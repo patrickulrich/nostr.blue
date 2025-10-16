@@ -62,21 +62,26 @@ export function FeedPage() {
     6300
   );
 
-  // Parse DVM feed events
+  // Parse DVM feed events - use only the most recent result for freshest recommendations
   useEffect(() => {
     if (feedType !== 'popular') return;
 
     const ids: string[] = [];
     const directEvents: NostrEvent[] = [];
 
-    dvmFeedEvents?.forEach(resultEvent => {
+    // Use only the most recent DVM result (first in sorted array)
+    // Each result is a separate recommendation list, ranked by the DVM
+    const mostRecentResult = dvmFeedEvents?.[0];
+
+    if (mostRecentResult) {
       try {
-        const content = resultEvent.content.trim();
+        const content = mostRecentResult.content.trim();
 
         if (content.startsWith('[') || content.startsWith('{')) {
           const parsed = JSON.parse(content);
 
           if (Array.isArray(parsed)) {
+            // Event IDs are in the DVM's intended order (likely by popularity)
             parsed.forEach(item => {
               if (Array.isArray(item) && item.length >= 2 && item[0] === 'e') {
                 const eventId = item[1];
@@ -99,7 +104,7 @@ export function FeedPage() {
       } catch (e) {
         console.error('Failed to parse DVM result:', e);
       }
-    });
+    }
 
     setEventIds(ids);
     setParsedDirectEvents(directEvents);
@@ -113,10 +118,15 @@ export function FeedPage() {
 
       try {
         const events = await nostr.query(
-          [{ ids: eventIds, limit: 50 }],
+          [{ ids: eventIds }],
           { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
         );
-        return events.sort((a, b) => b.created_at - a.created_at);
+
+        // Sort by the DVM's ranking order (preserve order from eventIds)
+        const eventMap = new Map(events.map(e => [e.id, e]));
+        return eventIds
+          .map(id => eventMap.get(id))
+          .filter((e): e is NostrEvent => e !== undefined);
       } catch (error) {
         console.error('Failed to fetch events by IDs:', error);
         return [];
@@ -157,6 +167,11 @@ export function FeedPage() {
   const allEvents = feedType === 'following'
     ? (data?.pages.flatMap((page) => page) || [])
     : [...parsedDirectEvents, ...fetchedDVMEvents];
+
+  console.log('[FeedPage] Current feedType:', feedType);
+  console.log('[FeedPage] allEvents count:', allEvents.length);
+  console.log('[FeedPage] parsedDirectEvents:', parsedDirectEvents.length);
+  console.log('[FeedPage] fetchedDVMEvents:', fetchedDVMEvents.length);
 
   const isLoading = feedType === 'following' ? isLoadingFollowing : isLoadingDVM;
   const isRefetching = feedType === 'following' ? isRefetchingFollowing : false;

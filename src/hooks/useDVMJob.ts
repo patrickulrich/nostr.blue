@@ -177,6 +177,7 @@ export function useDVMJob() {
     return useQuery<NostrEvent[]>({
       queryKey: ['dvm-feed', dvmPubkey, requestKind, resultKind],
       queryFn: async ({ signal }) => {
+        console.log('[useDVMFeed] Querying DVM:', dvmPubkey, 'kind:', resultKind);
         try {
           // Get results from this DVM
           const events = await nostr.query(
@@ -184,9 +185,14 @@ export function useDVMJob() {
             { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
           );
 
+          console.log('[useDVMFeed] Received', events.length, 'DVM result events');
+          if (events.length > 0) {
+            console.log('[useDVMFeed] Sample event:', events[0]);
+          }
+
           return events.sort((a, b) => b.created_at - a.created_at);
         } catch (error) {
-          console.error('Failed to fetch DVM feed:', error);
+          console.error('[useDVMFeed] Failed to fetch DVM feed:', error);
           return [];
         }
       },

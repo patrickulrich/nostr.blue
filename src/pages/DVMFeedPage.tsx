@@ -79,27 +79,25 @@ export function DVMFeedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dvm, user, jobRequestId]);
 
-  // Parse feed events - try to extract Nostr events from the content
+  // Parse feed events - use only the most recent result for freshest recommendations
   useEffect(() => {
     const ids: string[] = [];
     const directEvents: NostrEvent[] = [];
 
-    feedEvents?.forEach(resultEvent => {
-      console.log('DVM Result Event:', {
-        id: resultEvent.id,
-        kind: resultEvent.kind,
-        content: resultEvent.content,
-        tags: resultEvent.tags,
-      });
+    // Use only the most recent DVM result (first in sorted array)
+    // Each result is a separate recommendation list, ranked by the DVM
+    const mostRecentResult = feedEvents?.[0];
 
+    if (mostRecentResult) {
       try {
-        const content = resultEvent.content.trim();
+        const content = mostRecentResult.content.trim();
 
         // Try parsing as JSON first
         if (content.startsWith('[') || content.startsWith('{')) {
           const parsed = JSON.parse(content);
 
           if (Array.isArray(parsed)) {
+            // Event IDs are in the DVM's intended order (likely by popularity)
             parsed.forEach(item => {
               // Check if it's a tag array (DVM format: [["e", "id"], ["e", "id"]])
               if (Array.isArray(item) && item.length >= 2 && item[0] === 'e') {
@@ -128,15 +126,11 @@ export function DVMFeedPage() {
           ids.push(...lines);
         }
       } catch (e) {
-        console.error('Failed to parse DVM result:', e, resultEvent.content);
+        console.error('Failed to parse DVM result:', e, mostRecentResult.content);
       }
-    });
-
-    if (ids.length > 0) {
-      console.log('Found event IDs in DVM results:', ids);
-      setEventIds(ids);
     }
 
+    setEventIds(ids);
     setParsedDirectEvents(directEvents);
   }, [feedEvents]);
 
@@ -146,14 +140,21 @@ export function DVMFeedPage() {
     queryFn: async ({ signal }) => {
       if (eventIds.length === 0) return [];
 
+      console.log('[DVMFeedPage] Querying relay for', eventIds.length, 'event IDs');
+
       try {
-        console.log('Fetching events by IDs:', eventIds);
         const events = await nostr.query(
-          [{ ids: eventIds, limit: 50 }],
+          [{ ids: eventIds }],
           { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
         );
-        console.log('Fetched events:', events);
-        return events.sort((a, b) => b.created_at - a.created_at);
+
+        console.log('[DVMFeedPage] Relay returned', events.length, 'events');
+
+        // Sort by the DVM's ranking order (preserve order from eventIds)
+        const eventMap = new Map(events.map(e => [e.id, e]));
+        return eventIds
+          .map(id => eventMap.get(id))
+          .filter((e): e is NostrEvent => e !== undefined);
       } catch (error) {
         console.error('Failed to fetch events by IDs:', error);
         return [];
