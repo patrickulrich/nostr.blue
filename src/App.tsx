@@ -33,7 +33,7 @@ const queryClient = new QueryClient({
 
 const defaultConfig: AppConfig = {
   theme: "light",
-  relayUrl: "wss://relay.primal.net",
+  relayUrl: "wss://relay.nostr.band",
 };
 
 const presetRelays = [
