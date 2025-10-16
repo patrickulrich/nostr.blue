@@ -14,6 +14,7 @@ import DVMFeedPage from "./pages/DVMFeedPage";
 import CommunitiesPage from "./pages/CommunitiesPage";
 import CommunityFeedPage from "./pages/CommunityFeedPage";
 import SettingsPage from "./pages/SettingsPage";
+import MessagesPage from "./pages/MessagesPage";
 import { NIP19Router } from "./components/NIP19Router";
 import NotFound from "./pages/NotFound";
 
@@ -31,6 +32,7 @@ export function AppRouter() {
         <Route path="/explore" element={<ExplorePage />} />
         <Route path="/trending" element={<TrendingPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/messages" element={<MessagesPage />} />
         <Route path="/bookmarks" element={<BookmarksPage />} />
         <Route path="/lists" element={<ListsPage />} />
         <Route path="/lists/:listId/manage" element={<ManageListPage />} />

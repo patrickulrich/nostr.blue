@@ -192,18 +192,13 @@ export function useZaps(
         return;
       }
 
-      // Create zap request - use appropriate event format based on kind
-      // For addressable events (30000-39999), pass the object to get 'a' tag
-      // For all other events, pass the ID string to get 'e' tag
-      const event: string | Event = (actualTarget.kind >= 30000 && actualTarget.kind < 40000)
-        ? actualTarget
-        : actualTarget.id;
-
+      // Create zap request - always pass the full event object
+      // makeZapRequest will determine the appropriate tag ('e' or 'a') based on the event's kind
       const zapAmount = amount * 1000; // convert to millisats
 
       const zapRequest = nip57.makeZapRequest({
         profile: actualTarget.pubkey,
-        event: event,
+        event: actualTarget, // Always pass full Event object, not string ID
         amount: zapAmount,
         relays: [config.relayUrl],
         comment
