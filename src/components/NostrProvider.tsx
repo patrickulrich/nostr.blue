@@ -20,10 +20,10 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   // Use refs so the pool always has the latest data
   const relayUrl = useRef<string>(config.relayUrl);
 
-  // Update refs when config changes
+  // Invalidate Nostr queries when relayUrl changes
   useEffect(() => {
     relayUrl.current = config.relayUrl;
-    queryClient.resetQueries();
+    queryClient.invalidateQueries({ queryKey: ['nostr'] });
   }, [config.relayUrl, queryClient]);
 
   // Initialize NPool only once
