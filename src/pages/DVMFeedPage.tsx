@@ -7,12 +7,12 @@ import { useDVMs } from '@/hooks/useDVMs';
 import { useDVMJob } from '@/hooks/useDVMJob';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Zap, RefreshCw, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PostCard } from '@/components/PostCard';
 import { type NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
@@ -54,7 +54,7 @@ export function DVMFeedPage() {
     description: `Feed from ${dvm?.name || 'Data Vending Machine'}`,
   });
 
-  const handleRequestFeed = async () => {
+  const handleRequestFeed = useCallback(async () => {
     if (!dvm || !user) return;
 
     try {
@@ -69,15 +69,14 @@ export function DVMFeedPage() {
     } catch (error) {
       console.error('Failed to request feed:', error);
     }
-  };
+  }, [dvm, user, submitJob, requestKind]);
 
   // Auto-submit job request on mount if user is logged in
   useEffect(() => {
     if (dvm && user && !jobRequestId) {
       handleRequestFeed();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dvm, user, jobRequestId]);
+  }, [dvm, user, jobRequestId, handleRequestFeed]);
 
   // Parse feed events - use only the most recent result for freshest recommendations
   useEffect(() => {

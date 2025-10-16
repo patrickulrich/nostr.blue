@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { List, Users, VolumeX, Pin, BookmarkCheck, Hash, ExternalLink, Lock } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
@@ -26,7 +26,7 @@ const iconMap = {
 };
 
 export function ListCard({
-  kind,
+  kind: _kind,
   name,
   description,
   itemCount,
@@ -69,7 +69,7 @@ export function ListCard({
 }
 
 interface ListItemDisplayProps {
-  type: 'p' | 'e' | 'a' | 't' | 'r' | 'word';
+  type: 'p' | 'e' | 'a' | 't' | 'r' | 'word' | 'relay' | 'emoji' | 'group';
   value: string;
   relay?: string;
   onRemove?: () => void;
@@ -111,7 +111,7 @@ function UserCard({ pubkey, relay }: { pubkey: string; relay?: string }) {
   );
 }
 
-export function ListItemDisplay({ type, value, relay, onRemove }: ListItemDisplayProps) {
+export function ListItemDisplay({ type, value, relay, onRemove: _onRemove }: ListItemDisplayProps) {
   let content: React.ReactNode;
   let link: string | null = null;
 

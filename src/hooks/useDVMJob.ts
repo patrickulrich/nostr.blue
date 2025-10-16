@@ -1,6 +1,6 @@
 import { type NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useCurrentUser } from './useCurrentUser';
 
 export interface DVMJobRequest {
@@ -43,7 +43,6 @@ export interface DVMJobFeedback {
 export function useDVMJob() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
-  const queryClient = useQueryClient();
 
   // Submit a DVM job request
   const submitJob = useMutation({

@@ -254,7 +254,7 @@ export function ManageListPage() {
           variant: 'destructive',
         });
       }
-    } catch (error) {
+    } catch {
       // Not a valid nip19, ignore
       toast({
         title: 'Invalid input',

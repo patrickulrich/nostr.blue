@@ -70,7 +70,7 @@ export function useCommunity(aTag: string) {
   const { nostr } = useNostr();
 
   // Parse aTag: "34550:pubkey:dTag"
-  const [kind, pubkey, dTag] = aTag.split(':');
+  const [_kind, pubkey, dTag] = aTag.split(':');
 
   return useQuery<Community | null>({
     queryKey: ['community', aTag],
@@ -122,7 +122,7 @@ export function useCommunityPosts(aTag: string) {
   const { nostr } = useNostr();
 
   // Parse aTag: "34550:pubkey:dTag"
-  const [kind, pubkey, dTag] = aTag.split(':');
+  const [_kind, pubkey, dTag] = aTag.split(':');
 
   return useQuery<NostrEvent[]>({
     queryKey: ['community-posts', aTag],

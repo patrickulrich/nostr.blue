@@ -1,4 +1,4 @@
-import { type NostrEvent } from '@nostrify/nostrify';
+import { type NostrEvent, type NostrFilter } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCurrentUser } from './useCurrentUser';
@@ -37,7 +37,7 @@ export function useLists(kind: number, dTag?: string) {
       if (!userPubkey) return null;
 
       try {
-        const filter: any = {
+        const filter: NostrFilter = {
           kinds: [kind],
           authors: [userPubkey],
           limit: 1,

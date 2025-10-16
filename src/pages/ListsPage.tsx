@@ -60,7 +60,7 @@ export function ListsPage() {
 
   // Show list detail view
   if (selectedList) {
-    let listData: { name: string; items: any[]; type: string };
+    let listData: { name: string; items: Array<{ type: string; value: string; relay?: string }>; type: string };
 
     if (selectedList === 'mute') {
       listData = {
@@ -118,7 +118,7 @@ export function ListsPage() {
                 {listData.items.map((item, index) => (
                   <ListItemDisplay
                     key={`${item.type}-${item.value}-${index}`}
-                    type={item.type}
+                    type={item.type as 'p' | 'e' | 'a' | 't' | 'r' | 'word' | 'relay' | 'emoji' | 'group'}
                     value={item.value}
                     relay={item.relay}
                   />

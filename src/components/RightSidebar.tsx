@@ -1,7 +1,6 @@
 import { Search, TrendingUp, Heart, MessageCircle, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTrendingNotes } from '@/hooks/useTrendingNotes';

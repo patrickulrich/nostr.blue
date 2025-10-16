@@ -49,7 +49,7 @@ export function useDVMs() {
     if (event.content) {
       try {
         metadata = JSON.parse(event.content);
-      } catch (e) {
+      } catch {
         // Ignore parsing errors
       }
     }

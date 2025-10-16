@@ -1,5 +1,5 @@
 import { type NostrEvent } from '@nostrify/nostrify';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { MessageCircle, MoreHorizontal, Share, Bookmark } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -21,11 +21,10 @@ interface PostCardProps {
   showThread?: boolean;
 }
 
-export function PostCard({ event, className, showThread = true }: PostCardProps) {
+export function PostCard({ event, className, showThread: _showThread = true }: PostCardProps) {
   const { data: author } = useAuthor(event.pubkey);
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const { toast } = useToast();
-  const navigate = useNavigate();
   const npub = nip19.npubEncode(event.pubkey);
   const noteId = nip19.noteEncode(event.id);
 
@@ -112,7 +111,7 @@ export function PostCard({ event, className, showThread = true }: PostCardProps)
 
             <ReactionButton event={event} />
 
-            <ZapButton target={event as any} />
+            <ZapButton target={event as NostrEvent} />
 
             <div className="flex items-center gap-0">
               <Button

@@ -22,7 +22,7 @@ export function useNotifications() {
       if (!userPubkey) return [];
 
       const limit = 50;
-      const filters: any = {
+      const filters: Record<string, unknown> = {
         limit,
       };
 

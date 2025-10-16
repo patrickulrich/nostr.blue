@@ -28,14 +28,14 @@ export function ProfilePage() {
       pubkey = nip19.decode(nip19Param).data as string;
     } else if (nip19Param?.startsWith('nprofile1')) {
       const decoded = nip19.decode(nip19Param);
-      pubkey = (decoded.data as any).pubkey;
+      pubkey = (decoded.data as { pubkey: string }).pubkey;
     }
   } catch (error) {
     console.error('Failed to decode nip19:', error);
   }
 
   const { data: author, isLoading: authorLoading } = useAuthor(pubkey);
-  const { following, followingCount } = useFollowing(pubkey);
+  const { followingCount } = useFollowing(pubkey);
 
   // Fetch user's posts
   const {
