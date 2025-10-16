@@ -1,4 +1,4 @@
-import { type NostrEvent, NSchema as n } from '@nostrify/nostrify';
+import { NSchema as n } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
@@ -57,7 +57,7 @@ export function useSearchUsers(query: string) {
               nip05: metadata.nip05,
             });
           }
-        } catch (error) {
+        } catch {
           // Skip invalid metadata
         }
 

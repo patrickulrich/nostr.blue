@@ -2,7 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { useSeoMeta } from '@unhead/react';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import { type NostrEvent } from '@nostrify/nostrify';
+import { type NostrEvent, type NostrFilter } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/MainLayout';
@@ -21,18 +21,14 @@ export function ThreadPage() {
 
   // Decode note1 to get event ID
   let eventId: string | undefined;
-  let authorHint: string | undefined;
-  let relaysHint: string[] | undefined;
 
   try {
     if (noteIdParam?.startsWith('note1')) {
       eventId = nip19.decode(noteIdParam).data as string;
     } else if (noteIdParam?.startsWith('nevent1')) {
       const decoded = nip19.decode(noteIdParam);
-      const data = decoded.data as any;
+      const data = decoded.data as { id: string; author?: string; relays?: string[] };
       eventId = data.id;
-      authorHint = data.author;
-      relaysHint = data.relays;
     }
   } catch (error) {
     console.error('Failed to decode note ID:', error);
@@ -44,7 +40,7 @@ export function ThreadPage() {
     queryFn: async ({ signal }) => {
       if (!eventId) return null;
 
-      const filters: any = { ids: [eventId], limit: 1 };
+      const filters: NostrFilter = { ids: [eventId], limit: 1 };
 
       const [event] = await nostr.query(
         [filters],

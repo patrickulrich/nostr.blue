@@ -1,4 +1,4 @@
-import { type NostrEvent } from '@nostrify/nostrify';
+import { type NostrEvent, type NostrFilter } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 
@@ -26,7 +26,7 @@ export function useFeed(options: UseFeedOptions = {}) {
       // Fetch more events when filtering or when we have author constraints
       const multiplier = excludeReplies ? 4 : (authors && authors.length > 0 ? 2 : 1);
 
-      const filters: any = {
+      const filters: NostrFilter = {
         kinds,
         limit: limit * multiplier,
       };
@@ -69,7 +69,7 @@ export function useFeed(options: UseFeedOptions = {}) {
 
         // Store metadata for pagination decision
         // Continue if we got ANY events in the raw query
-        (resultEvents as any).__rawCount = rawEventCount;
+        (resultEvents as NostrEvent[] & { __rawCount?: number }).__rawCount = rawEventCount;
 
         return resultEvents;
       } catch (error) {
@@ -83,7 +83,7 @@ export function useFeed(options: UseFeedOptions = {}) {
       }
 
       // Get the raw count of events before filtering
-      const rawCount = (lastPage as any).__rawCount || 0;
+      const rawCount = (lastPage as NostrEvent[] & { __rawCount?: number }).__rawCount || 0;
 
       // Continue pagination if:
       // 1. We got some raw events from the relay, OR

@@ -1,4 +1,4 @@
-import { Home, Compass, User, Settings, PenSquare, Bell, Mail, List, Bookmark, Users, Sparkles, MoreHorizontal, Video, Calendar, Music, Zap } from 'lucide-react';
+import { Home, Compass, User, Settings, PenSquare, Bell, Mail, List, Bookmark, Users, MoreHorizontal, Video, Calendar, Music, Zap } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LoginArea } from '@/components/auth/LoginArea';

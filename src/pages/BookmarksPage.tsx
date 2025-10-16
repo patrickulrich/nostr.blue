@@ -5,7 +5,6 @@ import { RightSidebar } from '@/components/RightSidebar';
 import { BookmarkItem } from '@/components/BookmarkItem';
 import { useBookmarks } from '@/hooks/useBookmarks';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Button } from '@/components/ui/button';
 import { Loader2, Bookmark } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 

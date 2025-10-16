@@ -14,6 +14,17 @@ interface NoteContentProps {
   depth?: number; // Prevent infinite embedding loops
 }
 
+// Type definitions for nip19 decoded data
+interface EventPointer {
+  id: string;
+  relays?: string[];
+}
+
+interface ProfilePointer {
+  pubkey: string;
+  relays?: string[];
+}
+
 // Helper to detect if URL is an image
 function isImageUrl(url: string): boolean {
   return /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?.*)?$/i.test(url);
@@ -162,7 +173,7 @@ export function NoteContent({
           if (decoded.type === 'note') {
             eventIds.push(decoded.data as string);
           } else if (decoded.type === 'nevent') {
-            eventIds.push((decoded.data as any).id);
+            eventIds.push((decoded.data as EventPointer).id);
           }
         } catch (error) {
           console.error('Failed to decode note reference:', error);
@@ -245,7 +256,7 @@ export function NoteContent({
               <NostrMention key={`mention-${keyCounter++}`} pubkey={pubkey} />
             );
           } else if (decoded.type === 'nprofile') {
-            const pubkey = (decoded.data as any).pubkey;
+            const pubkey = (decoded.data as ProfilePointer).pubkey;
             parts.push(
               <NostrMention key={`mention-${keyCounter++}`} pubkey={pubkey} />
             );
@@ -310,7 +321,7 @@ export function NoteContent({
     for (const { index, ref } of content.noteRefs) {
       try {
         const decoded = nip19.decode(ref);
-        const eventId = decoded.type === 'note' ? decoded.data as string : (decoded.data as any).id;
+        const eventId = decoded.type === 'note' ? decoded.data as string : (decoded.data as EventPointer).id;
         const referencedEvent = referencedEvents[eventId];
 
         if (referencedEvent) {
@@ -376,19 +387,10 @@ export function NoteContent({
 
 // Helper component to display user mentions
 function NostrMention({ pubkey }: { pubkey: string }) {
-  const { data: author, isLoading } = useAuthor(pubkey);
+  const { data: author } = useAuthor(pubkey);
   const npub = nip19.npubEncode(pubkey);
   const hasRealName = !!author?.metadata?.name;
   const displayName = author?.metadata?.name ?? genUserName(pubkey);
-
-  // Show loading state briefly
-  if (isLoading) {
-    return (
-      <span className="text-muted-foreground">
-        @...
-      </span>
-    );
-  }
 
   return (
     <Link
@@ -397,7 +399,7 @@ function NostrMention({ pubkey }: { pubkey: string }) {
         "font-semibold hover:underline",
         hasRealName
           ? "text-blue-500"
-          : "text-muted-foreground hover:text-foreground"
+          : "text-gray-500"
       )}
       onClick={(e) => e.stopPropagation()}
     >

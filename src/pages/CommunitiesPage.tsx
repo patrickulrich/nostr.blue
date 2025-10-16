@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Users, Search, ArrowRight } from 'lucide-react';
-import { nip19 } from 'nostr-tools';
 
 export function CommunitiesPage() {
   useSeoMeta({
@@ -94,12 +93,6 @@ export function CommunitiesPage() {
         ) : (
           <div className="p-4 space-y-4">
             {filteredCommunities.map((community) => {
-              const naddr = nip19.naddrEncode({
-                kind: 34550,
-                pubkey: community.pubkey,
-                identifier: community.dTag,
-              });
-
               const isMember = userCommunities?.has(community.aTag) || (user && community.moderators.includes(user.pubkey));
               const isModerator = user && community.moderators.includes(user.pubkey);
 

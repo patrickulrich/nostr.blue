@@ -1,5 +1,3 @@
-import { nip44 } from 'nostr-tools';
-
 /**
  * Encrypt data using NIP-44 with the author's own keys
  * This creates a shared secret using the author's public and private keys
