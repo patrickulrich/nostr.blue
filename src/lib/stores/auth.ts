@@ -60,8 +60,13 @@ export function loginWithNsec(nsec: string): void {
 		throw new Error('Invalid nsec format. Please provide a valid nsec key.');
 	}
 
-	const secret = decoded.data as string;
-	loginWithNip01(secret);
+	// decoded.data is Uint8Array for nsec
+	const secret = decoded.data as Uint8Array;
+	// Convert Uint8Array to hex string
+	const secretHex = Array.from(secret)
+		.map((b) => b.toString(16).padStart(2, '0'))
+		.join('');
+	loginWithNip01(secretHex);
 }
 
 /**
@@ -151,8 +156,10 @@ export async function publishProfile(profile: Profile): Promise<void> {
 	await thunk.complete;
 
 	// Check if any relay succeeded
-	const results = Object.values(thunk.get().results);
-	const hasSuccess = results.some((r) => r.status === 'success');
+	// The thunk itself is a Svelte store that contains the results
+	const hasSuccess = Object.values(thunk.results).some(
+		(r: any) => r.status === 'success'
+	);
 
 	if (!hasSuccess) {
 		throw new Error('Failed to publish profile to any relay. Please try again.');
