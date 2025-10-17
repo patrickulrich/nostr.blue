@@ -37,9 +37,11 @@ export function useNotifications() {
       }
 
       try {
-        // Fetch all notification types in a single query for better performance and consistent pagination
+        // Use separate filters per kind to preserve per-kind limits
+        const kinds = [1, 7, 6, 9735] as const;
+        const filterArray = kinds.map((k) => ({ kinds: [k], '#p': [userPubkey], ...filters }));
         const allEvents = await nostr.query(
-          [{ kinds: [1, 7, 6, 9735], '#p': [userPubkey], ...filters }],
+          filterArray,
           { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
         );
 
@@ -70,33 +72,36 @@ export function useNotifications() {
           }
         });
 
-        // Process reactions
+        // Process reactions (support both 'e' and 'a' tags for addressable events)
         reactionEvents.forEach(event => {
           const eventTag = event.tags.find(tag => tag[0] === 'e');
+          const addrTag = event.tags.find(tag => tag[0] === 'a');
           notifications.push({
             type: 'reaction',
             event,
-            targetEventId: eventTag?.[1],
+            targetEventId: eventTag?.[1] ?? addrTag?.[1],
           });
         });
 
-        // Process reposts
+        // Process reposts (support both 'e' and 'a' tags for addressable events)
         repostEvents.forEach(event => {
           const eventTag = event.tags.find(tag => tag[0] === 'e');
+          const addrTag = event.tags.find(tag => tag[0] === 'a');
           notifications.push({
             type: 'repost',
             event,
-            targetEventId: eventTag?.[1],
+            targetEventId: eventTag?.[1] ?? addrTag?.[1],
           });
         });
 
-        // Process zaps
+        // Process zaps (support both 'e' and 'a' tags for addressable events)
         zapEvents.forEach(event => {
           const eventTag = event.tags.find(tag => tag[0] === 'e');
+          const addrTag = event.tags.find(tag => tag[0] === 'a');
           notifications.push({
             type: 'zap',
             event,
-            targetEventId: eventTag?.[1],
+            targetEventId: eventTag?.[1] ?? addrTag?.[1],
           });
         });
 

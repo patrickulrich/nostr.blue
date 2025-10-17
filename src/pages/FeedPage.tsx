@@ -42,6 +42,9 @@ export function FeedPage() {
   });
 
   // Fetch following feed
+  // Only query if we're in following mode AND (have followers OR not logged in)
+  const shouldFetchFollowing = feedType === 'following' && (following.length > 0 || !user);
+
   const {
     data,
     fetchNextPage,
@@ -51,8 +54,10 @@ export function FeedPage() {
     refetch: refetchFollowing,
     isRefetching: isRefetchingFollowing,
   } = useFeed({
-    authors: feedType === 'following' && following.length > 0 ? following : undefined,
+    authors: feedType === 'following' ? following : undefined,
     excludeReplies: true,
+  }, {
+    enabled: shouldFetchFollowing,
   });
 
   // Fetch popular feed from DVM

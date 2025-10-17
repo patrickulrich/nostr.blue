@@ -210,18 +210,26 @@ export function NoteContent({
         allEvents.push(...events);
       }
 
-      // Fetch addressable events
+      // Fetch addressable events (batched)
+      const uniqueAddr = new Map<string, AddressPointer>();
       for (const { data } of addressableRefs) {
+        uniqueAddr.set(`${data.kind}:${data.pubkey}:${data.identifier}`, data);
+      }
+      const addrFilters = Array.from(uniqueAddr.values()).map(d => ({
+        kinds: [d.kind],
+        authors: [d.pubkey],
+        '#d': [d.identifier],
+        limit: 1,
+      }));
+      if (addrFilters.length > 0) {
         try {
           const events = await nostr.query(
-            [{ kinds: [data.kind], authors: [data.pubkey], '#d': [data.identifier], limit: 1 }],
+            addrFilters,
             { signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) }
           );
-          if (events.length > 0) {
-            allEvents.push(events[0]);
-          }
+          allEvents.push(...events);
         } catch (error) {
-          console.error('Failed to fetch addressable event:', error);
+          console.error('Failed to fetch addressable events:', error);
         }
       }
 
@@ -233,16 +241,15 @@ export function NoteContent({
         eventMap[evt.id] = evt;
       });
 
-      // Also map addressable events by a composite key
+      // Also map addressable events by a composite key (optimized with index)
+      const addrIndex = new Map<string, NostrEvent>();
+      for (const evt of allEvents) {
+        const d = evt.tags.find(t => t[0] === 'd')?.[1];
+        if (d) addrIndex.set(`${evt.kind}:${evt.pubkey}:${d}`, evt);
+      }
       for (const { ref, data } of addressableRefs) {
-        const matchingEvent = allEvents.find(
-          evt => evt.kind === data.kind &&
-                 evt.pubkey === data.pubkey &&
-                 evt.tags.some(t => t[0] === 'd' && t[1] === data.identifier)
-        );
-        if (matchingEvent) {
-          eventMap[ref] = matchingEvent;
-        }
+        const match = addrIndex.get(`${data.kind}:${data.pubkey}:${data.identifier}`);
+        if (match) eventMap[ref] = match;
       }
 
       return eventMap;
