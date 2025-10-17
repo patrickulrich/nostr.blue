@@ -11,6 +11,14 @@ export interface ReactionData {
 }
 
 /**
+ * Helper to check if a reaction is real (not an optimistic temp reaction).
+ * A real reaction has a valid 64-char hex ID and a non-empty signature.
+ */
+function isRealReaction(r: NostrEvent): boolean {
+  return /^[0-9a-f]{64}$/i.test(r.id) && !!r.sig;
+}
+
+/**
  * Hook to query and manage reactions (Kind 7) for a specific event
  */
 export function useReactions(eventId: string | undefined) {
@@ -40,7 +48,7 @@ export function useReactions(eventId: string | undefined) {
   const reactionData: ReactionData = {
     count: data?.length || 0,
     userReacted: !!data?.some((r) => r.pubkey === user?.pubkey),
-    userReactionId: data?.find((r) => r.pubkey === user?.pubkey)?.id,
+    userReactionId: data?.find((r) => r.pubkey === user?.pubkey && isRealReaction(r))?.id,
   };
 
   // Mutation to add a reaction
@@ -60,27 +68,27 @@ export function useReactions(eventId: string | undefined) {
 
       return event;
     },
-    onMutate: async () => {
+    onMutate: async (targetEvent: NostrEvent) => {
       // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['reactions', eventId] });
+      await queryClient.cancelQueries({ queryKey: ['reactions', targetEvent.id] });
 
       // Snapshot the previous value
-      const previousReactions = queryClient.getQueryData<NostrEvent[]>(['reactions', eventId]);
+      const previousReactions = queryClient.getQueryData<NostrEvent[]>(['reactions', targetEvent.id]);
 
       // Optimistically update with a temporary reaction
-      if (user && eventId) {
+      if (user && targetEvent?.id) {
         const optimisticReaction: NostrEvent = {
           id: 'temp-' + Date.now(),
           pubkey: user.pubkey,
           created_at: Math.floor(Date.now() / 1000),
           kind: 7,
-          tags: [['e', eventId]],
+          tags: [['e', targetEvent.id]],
           content: '+',
           sig: '',
         };
 
         queryClient.setQueryData<NostrEvent[]>(
-          ['reactions', eventId],
+          ['reactions', targetEvent.id],
           (old) => [...(old || []), optimisticReaction]
         );
       }
@@ -89,8 +97,9 @@ export function useReactions(eventId: string | undefined) {
     },
     onError: (_err, _variables, context) => {
       // Rollback on error
-      if (context?.previousReactions) {
-        queryClient.setQueryData(['reactions', eventId], context.previousReactions);
+      const prev = (context as { previousReactions?: NostrEvent[] })?.previousReactions;
+      if (prev) {
+        queryClient.setQueryData(['reactions', eventId], prev);
       }
     },
     onSuccess: () => {
@@ -102,15 +111,25 @@ export function useReactions(eventId: string | undefined) {
   // Mutation to remove a reaction (by publishing a deletion event)
   const removeReaction = useMutation({
     mutationFn: async () => {
-      if (!user || !reactionData.userReactionId) {
+      if (!user) {
+        throw new Error('User not logged in');
+      }
+
+      // Get all real reaction IDs by this user
+      const currentReactions = queryClient.getQueryData<NostrEvent[]>(['reactions', eventId]) || [];
+      const idsToDelete = currentReactions
+        .filter(r => r.pubkey === user.pubkey && isRealReaction(r))
+        .map(r => r.id);
+
+      if (idsToDelete.length === 0) {
         throw new Error('No reaction to remove');
       }
 
-      // Publish a Kind 5 deletion event
+      // Publish a Kind 5 deletion event with all reaction IDs
       const event = await publish.mutateAsync({
         kind: 5,
         content: '',
-        tags: [['e', reactionData.userReactionId]],
+        tags: idsToDelete.map(id => ['e', id]),
         created_at: Math.floor(Date.now() / 1000),
       });
 
@@ -135,8 +154,9 @@ export function useReactions(eventId: string | undefined) {
     },
     onError: (_err, _variables, context) => {
       // Rollback on error
-      if (context?.previousReactions) {
-        queryClient.setQueryData(['reactions', eventId], context.previousReactions);
+      const prev = (context as { previousReactions?: NostrEvent[] })?.previousReactions;
+      if (prev) {
+        queryClient.setQueryData(['reactions', eventId], prev);
       }
     },
     onSuccess: () => {

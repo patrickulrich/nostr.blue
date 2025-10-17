@@ -37,31 +37,17 @@ export function useNotifications() {
       }
 
       try {
-        // Fetch all notification types in parallel for better performance
-        const [mentionEvents, reactionEvents, repostEvents, zapEvents] = await Promise.all([
-          // Fetch mentions (Kind 1 events that mention the user)
-          nostr.query(
-            [{ kinds: [1], '#p': [userPubkey], ...filters }],
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-          ),
-          // Fetch reactions (Kind 7 events on user's posts)
-          // Note: We can't easily filter by "reactions to my posts" without knowing all post IDs
-          // So we'll fetch recent reactions with the user's pubkey mentioned
-          nostr.query(
-            [{ kinds: [7], '#p': [userPubkey], ...filters }],
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-          ),
-          // Fetch reposts (Kind 6 events)
-          nostr.query(
-            [{ kinds: [6], '#p': [userPubkey], ...filters }],
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-          ),
-          // Fetch zaps (Kind 9735 zap receipts)
-          nostr.query(
-            [{ kinds: [9735], '#p': [userPubkey], ...filters }],
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-          ),
-        ]);
+        // Fetch all notification types in a single query for better performance and consistent pagination
+        const allEvents = await nostr.query(
+          [{ kinds: [1, 7, 6, 9735], '#p': [userPubkey], ...filters }],
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
+        );
+
+        // Split events by kind for processing
+        const mentionEvents = allEvents.filter(e => e.kind === 1);
+        const reactionEvents = allEvents.filter(e => e.kind === 7);
+        const repostEvents = allEvents.filter(e => e.kind === 6);
+        const zapEvents = allEvents.filter(e => e.kind === 9735);
 
         // Combine and categorize all notifications
         const notifications: NotificationEvent[] = [];
