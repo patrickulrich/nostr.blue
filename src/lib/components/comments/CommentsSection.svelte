@@ -1,6 +1,8 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
   import type { TrustedEvent } from '@welshman/util';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { fetchComments, type CommentsData } from '$lib/stores/comments.svelte';
   import CommentForm from './CommentForm.svelte';
   import Comment from './Comment.svelte';
 
@@ -22,19 +24,27 @@
     limit = 500
   }: Props = $props();
 
-  // TODO: Integrate with Welshman comments data
-  // import { createQuery } from '@tanstack/svelte-query';
-  // const commentsQuery = createQuery({
-  //   queryKey: ['comments', getRootId(root), limit],
-  //   queryFn: () => fetchComments(root, limit),
-  // });
-  // const commentsData = $derived(commentsQuery.data);
-  // const isLoading = $derived(commentsQuery.isLoading);
-  // const error = $derived(commentsQuery.error);
+  // Get root ID for query key
+  function getRootId(r: TrustedEvent | URL): string {
+    if (r instanceof URL) {
+      return r.toString();
+    }
+    return r.id;
+  }
 
-  const commentsData = $state<any>(null);
-  const isLoading = $state(false);
-  const error = $state<Error | null>(null);
+  // Query comments from the network
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const commentsQuery = createQuery<CommentsData>(() => ({
+    queryKey: ['comments', getRootId(root), limit],
+    queryFn: ({ signal }) => fetchComments(root, limit, signal),
+    enabled: !!root,
+    staleTime: 30000, // 30 seconds
+    refetchInterval: 60000 // 1 minute
+  }));
+
+  const commentsData = $derived($commentsQuery.data as CommentsData | undefined);
+  const isLoading = $derived($commentsQuery.isLoading);
+  const error = $derived($commentsQuery.error);
 
   const comments = $derived(commentsData?.topLevelComments || []);
 </script>
@@ -101,7 +111,7 @@
     {:else}
       <div class="space-y-4">
         {#each comments as comment (comment.id)}
-          <Comment {root} {comment} {limit} />
+          <Comment {root} {comment} {commentsData} {limit} />
         {/each}
       </div>
     {/if}

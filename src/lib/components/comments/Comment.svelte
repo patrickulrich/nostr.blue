@@ -1,6 +1,9 @@
 <script lang="ts">
   import { nip19 } from 'nostr-tools';
   import { genUserName } from '$lib/genUserName';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
+  import type { CommentsData } from '$lib/stores/comments.svelte';
   import NoteContent from '$lib/components/NoteContent.svelte';
   import CommentForm from './CommentForm.svelte';
   import Comment from './Comment.svelte';
@@ -9,32 +12,27 @@
   interface Props {
     root: TrustedEvent | URL;
     comment: TrustedEvent;
+    commentsData?: CommentsData;
     depth?: number;
     maxDepth?: number;
     limit?: number;
   }
 
-  let { root, comment, depth = 0, maxDepth = 3, limit }: Props = $props();
+  let { root, comment, commentsData, depth = 0, maxDepth = 3, limit }: Props = $props();
 
   let showReplyForm = $state(false);
   let showReplies = $state(depth < 2); // Auto-expand first 2 levels
 
-  // TODO: Integrate with Welshman author and comments data
-  // import { createQuery } from '@tanstack/svelte-query';
-  // const authorQuery = createQuery({
-  //   queryKey: ['author', comment.pubkey],
-  //   queryFn: () => fetchAuthor(comment.pubkey),
-  // });
-  // const author = $derived(authorQuery.data);
-  //
-  // const commentsQuery = createQuery({
-  //   queryKey: ['comments', getRootId(root)],
-  //   queryFn: () => fetchComments(root, limit),
-  // });
-  // const commentsData = $derived(commentsQuery.data);
+  // Query author profile for this comment
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const authorQuery = createQuery<AuthorData>(() => ({
+    queryKey: ['author', comment.pubkey],
+    queryFn: ({ signal }) => fetchAuthor(comment.pubkey, signal),
+    enabled: !!comment.pubkey,
+    staleTime: 5 * 60 * 1000 // 5 minutes
+  }));
 
-  const author = $state<any>(null);
-  const commentsData = $state<any>(null);
+  const author = $derived($authorQuery.data as AuthorData | undefined);
 
   const metadata = $derived(author?.metadata);
   const displayName = $derived(metadata?.name ?? genUserName(comment.pubkey));
@@ -163,6 +161,7 @@
         <Comment
           {root}
           comment={reply}
+          {commentsData}
           depth={depth + 1}
           {maxDepth}
           {limit}

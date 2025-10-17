@@ -1,5 +1,9 @@
 <script lang="ts">
   import { currentUser } from '$lib/stores/auth';
+  import { useQueryClient } from '@tanstack/svelte-query';
+  import { publishNostrEvent } from '$lib/stores/publish.svelte';
+  import { COMMENT, isParameterizedReplaceableKind, isPlainReplaceableKind } from '@welshman/util';
+  import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
   import LoginArea from '$lib/components/auth/LoginArea.svelte';
   import type { TrustedEvent } from '@welshman/util';
 
@@ -16,8 +20,7 @@
   let content = $state('');
   let isPending = $state(false);
 
-  // TODO: Integrate with Welshman publishing
-  // import { publish } from '@welshman/app';
+  const queryClient = useQueryClient();
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -26,41 +29,76 @@
 
     isPending = true;
     try {
-      // TODO: Implement comment posting using Welshman
-      // const tags: string[][] = [];
-      //
-      // // Add root reference
-      // if (root instanceof URL) {
-      //   tags.push(['r', root.toString()]);
-      // } else {
-      //   tags.push(['e', root.id, '', 'root']);
-      // }
-      //
-      // // Add reply reference
-      // if (reply) {
-      //   if (reply instanceof URL) {
-      //     tags.push(['r', reply.toString()]);
-      //   } else {
-      //     tags.push(['e', reply.id, '', 'reply']);
-      //     tags.push(['p', reply.pubkey]);
-      //   }
-      // }
-      //
-      // const thunk = publish({
-      //   kind: 1,
-      //   content: content.trim(),
-      //   tags,
-      // });
-      //
-      // await thunk.complete;
+      // Build NIP-22 comment tags
+      const tags: string[][] = [];
 
-      console.log('Post comment:', { content: content.trim(), root, reply });
+      // Determine if root is URL or event
+      if (root instanceof URL) {
+        // Root is external URL
+        tags.push(['I', root.toString()]);
+        tags.push(['K', 'web']);
+
+        // Parent (same as root for top-level)
+        if (!reply) {
+          tags.push(['i', root.toString()]);
+          tags.push(['k', 'web']);
+        }
+      } else {
+        // Root is Nostr event
+        if (isParameterizedReplaceableKind(root.kind)) {
+          // Addressable event (kind 30000-39999)
+          const d = root.tags.find(([name]) => name === 'd')?.[1] ?? '';
+          const address = `${root.kind}:${root.pubkey}:${d}`;
+          tags.push(['A', address, '', root.pubkey]);
+        } else {
+          // Regular or plain replaceable event
+          tags.push(['E', root.id, '', root.pubkey]);
+        }
+        tags.push(['K', String(root.kind)]);
+        tags.push(['P', root.pubkey]);
+
+        // Parent (same as root for top-level)
+        if (!reply) {
+          if (isParameterizedReplaceableKind(root.kind)) {
+            const d = root.tags.find(([name]) => name === 'd')?.[1] ?? '';
+            const address = `${root.kind}:${root.pubkey}:${d}`;
+            tags.push(['a', address, '']);
+          }
+          tags.push(['e', root.id, '', root.pubkey]);
+          tags.push(['k', String(root.kind)]);
+          tags.push(['p', root.pubkey]);
+        }
+      }
+
+      // Add reply reference if replying to a comment
+      if (reply) {
+        if (reply instanceof URL) {
+          tags.push(['i', reply.toString()]);
+          tags.push(['k', 'web']);
+        } else {
+          tags.push(['e', reply.id, '', reply.pubkey]);
+          tags.push(['k', String(reply.kind)]);
+          tags.push(['p', reply.pubkey]);
+        }
+      }
+
+      // Publish the comment
+      await publishNostrEvent({
+        kind: COMMENT, // 1111
+        content: content.trim(),
+        tags
+      });
+
+      toastSuccess('Comment posted!', 'Your comment has been published to the network.');
+
+      // Invalidate comments query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['comments'] });
 
       content = '';
       onSuccess?.();
     } catch (error) {
       console.error('Failed to post comment:', error);
-      alert('Failed to post comment. Please try again.');
+      toastError('Failed to post comment', (error as Error).message || 'Please try again.');
     } finally {
       isPending = false;
     }
