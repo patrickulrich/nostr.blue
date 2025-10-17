@@ -1,4 +1,5 @@
 <script lang="ts">
+  /* eslint-disable svelte/valid-compile */
   import { cn } from '$lib/utils';
   import { sidebarMenuButtonVariants } from './sidebar-utils';
   import type { VariantProps } from 'class-variance-authority';

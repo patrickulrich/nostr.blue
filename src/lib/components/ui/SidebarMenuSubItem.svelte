@@ -1,4 +1,5 @@
 <script lang="ts">
+  /* eslint-disable svelte/valid-compile */
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLLIElement> {

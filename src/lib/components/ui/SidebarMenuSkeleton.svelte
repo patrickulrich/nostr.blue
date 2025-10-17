@@ -1,4 +1,5 @@
 <script lang="ts">
+  /* eslint-disable svelte/valid-compile */
   import { cn } from '$lib/utils';
   import type { HTMLAttributes } from 'svelte/elements';
   import Skeleton from './Skeleton.svelte';

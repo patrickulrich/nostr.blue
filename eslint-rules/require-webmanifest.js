@@ -53,16 +53,33 @@ export default {
         }
 
         const manifestPath = hrefMatch[1];
-        
-        // Resolve the manifest file path relative to the project root
+
+        // Find project root by looking for package.json
+        let projectRoot = path.dirname(filename);
+        while (projectRoot !== path.dirname(projectRoot)) {
+          if (fs.existsSync(path.join(projectRoot, 'package.json'))) {
+            break;
+          }
+          projectRoot = path.dirname(projectRoot);
+        }
+
         const htmlDir = path.dirname(filename);
         let resolvedManifestPath;
-        
-        if (manifestPath.startsWith('/')) {
-          // Absolute path - check in public directory first, then project root
-          const publicPath = path.resolve(htmlDir, 'public' + manifestPath);
-          const rootPath = path.resolve(htmlDir, '.' + manifestPath);
-          resolvedManifestPath = fs.existsSync(publicPath) ? publicPath : rootPath;
+
+        if (manifestPath.startsWith('/') || manifestPath.includes('%sveltekit.assets%')) {
+          // Absolute path - check in static directory (SvelteKit), public directory, then project root
+          const cleanPath = manifestPath.replace('%sveltekit.assets%', '');
+          const staticPath = path.join(projectRoot, 'static', cleanPath);
+          const publicPath = path.join(projectRoot, 'public', cleanPath);
+          const rootPath = path.join(projectRoot, cleanPath);
+
+          if (fs.existsSync(staticPath)) {
+            resolvedManifestPath = staticPath;
+          } else if (fs.existsSync(publicPath)) {
+            resolvedManifestPath = publicPath;
+          } else {
+            resolvedManifestPath = rootPath;
+          }
         } else {
           // Relative path
           resolvedManifestPath = path.resolve(htmlDir, manifestPath);
