@@ -4,29 +4,15 @@
   import '../lib/polyfills.ts';
 
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
+  import { appConfig, applyTheme, setupThemeWatcher } from '$lib/stores/appStore';
+  import { welshmanRouter } from '$lib/stores/welshman';
 
-  // App configuration types
-  type Theme = "dark" | "light" | "system";
-
-  interface AppConfig {
-    theme: Theme;
-    relayUrl: string;
-  }
-
-  // Default configuration
-  const defaultConfig: AppConfig = {
-    theme: "light",
-    relayUrl: "wss://relay.ditto.pub",
-  };
-
-  // Preset relays
-  const presetRelays = [
-    { url: 'wss://relay.ditto.pub', name: 'Ditto' },
-    { url: 'wss://relay.nostr.band', name: 'Nostr.Band' },
-    { url: 'wss://relay.damus.io', name: 'Damus' },
-    { url: 'wss://relay.primal.net', name: 'Primal' },
-  ];
+  // Scroll to top on navigation
+  afterNavigate(() => {
+    window.scrollTo(0, 0);
+  });
 
   // Query client setup
   const queryClient = new QueryClient({
@@ -39,53 +25,21 @@
     }
   });
 
-  // App config state - will be enhanced with proper store later
-  let config = $state<AppConfig>(defaultConfig);
-
-  // Load config from localStorage on mount
+  // Apply theme on mount and setup watcher
   onMount(() => {
-    const stored = localStorage.getItem('nostr:app-config');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        config = { ...defaultConfig, ...parsed };
-      } catch (e) {
-        console.error('Failed to parse app config:', e);
-      }
-    }
-
-    // Apply initial theme
-    applyTheme(config.theme);
-
-    // Watch for system theme changes
-    if (config.theme === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleChange = () => applyTheme('system');
-      mediaQuery.addEventListener('change', handleChange);
-
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
+    applyTheme($appConfig.theme);
+    welshmanRouter.init();
+    return setupThemeWatcher();
   });
 
-  // Apply theme to document
-  function applyTheme(theme: Theme) {
-    const root = window.document.documentElement;
-    root.classList.remove('light', 'dark');
+  // Cleanup Welshman on unmount
+  onDestroy(() => {
+    welshmanRouter.cleanup();
+  });
 
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
-      root.classList.add(systemTheme);
-    } else {
-      root.classList.add(theme);
-    }
-  }
-
-  // Save config to localStorage when it changes
+  // Apply theme when config changes
   $effect(() => {
-    localStorage.setItem('nostr:app-config', JSON.stringify(config));
-    applyTheme(config.theme);
+    applyTheme($appConfig.theme);
   });
 </script>
 
