@@ -1,5 +1,5 @@
 {
-  "name": "mkstack",
+  "name": "pustack",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -25,13 +25,21 @@
     "@welshman/signer": "^0.5.3",
     "@welshman/store": "^0.5.3",
     "@welshman/util": "^0.5.3",
+    "bits-ui": "^2.11.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk-sv": "^0.0.19",
     "date-fns": "^3.6.0",
+    "embla-carousel-svelte": "^8.6.0",
+    "input-otp": "^1.4.2",
+    "layerchart": "^1.0.12",
     "nostr-tools": "^2.13.0",
+    "paneforge": "^1.0.2",
     "qrcode": "^1.5.4",
+    "svelte-sonner": "^1.0.5",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
+    "vaul-svelte": "^0.3.2",
     "zod": "^3.25.71"
   },
   "devDependencies": {
