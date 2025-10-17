@@ -119,7 +119,7 @@ export function useFeed(
     initialPageParam: undefined,
     enabled: queryOptions?.enabled !== undefined ? queryOptions.enabled : true,
     refetchOnWindowFocus: queryOptions?.refetchOnWindowFocus !== undefined ? queryOptions.refetchOnWindowFocus : false,
-    refetchOnMount: queryOptions?.refetchOnMount !== undefined ? queryOptions.refetchOnMount : true,
+    refetchOnMount: queryOptions?.refetchOnMount !== undefined ? queryOptions.refetchOnMount : false,
     staleTime: queryOptions?.staleTime !== undefined ? queryOptions.staleTime : 30000,
   });
 }
