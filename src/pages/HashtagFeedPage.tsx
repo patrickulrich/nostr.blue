@@ -18,8 +18,8 @@ export function HashtagFeedPage() {
   const hashtag = tag || '';
 
   useSeoMeta({
-    title: `#${hashtag} / nostr.blue`,
-    description: `Posts tagged with #${hashtag} on Nostr`,
+    title: hashtag ? `#${hashtag} / nostr.blue` : 'Hashtag / nostr.blue',
+    description: hashtag ? `Posts tagged with #${hashtag} on Nostr` : 'Browse posts by hashtag',
   });
 
   const {
@@ -33,12 +33,16 @@ export function HashtagFeedPage() {
   } = useFeed({
     hashtag,
     kinds: [1], // Short text notes
+  }, {
+    enabled: !!hashtag, // Only query if hashtag is valid
   });
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
   // Infinite scroll
   useEffect(() => {
+    if (!hashtag) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
@@ -58,9 +62,24 @@ export function HashtagFeedPage() {
         observer.unobserve(currentTarget);
       }
     };
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, hashtag]);
 
   const allEvents = data?.pages.flatMap((page) => page) || [];
+
+  // Validate hashtag parameter - render error if invalid
+  if (!hashtag) {
+    return (
+      <MainLayout sidebar={<AppSidebar />} rightPanel={<RightSidebar />}>
+        <div className="flex flex-col items-center justify-center py-20 px-4 text-center min-h-screen">
+          <Hash className="h-16 w-16 text-muted-foreground mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Invalid hashtag</h2>
+          <p className="text-muted-foreground max-w-sm">
+            Please provide a valid hashtag to search for.
+          </p>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout sidebar={<AppSidebar />} rightPanel={<RightSidebar />}>

@@ -5,6 +5,20 @@ import { useCurrentUser } from './useCurrentUser';
 import { nip19 } from 'nostr-tools';
 
 /**
+ * Safely parses an amount string to a number.
+ * Returns undefined for invalid or missing values to distinguish from zero.
+ * @param v - Amount string to parse
+ * @returns Parsed number if valid, undefined otherwise
+ */
+function parseAmountSafe(v?: string): number | undefined {
+  if (!v) return undefined;
+  const s = v.trim();
+  if (!/^\d+$/.test(s)) return undefined;
+  const n = Number(s);
+  return Number.isSafeInteger(n) ? n : undefined;
+}
+
+/**
  * Normalizes a Nostr event ID from NIP-19 format (note1/nevent1) to hex.
  * @param id - Event ID in hex or NIP-19 format
  * @returns Hex event ID
@@ -191,7 +205,7 @@ export function useDVMJob() {
               jobRequestId,
               dvmPubkey: event.pubkey,
               content: event.content,
-              amount: parseInt(amountTag?.[1] || '0', 10),
+              amount: parseAmountSafe(amountTag?.[1]),
               bolt11: bolt11Tag?.[1],
               event,
               createdAt: event.created_at,
@@ -232,7 +246,7 @@ export function useDVMJob() {
               dvmPubkey: event.pubkey,
               status: (statusTag?.[1] as DVMJobFeedback['status']) || 'processing',
               message: statusTag?.[2],
-              amount: parseInt(amountTag?.[1] || '0', 10),
+              amount: parseAmountSafe(amountTag?.[1]),
               bolt11: bolt11Tag?.[1],
               event,
             };

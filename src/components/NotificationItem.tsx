@@ -22,8 +22,18 @@ export function NotificationItem({ notification, className }: NotificationItemPr
   const avatarUrl = author?.metadata?.picture;
   const timestamp = formatDistanceToNow(new Date(event.created_at * 1000), { addSuffix: true });
 
-  // Encode the target event ID for linking
-  const targetNoteId = targetEventId ? nip19.noteEncode(targetEventId) : null;
+  // Encode the target event ID or address for linking
+  // targetEventId can be either an event id (hex) or an address (kind:pubkey:d)
+  const targetNoteId = targetEventId
+    ? targetEventId.includes(':')
+      ? (() => {
+          // Parse address format: kind:pubkey:identifier
+          const [kindStr, pubkey, identifier] = targetEventId.split(':');
+          const kind = parseInt(kindStr, 10);
+          return nip19.naddrEncode({ kind, pubkey, identifier });
+        })()
+      : nip19.noteEncode(targetEventId)
+    : null;
 
   // Get the appropriate icon and color based on notification type
   const getIcon = () => {
