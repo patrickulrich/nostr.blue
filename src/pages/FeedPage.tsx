@@ -134,6 +134,7 @@ export function FeedPage() {
     },
     enabled: eventIds.length > 0 && feedType === 'popular',
     staleTime: 60000,
+    refetchOnMount: true, // Always refetch when component mounts
   });
 
   const observerTarget = useRef<HTMLDivElement>(null);

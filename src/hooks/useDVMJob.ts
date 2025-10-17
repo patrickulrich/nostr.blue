@@ -206,6 +206,7 @@ export function useDVMJob() {
         }
       },
       staleTime: 30000,
+      refetchOnMount: true, // Always refetch when component mounts
     });
   };
 
