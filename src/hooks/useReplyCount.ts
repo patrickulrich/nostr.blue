@@ -20,18 +20,21 @@ export function useReplyCount(eventId: string | undefined) {
         const combinedSignal = AbortSignal.any([signal, timeoutSignal]);
 
         // Query for kind 1 events that have an 'e' tag referencing this event
+        // Query for limit + 1 to detect if there are more replies than the limit
+        const limit = 500;
         const replies = await nostr.query(
           [
             {
               kinds: [1],
               '#e': [eventId],
-              limit: 500, // Limit to prevent too many results
+              limit: limit + 1,
             },
           ],
           { signal: combinedSignal }
         );
 
-        return replies.length;
+        // If we get limit + 1 results, return limit + 1 to indicate "500+" in UI
+        return Math.min(replies.length, limit + 1);
       } catch (error) {
         // Don't log AbortError as it's expected when queries are cancelled
         if (error instanceof Error && error.name === 'AbortError') {

@@ -40,10 +40,7 @@ export function useSuggestedProfiles(pubkey: string | undefined, limit: number =
   return useQuery<ParsedProfile[]>({
     queryKey: ['suggested-profiles', pubkey, limit],
     queryFn: async ({ signal }) => {
-      console.log('[useSuggestedProfiles] Starting query with pubkey:', pubkey);
-
       if (!pubkey) {
-        console.log('[useSuggestedProfiles] No pubkey, returning empty array');
         return [];
       }
 
@@ -51,8 +48,6 @@ export function useSuggestedProfiles(pubkey: string | undefined, limit: number =
         // Convert hex pubkey to npub format for the API
         const npub = nip19.npubEncode(pubkey);
         const url = `https://api.nostr.band/v0/suggested/profiles/${npub}`;
-        console.log('[useSuggestedProfiles] Using npub:', npub);
-        console.log('[useSuggestedProfiles] Fetching from URL:', url);
 
         // Create a timeout signal (10 seconds)
         const timeoutSignal = AbortSignal.timeout(10000);
@@ -66,21 +61,14 @@ export function useSuggestedProfiles(pubkey: string | undefined, limit: number =
           }
         });
 
-        console.log('[useSuggestedProfiles] Response status:', response.status);
-
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`[useSuggestedProfiles] API error: ${response.status} ${response.statusText}`, errorText);
           throw new Error(`Failed to fetch suggested profiles: ${response.status}`);
         }
 
         const data: NostrBandSuggestedResponse = await response.json();
-        console.log('[useSuggestedProfiles] Response data:', data);
-        console.log('[useSuggestedProfiles] Number of profiles:', data.profiles?.length);
 
         // Return limited number of profiles, parsing the profile content
         const profiles = (data.profiles || []).slice(0, limit);
-        console.log('[useSuggestedProfiles] Processing profiles:', profiles);
 
         return profiles.map(item => {
           let parsedProfile;
@@ -94,8 +82,8 @@ export function useSuggestedProfiles(pubkey: string | undefined, limit: number =
               if (parsedProfile.banner) {
                 parsedProfile.banner = parsedProfile.banner.replace(/^http:/, 'https:');
               }
-            } catch (e) {
-              console.warn('[useSuggestedProfiles] Failed to parse profile content:', e);
+            } catch {
+              // Silently ignore JSON parse errors
             }
           }
 
@@ -105,20 +93,13 @@ export function useSuggestedProfiles(pubkey: string | undefined, limit: number =
           };
         });
       } catch (error) {
-        // Log timeout errors
-        if (error instanceof Error && error.name === 'TimeoutError') {
-          console.error('[useSuggestedProfiles] Request timed out after 10 seconds');
+        // Silently return empty array for timeout and abort errors
+        if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
           return [];
         }
-        // Don't log AbortError as it's expected when queries are cancelled
-        if (error instanceof Error && error.name === 'AbortError') {
-          console.log('[useSuggestedProfiles] Request aborted');
-          return [];
-        }
-        console.error('[useSuggestedProfiles] Failed to fetch suggested profiles:', error);
-        if (error instanceof Error) {
-          console.error('[useSuggestedProfiles] Error name:', error.name);
-          console.error('[useSuggestedProfiles] Error message:', error.message);
+        // Log other errors only in development
+        if (import.meta.env.DEV) {
+          console.error('[useSuggestedProfiles] Failed to fetch suggested profiles:', error);
         }
         return [];
       }

@@ -13,6 +13,11 @@ interface NostrWineSearchResult {
   };
 }
 
+interface SearchPageData {
+  events: NostrEvent[];
+  pagination: NostrWineSearchResult['pagination'];
+}
+
 interface UseNostrWineSearchOptions {
   query: string;
   kinds?: number[];
@@ -28,11 +33,21 @@ interface UseNostrWineSearchOptions {
 export function useNostrWineSearch(options: UseNostrWineSearchOptions) {
   const { query, kinds = [1], limit = 20, sort = 'relevance', order = 'descending' } = options;
 
-  return useInfiniteQuery<NostrEvent[]>({
+  return useInfiniteQuery<SearchPageData>({
     queryKey: ['nostr-wine-search', { query, kinds, sort, order }],
     queryFn: async ({ pageParam = 1, signal }) => {
       if (!query.trim()) {
-        return [];
+        return {
+          events: [],
+          pagination: {
+            last_page: true,
+            limit: 0,
+            next_url: null,
+            page: 1,
+            total_pages: 0,
+            total_records: 0,
+          },
+        };
       }
 
       const params = new URLSearchParams({
@@ -59,18 +74,16 @@ export function useNostrWineSearch(options: UseNostrWineSearchOptions) {
 
       const data: NostrWineSearchResult = await response.json();
 
-      // Store pagination metadata on the result array
-      const events = data.data || [];
-      (events as NostrEvent[] & { __pagination?: NostrWineSearchResult['pagination'] }).__pagination = data.pagination;
-
-      return events;
+      // Return properly typed data with pagination
+      return {
+        events: data.data || [],
+        pagination: data.pagination,
+      };
     },
     getNextPageParam: (lastPage) => {
       // Check if there's a next page using the pagination metadata
-      const pagination = (lastPage as NostrEvent[] & { __pagination?: NostrWineSearchResult['pagination'] }).__pagination;
-
-      if (pagination && !pagination.last_page) {
-        return pagination.page + 1;
+      if (lastPage.pagination && !lastPage.pagination.last_page) {
+        return lastPage.pagination.page + 1;
       }
 
       return undefined;
