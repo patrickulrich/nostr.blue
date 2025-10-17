@@ -11,6 +11,11 @@ export interface NotificationEvent {
   targetEventId?: string; // The event being replied to, reacted to, etc.
 }
 
+/**
+ * Hook to fetch and manage user notifications from the Nostr network.
+ * Aggregates replies, mentions, reactions, reposts, and zaps with infinite scrolling.
+ * @returns Infinite query result containing paginated notification events
+ */
 export function useNotifications() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

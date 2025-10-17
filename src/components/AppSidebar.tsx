@@ -1,5 +1,5 @@
 import { Home, Compass, User, Settings, PenSquare, Bell, Mail, List, Bookmark, Users, MoreHorizontal, Video, Calendar, Music, Zap } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { PostComposer } from '@/components/PostComposer';
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface NavItemProps {
   to: string;
@@ -34,20 +35,40 @@ function NavItem({ to, icon, label, active }: NavItemProps) {
   );
 }
 
+/**
+ * Main application sidebar with navigation links and post composer.
+ * Shows different navigation items based on user authentication status.
+ */
 export function AppSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user } = useCurrentUser();
   const [composeOpen, setComposeOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const profilePath = user ? `/${nip19.npubEncode(user.pubkey)}` : '/';
 
+  const handleHomeClick = (e: React.MouseEvent) => {
+    // If already on home page, scroll to top and refresh feed
+    if (location.pathname === '/') {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Invalidate feed queries to trigger a refresh
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+      queryClient.invalidateQueries({ queryKey: ['popular-feed-events'] });
+    } else {
+      // Otherwise navigate normally (Link will handle it)
+      navigate('/');
+    }
+  };
+
   return (
     <div className="flex flex-col h-full justify-between">
       <div className="flex flex-col gap-2">
         {/* Logo/Brand */}
         <div className="px-4 py-3 mb-2">
-          <Link to="/">
+          <Link to="/" onClick={handleHomeClick}>
             <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-xl hover:bg-blue-600 transition-colors">
               N
             </div>
@@ -56,12 +77,19 @@ export function AppSidebar() {
 
         {/* Navigation */}
         <nav className="flex flex-col gap-1">
-          <NavItem
-            to="/"
-            icon={<Home className="w-7 h-7" />}
-            label="Home"
-            active={location.pathname === '/'}
-          />
+          {/* Home - with special click handling for refresh */}
+          <Link to="/" onClick={handleHomeClick}>
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-start gap-4 text-xl py-6 px-4 rounded-full hover:bg-accent",
+                location.pathname === '/' && "font-bold"
+              )}
+            >
+              <Home className="w-7 h-7" />
+              <span className="hidden xl:inline">Home</span>
+            </Button>
+          </Link>
           <NavItem
             to="/explore"
             icon={<Compass className="w-7 h-7" />}

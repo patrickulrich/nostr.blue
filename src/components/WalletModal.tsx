@@ -204,6 +204,14 @@ const WalletContent = forwardRef<HTMLDivElement, {
 ));
 WalletContent.displayName = 'WalletContent';
 
+/**
+ * Modal component for managing Lightning wallet connections.
+ * Supports WebLN browser extensions and Nostr Wallet Connect (NWC) wallets.
+ *
+ * @param props - Component properties
+ * @param props.children - Optional custom trigger element
+ * @param props.className - Optional CSS class names
+ */
 export function WalletModal({ children, className }: WalletModalProps) {
   const [open, setOpen] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);

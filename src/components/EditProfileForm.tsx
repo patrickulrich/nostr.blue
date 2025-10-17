@@ -22,6 +22,10 @@ import { NSchema as n, type NostrMetadata } from '@nostrify/nostrify';
 import { useQueryClient } from '@tanstack/react-query';
 import { useUploadFile } from '@/hooks/useUploadFile';
 
+/**
+ * Form component for editing Nostr user profile metadata (kind 0 event).
+ * Supports text fields, image uploads, and NIP-05 verification.
+ */
 export const EditProfileForm: React.FC = () => {
   const queryClient = useQueryClient();
 

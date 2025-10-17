@@ -19,6 +19,11 @@ const AppConfigSchema: z.ZodType<AppConfig, z.ZodTypeDef, unknown> = z.object({
   relayUrl: z.string().url(),
 });
 
+/**
+ * Root provider component that manages application-wide configuration and state.
+ * Handles theme application, relay selection, and config persistence to localStorage.
+ * @param props - Provider configuration including storage key and default config
+ */
 export function AppProvider(props: AppProviderProps) {
   const {
     children,

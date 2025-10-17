@@ -19,6 +19,12 @@ export interface NWCInfo {
   notifications?: string[];
 }
 
+/**
+ * Internal hook for managing Nostr Wallet Connect (NWC) connections.
+ * Provides functionality to add, remove, and use NWC wallets for Lightning payments.
+ *
+ * @returns Object with NWC connection management and payment functions
+ */
 export function useNWCInternal() {
   const { toast } = useToast();
   const [connections, setConnections] = useLocalStorage<NWCConnection[]>('nwc-connections', []);

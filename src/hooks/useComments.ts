@@ -2,6 +2,14 @@ import { NKinds, NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
+/**
+ * Fetches and organizes threaded comments (kind 1111) for a Nostr event or URL.
+ * Provides hierarchical comment structure with support for nested replies.
+ *
+ * @param root - The root event or URL to fetch comments for
+ * @param limit - Optional maximum number of comments to fetch
+ * @returns Query result with top-level comments and helper functions for thread navigation
+ */
 export function useComments(root: NostrEvent | URL, limit?: number) {
   const { nostr } = useNostr();
 

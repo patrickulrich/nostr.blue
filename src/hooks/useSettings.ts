@@ -14,6 +14,11 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const SETTINGS_D_TAG = 'nostr.blue:settings';
 
+/**
+ * Hook to manage user application settings stored on Nostr using kind 30078 events.
+ * Provides settings retrieval, updates, and automatic theme application.
+ * @returns Object containing current settings, loading state, and update mutation
+ */
 export function useSettings() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

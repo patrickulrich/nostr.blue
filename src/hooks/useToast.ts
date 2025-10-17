@@ -62,6 +62,13 @@ const addToRemoveQueue = (toastId: string) => {
   toastTimeouts.set(toastId, timeout)
 }
 
+/**
+ * Reducer function to manage toast notification state.
+ * Handles adding, updating, dismissing, and removing toast notifications.
+ * @param state - Current toast state
+ * @param action - Action to perform on the state
+ * @returns Updated state after applying the action
+ */
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
     case "ADD_TOAST":

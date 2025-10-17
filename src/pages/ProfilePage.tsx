@@ -18,6 +18,10 @@ import { useProfileStats } from '@/hooks/useProfileStats';
 import { genUserName } from '@/lib/genUserName';
 import { format } from 'date-fns';
 
+/**
+ * Profile page component displaying user information and posts.
+ * Shows avatar, banner, bio, follower counts, and infinite-scrolling feed of user posts.
+ */
 export function ProfilePage() {
   const { nip19: nip19Param } = useParams<{ nip19?: string }>();
   const { user: currentUser } = useCurrentUser();

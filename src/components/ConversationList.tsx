@@ -100,6 +100,16 @@ function ConversationListSkeleton() {
   );
 }
 
+/**
+ * Component displaying a list of direct message conversations.
+ * Shows conversation previews with avatars, latest message, and timestamps.
+ *
+ * @param props - Component properties
+ * @param props.conversations - Array of conversation objects
+ * @param props.selectedPubkey - Currently selected conversation pubkey
+ * @param props.onSelectConversation - Callback when a conversation is selected
+ * @param props.isLoading - Whether conversations are loading
+ */
 export function ConversationList({
   conversations,
   selectedPubkey,

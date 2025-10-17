@@ -2,6 +2,12 @@ import { type NostrEvent, type NostrMetadata, NSchema as n } from '@nostrify/nos
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
+/**
+ * Fetches and parses Nostr author metadata (kind 0 event) for a given public key.
+ *
+ * @param pubkey - The Nostr public key (hex format) of the author to fetch
+ * @returns Query result containing the author's event and parsed metadata
+ */
 export function useAuthor(pubkey: string | undefined) {
   const { nostr } = useNostr();
 

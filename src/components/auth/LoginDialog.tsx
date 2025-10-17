@@ -26,6 +26,16 @@ const validateBunkerUri = (uri: string) => {
   return uri.startsWith('bunker://');
 };
 
+/**
+ * Dialog component for user authentication with multiple login methods.
+ * Supports NIP-07 browser extensions, nsec private keys, and bunker URIs.
+ *
+ * @param props - Component properties
+ * @param props.isOpen - Whether the dialog is open
+ * @param props.onClose - Callback when dialog closes
+ * @param props.onLogin - Callback after successful login
+ * @param props.onSignup - Optional callback for signup navigation
+ */
 const LoginDialog: React.FC<LoginDialogProps> = ({ isOpen, onClose, onLogin, onSignup }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isFileLoading, setIsFileLoading] = useState(false);

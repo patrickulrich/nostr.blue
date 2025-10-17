@@ -11,6 +11,11 @@ interface TestAppProps {
   children: React.ReactNode;
 }
 
+/**
+ * Test wrapper component providing all necessary providers for testing.
+ * Configures React Query, Nostr, routing, and other contexts with test-friendly defaults.
+ * @param props - Test app props containing children elements to render
+ */
 export function TestApp({ children }: TestAppProps) {
   const head = createHead();
 

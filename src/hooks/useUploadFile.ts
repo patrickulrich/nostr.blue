@@ -3,6 +3,12 @@ import { BlossomUploader } from '@nostrify/nostrify/uploaders';
 
 import { useCurrentUser } from "./useCurrentUser";
 
+/**
+ * Hook for uploading files to Blossom servers (NIP-96).
+ * Requires user to be logged in for authentication.
+ *
+ * @returns Mutation result for file upload operation
+ */
 export function useUploadFile() {
   const { user } = useCurrentUser();
 

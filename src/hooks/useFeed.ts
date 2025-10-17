@@ -10,6 +10,13 @@ export interface UseFeedOptions {
   excludeReplies?: boolean; // Exclude replies (top-level posts only)
 }
 
+/**
+ * Hook for fetching an infinite-scrolling feed of Nostr events.
+ * Supports filtering by authors, kinds, hashtags, and optionally excluding replies.
+ *
+ * @param options - Feed configuration options
+ * @returns Infinite query result with paginated events
+ */
 export function useFeed(options: UseFeedOptions = {}) {
   const { nostr } = useNostr();
   const {

@@ -16,12 +16,17 @@ interface CommentFormProps {
   compact?: boolean;
 }
 
+/**
+ * Form component for posting NIP-22 comments on Nostr events.
+ * Supports both top-level comments and nested replies with compact mode option.
+ * @param props - Form configuration including root event, reply target, and callbacks
+ */
 export function CommentForm({
   root,
   reply,
-  onSuccess, 
+  onSuccess,
   placeholder = "Write a comment...",
-  compact = false 
+  compact = false
 }: CommentFormProps) {
   const [content, setContent] = useState('');
   const { user } = useCurrentUser();

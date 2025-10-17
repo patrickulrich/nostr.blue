@@ -19,6 +19,10 @@ import MessagesPage from "./pages/MessagesPage";
 import { NIP19Router } from "./components/NIP19Router";
 import NotFound from "./pages/NotFound";
 
+/**
+ * Application router component defining all application routes.
+ * Includes routes for feed, explore, notifications, messages, settings, and NIP-19 entities.
+ */
 export function AppRouter() {
   return (
     <BrowserRouter

@@ -8,6 +8,13 @@ interface NostrProviderProps {
   children: React.ReactNode;
 }
 
+/**
+ * Provider component that initializes and manages the Nostr connection pool.
+ * Configures relay routing for queries and event publishing.
+ *
+ * @param props - Component properties
+ * @param props.children - Child components to wrap
+ */
 const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   const { children } = props;
   const { config, presetRelays } = useAppContext();

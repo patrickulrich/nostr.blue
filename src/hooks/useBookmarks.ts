@@ -11,6 +11,12 @@ export interface Bookmark {
   relay?: string;
 }
 
+/**
+ * Hook to manage user bookmarks (NIP-51 kind 10003).
+ * Provides functionality to fetch, add, remove, and toggle bookmarks.
+ *
+ * @returns Object containing bookmarks, loading state, and mutation functions
+ */
 export function useBookmarks() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

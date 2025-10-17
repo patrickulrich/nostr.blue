@@ -16,6 +16,11 @@ export interface Community {
   aTag: string; // formatted as "34550:pubkey:dTag"
 }
 
+/**
+ * Hook to fetch all available communities from the Nostr network.
+ * Queries for kind 34550 events (NIP-72 community definitions) and parses their metadata.
+ * @returns Query result containing an array of Community objects sorted by creation date
+ */
 export function useCommunities() {
   const { nostr } = useNostr();
 
@@ -66,6 +71,12 @@ export function useCommunities() {
   });
 }
 
+/**
+ * Hook to fetch a specific community by its NIP-19 address tag.
+ * Queries for the community definition event and parses its metadata.
+ * @param aTag - The community address tag in format "34550:pubkey:dTag"
+ * @returns Query result containing the Community object or null if not found
+ */
 export function useCommunity(aTag: string) {
   const { nostr } = useNostr();
 
@@ -118,6 +129,12 @@ export function useCommunity(aTag: string) {
   });
 }
 
+/**
+ * Hook to fetch all posts belonging to a specific community.
+ * Fetches kind 1111 (NIP-72 community posts) and kind 1 posts tagged with the community address.
+ * @param aTag - The community address tag in format "34550:pubkey:dTag"
+ * @returns Query result containing an array of NostrEvent posts sorted by creation date
+ */
 export function useCommunityPosts(aTag: string) {
   const { nostr } = useNostr();
 
@@ -150,7 +167,11 @@ export function useCommunityPosts(aTag: string) {
   });
 }
 
-// Hook to get communities the user is a member of (has posted to or moderates)
+/**
+ * Hook to get communities the current user is a member of.
+ * Determines membership by checking which communities the user has posted to.
+ * @returns Query result containing a Set of community address tags the user has participated in
+ */
 export function useUserCommunities() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

@@ -10,6 +10,10 @@ import { FollowButton } from '@/components/FollowButton';
 import { nip19 } from 'nostr-tools';
 import { genUserName } from '@/lib/genUserName';
 
+/**
+ * Explore sidebar component with search and suggested profiles.
+ * Displays "Who to follow" recommendations for the current user.
+ */
 export function ExploreSidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();

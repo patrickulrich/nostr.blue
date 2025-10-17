@@ -6,6 +6,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useTrendingNotes } from '@/hooks/useTrendingNotes';
 import { nip19 } from 'nostr-tools';
 
+/**
+ * Right sidebar component displaying search and trending posts from Nostr.Band.
+ * Includes a search input and a scrollable list of trending notes.
+ */
 export function RightSidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();

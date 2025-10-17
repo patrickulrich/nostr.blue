@@ -23,6 +23,11 @@ interface CommentProps {
   limit?: number;
 }
 
+/**
+ * Recursive comment component displaying a single comment with nested replies.
+ * Supports threaded discussions with collapsible reply chains.
+ * @param props - Comment configuration including root event, comment data, and depth limits
+ */
 export function Comment({ root, comment, depth = 0, maxDepth = 3, limit }: CommentProps) {
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(depth < 2); // Auto-expand first 2 levels

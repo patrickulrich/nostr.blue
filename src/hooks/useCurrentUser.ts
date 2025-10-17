@@ -4,6 +4,12 @@ import { useCallback, useMemo } from 'react';
 
 import { useAuthor } from './useAuthor.ts';
 
+/**
+ * Hook to get the currently logged-in user and their profile metadata.
+ * Handles multiple login types (nsec, bunker, extension) and fetches author data.
+ *
+ * @returns Object containing current user, all logged-in users, and author metadata
+ */
 export function useCurrentUser() {
   const { nostr } = useNostr();
   const { logins } = useNostrLogin();

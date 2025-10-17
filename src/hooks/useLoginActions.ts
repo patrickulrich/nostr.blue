@@ -3,6 +3,12 @@ import { NLogin, useNostrLogin } from '@nostrify/react/login';
 
 // NOTE: This file should not be edited except for adding new login methods.
 
+/**
+ * Hook providing login and logout actions for different Nostr authentication methods.
+ * Supports nsec keys, NIP-46 bunkers, and NIP-07 browser extensions.
+ *
+ * @returns Object with login/logout methods for various authentication types
+ */
 export function useLoginActions() {
   const { nostr } = useNostr();
   const { logins, addLogin, removeLogin } = useNostrLogin();

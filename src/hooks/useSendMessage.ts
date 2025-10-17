@@ -2,6 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import { useCurrentUser } from './useCurrentUser';
 
+/**
+ * Parameters for sending a direct message.
+ */
 export interface SendMessageParams {
   recipientPubkey: string;
   content: string;

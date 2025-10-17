@@ -25,6 +25,20 @@ const iconMap = {
   bookmark: BookmarkCheck,
 };
 
+/**
+ * Card component for displaying Nostr list information.
+ * Shows list name, description, icon, item count, and privacy status.
+ *
+ * @param props - Component properties
+ * @param props.kind - Nostr event kind number
+ * @param props.name - List name
+ * @param props.description - List description
+ * @param props.itemCount - Number of items in the list
+ * @param props.icon - Icon type to display (default: 'list')
+ * @param props.isPrivate - Whether the list is private (default: false)
+ * @param props.className - Optional CSS class names
+ * @param props.onClick - Optional click handler
+ */
 export function ListCard({
   kind: _kind,
   name,
@@ -111,6 +125,16 @@ function UserCard({ pubkey, relay }: { pubkey: string; relay?: string }) {
   );
 }
 
+/**
+ * Component displaying a single item from a Nostr list.
+ * Renders different UI based on item type (user, event, hashtag, URL, etc.).
+ *
+ * @param props - Component properties
+ * @param props.type - Item type ('p', 'e', 'a', 't', 'r', 'word', 'relay', 'emoji', 'group')
+ * @param props.value - The item value (pubkey, event ID, URL, etc.)
+ * @param props.relay - Optional relay URL associated with the item
+ * @param props.onRemove - Optional callback when item is removed
+ */
 export function ListItemDisplay({ type, value, relay, onRemove: _onRemove }: ListItemDisplayProps) {
   let content: React.ReactNode;
   let link: string | null = null;
