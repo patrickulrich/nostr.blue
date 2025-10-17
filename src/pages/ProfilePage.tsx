@@ -14,6 +14,7 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useFeed } from '@/hooks/useFeed';
 import { useFollowing } from '@/hooks/useFollowing';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useProfileStats } from '@/hooks/useProfileStats';
 import { genUserName } from '@/lib/genUserName';
 import { format } from 'date-fns';
 
@@ -36,6 +37,7 @@ export function ProfilePage() {
 
   const { data: author, isLoading: authorLoading } = useAuthor(pubkey);
   const { followingCount } = useFollowing(pubkey);
+  const { data: profileStats } = useProfileStats(pubkey);
 
   // Fetch user's posts
   const {
@@ -190,7 +192,9 @@ export function ProfilePage() {
               <span className="text-muted-foreground">Following</span>
             </span>
             <span>
-              <strong className="font-bold text-foreground">0</strong>{' '}
+              <strong className="font-bold text-foreground">
+                {profileStats?.followers_pubkey_count?.toLocaleString() || '0'}
+              </strong>{' '}
               <span className="text-muted-foreground">Followers</span>
             </span>
           </div>

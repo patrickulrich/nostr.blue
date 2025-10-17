@@ -2,11 +2,13 @@ import { useState, useRef } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { EmojiPicker } from '@/components/EmojiPicker';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useUploadFile } from '@/hooks/useUploadFile';
 import { useSearchUsers, type UserSearchResult } from '@/hooks/useSearchUsers';
 import { genUserName } from '@/lib/genUserName';
-import { Loader2, Image, Smile } from 'lucide-react';
+import { Loader2, Image, Smile, X } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import { nip19 } from 'nostr-tools';
 import { cn } from '@/lib/utils';
@@ -16,6 +18,11 @@ interface PostComposerProps {
   placeholder?: string;
   replyTo?: string; // Event ID to reply to
   autoFocus?: boolean;
+}
+
+interface UploadedImage {
+  url: string;
+  tags: string[][];
 }
 
 export function PostComposer({
@@ -28,10 +35,13 @@ export function PostComposer({
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { user, metadata } = useCurrentUser();
   const publish = useNostrPublish();
+  const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { toast } = useToast();
   const { data: userSuggestions, isLoading: isSearching } = useSearchUsers(mentionQuery);
 
@@ -102,8 +112,73 @@ export function PostComposer({
     }
   };
 
+  // Handle file upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check if it's an image
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload an image file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Upload the file and get NIP-94 compatible tags
+      const tags = await uploadFile(file);
+      const url = tags[0][1]; // First tag contains the URL
+
+      setUploadedImages(prev => [...prev, { url, tags }]);
+
+      toast({
+        title: "Image uploaded",
+        description: "Your image has been uploaded successfully.",
+      });
+    } catch (error) {
+      console.error('Failed to upload image:', error);
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload image. Please try again.",
+        variant: "destructive",
+      });
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Remove uploaded image
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Insert emoji at cursor position
+  const handleEmojiSelect = (emoji: string) => {
+    if (!textareaRef.current) return;
+
+    const textarea = textareaRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+
+    const newContent = content.slice(0, start) + emoji + content.slice(end);
+    setContent(newContent);
+
+    // Set cursor position after the emoji
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + emoji.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
   const handlePost = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() && uploadedImages.length === 0) return;
 
     try {
       const tags: string[][] = [];
@@ -113,14 +188,31 @@ export function PostComposer({
         tags.push(['e', replyTo, '', 'reply']);
       }
 
+      // Build content with image URLs appended
+      let postContent = content.trim();
+
+      // Add imeta tags for each uploaded image
+      uploadedImages.forEach(image => {
+        // Append URL to content
+        if (postContent) {
+          postContent += '\n\n';
+        }
+        postContent += image.url;
+
+        // Add imeta tag for the image
+        const imetaTag = ['imeta', ...image.tags.flat()];
+        tags.push(imetaTag);
+      });
+
       await publish.mutateAsync({
         kind: 1,
-        content: content.trim(),
+        content: postContent,
         tags,
         created_at: Math.floor(Date.now() / 1000),
       });
 
       setContent('');
+      setUploadedImages([]);
       toast({
         title: "Posted!",
         description: "Your post has been published to the network.",
@@ -213,15 +305,61 @@ export function PostComposer({
           </div>
         )}
 
+        {/* Image Previews */}
+        {uploadedImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 py-2">
+            {uploadedImages.map((image, index) => (
+              <div key={index} className="relative group">
+                <img
+                  src={image.url}
+                  alt={`Upload ${index + 1}`}
+                  className="h-24 w-24 object-cover rounded-lg border border-border"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  className="absolute -top-2 -right-2 h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={() => removeImage(index)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileUpload}
+        />
+
         {/* Actions */}
         <div className="flex items-center justify-between pt-2 border-t border-border">
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="text-primary" disabled>
-              <Image className="h-5 w-5" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-primary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Image className="h-5 w-5" />
+              )}
             </Button>
-            <Button variant="ghost" size="icon" className="text-primary" disabled>
-              <Smile className="h-5 w-5" />
-            </Button>
+            <EmojiPicker onEmojiSelect={handleEmojiSelect}>
+              <Button type="button" variant="ghost" size="icon" className="text-primary">
+                <Smile className="h-5 w-5" />
+              </Button>
+            </EmojiPicker>
           </div>
 
           <div className="flex items-center gap-3">
@@ -232,7 +370,7 @@ export function PostComposer({
             )}
             <Button
               onClick={handlePost}
-              disabled={!content.trim() || isOverLimit || publish.isPending}
+              disabled={(!content.trim() && uploadedImages.length === 0) || isOverLimit || publish.isPending || isUploading}
               className="rounded-full px-6"
             >
               {publish.isPending ? (

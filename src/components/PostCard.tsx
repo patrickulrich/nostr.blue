@@ -1,5 +1,5 @@
 import { type NostrEvent } from '@nostrify/nostrify';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { MessageCircle, MoreHorizontal, Share, Bookmark } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -10,6 +10,7 @@ import { ReactionButton } from '@/components/ReactionButton';
 import { RepostButton } from '@/components/RepostButton';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useBookmarks } from '@/hooks/useBookmarks';
+import { useReplyCount } from '@/hooks/useReplyCount';
 import { genUserName } from '@/lib/genUserName';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
@@ -22,8 +23,10 @@ interface PostCardProps {
 }
 
 export function PostCard({ event, className, showThread: _showThread = true }: PostCardProps) {
+  const navigate = useNavigate();
   const { data: author } = useAuthor(event.pubkey);
   const { isBookmarked, toggleBookmark } = useBookmarks();
+  const { data: replyCount = 0 } = useReplyCount(event.id);
   const { toast } = useToast();
   const npub = nip19.npubEncode(event.pubkey);
   const noteId = nip19.noteEncode(event.id);
@@ -54,8 +57,24 @@ export function PostCard({ event, className, showThread: _showThread = true }: P
     }
   };
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on a button, link, or interactive element
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') ||
+      target.closest('a') ||
+      target.closest('[role="button"]')
+    ) {
+      return;
+    }
+    navigate(`/${noteId}`);
+  };
+
   return (
-    <article className={cn("border-b border-border hover:bg-accent/50 transition-colors", className)}>
+    <article
+      className={cn("border-b border-border hover:bg-accent/50 transition-colors cursor-pointer", className)}
+      onClick={handleCardClick}
+    >
       <div className="flex gap-3 p-4">
         {/* Avatar */}
         <Link to={`/${npub}`} className="flex-shrink-0">
@@ -77,9 +96,9 @@ export function PostCard({ event, className, showThread: _showThread = true }: P
                 {username}
               </Link>
               <span className="text-muted-foreground text-sm">·</span>
-              <Link to={`/${noteId}`} className="text-muted-foreground text-sm hover:underline">
+              <span className="text-muted-foreground text-sm">
                 {timestamp}
-              </Link>
+              </span>
             </div>
             <Button variant="ghost" size="icon" className="flex-shrink-0 -mt-1 -mr-2">
               <MoreHorizontal className="h-4 w-4" />
@@ -104,7 +123,7 @@ export function PostCard({ event, className, showThread: _showThread = true }: P
               }}
             >
               <MessageCircle className="h-[18px] w-[18px]" />
-              <span className="text-xs">0</span>
+              <span className="text-xs">{replyCount > 0 ? replyCount : ''}</span>
             </Button>
 
             <RepostButton event={event} />

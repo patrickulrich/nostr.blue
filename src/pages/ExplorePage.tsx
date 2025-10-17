@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { MainLayout } from '@/components/MainLayout';
 import { AppSidebar } from '@/components/AppSidebar';
-import { RightSidebar } from '@/components/RightSidebar';
+import { ExploreSidebar } from '@/components/ExploreSidebar';
 import { PostCard } from '@/components/PostCard';
 import { useFeed } from '@/hooks/useFeed';
 import { Loader2, TrendingUp } from 'lucide-react';
@@ -49,7 +49,7 @@ export function ExplorePage() {
   const allEvents = data?.pages.flatMap((page) => page) || [];
 
   return (
-    <MainLayout sidebar={<AppSidebar />} rightPanel={<RightSidebar />}>
+    <MainLayout sidebar={<AppSidebar />} rightPanel={<ExploreSidebar />}>
       <div className="min-h-screen">
         {/* Header */}
         <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border">
