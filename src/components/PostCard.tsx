@@ -96,9 +96,13 @@ export function PostCard({ event, className, showThread: _showThread = true }: P
                 {username}
               </Link>
               <span className="text-muted-foreground text-sm">·</span>
-              <span className="text-muted-foreground text-sm">
+              <Link
+                to={`/${noteId}`}
+                className="text-muted-foreground text-sm hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
                 {timestamp}
-              </span>
+              </Link>
             </div>
             <Button variant="ghost" size="icon" className="flex-shrink-0 -mt-1 -mr-2">
               <MoreHorizontal className="h-4 w-4" />
@@ -123,7 +127,9 @@ export function PostCard({ event, className, showThread: _showThread = true }: P
               }}
             >
               <MessageCircle className="h-[18px] w-[18px]" />
-              <span className="text-xs">{replyCount > 0 ? replyCount : ''}</span>
+              <span className="text-xs">
+                {replyCount > 500 ? '500+' : replyCount > 0 ? replyCount : ''}
+              </span>
             </Button>
 
             <RepostButton event={event} />

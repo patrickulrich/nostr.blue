@@ -57,7 +57,7 @@ export function SearchPage() {
     };
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-  const allEvents = data?.pages.flatMap((page) => page) || [];
+  const allEvents = data?.pages.flatMap((page) => page.events) || [];
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

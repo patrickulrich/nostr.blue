@@ -14,12 +14,7 @@ export function ExploreSidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
   const { user } = useCurrentUser();
-  const { data: suggestedProfiles = [], isLoading, error } = useSuggestedProfiles(user?.pubkey, 5);
-
-  console.log('[ExploreSidebar] User pubkey:', user?.pubkey);
-  console.log('[ExploreSidebar] Is loading:', isLoading);
-  console.log('[ExploreSidebar] Error:', error);
-  console.log('[ExploreSidebar] Suggested profiles:', suggestedProfiles);
+  const { data: suggestedProfiles = [], isLoading } = useSuggestedProfiles(user?.pubkey, 5);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

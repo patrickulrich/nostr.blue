@@ -127,10 +127,27 @@ export function PostComposer({
       return;
     }
 
+    // Check file size (10MB limit)
+    const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+    if (file.size > maxSize) {
+      toast({
+        title: "File too large",
+        description: "Please upload an image smaller than 10MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       // Upload the file and get NIP-94 compatible tags
       const tags = await uploadFile(file);
-      const url = tags[0][1]; // First tag contains the URL
+
+      // Find the URL tag
+      const urlTag = tags.find(tag => tag[0] === 'url');
+      if (!urlTag || !urlTag[1]) {
+        throw new Error('No URL returned from upload');
+      }
+      const url = urlTag[1];
 
       setUploadedImages(prev => [...prev, { url, tags }]);
 
@@ -191,7 +208,7 @@ export function PostComposer({
       // Build content with image URLs appended
       let postContent = content.trim();
 
-      // Add imeta tags for each uploaded image
+      // Add imeta tags for each uploaded image (NIP-92 format)
       uploadedImages.forEach(image => {
         // Append URL to content
         if (postContent) {
@@ -199,8 +216,13 @@ export function PostComposer({
         }
         postContent += image.url;
 
-        // Add imeta tag for the image
-        const imetaTag = ['imeta', ...image.tags.flat()];
+        // Build imeta tag according to NIP-92 spec: ["imeta", "key value", "key value", ...]
+        const imetaTag = ['imeta'];
+        image.tags.forEach(([key, value]) => {
+          if (key && value) {
+            imetaTag.push(`${key} ${value}`);
+          }
+        });
         tags.push(imetaTag);
       });
 
@@ -237,7 +259,13 @@ export function PostComposer({
   }
 
   const maxLength = 280;
-  const remaining = maxLength - content.length;
+  // Calculate total length including image URLs that will be appended
+  const imageUrlsLength = uploadedImages.reduce((total, image) => {
+    // Each image adds: "\n\n" + URL (except the first one adds nothing if content is empty)
+    return total + (total > 0 || content.length > 0 ? 2 : 0) + image.url.length;
+  }, 0);
+  const totalLength = content.length + imageUrlsLength;
+  const remaining = maxLength - totalLength;
   const isOverLimit = remaining < 0;
   const showWarning = remaining < 20 && remaining >= 0;
 
