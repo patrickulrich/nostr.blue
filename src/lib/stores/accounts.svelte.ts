@@ -1,6 +1,5 @@
 import type { TrustedEvent, Profile } from '@welshman/util';
 import { PROFILE } from '@welshman/util';
-import { createQuery } from '@tanstack/svelte-query';
 import { load } from '@welshman/net';
 import { sessions, pubkey } from '@welshman/app';
 import { derived, get } from 'svelte/store';
@@ -11,90 +10,80 @@ export interface Account {
 	metadata: Profile;
 }
 
-/**
- * Query all logged-in accounts with their profile metadata
- * Returns a TanStack Query with account data for all sessions
- *
- * @returns TanStack Query with accounts data and utility functions
- *
- * @example
- * ```svelte
- * <script lang="ts">
- *   import { useLoggedInAccounts } from '$lib/stores/accounts.svelte';
- *
- *   const accounts = useLoggedInAccounts();
- *
- *   let currentUser = $derived($accounts.data?.currentUser);
- *   let otherUsers = $derived($accounts.data?.otherUsers ?? []);
- * </script>
- *
- * {#if currentUser}
- *   <div>Current: {currentUser.metadata.name ?? 'Anonymous'}</div>
- * {/if}
- *
- * {#each otherUsers as user}
- *   <div>{user.metadata.name ?? 'Anonymous'}</div>
- * {/each}
- * ```
- */
 export interface AccountsData {
 	authors: Account[];
 	currentUser: Account | undefined;
 	otherUsers: Account[];
 }
 
-export function useLoggedInAccounts() {
-	const allSessions = derived(sessions, ($sessions) => Object.values($sessions));
+/**
+ * Fetch all logged-in accounts with their profile metadata
+ * Use this with createQuery directly in components
+ *
+ * @param sessionPubkeys - Array of pubkeys from active sessions
+ * @param currentPubkey - The currently active pubkey
+ * @param signal - Optional abort signal for request cancellation
+ * @returns Accounts data with current user and other users
+ *
+ * @example
+ * ```svelte
+ * <script lang="ts">
+ *   import { createQuery } from '@tanstack/svelte-query';
+ *   import { fetchAccounts, type AccountsData } from '$lib/stores/accounts.svelte';
+ *   import { sessions, pubkey } from '@welshman/app';
+ *   import { get } from 'svelte/store';
+ *
+ *   const sessionPubkeys = $derived(Object.keys(get(sessions)));
+ *   const currentPubkey = $derived(get(pubkey));
+ *
+ *   const accountsQuery = createQuery<AccountsData>(() => ({
+ *     queryKey: ['accounts', sessionPubkeys.join(';')],
+ *     queryFn: ({ signal }) => fetchAccounts(sessionPubkeys, currentPubkey, signal)
+ *   }));
+ *
+ *   let currentUser = $derived($accountsQuery.data?.currentUser);
+ *   let otherUsers = $derived($accountsQuery.data?.otherUsers ?? []);
+ * </script>
+ * ```
+ */
+export async function fetchAccounts(
+	sessionPubkeys: string[],
+	currentPubkey: string | undefined,
+	signal?: AbortSignal
+): Promise<AccountsData> {
+	if (sessionPubkeys.length === 0) {
+		return { authors: [], currentUser: undefined, otherUsers: [] };
+	}
 
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
-	// This pattern works in React but not in Svelte. See: https://tanstack.com/query/latest/docs/framework/svelte/guides/queries
-	return createQuery<AccountsData>(() => {
-		const $sessions = get(allSessions);
-		const currentPubkey = get(pubkey);
-
-		return {
-			queryKey: ['accounts', $sessions.map((s) => s.pubkey).join(';')] as const,
-			queryFn: async ({ signal }) => {
-				if ($sessions.length === 0) {
-					return { authors: [], currentUser: undefined, otherUsers: [] };
-				}
-
-				const pubkeys = $sessions.map((s) => s.pubkey);
-
-				const events = await load({
-					relays: [],
-					filters: [{ kinds: [PROFILE], authors: pubkeys }],
-					signal,
-				});
-
-				const authors: Account[] = pubkeys.map((pk) => {
-					const event = events.find((e) => e.pubkey === pk);
-					try {
-						const metadata = event?.content ? JSON.parse(event.content) : {};
-						return { pubkey: pk, metadata, event };
-					} catch {
-						return { pubkey: pk, metadata: {}, event };
-					}
-				});
-
-				// Current user is the first one matching the active pubkey
-				const currentUser: Account | undefined = authors.find(
-					(a) => a.pubkey === currentPubkey
-				);
-
-				// Other users are all accounts except the current one
-				const otherUsers = authors.filter((a) => a.pubkey !== currentPubkey);
-
-				return {
-					authors,
-					currentUser,
-					otherUsers
-				};
-			},
-			retry: 3
-		};
+	const events = await load({
+		relays: [],
+		filters: [{ kinds: [PROFILE], authors: sessionPubkeys }],
+		signal,
 	});
+
+	const authors: Account[] = sessionPubkeys.map((pk) => {
+		const event = events.find((e) => e.pubkey === pk);
+		try {
+			const metadata = event?.content ? JSON.parse(event.content) : {};
+			return { pubkey: pk, metadata, event };
+		} catch {
+			return { pubkey: pk, metadata: {}, event };
+		}
+	});
+
+	// Current user is the first one matching the active pubkey
+	const currentUser: Account | undefined = authors.find(
+		(a) => a.pubkey === currentPubkey
+	);
+
+	// Other users are all accounts except the current one
+	const otherUsers = authors.filter((a) => a.pubkey !== currentPubkey);
+
+	return {
+		authors,
+		currentUser,
+		otherUsers
+	};
 }
 
 /**

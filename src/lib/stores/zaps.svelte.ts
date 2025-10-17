@@ -3,7 +3,7 @@ import { ZAP_RESPONSE } from '@welshman/util';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { load } from '@welshman/net';
 import { pubkey, signer } from '@welshman/app';
-import { useAuthor } from './author.svelte';
+import { fetchAuthor } from './author.svelte';
 import { appConfig } from './appStore';
 import { nip57 } from 'nostr-tools';
 import type { Event } from 'nostr-tools';
@@ -60,8 +60,9 @@ export function useZaps(
 	}
 
 	// Query for zap receipts
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
+	// Note: This function provides complete zaps management including query, state, and zap functionality.
+	// It's intentionally kept as a module rather than refactored to a utility function.
+	// @ts-expect-error - TanStack Query type inference through wrapper function
 	const zapQuery = createQuery<TrustedEvent[], Error, ZapQueryData>(() => ({
 		queryKey: ['zaps', target?.id] as const,
 		staleTime: 30000, // 30 seconds
@@ -158,8 +159,8 @@ export function useZaps(
 		}
 	}));
 
-	// Get author for the target event
-	const author = target ? useAuthor(target.pubkey) : null;
+	// Author data will be fetched when zapping
+	let authorData: Awaited<ReturnType<typeof fetchAuthor>> | null = null;
 
 	async function zap(amount: number, comment: string) {
 		if (amount <= 0 || !target) {
@@ -179,15 +180,10 @@ export function useZaps(
 		}
 
 		try {
-			if (!author) {
-				toastError('Author not found', 'Could not find the author of this item.');
-				isZapping = false;
-				return;
+			// Fetch author data if not already available
+			if (!authorData) {
+				authorData = await fetchAuthor(target.pubkey, undefined);
 			}
-
-			// Get the current author data
-			const authorQuery = author;
-			const authorData = get(authorQuery).data;
 
 			if (!authorData?.metadata || !authorData?.event) {
 				toastError('Author profile not loaded', 'Could not load the author profile.');

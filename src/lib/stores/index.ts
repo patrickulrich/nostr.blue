@@ -38,24 +38,22 @@ export {
 } from './auth';
 
 // Author queries
-export { useAuthor, type AuthorData } from './author.svelte';
-
-// Current user
-export { useCurrentUser, getCurrentUserMetadata } from './currentUser.svelte';
+export { fetchAuthor, type AuthorData } from './author.svelte';
 
 // Account management
 export {
-  useLoggedInAccounts,
+  fetchAccounts,
   currentUserAccount,
   otherUserAccounts,
-  type Account
+  type Account,
+  type AccountsData
 } from './accounts.svelte';
 
 // Event publishing
 export { useNostrPublish, publishNostrEvent } from './publish.svelte';
 
 // Comments
-export { useComments, type CommentsData } from './comments.svelte';
+export { fetchComments, type CommentsData } from './comments.svelte';
 export { usePostComment } from './postComment.svelte';
 
 // Shakespeare AI
