@@ -13,6 +13,10 @@ dist-ssr
 *.local
 .ai/
 
+# SvelteKit
+.svelte-kit
+build
+
 # Editor directories and files
 .idea
 .DS_Store

@@ -1,54 +1,104 @@
 # Project Overview
 
-This project is a Nostr client application built with React 18.x, TailwindCSS 3.x, Vite, shadcn/ui, and Nostrify.
+This project is a Nostr client application built with Svelte 5, TailwindCSS 3.x, Vite, shadcn-svelte, and Welshman.
 
 ## Technology Stack
 
-- **React 18.x**: Stable version of React with hooks, concurrent rendering, and improved performance
+- **Svelte 5**: Modern reactive framework with runes and fine-grained reactivity for optimal performance
+- **SvelteKit**: Full-stack framework for routing, SSR, and server-side data loading
 - **TailwindCSS 3.x**: Utility-first CSS framework for styling
 - **Vite**: Fast build tool and development server
-- **shadcn/ui**: Unstyled, accessible UI components built with Radix UI and Tailwind
-- **Nostrify**: Nostr protocol framework for Deno and web
-- **React Router**: For client-side routing with BrowserRouter and ScrollToTop functionality
+- **shadcn-svelte**: Unstyled, accessible UI components built with Melt UI and Tailwind
+- **Welshman**: Modular Nostr toolkit extracted from Coracle, providing networking, storage, and utilities
 - **TanStack Query**: For data fetching, caching, and state management
 - **TypeScript**: For type-safe JavaScript development
+
+## Welshman Packages
+
+Welshman is a modular toolkit with specialized packages:
+
+- **@welshman/app**: Batteries-included framework for building Nostr clients
+- **@welshman/util**: Core Nostr utilities for events, filters, and data structures
+- **@welshman/net**: Networking layer with relay connection management and message status handling
+- **@welshman/signer**: Signing implementations (NIP-01, NIP-07, NIP-46, NIP-55)
+- **@welshman/store**: In-memory relay and event store
+- **@welshman/router**: Tools for relay selection and routing
+- **@welshman/content**: Parser and renderer for Nostr notes with customizable formatting
+- **@welshman/editor**: Rich text editor with mentions and embeds support
+- **@welshman/feeds**: Dynamic feed compiler and loader
 
 ## Project Structure
 
 - `/docs/`: Specialized documentation for implementation patterns and features
-- `/src/components/`: UI components including NostrProvider for Nostr integration
-  - `/src/components/ui/`: shadcn/ui components (48+ components available)
-  - `/src/components/auth/`: Authentication-related components (LoginArea, LoginDialog, etc.)
+- `/src/lib/`: Reusable library code and utilities
+  - `/src/lib/components/`: UI components including Nostr integration
+  - `/src/lib/components/ui/`: shadcn-svelte components (48+ components available)
+  - `/src/lib/components/auth/`: Authentication-related components (LoginArea, LoginDialog, etc.)
   - Zap components: `ZapButton`, `ZapDialog`, `WalletModal` for Lightning payments
-- `/src/hooks/`: Custom hooks including:
-  - `useNostr`: Core Nostr protocol integration
-  - `useAuthor`: Fetch user profile data by pubkey
-  - `useCurrentUser`: Get currently logged-in user
-  - `useNostrPublish`: Publish events to Nostr
-  - `useUploadFile`: Upload files via Blossom servers
-  - `useAppContext`: Access global app configuration
-  - `useTheme`: Theme management
-  - `useToast`: Toast notifications
-  - `useLocalStorage`: Persistent local storage
-  - `useLoggedInAccounts`: Manage multiple accounts
-  - `useLoginActions`: Authentication actions
-  - `useIsMobile`: Responsive design helper
-  - `useZaps`: Lightning zap functionality with payment processing
-  - `useWallet`: Unified wallet detection (WebLN + NWC)
-  - `useNWC`: Nostr Wallet Connect connection management
-  - `useNWCContext`: Access NWC context provider
-  - `useShakespeare`: AI chat completions with Shakespeare AI API
-- `/src/pages/`: Page components used by React Router (Index, NotFound)
-- `/src/lib/`: Utility functions and shared logic
-- `/src/contexts/`: React context providers (AppContext, NWCContext)
-- `/src/test/`: Testing utilities including TestApp component
-- `/public/`: Static assets
-- `App.tsx`: Main app component with provider setup
-- `AppRouter.tsx`: React Router configuration
+- `/src/lib/stores/`: Svelte stores for reactive state management
+- `/src/lib/welshman/`: Welshman integration utilities
+  - Connection management and relay pools
+  - Event publishing and querying
+  - Signing methods and user authentication
+  - Feed compilation and filtering
+- `/src/lib/utils/`: Utility functions including:
+  - Nostr query helpers and event validation
+  - Profile data fetching by pubkey
+  - Event publishing utilities
+  - File upload via Blossom servers
+  - Theme management
+  - Lightning zap functionality
+  - Wallet detection (WebLN + NWC)
+  - Nostr Wallet Connect management
+  - AI chat completions with Shakespeare API
+- `/src/routes/`: SvelteKit file-based routing (pages and layouts)
+  - `+page.svelte`: Page components
+  - `+layout.svelte`: Layout components
+  - `+page.ts` / `+page.server.ts`: Data loading
+- `/src/lib/contexts/`: Context providers for global state
+- `/src/tests/`: Testing utilities
+- `/static/`: Static assets
+
+## Svelte 5 Runes and Reactivity
+
+Svelte 5 uses **runes** for reactivity instead of stores in most cases. Key runes:
+
+- `$state()`: Reactive state (replaces `let` declarations)
+- `$derived()`: Computed values (replaces `$:` reactive statements)
+- `$effect()`: Side effects (replaces `onMount` and reactive blocks)
+- `$props()`: Component props with reactivity
+
+**Example:**
+```svelte
+<script lang="ts">
+  let count = $state(0);
+  let doubled = $derived(count * 2);
+  
+  $effect(() => {
+    console.log(`Count is now: ${count}`);
+  });
+</script>
+
+<button onclick={() => count++}>
+  Count: {count}, Doubled: {doubled}
+</button>
+```
+
+For backward compatibility with stores, use the `$` prefix to auto-subscribe:
+```svelte
+<script>
+  import { writable } from 'svelte/store';
+  const count = writable(0);
+</script>
+
+<button onclick={() => $count++}>
+  Count: {$count}
+</button>
+```
 
 ## UI Components
 
-The project uses shadcn/ui components located in `@/components/ui`. These are unstyled, accessible components built with Radix UI and styled with Tailwind CSS. Available components include:
+The project uses shadcn-svelte components located in `$lib/components/ui`. These are unstyled, accessible components built with Melt UI and styled with Tailwind CSS. Available components include:
 
 - **Accordion**: Vertically collapsing content panels
 - **Alert**: Displays important messages to users
@@ -67,7 +117,7 @@ The project uses shadcn/ui components located in `@/components/ui`. These are un
 - **Command**: Command palette for keyboard-first interfaces
 - **ContextMenu**: Right-click menu component
 - **Dialog**: Modal window overlay
-- **Drawer**: Side-sliding panel (using vaul)
+- **Drawer**: Side-sliding panel
 - **DropdownMenu**: Menu that appears from a trigger element
 - **Form**: Form validation and submission handling
 - **HoverCard**: Card that appears when hovering over an element
@@ -97,16 +147,31 @@ The project uses shadcn/ui components located in `@/components/ui`. These are un
 - **Toggle**: Two-state button
 - **Tooltip**: Informational text that appears on hover
 
-These components follow a consistent pattern using React's `forwardRef` and use the `cn()` utility for class name merging. Many are built on Radix UI primitives for accessibility and customized with Tailwind CSS.
+These components follow Svelte patterns and use Melt UI primitives for accessibility. Import patterns:
+
+```svelte
+<script>
+  import { Button } from '$lib/components/ui/button';
+  import * as Card from '$lib/components/ui/card';
+  import * as Dialog from '$lib/components/ui/dialog';
+</script>
+
+<Card.Root>
+  <Card.Header>
+    <Card.Title>Title</Card.Title>
+  </Card.Header>
+  <Card.Content>
+    <Button>Click me</Button>
+  </Card.Content>
+</Card.Root>
+```
 
 ## Documentation
 
 The project includes a **`docs/`** directory containing specialized documentation for specific implementation tasks. You are encouraged to add new documentation files to help future development.
 
 - **`docs/AI_CHAT.md`**: Read when building any AI-powered chat interfaces, implementing streaming responses, or integrating with the Shakespeare API.
-
 - **`docs/NOSTR_COMMENTS.md`**: Read when implementing comment systems, adding discussion features to posts/articles, or building community interaction features.
-
 - **`docs/NOSTR_INFINITE_SCROLL.md`**: Read when building feed interfaces, implementing pagination for Nostr events, or creating social media-style infinite scroll experiences.
 
 ## System Prompt Management
@@ -116,13 +181,59 @@ The AI assistant's behavior and knowledge is defined by the AGENTS.md file, whic
 1. Edit AGENTS.md directly
 2. The changes take effect in the next session
 
-## "Vibed with MKStack"
+## Nostr Protocol Integration with Welshman
 
-When building the site for the first time, include "Vibed with MKStack" somewhere in the UI, linked to this URL: https://soapbox.pub/mkstack
+This project uses Welshman, the battle-tested Nostr toolkit extracted from Coracle. Welshman provides a modular, highly configurable system for Nostr clients.
 
-## Nostr Protocol Integration
+### Welshman Setup
 
-This project comes with custom hooks for querying and publishing events on the Nostr network.
+Install the necessary Welshman packages:
+
+```bash
+npm install @welshman/app @welshman/net @welshman/util @welshman/signer @welshman/store @welshman/router
+```
+
+### Core Welshman Integration
+
+Welshman uses individual Svelte stores rather than a single context object. All stores are available from `@welshman/app`.
+
+**Key Welshman Stores:**
+- `pubkey` - Current user's public key
+- `session` - Current session information
+- `signer` - Current ISigner instance
+- `repository` - In-memory event storage (Repository instance)
+- `relays` - Array of relay information
+- `profiles` - Map of user profiles
+- And many more specialized stores
+
+**Router Configuration** in `$lib/welshman/setup.ts`:
+
+```typescript
+import { Router } from '@welshman/router';
+import { pubkey } from '@welshman/app';
+import { get } from 'svelte/store';
+
+// Configure the global router
+export function setupRouter(defaultRelays: string[]) {
+  Router.configure({
+    getUserPubkey: () => get(pubkey),
+    getDefaultRelays: () => defaultRelays,
+    getPubkeyRelays: (pk, mode) => {
+      // Return relay URLs for a given pubkey
+      // You can query kind 10002 (NIP-65) relay lists here
+      return defaultRelays; // Fallback
+    },
+    getRelayQuality: (url) => {
+      // Return 0-1 quality score for relay selection
+      return 0.5; // Default quality
+    },
+    getLimit: () => 5, // Max relays per scenario
+  });
+}
+
+// Get router instance
+export const router = Router.get();
+```
 
 ### Nostr Implementation Guidelines
 
@@ -200,11 +311,11 @@ When designing tags for Nostr events, follow these principles:
 5. **Querying Best Practices**:
    ```typescript
    // ❌ Inefficient: Get all events, filter in JavaScript
-   const events = await nostr.query([{ kinds: [30402] }]);
+   const events = await load([{ kinds: [30402] }]);
    const filtered = events.filter(e => hasTag(e, 'product_type', 'electronics'));
 
    // ✅ Efficient: Filter at relay level
-   const events = await nostr.query([{ kinds: [30402], '#t': ['electronics'] }]);
+   const events = await load([{ kinds: [30402], '#t': ['electronics'] }]);
    ```
 
 #### `t` Tag Filtering for Community-Specific Content
@@ -217,19 +328,23 @@ For applications focused on a specific community or niche, you can use `t` tags 
 
 **Implementation:**
 ```typescript
+import { publish } from '@welshman/app';
+
 // Publishing with community tag
-createEvent({
+await publish({
   kind: 1,
   content: data.content,
   tags: [['t', 'farming']]
 });
 
-// Querying community content
-const events = await nostr.query([{
+// Querying community content with Welshman
+import { load } from '@welshman/app';
+
+const events = await load([{
   kinds: [1],
   '#t': ['farming'],
   limit: 20
-}], { signal });
+}]);
 ```
 
 ### Kind Ranges
@@ -279,120 +394,45 @@ The file `NIP.md` is used by this project to define a custom Nostr protocol docu
 
 Whenever new kinds are generated, the `NIP.md` file in the project must be created or updated to document the custom event schema. Whenever the schema of one of these custom events changes, `NIP.md` must also be updated accordingly.
 
-### The `useNostr` Hook
+### Query Nostr Data with Welshman and TanStack Query
 
-The `useNostr` hook returns an object containing a `nostr` property, with `.query()` and `.event()` methods for querying and publishing Nostr events respectively.
+When querying Nostr with Welshman, combine `load()` from `@welshman/app` with `createQuery` from TanStack Query:
 
-```typescript
-import { useNostr } from '@nostrify/react';
+```svelte
+<script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { load } from '@welshman/app';
 
-function useCustomHook() {
-  const { nostr } = useNostr();
+  function usePosts() {
+    return createQuery({
+      queryKey: ['posts'],
+      queryFn: async (context) => {
+        const signal = context.signal;
+        const events = await load([{ kinds: [1], limit: 20 }], { signal });
+        return events;
+      },
+    });
+  }
 
-  // ...
-}
+  const posts = usePosts();
+</script>
+
+{#if $posts.isLoading}
+  <div>Loading...</div>
+{:else if $posts.error}
+  <div>Error: {$posts.error.message}</div>
+{:else if $posts.data}
+  {#each $posts.data as post (post.id)}
+    <Post event={post} />
+  {/each}
+{/if}
 ```
 
-### Connecting to Multiple Nostr Relays
-
-By default, the `nostr` object from `useNostr` uses a pool configuration that reads data from 1 relay and publishes to all configured relays. However, you can connect to specific relays or groups of relays for more granular control:
-
-#### Single Relay Connection
-
-To read and publish from one specific relay, use `nostr.relay()` with a WebSocket URL:
-
-```typescript
-import { useNostr } from '@nostrify/react';
-
-function useSpecificRelay() {
-  const { nostr } = useNostr();
-
-  // Connect to a specific relay
-  const relay = nostr.relay('wss://relay.damus.io');
-
-  // Query from this specific relay only
-  const events = await relay.query([{ kinds: [1], limit: 20 }], { signal });
-
-  // Publish to this specific relay only
-  await relay.event({ kind: 1, content: 'Hello from specific relay!' });
-}
-```
-
-#### Multiple Relay Group
-
-To read and publish from a specific set of relays, use `nostr.group()` with an array of relay URLs:
-
-```typescript
-import { useNostr } from '@nostrify/react';
-
-function useRelayGroup() {
-  const { nostr } = useNostr();
-
-  // Create a group of specific relays
-  const relayGroup = nostr.group([
-    'wss://relay.damus.io',
-    'wss://relay.nostr.band',
-    'wss://nos.lol'
-  ]);
-
-  // Query from all relays in the group
-  const events = await relayGroup.query([{ kinds: [1], limit: 20 }], { signal });
-
-  // Publish to all relays in the group
-  await relayGroup.event({ kind: 1, content: 'Hello from relay group!' });
-}
-```
-
-#### API Consistency
-
-Both `relay` and `group` objects have the same API as the main `nostr` object, including:
-
-- `.query()` - Query events with filters
-- `.req()` - Create subscriptions
-- `.event()` - Publish events
-- All other Nostr protocol methods
-
-#### Use Cases
-
-**Single Relay (`nostr.relay()`):**
-- Testing specific relay behavior
-- Querying relay-specific content
-- Debugging connectivity issues
-- Working with specialized relays
-
-**Relay Group (`nostr.group()`):**
-- Querying from trusted relay sets
-- Publishing to specific communities
-- Load balancing across relay subsets
-- Geographic relay optimization
-
-**Default Pool (`nostr`):**
-- General application queries
-- Maximum reach for publishing
-- Default user experience
-- Simplified relay management
-
-### Query Nostr Data with `useNostr` and Tanstack Query
-
-When querying Nostr, the best practice is to create custom hooks that combine `useNostr` and `useQuery` to get the required data.
-
-```typescript
-import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/query';
-
-function usePosts() {
-  const { nostr } = useNostr();
-
-  return useQuery({
-    queryKey: ['posts'],
-    queryFn: async (c) => {
-      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(1500)]);
-      const events = await nostr.query([{ kinds: [1], limit: 20 }], { signal });
-      return events; // these events could be transformed into another format
-    },
-  });
-}
-```
+**Key Welshman Functions:**
+- `load(filters, options)`: Load events from relays based on filters
+- `publish(event)`: Publish an event to configured relays
+- `subscribe(filters, callbacks)`: Subscribe to real-time events
+- `count(filters)`: Count events matching filters
 
 ### Efficient Query Design
 
@@ -400,8 +440,10 @@ function usePosts() {
 
 **✅ Efficient - Single query with multiple kinds:**
 ```typescript
+import { load } from '@welshman/app';
+
 // Query multiple event types in one request
-const events = await nostr.query([
+const events = await load([
   {
     kinds: [1, 6, 16], // All repost kinds in one query
     '#e': [eventId],
@@ -419,9 +461,9 @@ const genericReposts = events.filter((e) => e.kind === 16);
 ```typescript
 // This creates unnecessary load and can trigger rate limiting
 const [notes, reposts, genericReposts] = await Promise.all([
-  nostr.query([{ kinds: [1], '#e': [eventId] }], { signal }),
-  nostr.query([{ kinds: [6], '#e': [eventId] }], { signal }),
-  nostr.query([{ kinds: [16], '#e': [eventId] }], { signal }),
+  load([{ kinds: [1], '#e': [eventId] }], { signal }),
+  load([{ kinds: [6], '#e': [eventId] }], { signal }),
+  load([{ kinds: [16], '#e': [eventId] }], { signal }),
 ]);
 ```
 
@@ -432,7 +474,37 @@ const [notes, reposts, genericReposts] = await Promise.all([
 4. **Filter in JavaScript**: Separate event types after receiving results rather than making multiple requests
 5. **Consider relay capacity**: Each query consumes relay resources and may count against rate limits
 
-The data may be transformed into a more appropriate format if needed, and multiple calls to `nostr.query()` may be made in a single queryFn.
+### Reactive Queries with Svelte 5 Runes
+
+With Svelte 5, queries automatically track reactive dependencies:
+
+```svelte
+<script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { load } from '@welshman/app';
+  
+  let search = $state('');
+  
+  // Query automatically re-runs when search changes
+  const results = createQuery(() => ({
+    queryKey: ['search', search],
+    queryFn: async () => {
+      if (!search) return [];
+      return await load([{
+        kinds: [1],
+        search, // NIP-50 search if relay supports it
+        limit: 20
+      }]);
+    }
+  }));
+</script>
+
+<input bind:value={search} placeholder="Search..." />
+
+{#if $results.data}
+  <div>Found {$results.data.length} results</div>
+{/if}
+```
 
 ### Event Validation
 
@@ -454,14 +526,12 @@ function validateCalendarEvent(event: NostrEvent): boolean {
 
   // Additional validation for date-based events (kind 31922)
   if (event.kind === 31922) {
-    // start tag should be in YYYY-MM-DD format for date-based events
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(start)) return false;
   }
 
   // Additional validation for time-based events (kind 31923)
   if (event.kind === 31923) {
-    // start tag should be a unix timestamp for time-based events
     const timestamp = parseInt(start);
     if (isNaN(timestamp) || timestamp <= 0) return false;
   }
@@ -470,14 +540,10 @@ function validateCalendarEvent(event: NostrEvent): boolean {
 }
 
 function useCalendarEvents() {
-  const { nostr } = useNostr();
-
-  return useQuery({
+  return createQuery({
     queryKey: ['calendar-events'],
-    queryFn: async (c) => {
-      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(1500)]);
-      const events = await nostr.query([{ kinds: [31922, 31923], limit: 20 }], { signal });
-
+    queryFn: async (context) => {
+      const events = await load([{ kinds: [31922, 31923], limit: 20 }], { signal: context.signal });
       // Filter events through validator to ensure they meet NIP-52 requirements
       return events.filter(validateCalendarEvent);
     },
@@ -485,24 +551,46 @@ function useCalendarEvents() {
 }
 ```
 
-### The `useAuthor` Hook
+### Profile Data with Welshman
 
-To display profile data for a user by their Nostr pubkey (such as an event author), use the `useAuthor` hook.
+To display profile data for a user by their Nostr pubkey:
 
-```tsx
-import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
-import { useAuthor } from '@/hooks/useAuthor';
-import { genUserName } from '@/lib/genUserName';
+```svelte
+<script lang="ts">
+  import type { NostrEvent } from '@welshman/util';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { load } from '@welshman/app';
+  import { genUserName } from '$lib/utils/genUserName';
 
-function Post({ event }: { event: NostrEvent }) {
-  const author = useAuthor(event.pubkey);
-  const metadata: NostrMetadata | undefined = author.data?.metadata;
+  interface Props {
+    event: NostrEvent;
+  }
+  
+  let { event }: Props = $props();
+  
+  const author = createQuery(() => ({
+    queryKey: ['author', event.pubkey],
+    queryFn: async () => {
+      const profiles = await load([{
+        kinds: [0],
+        authors: [event.pubkey],
+        limit: 1
+      }]);
+      return profiles[0];
+    }
+  }));
+  
+  let metadata = $derived($author.data?.content ? JSON.parse($author.data.content) : undefined);
+  let displayName = $derived(metadata?.name ?? genUserName(event.pubkey));
+  let profileImage = $derived(metadata?.picture);
+</script>
 
-  const displayName = metadata?.name ?? genUserName(event.pubkey);
-  const profileImage = metadata?.picture;
-
-  // ...render elements with this data
-}
+<div class="flex items-center gap-2">
+  {#if profileImage}
+    <img src={profileImage} alt={displayName} class="w-10 h-10 rounded-full" />
+  {/if}
+  <span>{displayName}</span>
+</div>
 ```
 
 ### `NostrMetadata` type
@@ -533,63 +621,179 @@ interface NostrMetadata {
 }
 ```
 
-### The `useNostrPublish` Hook
+### Publishing Events with Welshman
 
-To publish events, use the `useNostrPublish` hook in this project. This hook automatically adds a "client" tag to published events.
+To publish events, create an event template, sign it with the current signer, then publish using `publishEvent()` from `@welshman/app`:
 
-```tsx
-import { useState } from 'react';
+```svelte
+<script lang="ts">
+  import { createMutation } from '@tanstack/svelte-query';
+  import { publishEvent, pubkey, signer } from '@welshman/app';
+  import { makeEvent } from '@welshman/util';
 
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+  let content = $state('');
 
-export function MyComponent() {
-  const [ data, setData] = useState<Record<string, string>>({});
+  const publish = createMutation({
+    mutationFn: async (noteContent: string) => {
+      const currentSigner = $signer;
+      if (!currentSigner) throw new Error('Not logged in');
 
-  const { user } = useCurrentUser();
-  const { mutate: createEvent } = useNostrPublish();
+      // Create event template
+      const template = makeEvent(1, {
+        content: noteContent,
+        tags: [['client', 'your-app-name']]
+      });
 
-  const handleSubmit = () => {
-    createEvent({ kind: 1, content: data.content });
-  };
+      // Sign the event
+      const signedEvent = await currentSigner.sign(template);
 
-  if (!user) {
-    return <span>You must be logged in to use this form.</span>;
+      // Publish to relays (Router automatically selects relays)
+      return await publishEvent(signedEvent);
+    },
+    onSuccess: () => {
+      content = '';
+      // Show success toast
+    }
+  });
+
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    $publish.mutate(content);
+  }
+</script>
+
+{#if $pubkey}
+  <form onsubmit={handleSubmit}>
+    <textarea bind:value={content} placeholder="What's on your mind?" />
+    <button type="submit" disabled={$publish.isPending}>
+      {$publish.isPending ? 'Publishing...' : 'Publish'}
+    </button>
+  </form>
+{:else}
+  <p>Please log in to publish</p>
+{/if}
+```
+
+**Publishing with Router Scenarios:**
+
+```typescript
+import { Router } from '@welshman/router';
+import { publishEvent, signer } from '@welshman/app';
+import { makeEvent } from '@welshman/util';
+
+// Publish to specific relay selection
+const router = Router.get();
+const template = makeEvent(1, { content: 'Hello Nostr!' });
+const signedEvent = await $signer.sign(template);
+
+// Router automatically determines best relays based on configuration
+await publishEvent(signedEvent);
+
+// Or manually specify relay scenario
+const scenario = router.FromUser(); // User's write relays
+const relays = scenario.getUrls();
+// Use these relays with lower-level publish function if needed
+```
+
+### Nostr Login with Welshman
+
+Welshman provides built-in login functions and session management through `@welshman/app`:
+
+```typescript
+import {
+  loginWithNip07,
+  loginWithNip46,
+  loginWithNip01,
+  loginWithPubkey,
+  pubkey,
+  session,
+  signer
+} from '@welshman/app';
+import { get } from 'svelte/store';
+
+// Login with browser extension (NIP-07)
+export async function loginWithExtension() {
+  if (!window.nostr) {
+    throw new Error('No Nostr extension found');
   }
 
-  return (
-    <form onSubmit={handleSubmit} disabled={!user}>
-      {/* ...some input fields */}
-    </form>
-  );
+  const userPubkey = await window.nostr.getPublicKey();
+  await loginWithNip07(userPubkey);
+
+  // Current user is now available via stores
+  console.log('Logged in:', get(pubkey));
+}
+
+// Login with nsecbunker (NIP-46)
+export async function loginWithBunker(bunkerPubkey: string, relays: string[]) {
+  const clientSecret = makeSecret(); // Generate ephemeral key
+  const userPubkey = await getUserPubkeyFromBunker(bunkerPubkey);
+
+  await loginWithNip46(userPubkey, clientSecret, bunkerPubkey, relays);
+}
+
+// Login with private key (NIP-01) - use carefully!
+export async function loginWithPrivateKey(secret: string) {
+  const userPubkey = getPubkey(secret);
+  await loginWithNip01(secret);
+}
+
+// Read-only mode (no signing)
+export async function loginReadOnly(userPubkey: string) {
+  await loginWithPubkey(userPubkey);
+}
+
+// Check current session
+export function getCurrentUser() {
+  return {
+    pubkey: get(pubkey),
+    session: get(session),
+    signer: get(signer)
+  };
+}
+
+// Logout
+export function logout() {
+  clearSessions();
 }
 ```
 
-The `useCurrentUser` hook should be used to ensure that the user is logged in before they are able to publish Nostr events.
+**Using in Components:**
 
-### Nostr Login
+```svelte
+<script lang="ts">
+  import { pubkey, signer } from '@welshman/app';
 
-To enable login with Nostr, simply use the `LoginArea` component already included in this project.
+  // Auto-reactive to login state changes
+  let isLoggedIn = $derived($pubkey !== undefined);
+  let currentPubkey = $derived($pubkey);
+</script>
 
-```tsx
-import { LoginArea } from "@/components/auth/LoginArea";
-
-function MyComponent() {
-  return (
-    <div>
-      {/* other components ... */}
-
-      <LoginArea className="max-w-60" />
-    </div>
-  );
-}
+{#if isLoggedIn}
+  <p>Logged in as {currentPubkey}</p>
+{:else}
+  <button onclick={loginWithExtension}>Login</button>
+{/if}
 ```
 
-The `LoginArea` component handles all the login-related UI and interactions, including displaying login dialogs, sign up functionality, and switching between accounts. It should not be wrapped in any conditional logic.
+### LoginArea Component
 
-`LoginArea` displays both "Log in" and "Sign Up" buttons when the user is logged out, and changes to an account switcher once the user is logged in. It is an inline-flex element by default. To make it expand to the width of its container, you can pass a className like `flex` (to make it a block element) or `w-full`. If it is left as inline-flex, it's recommended to set a max width.
+To enable login with Nostr, use the `LoginArea` component:
 
-**Important**: Social applications should include a profile menu button in the main interface (typically in headers/navigation) to provide access to account settings, profile editing, and logout functionality. Don't only show `LoginArea` in logged-out states.
+```svelte
+<script>
+  import { LoginArea } from '$lib/components/auth/LoginArea.svelte';
+</script>
+
+<div>
+  <!-- other components ... -->
+  <LoginArea class="max-w-60" />
+</div>
+```
+
+The `LoginArea` component handles all login-related UI and interactions. It displays "Log in" and "Sign Up" buttons when logged out, and an account switcher when logged in.
+
+**Important**: Social applications should include a profile menu button in the main interface for access to account settings, profile editing, and logout functionality.
 
 ### `npub`, `naddr`, and other Nostr addresses
 
@@ -617,57 +821,46 @@ Nostr defines a set of bech32-encoded identifiers in NIP-19. Their prefixes and 
 - Use `npub1` for simple user references
 - Use `nprofile1` when you need to include relay hints or display name context
 
-#### NIP-19 Routing Implementation
+#### NIP-19 Routing with SvelteKit
 
-**Critical**: NIP-19 identifiers should be handled at the **root level** of URLs (e.g., `/note1...`, `/npub1...`, `/naddr1...`), NOT nested under paths like `/note/note1...` or `/profile/npub1...`.
+NIP-19 identifiers should be handled at the **root level** of URLs using SvelteKit's dynamic routing:
 
-This project includes a boilerplate `NIP19Page` component that provides the foundation for handling all NIP-19 identifier types at the root level. The component is configured in the routing system and ready for AI agents to populate with specific functionality.
+Create `/src/routes/[nip19]/+page.svelte`:
 
-**How it works:**
+```svelte
+<script lang="ts">
+  import { page } from '$app/stores';
+  import { nip19 } from 'nostr-tools';
+  import { goto } from '$app/navigation';
+  
+  let decoded = $derived.by(() => {
+    try {
+      return nip19.decode($page.params.nip19);
+    } catch {
+      goto('/404');
+      return null;
+    }
+  });
+</script>
 
-1. **Root-Level Route**: The route `/:nip19` in `AppRouter.tsx` catches all NIP-19 identifiers
-2. **Automatic Decoding**: The `NIP19Page` component automatically decodes the identifier using `nip19.decode()`
-3. **Type-Specific Sections**: Different sections are rendered based on the identifier type:
-   - `npub1`/`nprofile1`: Profile section with placeholder for profile view
-   - `note1`: Note section with placeholder for kind:1 text note view
-   - `nevent1`: Event section with placeholder for any event type view
-   - `naddr1`: Addressable event section with placeholder for articles, marketplace items, etc.
-4. **Error Handling**: Invalid, vacant, or unsupported identifiers show 404 NotFound page
-5. **Ready for Population**: Each section includes comments indicating where AI agents should implement specific functionality
-
-**Example URLs that work automatically:**
-- `/npub1abc123...` - User profile (needs implementation)
-- `/note1def456...` - Kind:1 text note (needs implementation)
-- `/nevent1ghi789...` - Any event with relay hints (needs implementation)
-- `/naddr1jkl012...` - Addressable event (needs implementation)
-
-**Features included:**
-- Basic NIP-19 identifier decoding and routing
-- Type-specific sections for different identifier types
-- Error handling for invalid identifiers
-- Responsive container structure
-- Comments indicating where to implement specific views
-
-**Error handling:**
-- Invalid NIP-19 format → 404 NotFound
-- Unsupported identifier types (like `nsec1`) → 404 NotFound
-- Empty or missing identifiers → 404 NotFound
-
-To implement NIP-19 routing in your Nostr application:
-
-1. **The NIP19Page boilerplate is already created** - populate sections with specific functionality
-2. **The route is already configured** in `AppRouter.tsx`
-3. **Error handling is built-in** - all edge cases show appropriate 404 responses
-4. **Add specific components** for profile views, event displays, etc. as needed
-
-#### Event Type Distinctions
-
-**`note1` identifiers** are specifically for **kind:1 events** (Short Text Notes) as defined in NIP-10: "Text Notes and Threads". These are the basic social media posts in Nostr.
-
-**`nevent1` identifiers** can reference any event kind and include additional metadata like relay hints and author pubkey. Use `nevent1` when:
-- The event is not a kind:1 text note
-- You need to include relay hints for better discoverability
-- You want to include author context
+{#if decoded}
+  {#if decoded.type === 'npub' || decoded.type === 'nprofile'}
+    <!-- Profile view -->
+    <ProfileView pubkey={decoded.type === 'npub' ? decoded.data : decoded.data.pubkey} />
+  {:else if decoded.type === 'note'}
+    <!-- Note view -->
+    <NoteView eventId={decoded.data} />
+  {:else if decoded.type === 'nevent'}
+    <!-- Event view with relay hints -->
+    <EventView eventId={decoded.data.id} relays={decoded.data.relays} />
+  {:else if decoded.type === 'naddr'}
+    <!-- Addressable event view -->
+    <AddressableView data={decoded.data} />
+  {:else}
+    <p>Unsupported identifier type</p>
+  {/if}
+{/if}
+```
 
 #### Use in Filters
 
@@ -675,10 +868,7 @@ The base Nostr protocol uses hex string identifiers when filtering by event IDs 
 
 ```ts
 // ❌ Wrong: naddr is not decoded
-const events = await nostr.query(
-  [{ ids: [naddr] }],
-  { signal }
-);
+const events = await load([{ ids: [naddr] }]);
 ```
 
 Corrected example:
@@ -686,6 +876,7 @@ Corrected example:
 ```ts
 // Import nip19 from nostr-tools
 import { nip19 } from 'nostr-tools';
+import { load } from '@welshman/app';
 
 // Decode a NIP-19 identifier
 const decoded = nip19.decode(value);
@@ -699,14 +890,11 @@ if (decoded.type !== 'naddr') {
 const naddr = decoded.data;
 
 // ✅ Correct: naddr is expanded into the correct filter
-const events = await nostr.query(
-  [{
-    kinds: [naddr.kind],
-    authors: [naddr.pubkey],
-    '#d': [naddr.identifier],
-  }],
-  { signal }
-);
+const events = await load([{
+  kinds: [naddr.kind],
+  authors: [naddr.pubkey],
+  '#d': [naddr.identifier],
+}]);
 ```
 
 #### Implementation Guidelines
@@ -724,175 +912,383 @@ const events = await nostr.query(
 4. **Security considerations**: Always use `naddr1` for addressable events instead of just the `d` tag value, as `naddr1` contains the author pubkey needed to create secure filters
 5. **Error handling**: Gracefully handle invalid or unsupported NIP-19 identifiers with 404 responses
 
-### Nostr Edit Profile
+### Edit Profile with Welshman
 
-To include an Edit Profile form, place the `EditProfileForm` component in the project:
+To include an Edit Profile form:
 
-```tsx
-import { EditProfileForm } from "@/components/EditProfileForm";
+```svelte
+<script lang="ts">
+  import { createMutation } from '@tanstack/svelte-query';
+  import { publishEvent, pubkey, signer } from '@welshman/app';
+  import { makeEvent } from '@welshman/util';
 
-function EditProfilePage() {
-  return (
-    <div>
-      {/* you may want to wrap this in a layout or include other components depending on the project ... */}
+  let name = $state('');
+  let about = $state('');
+  let picture = $state('');
 
-      <EditProfileForm />
-    </div>
-  );
-}
-```
+  const updateProfile = createMutation({
+    mutationFn: async (metadata: Record<string, string>) => {
+      const currentSigner = $signer;
+      if (!currentSigner) throw new Error('Not logged in');
 
-The `EditProfileForm` component displays just the form. It requires no props, and will "just work" automatically.
+      // Create kind 0 profile event
+      const template = makeEvent(0, {
+        content: JSON.stringify(metadata),
+        tags: []
+      });
 
-### Uploading Files on Nostr
-
-Use the `useUploadFile` hook to upload files. This hook uses Blossom servers for file storage and returns NIP-94 compatible tags.
-
-```tsx
-import { useUploadFile } from "@/hooks/useUploadFile";
-
-function MyComponent() {
-  const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
-
-  const handleUpload = async (file: File) => {
-    try {
-      // Provides an array of NIP-94 compatible tags
-      // The first tag in the array contains the URL
-      const [[_, url]] = await uploadFile(file);
-      // ...use the url
-    } catch (error) {
-      // ...handle errors
+      // Sign and publish
+      const signedEvent = await currentSigner.sign(template);
+      return await publishEvent(signedEvent);
     }
-  };
+  });
 
-  // ...rest of component
-}
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    $updateProfile.mutate({ name, about, picture });
+  }
+</script>
+
+{#if $pubkey}
+  <form onsubmit={handleSubmit}>
+    <input bind:value={name} placeholder="Name" />
+    <textarea bind:value={about} placeholder="About" />
+    <input bind:value={picture} placeholder="Picture URL" />
+    <button type="submit" disabled={$updateProfile.isPending}>
+      {$updateProfile.isPending ? 'Saving...' : 'Save Profile'}
+    </button>
+  </form>
+{:else}
+  <p>Please log in to edit profile</p>
+{/if}
 ```
 
-To attach files to kind 1 events, each file's URL should be appended to the event's `content`, and an `imeta` tag should be added for each file. For kind 0 events, the URL by itself can be used in relevant fields of the JSON content.
+### Uploading Files with Welshman
+
+Create a file upload utility using Blossom servers:
+
+```svelte
+<script lang="ts">
+  import { createMutation } from '@tanstack/svelte-query';
+  import { uploadToBlossom } from '$lib/utils/blossom';
+
+  const uploadFile = createMutation({
+    mutationFn: async (file: File) => {
+      const tags = await uploadToBlossom(file);
+      return tags[0][1]; // Return URL
+    }
+  });
+
+  function handleFileChange(e: Event) {
+    const target = e.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (file) {
+      $uploadFile.mutate(file);
+    }
+  }
+</script>
+
+<input 
+  type="file" 
+  onchange={handleFileChange}
+  disabled={$uploadFile.isPending}
+/>
+
+{#if $uploadFile.isPending}
+  <p>Uploading...</p>
+{:else if $uploadFile.data}
+  <img src={$uploadFile.data} alt="Uploaded" />
+{/if}
+```
+
+To attach files to kind 1 events, each file's URL should be appended to the event's `content`, and an `imeta` tag should be added for each file.
 
 ### Nostr Encryption and Decryption
 
-The logged-in user has a `signer` object (matching the NIP-07 signer interface) that can be used for encryption and decryption. The signer's nip44 methods handle all cryptographic operations internally, including key derivation and conversation key management, so you never need direct access to private keys. Always use the signer interface for encryption rather than requesting private keys from users, as this maintains security and follows best practices.
+Use Welshman's signer interface for encryption and decryption:
 
-```ts
-// Get the current user
-const { user } = useCurrentUser();
+```typescript
+import { pubkey, signer } from '@welshman/app';
+import { get } from 'svelte/store';
 
-// Optional guard to check that nip44 is available
-if (!user.signer.nip44) {
-  throw new Error("Please upgrade your signer extension to a version that supports NIP-44 encryption");
+// Get current signer and pubkey
+const currentSigner = get(signer);
+const currentPubkey = get(pubkey);
+
+if (!currentSigner?.nip44) {
+  throw new Error("Please upgrade your signer to support NIP-44 encryption");
 }
 
 // Encrypt message to self
-const encrypted = await user.signer.nip44.encrypt(user.pubkey, "hello world");
-// Decrypt message to self
-const decrypted = await user.signer.nip44.decrypt(user.pubkey, encrypted) // "hello world"
+const encrypted = await currentSigner.nip44.encrypt(currentPubkey, "hello world");
+
+// Decrypt message
+const decrypted = await currentSigner.nip44.decrypt(currentPubkey, encrypted); // "hello world"
+
+// In Svelte components, use stores directly:
+// const encrypted = await $signer.nip44.encrypt($pubkey, "hello world");
 ```
 
 ### Rendering Rich Text Content
 
-Nostr text notes (kind 1, 11, and 1111) have a plaintext `content` field that may contain URLs, hashtags, and Nostr URIs. These events should render their content using the `NoteContent` component:
+Use a `NoteContent` component powered by `@welshman/content`:
 
-```tsx
-import { NoteContent } from "@/components/NoteContent";
+```svelte
+<script lang="ts">
+  import { parseContent } from '@welshman/content';
+  import type { NostrEvent } from '@welshman/util';
+  
+  interface Props {
+    event: NostrEvent;
+    class?: string;
+  }
+  
+  let { event, class: className = '' }: Props = $props();
+  
+  let parsed = $derived(parseContent(event.content));
+</script>
 
-export function Post(/* ...props */) {
-  // ...
+<div class="whitespace-pre-wrap break-words {className}">
+  {#each parsed as part}
+    {#if part.type === 'text'}
+      {part.value}
+    {:else if part.type === 'link'}
+      <a href={part.value} target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">
+        {part.value}
+      </a>
+    {:else if part.type === 'mention'}
+      <span class="text-purple-500">@{part.value}</span>
+    {/if}
+  {/each}
+</div>
+```
 
-  return (
-    <CardContent className="pb-2">
-      <div className="whitespace-pre-wrap break-words">
-        <NoteContent event={post} className="text-sm" />
-      </div>
-    </CardContent>
-  );
-}
+### Real-Time Subscriptions with Welshman
+
+Welshman provides powerful subscription capabilities:
+
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { subscribe } from '@welshman/app';
+  import { writable } from 'svelte/store';
+
+  const events = writable<NostrEvent[]>([]);
+
+  onMount(() => {
+    // Subscribe to real-time events
+    const sub = subscribe([{ kinds: [1], limit: 20 }], {
+      onEvent: (event) => {
+        events.update(list => [event, ...list]);
+      },
+      onEose: () => {
+        console.log('End of stored events');
+      }
+    });
+
+    // Cleanup on unmount
+    return () => sub.close();
+  });
+</script>
+
+{#each $events as event (event.id)}
+  <Post {event} />
+{/each}
+```
+
+### Feed Compilation with `@welshman/feeds`
+
+Welshman includes a powerful feed system:
+
+```svelte
+<script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { FeedLoader } from '@welshman/feeds';
+  import { getUserRelays } from '$lib/welshman/relays';
+
+  let feedDefinition = $state({
+    kinds: [1],
+    authors: [], // Add followed pubkeys
+    limit: 50
+  });
+
+  const feed = createQuery(() => ({
+    queryKey: ['feed', feedDefinition],
+    queryFn: async () => {
+      const loader = new FeedLoader({
+        filters: [feedDefinition],
+        relays: getUserRelays()
+      });
+      
+      return await loader.load();
+    }
+  }));
+</script>
+
+{#if $feed.data}
+  {#each $feed.data as event (event.id)}
+    <Post {event} />
+  {/each}
+{/if}
 ```
 
 ## App Configuration
 
-The project includes an `AppProvider` that manages global application state including theme and relay configuration. The default configuration includes:
+The project uses SvelteKit's context API with Welshman for global state. Create a setup function and initialize in `+layout.svelte`:
 
-```typescript
-const defaultConfig: AppConfig = {
-  theme: "light",
-  relayUrl: "wss://relay.nostr.band",
-};
+```svelte
+<script lang="ts">
+  import { setContext, onMount } from 'svelte';
+  import { writable } from 'svelte/store';
+  import { setupRouter } from '$lib/welshman/setup';
+  import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
+
+  const theme = writable('light');
+  const defaultRelays = ['wss://relay.damus.io', 'wss://relay.nostr.band', 'wss://purplepag.es'];
+
+  setContext('app', { theme });
+
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 1000 * 60 * 5, // 5 minutes
+      }
+    }
+  });
+
+  onMount(() => {
+    // Initialize Welshman Router with default relays
+    setupRouter(defaultRelays);
+  });
+</script>
+
+<QueryClientProvider client={queryClient}>
+  <slot />
+</QueryClientProvider>
 ```
 
-Preset relays are available including Ditto, Nostr.Band, Damus, and Primal. The app uses local storage to persist user preferences.
+**Note:** Welshman stores (`pubkey`, `signer`, `repository`, etc.) are global and accessible from `@welshman/app` anywhere in your application. You don't need to pass them through context.
+
+Access Welshman stores directly in any component:
+
+```svelte
+<script lang="ts">
+  import { pubkey, signer } from '@welshman/app';
+  import { getContext } from 'svelte';
+
+  const { theme } = getContext('app');
+</script>
+
+<div class:dark={$theme === 'dark'}>
+  {#if $pubkey}
+    <p>Logged in as {$pubkey.slice(0, 8)}...</p>
+  {:else}
+    <p>Not logged in</p>
+  {/if}
+</div>
+```
 
 ## Routing
 
-The project uses React Router with a centralized routing configuration in `AppRouter.tsx`. To add new routes:
+SvelteKit uses file-based routing. Routes are defined by the file structure in `/src/routes/`:
 
-1. Create your page component in `/src/pages/`
-2. Import it in `AppRouter.tsx`
-3. Add the route above the catch-all `*` route:
+- `/src/routes/+page.svelte` → `/`
+- `/src/routes/about/+page.svelte` → `/about`
+- `/src/routes/post/[id]/+page.svelte` → `/post/123`
+- `/src/routes/+layout.svelte` → Wraps all routes
 
-```tsx
-<Route path="/your-path" element={<YourComponent />} />
+**Data loading** with `+page.ts`:
+
+```typescript
+// /src/routes/post/[id]/+page.ts
+import type { PageLoad } from './$types';
+import { load } from '@welshman/app';
+
+export const load: PageLoad = async ({ params }) => {
+  const events = await load([{
+    kinds: [1],
+    ids: [params.id]
+  }]);
+  
+  return { post: events[0] };
+};
 ```
 
-The router includes automatic scroll-to-top functionality and a 404 NotFound page for unmatched routes.
+**Use data in component**:
+
+```svelte
+<!-- /src/routes/post/[id]/+page.svelte -->
+<script lang="ts">
+  import type { PageData } from './$types';
+  
+  let { data }: { data: PageData } = $props();
+</script>
+
+<h1>{data.post.content}</h1>
+```
 
 ## Development Practices
 
-- Uses React Query for data fetching and caching
-- Follows shadcn/ui component patterns
-- Implements Path Aliases with `@/` prefix for cleaner imports
+- Uses TanStack Query with `createQuery` and `createMutation`
+- Uses Welshman for all Nostr operations (networking, signing, storage)
+- Follows shadcn-svelte component patterns
+- Implements Path Aliases with `$lib/` prefix for library code
 - Uses Vite for fast development and production builds
-- Component-based architecture with React hooks
-- Default connection to one Nostr relay for best performance
-- Comprehensive provider setup with NostrLoginProvider, QueryClientProvider, and custom AppProvider
+- Component-based architecture with Svelte 5 runes
+- Battle-tested patterns extracted from Coracle
+- Comprehensive provider setup with QueryClientProvider and SvelteKit context
 - **Never use the `any` type**: Always use proper TypeScript types for type safety
 
 ## Loading States
 
 **Use skeleton loading** for structured content (feeds, profiles, forms). **Use spinners** only for buttons or short operations.
 
-```tsx
-// Skeleton example matching component structure
-<Card>
-  <CardHeader>
-    <div className="flex items-center space-x-3">
-      <Skeleton className="h-10 w-10 rounded-full" />
-      <div className="space-y-1">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-3 w-16" />
+```svelte
+<script>
+  import { Skeleton } from '$lib/components/ui/skeleton';
+  import * as Card from '$lib/components/ui/card';
+</script>
+
+<Card.Root>
+  <Card.Header>
+    <div class="flex items-center space-x-3">
+      <Skeleton class="h-10 w-10 rounded-full" />
+      <div class="space-y-1">
+        <Skeleton class="h-4 w-24" />
+        <Skeleton class="h-3 w-16" />
       </div>
     </div>
-  </CardHeader>
-  <CardContent>
-    <div className="space-y-2">
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-4/5" />
+  </Card.Header>
+  <Card.Content>
+    <div class="space-y-2">
+      <Skeleton class="h-4 w-full" />
+      <Skeleton class="h-4 w-4/5" />
     </div>
-  </CardContent>
-</Card>
+  </Card.Content>
+</Card.Root>
 ```
 
 ### Empty States and No Content Found
 
-When no content is found (empty search results, no data available, etc.), display a minimalist empty state with the `RelaySelector` component. This allows users to easily switch relays to discover content from different sources.
+When no content is found, display a minimalist empty state with the `RelaySelector` component:
 
-```tsx
-import { RelaySelector } from '@/components/RelaySelector';
-import { Card, CardContent } from '@/components/ui/card';
+```svelte
+<script>
+  import { RelaySelector } from '$lib/components/RelaySelector.svelte';
+  import * as Card from '$lib/components/ui/card';
+</script>
 
-// Empty state example
-<div className="col-span-full">
-  <Card className="border-dashed">
-    <CardContent className="py-12 px-8 text-center">
-      <div className="max-w-sm mx-auto space-y-6">
-        <p className="text-muted-foreground">
+<div class="col-span-full">
+  <Card.Root class="border-dashed">
+    <Card.Content class="py-12 px-8 text-center">
+      <div class="max-w-sm mx-auto space-y-6">
+        <p class="text-muted-foreground">
           No results found. Try another relay?
         </p>
-        <RelaySelector className="w-full" />
+        <RelaySelector class="w-full" />
       </div>
-    </CardContent>
-  </Card>
+    </Card.Content>
+  </Card.Root>
 </div>
 ```
 
@@ -901,21 +1297,21 @@ import { Card, CardContent } from '@/components/ui/card';
 - Create breathtaking, immersive designs that feel like bespoke masterpieces, rivaling the polish of Apple, Stripe, or luxury brands
 - Designs must be production-ready, fully featured, with no placeholders unless explicitly requested, ensuring every element serves a functional and aesthetic purpose
 - Avoid generic or templated aesthetics at all costs; every design must have a unique, brand-specific visual signature that feels custom-crafted
-- Headers must be dynamic, immersive, and storytelling-driven, using layered visuals, motion, and symbolic elements to reflect the brand’s identity—never use simple “icon and text” combos
+- Headers must be dynamic, immersive, and storytelling-driven, using layered visuals, motion, and symbolic elements to reflect the brand's identity—never use simple "icon and text" combos
 - Incorporate purposeful, lightweight animations for scroll reveals, micro-interactions (e.g., hover, click, transitions), and section transitions to create a sense of delight and fluidity
 
 ### Design Principles
 
 - Achieve Apple-level refinement with meticulous attention to detail, ensuring designs evoke strong emotions (e.g., wonder, inspiration, energy) through color, motion, and composition
 - Deliver fully functional interactive components with intuitive feedback states, ensuring every element has a clear purpose and enhances user engagement
-- Use custom illustrations, 3D elements, or symbolic visuals instead of generic stock imagery to create a unique brand narrative; stock imagery, when required, must be sourced exclusively from Pexels (NEVER Unsplash) and align with the design’s emotional tone
+- Use custom illustrations, 3D elements, or symbolic visuals instead of generic stock imagery to create a unique brand narrative; stock imagery, when required, must be sourced exclusively from Pexels (NEVER Unsplash) and align with the design's emotional tone
 - Ensure designs feel alive and modern with dynamic elements like gradients, glows, or parallax effects, avoiding static or flat aesthetics
 - Before finalizing, ask: "Would this design make Apple or Stripe designers pause and take notice?" If not, iterate until it does
 
 ### Avoid Generic Design
 
 - No basic layouts (e.g., text-on-left, image-on-right) without significant custom polish, such as dynamic backgrounds, layered visuals, or interactive elements
-- No simplistic headers; they must be immersive, animated, and reflective of the brand’s core identity and mission
+- No simplistic headers; they must be immersive, animated, and reflective of the brand's core identity and mission
 - No designs that could be mistaken for free templates or overused patterns; every element must feel intentional and tailored
 
 ### Interaction Patterns
@@ -928,7 +1324,7 @@ import { Card, CardContent } from '@/components/ui/card';
 
 ### Technical Requirements
 
-- Curated color FRpalette (3-5 evocative colors + neutrals) that aligns with the brand’s emotional tone and creates a memorable impact
+- Curated color palette (3-5 evocative colors + neutrals) that aligns with the brand's emotional tone and creates a memorable impact
 - Ensure a minimum 4.5:1 contrast ratio for all text and interactive elements to meet accessibility standards
 - Use expressive, readable fonts (18px+ for body text, 40px+ for headlines) with a clear hierarchy; pair a modern sans-serif (e.g., Inter) with an elegant serif (e.g., Playfair Display) for personality
 - Design for full responsiveness, ensuring flawless performance and aesthetics across all screen sizes (mobile, tablet, desktop)
@@ -942,7 +1338,7 @@ import { Card, CardContent } from '@/components/ui/card';
 - Design reusable, modular components with consistent styling, behavior, and feedback states (e.g., hover, active, focus, error)
 - Include purposeful animations (e.g., scale-up on hover, fade-in on scroll) to guide attention and enhance interactivity without distraction
 - Ensure full accessibility support with keyboard navigation, ARIA labels, and visible focus states (e.g., a glowing outline in an accent color)
-- Use custom icons or illustrations for components to reinforce the brand’s visual identity
+- Use custom icons or illustrations for components to reinforce the brand's visual identity
 
 ### Adding Fonts
 
@@ -959,9 +1355,9 @@ To add custom fonts, follow these steps:
 
    **Format**: `@fontsource/[font-name]` or `@fontsource-variable/[font-name]` (for variable fonts)
 
-2. **Import the font** in `src/main.tsx`:
+2. **Import the font** in `src/routes/+layout.svelte`:
    ```typescript
-   import '@fontsource-variable/<font-name>';
+   import '@fontsource-variable/inter';
    ```
 
 3. **Update Tailwind configuration** in `tailwind.config.ts`:
@@ -988,14 +1384,14 @@ To add custom fonts, follow these steps:
 
 The project includes a complete light/dark theme system using CSS custom properties. The theme can be controlled via:
 
-- `useTheme` hook for programmatic theme switching
-- CSS custom properties defined in `src/index.css`
+- Context API with writable stores for theme switching
+- CSS custom properties defined in `src/app.css`
 - Automatic dark mode support with `.dark` class
 
 ### Color Scheme Implementation
 
 When users specify color schemes:
-- Update CSS custom properties in `src/index.css` (both `:root` and `.dark` selectors)
+- Update CSS custom properties in `src/app.css` (both `:root` and `.dark` selectors)
 - Use Tailwind's color palette or define custom colors
 - Ensure proper contrast ratios for accessibility
 - Apply colors consistently across components (buttons, links, accents)
@@ -1004,9 +1400,104 @@ When users specify color schemes:
 ### Component Styling Patterns
 
 - Use `cn()` utility for conditional class merging
-- Follow shadcn/ui patterns for component variants
+- Follow shadcn-svelte patterns for component variants
 - Implement responsive design with Tailwind breakpoints
 - Add hover and focus states for interactive elements
+
+## Svelte-Specific Patterns
+
+### Component Props
+
+```svelte
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+  
+  interface Props {
+    title: string;
+    count?: number;
+    children?: Snippet;
+  }
+  
+  let { title, count = 0, children }: Props = $props();
+</script>
+
+<div>
+  <h1>{title}</h1>
+  <p>Count: {count}</p>
+  {#if children}
+    {@render children()}
+  {/if}
+</div>
+```
+
+### Event Handlers
+
+```svelte
+<script lang="ts">
+  let count = $state(0);
+  
+  function increment() {
+    count++;
+  }
+</script>
+
+<!-- Inline handler -->
+<button onclick={() => count++}>Increment</button>
+
+<!-- Named handler -->
+<button onclick={increment}>Increment</button>
+
+<!-- With event parameter -->
+<button onclick={(e) => {
+  e.preventDefault();
+  count++;
+}}>
+  Increment
+</button>
+```
+
+### Conditional Rendering
+
+```svelte
+{#if condition}
+  <p>Condition is true</p>
+{:else if otherCondition}
+  <p>Other condition is true</p>
+{:else}
+  <p>All conditions false</p>
+{/if}
+```
+
+### List Rendering
+
+```svelte
+<script lang="ts">
+  let items = $state([
+    { id: 1, name: 'Item 1' },
+    { id: 2, name: 'Item 2' },
+  ]);
+</script>
+
+{#each items as item (item.id)}
+  <div>{item.name}</div>
+{:else}
+  <p>No items found</p>
+{/each}
+```
+
+### Two-Way Binding
+
+```svelte
+<script lang="ts">
+  let value = $state('');
+  let checked = $state(false);
+</script>
+
+<input type="text" bind:value />
+<input type="checkbox" bind:checked />
+
+<p>Value: {value}, Checked: {checked}</p>
+```
 
 ## Writing Tests vs Running Tests
 
@@ -1035,29 +1526,17 @@ There is an important distinction between **writing new tests** and **running ex
 
 ### Test Setup
 
-The project uses Vitest with jsdom environment and includes comprehensive test setup:
+The project uses Vitest with jsdom environment and Svelte Testing Library:
 
-- **Testing Library**: React Testing Library with jest-dom matchers
-- **Test Environment**: jsdom with mocked browser APIs (matchMedia, scrollTo, IntersectionObserver, ResizeObserver)
-- **Test App**: `TestApp` component provides all necessary context providers for testing
-
-The project includes a `TestApp` component that provides all necessary context providers for testing. Wrap components with this component to provide required context providers:
-
-```tsx
+```typescript
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { TestApp } from '@/test/TestApp';
-import { MyComponent } from './MyComponent';
+import { render, screen } from '@testing-library/svelte';
+import MyComponent from './MyComponent.svelte';
 
 describe('MyComponent', () => {
   it('renders correctly', () => {
-    render(
-      <TestApp>
-        <MyComponent />
-      </TestApp>
-    );
-
-    expect(screen.getByText('Expected text')).toBeInTheDocument();
+    render(MyComponent, { props: { title: 'Test' } });
+    expect(screen.getByText('Test')).toBeInTheDocument();
   });
 });
 ```
@@ -1072,16 +1551,38 @@ describe('MyComponent', () => {
 
 Run available tools in this priority order:
 
-1. **Type Checking** (Required): Ensure TypeScript compilation succeeds
-2. **Building/Compilation** (Required): Verify the project builds successfully
-3. **Linting** (Recommended): Check code style and catch potential issues
-4. **Tests** (If Available): Run existing test suite
+1. **Type Checking** (Required): `npm run check` - Ensures TypeScript and Svelte compilation succeeds
+2. **Building/Compilation** (Required): `npm run build` - Verify the project builds successfully
+3. **Linting** (Recommended): `npm run lint` - Check code style and catch potential issues
+4. **Tests** (If Available): `npm run test` - Run existing test suite
 5. **Git Commit** (Required): Create a commit with your changes when finished
 
 **Minimum Requirements:**
-- Code must type-check without errors
-- Code must build/compile successfully
+- Code must type-check without errors (`npm run check`)
+- Code must build/compile successfully (`npm run build`)
 - Fix any critical linting errors that would break functionality
 - Create a git commit when your changes are complete
 
-The validation ensures code quality and catches errors before deployment, regardless of the development environment.
+The validation ensures code quality and catches errors before deployment.
+
+---
+
+## Quick Reference: Nostrify to Welshman Migration
+
+| Nostrify Pattern | Welshman Pattern |
+|------------------|------------------|
+| `import { useNostr } from '@nostrify/react'` | `import { load, publish } from '@welshman/app'` |
+| `nostr.query([filters])` | `load([filters])` |
+| `nostr.event(event)` | `publish(event)` |
+| `nostr.relay('wss://...')` | Use Router for relay management |
+| Custom hooks | TanStack Query + Welshman functions |
+| Provider setup | Initialize Welshman context in layout |
+
+## Welshman Advantages
+
+- **Battle-tested**: Extracted from production Coracle client
+- **Modular**: Use only the packages you need
+- **Performance**: Optimized for real-time feeds and subscriptions
+- **Svelte-native**: Designed for Svelte's reactivity model
+- **Feature-rich**: Includes feeds, routing, content parsing, and more out of the box
+- **Active development**: Maintained by Coracle team

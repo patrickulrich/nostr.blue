@@ -1,19 +1,20 @@
 {
-  "name": "mkstack",
-  "title": "MKStack",
-  "description": "Build Nostr apps in minutes with this React framework",
-  "uri": "git+https://gitlab.com/soapbox-pub/mkstack.git",
+  "name": "pustack",
+  "title": "PuStack",
+  "description": "Build Nostr apps in minutes with this Svelte framework",
+  "uri": "git+https://code.undiscoveredweb.com/patrickulrich/pustack.git",
   "image": "https://gitlab.com/-/project/69048882/uploads/0a9e3a19f2901d5c772952c1de10ce4f/image.png",
   "commands": [
     "npm",
     "npx"
   ],
   "tech": [
-    "react",
+    "svelte",
+    "sveltekit",
     "typescript",
     "tailwind",
-    "shadcn-ui",
-    "nostrify",
+    "shadcn-svelte",
+    "welshman",
     "vite"
   ]
 }

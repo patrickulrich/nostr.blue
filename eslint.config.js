@@ -1,17 +1,16 @@
 import js from "@eslint/js";
 import globals from "globals";
-import reactHooks from "eslint-plugin-react-hooks";
-import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
+import svelteEslint from "eslint-plugin-svelte";
 import htmlEslint from "@html-eslint/eslint-plugin";
 import htmlParser from "@html-eslint/parser";
 import customRules from "./eslint-rules/index.js";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  { ignores: ["dist", ".svelte-kit", "build"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/*.{ts,tsx}"],
+    files: ["**/*.{ts,js}"],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
@@ -21,16 +20,9 @@ export default tseslint.config(
       reportUnusedDisableDirectives: "error", // Reports unused disable directives as errors
     },
     plugins: {
-      "react-hooks": reactHooks,
-      "react-refresh": reactRefresh,
       "custom": customRules,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": [
-        "warn",
-        { allowConstantExport: true },
-      ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -44,6 +36,21 @@ export default tseslint.config(
         "error",
         { terms: ["fixme"] },
       ],
+    },
+  },
+  ...svelteEslint.configs["flat/recommended"],
+  {
+    files: ["**/*.svelte"],
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+      },
+    },
+    plugins: {
+      "custom": customRules,
+    },
+    rules: {
+      "custom/no-placeholder-comments": "error",
     },
   },
   {
