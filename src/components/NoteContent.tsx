@@ -25,6 +25,13 @@ interface ProfilePointer {
   relays?: string[];
 }
 
+interface AddressPointer {
+  identifier: string;
+  pubkey: string;
+  kind: number;
+  relays?: string[];
+}
+
 // Helper to detect if URL is an image
 function isImageUrl(url: string): boolean {
   return /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?.*)?$/i.test(url);
@@ -158,7 +165,7 @@ export function NoteContent({
   // Extract note references from content
   const noteReferences = useMemo(() => {
     const refs: string[] = [];
-    const regex = /nostr:(note1|nevent1)([023456789acdefghjklmnpqrstuvwxyz]+)/g;
+    const regex = /nostr:(note1|nevent1|naddr1)([023456789acdefghjklmnpqrstuvwxyz]+)/g;
     let match;
 
     while ((match = regex.exec(event.content)) !== null) {
@@ -175,6 +182,7 @@ export function NoteContent({
       if (noteReferences.length === 0 || depth > 0) return {};
 
       const eventIds: string[] = [];
+      const addressableRefs: Array<{ ref: string; data: AddressPointer }> = [];
 
       for (const ref of noteReferences) {
         try {
@@ -183,24 +191,59 @@ export function NoteContent({
             eventIds.push(decoded.data as string);
           } else if (decoded.type === 'nevent') {
             eventIds.push((decoded.data as EventPointer).id);
+          } else if (decoded.type === 'naddr') {
+            addressableRefs.push({ ref, data: decoded.data as AddressPointer });
           }
         } catch (error) {
           console.error('Failed to decode note reference:', error);
         }
       }
 
-      if (eventIds.length === 0) return {};
+      const allEvents: NostrEvent[] = [];
 
-      const events = await nostr.query(
-        [{ ids: eventIds, kinds: [1] }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) }
-      );
+      // Fetch regular events by ID
+      if (eventIds.length > 0) {
+        const events = await nostr.query(
+          [{ ids: eventIds }],
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) }
+        );
+        allEvents.push(...events);
+      }
 
-      // Create a map of eventId -> event
+      // Fetch addressable events
+      for (const { data } of addressableRefs) {
+        try {
+          const events = await nostr.query(
+            [{ kinds: [data.kind], authors: [data.pubkey], '#d': [data.identifier], limit: 1 }],
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) }
+          );
+          if (events.length > 0) {
+            allEvents.push(events[0]);
+          }
+        } catch (error) {
+          console.error('Failed to fetch addressable event:', error);
+        }
+      }
+
+      // Create a map of ref -> event
       const eventMap: Record<string, NostrEvent> = {};
-      events.forEach(evt => {
+
+      // Map regular events by their ID
+      allEvents.forEach(evt => {
         eventMap[evt.id] = evt;
       });
+
+      // Also map addressable events by a composite key
+      for (const { ref, data } of addressableRefs) {
+        const matchingEvent = allEvents.find(
+          evt => evt.kind === data.kind &&
+                 evt.pubkey === data.pubkey &&
+                 evt.tags.some(t => t[0] === 'd' && t[1] === data.identifier)
+        );
+        if (matchingEvent) {
+          eventMap[ref] = matchingEvent;
+        }
+      }
 
       return eventMap;
     },
@@ -213,7 +256,7 @@ export function NoteContent({
     const text = event.content;
 
     // Regex to find URLs, Nostr references, and hashtags
-    const regex = /(https?:\/\/[^\s]+)|nostr:(npub1|note1|nprofile1|nevent1)([023456789acdefghjklmnpqrstuvwxyz]+)|(#\w+)/g;
+    const regex = /(https?:\/\/[^\s]+)|nostr:(npub1|note1|nprofile1|nevent1|naddr1)([023456789acdefghjklmnpqrstuvwxyz]+)|(#\w+)/g;
 
     const parts: React.ReactNode[] = [];
     const mediaUrls: string[] = [];
@@ -269,7 +312,7 @@ export function NoteContent({
             parts.push(
               <NostrMention key={`mention-${keyCounter++}`} pubkey={pubkey} />
             );
-          } else if ((decoded.type === 'note' || decoded.type === 'nevent') && depth === 0) {
+          } else if ((decoded.type === 'note' || decoded.type === 'nevent' || decoded.type === 'naddr') && depth === 0) {
             // Store note reference for embedding later
             noteRefs.push({ index: parts.length, ref: nostrId });
             parts.push(null); // Placeholder
@@ -330,8 +373,18 @@ export function NoteContent({
     for (const { index, ref } of content.noteRefs) {
       try {
         const decoded = nip19.decode(ref);
-        const eventId = decoded.type === 'note' ? decoded.data as string : (decoded.data as EventPointer).id;
-        const referencedEvent = referencedEvents[eventId];
+        let referencedEvent: NostrEvent | undefined;
+
+        // For naddr, look up by the ref itself; for note/nevent, look up by event ID
+        if (decoded.type === 'naddr') {
+          referencedEvent = referencedEvents[ref];
+        } else if (decoded.type === 'note') {
+          const eventId = decoded.data as string;
+          referencedEvent = referencedEvents[eventId];
+        } else if (decoded.type === 'nevent') {
+          const eventId = (decoded.data as EventPointer).id;
+          referencedEvent = referencedEvents[eventId];
+        }
 
         if (referencedEvent) {
           result[index] = <EmbeddedNote key={`embed-${ref}`} event={referencedEvent} />;

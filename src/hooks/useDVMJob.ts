@@ -2,6 +2,65 @@ import { type NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useCurrentUser } from './useCurrentUser';
+import { nip19 } from 'nostr-tools';
+
+/**
+ * Normalizes a Nostr event ID from NIP-19 format (note1/nevent1) to hex.
+ * @param id - Event ID in hex or NIP-19 format
+ * @returns Hex event ID
+ */
+function normalizeEventId(id: string): string {
+  if (!id) return id;
+  if (id.startsWith('note1')) {
+    try {
+      return nip19.decode(id).data as string;
+    } catch {
+      return id;
+    }
+  }
+  if (id.startsWith('nevent1')) {
+    try {
+      const decoded = nip19.decode(id);
+      if (decoded.type === 'nevent') {
+        const eventData = decoded.data as { id: string };
+        return typeof eventData.id === 'string' ? eventData.id : id;
+      }
+      return id;
+    } catch {
+      return id;
+    }
+  }
+  return id; // assume already hex
+}
+
+/**
+ * Normalizes a Nostr pubkey from NIP-19 format (npub1/nprofile1) to hex.
+ * @param pk - Pubkey in hex or NIP-19 format
+ * @returns Hex pubkey
+ */
+function normalizePubkey(pk: string): string {
+  if (!pk) return pk;
+  if (pk.startsWith('npub1')) {
+    try {
+      return nip19.decode(pk).data as string;
+    } catch {
+      return pk;
+    }
+  }
+  if (pk.startsWith('nprofile1')) {
+    try {
+      const decoded = nip19.decode(pk);
+      if (decoded.type === 'nprofile') {
+        const profileData = decoded.data as { pubkey: string };
+        return typeof profileData.pubkey === 'string' ? profileData.pubkey : pk;
+      }
+      return pk;
+    } catch {
+      return pk;
+    }
+  }
+  return pk; // assume already hex
+}
 
 export interface DVMJobRequest {
   kind: number; // 5000-5999
@@ -88,9 +147,9 @@ export function useDVMJob() {
         tags.push(['bid', request.bid.toString()]);
       }
 
-      // Add target DVM pubkey
+      // Add target DVM pubkey (hex)
       if (request.targetPubkey) {
-        tags.push(['p', request.targetPubkey]);
+        tags.push(['p', normalizePubkey(request.targetPubkey)]);
       }
 
       // Create and sign the job request
@@ -118,8 +177,9 @@ export function useDVMJob() {
         if (!jobRequestId) return [];
 
         try {
+          const idHex = normalizeEventId(jobRequestId);
           const events = await nostr.query(
-            [{ kinds: [resultKind], '#e': [jobRequestId], limit: 50 }],
+            [{ kinds: [resultKind], '#e': [idHex], limit: 50 }],
             { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
           );
 
@@ -156,8 +216,9 @@ export function useDVMJob() {
         if (!jobRequestId) return [];
 
         try {
+          const idHex = normalizeEventId(jobRequestId);
           const events = await nostr.query(
-            [{ kinds: [7000], '#e': [jobRequestId], limit: 20 }],
+            [{ kinds: [7000], '#e': [idHex], limit: 20 }],
             { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
           );
 
@@ -194,8 +255,9 @@ export function useDVMJob() {
       queryFn: async ({ signal }) => {
         try {
           // Get results from this DVM
+          const authorHex = normalizePubkey(dvmPubkey);
           const events = await nostr.query(
-            [{ kinds: [resultKind], authors: [dvmPubkey], limit: 50 }],
+            [{ kinds: [resultKind], authors: [authorHex], limit: 50 }],
             { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
           );
 
