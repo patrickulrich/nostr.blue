@@ -64,7 +64,7 @@ export function NotificationItem({ notification, className }: NotificationItemPr
 
   // Link to the appropriate page
   const linkTo = type === 'reply'
-    ? `/${nip19.noteEncode(event.id)}` // Link to the reply itself
+    ? `/${encodeTargetId(event.id) || npub}` // Link to the reply itself, fallback to profile
     : targetNoteId
     ? `/${targetNoteId}` // Link to the target post
     : `/${npub}`; // Fallback to profile

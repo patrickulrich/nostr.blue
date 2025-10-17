@@ -42,6 +42,12 @@ export function encodeTargetId(targetEventId: string | undefined): string | null
   }
 
   // Regular event ID - encode as note
+  // Validate event ID is 64-character hex
+  if (!/^[0-9a-f]{64}$/i.test(targetEventId)) {
+    console.warn('[encodeTargetId] Invalid event ID format:', targetEventId);
+    return null;
+  }
+
   try {
     return nip19.noteEncode(targetEventId);
   } catch (error) {
