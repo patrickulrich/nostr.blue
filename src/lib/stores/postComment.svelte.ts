@@ -1,7 +1,7 @@
 import type { TrustedEvent } from '@welshman/util';
 import { COMMENT, isParameterizedReplaceableKind, isPlainReplaceableKind } from '@welshman/util';
 import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-import { useNostrPublish } from './publish.svelte';
+import { publishNostrEvent } from './publish.svelte';
 
 interface PostCommentParams {
 	/** The root event to comment on */
@@ -43,7 +43,6 @@ interface PostCommentParams {
  * ```
  */
 export function usePostComment() {
-	const { mutateAsync: publishEvent } = useNostrPublish();
 	const queryClient = useQueryClient();
 
 	return createMutation({
@@ -109,7 +108,7 @@ export function usePostComment() {
 				}
 			}
 
-			const event = await publishEvent({
+			const event = await publishNostrEvent({
 				kind: COMMENT,
 				content,
 				tags

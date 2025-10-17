@@ -1,8 +1,13 @@
-import type { TrustedEvent, EventTemplate } from '@welshman/util';
+import type { TrustedEvent } from '@welshman/util';
+import { makeEvent } from '@welshman/util';
 import { createMutation } from '@tanstack/svelte-query';
-import { signer, pubkey } from '@welshman/app';
 import { publishThunk } from '@welshman/app';
-import { get } from 'svelte/store';
+
+export interface PublishEventParams {
+	kind: number;
+	content?: string;
+	tags?: string[][];
+}
 
 /**
  * TanStack mutation for publishing Nostr events
@@ -33,15 +38,8 @@ import { get } from 'svelte/store';
  */
 export function useNostrPublish() {
 	return createMutation({
-		mutationFn: async (template: Omit<EventTemplate, 'pubkey'>) => {
-			const currentSigner = get(signer);
-			const currentPubkey = get(pubkey);
-
-			if (!currentSigner || !currentPubkey) {
-				throw new Error('User is not logged in');
-			}
-
-			const tags = template.tags ?? [];
+		mutationFn: async (params: PublishEventParams) => {
+			const tags = params.tags ?? [];
 
 			// Add the client tag if it doesn't exist and we're on HTTPS
 			if (
@@ -52,19 +50,14 @@ export function useNostrPublish() {
 				tags.push(['client', location.hostname]);
 			}
 
-			// Create event template
-			const eventTemplate: EventTemplate = {
-				kind: template.kind,
-				content: template.content ?? '',
-				tags,
-				created_at: template.created_at ?? Math.floor(Date.now() / 1000)
-			};
+			// Create event using makeEvent (adds created_at automatically)
+			const event = makeEvent(params.kind, {
+				content: params.content ?? '',
+				tags
+			});
 
-			// Sign the event
-			const signedEvent = await currentSigner.sign(eventTemplate);
-
-			// Publish to relays
-			const thunk = publishThunk({ event: signedEvent, relays: [] });
+			// Publish to relays (publishThunk will sign and publish)
+			const thunk = publishThunk({ event, relays: [] });
 
 			// Wait for publication to complete (with timeout)
 			await Promise.race([
@@ -75,7 +68,7 @@ export function useNostrPublish() {
 			]);
 
 			// Return the signed event
-			return signedEvent as TrustedEvent;
+			return thunk.event as TrustedEvent;
 		},
 		onError: (error) => {
 			console.error('Failed to publish event:', error);
@@ -90,8 +83,8 @@ export function useNostrPublish() {
  * Simplified publish function for direct use
  * Signs and publishes a Nostr event without TanStack mutation wrapper
  *
- * @param template - Event template (without pubkey)
- * @returns Promise<NostrEvent> - The signed and published event
+ * @param params - Event parameters (kind, content, tags)
+ * @returns Promise<TrustedEvent> - The signed and published event
  *
  * @example
  * ```svelte
@@ -113,17 +106,8 @@ export function useNostrPublish() {
  * </script>
  * ```
  */
-export async function publishNostrEvent(
-	template: Omit<EventTemplate, 'pubkey'>
-): Promise<TrustedEvent> {
-	const currentSigner = get(signer);
-	const currentPubkey = get(pubkey);
-
-	if (!currentSigner || !currentPubkey) {
-		throw new Error('User is not logged in');
-	}
-
-	const tags = template.tags ?? [];
+export async function publishNostrEvent(params: PublishEventParams): Promise<TrustedEvent> {
+	const tags = params.tags ?? [];
 
 	// Add the client tag if it doesn't exist and we're on HTTPS
 	if (
@@ -134,19 +118,14 @@ export async function publishNostrEvent(
 		tags.push(['client', location.hostname]);
 	}
 
-	// Create event template
-	const eventTemplate: EventTemplate = {
-		kind: template.kind,
-		content: template.content ?? '',
-		tags,
-		created_at: template.created_at ?? Math.floor(Date.now() / 1000)
-	};
+	// Create event using makeEvent (adds created_at automatically)
+	const event = makeEvent(params.kind, {
+		content: params.content ?? '',
+		tags
+	});
 
-	// Sign the event
-	const signedEvent = await currentSigner.sign(eventTemplate);
-
-	// Publish to relays
-	const thunk = publishThunk({ event: signedEvent, relays: [] });
+	// Publish to relays (publishThunk will sign and publish)
+	const thunk = publishThunk({ event, relays: [] });
 
 	// Wait for publication to complete (with timeout)
 	await Promise.race([
@@ -156,5 +135,5 @@ export async function publishNostrEvent(
 		)
 	]);
 
-	return signedEvent as TrustedEvent;
+	return thunk.event as TrustedEvent;
 }

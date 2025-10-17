@@ -13,7 +13,7 @@ import {
 import { Nip07Signer, getNip07, Nip46Broker, makeSecret } from '@welshman/signer';
 import { nip19 } from 'nostr-tools';
 import type { Profile } from '@welshman/util';
-import { derived } from 'svelte/store';
+import { derived, get } from 'svelte/store';
 
 // Re-export Welshman stores for convenience
 export { pubkey, session, sessions, signer };
@@ -121,7 +121,7 @@ export async function loginWithBunker(bunkerUri: string): Promise<void> {
  * @param accountPubkey - The pubkey of the account to switch to
  */
 export function switchAccount(accountPubkey: string): void {
-	const $sessions = sessions.get();
+	const $sessions = get(sessions);
 
 	if (!$sessions[accountPubkey]) {
 		throw new Error('Account not found. Please log in first.');
@@ -135,7 +135,7 @@ export function switchAccount(accountPubkey: string): void {
  * @param accountPubkey - The pubkey of the account to logout. If not provided, logs out current account.
  */
 export function logout(accountPubkey?: string): void {
-	const targetPubkey = accountPubkey || pubkey.get();
+	const targetPubkey = accountPubkey || get(pubkey);
 
 	if (!targetPubkey) {
 		throw new Error('No account to logout from.');

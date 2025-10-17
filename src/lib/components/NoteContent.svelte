@@ -1,131 +1,50 @@
 <script lang="ts">
-  import { nip19 } from 'nostr-tools';
-  import { cn } from '$lib/utils';
-  import NostrMention from './NostrMention.svelte';
+	import type { TrustedEvent } from '@welshman/util';
+	import { parse } from '@welshman/content';
+	import { cn } from '$lib/utils';
 
-  interface Props {
-    event: { content: string; [key: string]: any };
-    class?: string;
-  }
+	interface Props {
+		event: TrustedEvent;
+		class?: string;
+	}
 
-  let { event, class: className }: Props = $props();
+	let { event, class: className }: Props = $props();
 
-  // Parse content to find URLs, Nostr references, and hashtags
-  const parsedContent = $derived(() => {
-    const text = event.content;
-
-    // Regex to find URLs, Nostr references, and hashtags
-    const regex = /(https?:\/\/[^\s]+)|nostr:(npub1|note1|nprofile1|nevent1|naddr1)([023456789acdefghjklmnpqrstuvwxyz]+)|(#\w+)/g;
-
-    const parts: Array<{ type: string; content: string; data?: any }> = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(text)) !== null) {
-      const [fullMatch, url, nostrPrefix, nostrData, hashtag] = match;
-      const index = match.index;
-
-      // Add text before this match
-      if (index > lastIndex) {
-        parts.push({
-          type: 'text',
-          content: text.substring(lastIndex, index)
-        });
-      }
-
-      if (url) {
-        // Handle URLs
-        parts.push({
-          type: 'url',
-          content: url
-        });
-      } else if (nostrPrefix && nostrData) {
-        // Handle Nostr references
-        try {
-          const nostrId = `${nostrPrefix}${nostrData}`;
-          const decoded = nip19.decode(nostrId);
-
-          if (decoded.type === 'npub') {
-            const pubkey = decoded.data as string;
-            parts.push({
-              type: 'mention',
-              content: fullMatch,
-              data: { pubkey }
-            });
-          } else {
-            // For other types, just show as a link
-            parts.push({
-              type: 'nostr-link',
-              content: fullMatch,
-              data: { nostrId }
-            });
-          }
-        } catch {
-          // If decoding fails, just render as text
-          parts.push({
-            type: 'text',
-            content: fullMatch
-          });
-        }
-      } else if (hashtag) {
-        // Handle hashtags
-        const tag = hashtag.slice(1); // Remove the #
-        parts.push({
-          type: 'hashtag',
-          content: hashtag,
-          data: { tag }
-        });
-      }
-
-      lastIndex = index + fullMatch.length;
-    }
-
-    // Add any remaining text
-    if (lastIndex < text.length) {
-      parts.push({
-        type: 'text',
-        content: text.substring(lastIndex)
-      });
-    }
-
-    // If no special content was found, return plain text
-    if (parts.length === 0) {
-      return [{ type: 'text', content: text }];
-    }
-
-    return parts;
-  });
+	// Parse content using Welshman's parse for proper rendering
+	let parsed = $derived(parse({ content: event.content, tags: event.tags }));
 </script>
 
-<div class={cn("whitespace-pre-wrap break-words", className)}>
-  {#each parsedContent() as part, i (i)}
-    {#if part.type === 'text'}
-      {part.content}
-    {:else if part.type === 'url'}
-      <a
-        href={part.content}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-blue-500 hover:underline"
-      >
-        {part.content}
-      </a>
-    {:else if part.type === 'mention'}
-      <NostrMention pubkey={part.data.pubkey} />
-    {:else if part.type === 'nostr-link'}
-      <a
-        href="/{part.data.nostrId}"
-        class="text-blue-500 hover:underline"
-      >
-        {part.content}
-      </a>
-    {:else if part.type === 'hashtag'}
-      <a
-        href="/t/{part.data.tag}"
-        class="text-blue-500 hover:underline"
-      >
-        {part.content}
-      </a>
-    {/if}
-  {/each}
+<div class={cn('whitespace-pre-wrap break-words', className)}>
+	{#each parsed as part}
+		{#if part.type === 'text'}
+			{part.value}
+		{:else if part.type === 'link'}
+			<!-- @ts-expect-error - Welshman content types need refinement -->
+			<a
+				href={part.value}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="text-primary hover:underline"
+			>
+				{part.value}
+			</a>
+		{:else if part.type === 'invoice'}
+			<code class="px-2 py-1 bg-muted rounded text-sm font-mono">
+				{part.value}
+			</code>
+		{:else if part.type === 'code'}
+			<code class="px-1 bg-muted rounded text-sm font-mono">
+				{part.value}
+			</code>
+		{:else if part.type === 'event' || part.type === 'profile'}
+			<!-- @ts-expect-error - Welshman content types need refinement -->
+			<a href="/{part.value}" class="text-primary hover:underline font-medium">
+				@{part.value.slice(0, 8)}...
+			</a>
+		{:else if part.type === 'topic'}
+			<a href="/search?q={encodeURIComponent(part.value)}" class="text-primary hover:underline">
+				#{part.value}
+			</a>
+		{/if}
+	{/each}
 </div>

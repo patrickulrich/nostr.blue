@@ -37,15 +37,24 @@ export interface Account {
  * {/each}
  * ```
  */
+export interface AccountsData {
+	authors: Account[];
+	currentUser: Account | undefined;
+	otherUsers: Account[];
+}
+
 export function useLoggedInAccounts() {
 	const allSessions = derived(sessions, ($sessions) => Object.values($sessions));
 
+	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
+	// This pattern works in React but not in Svelte. See: https://tanstack.com/query/latest/docs/framework/svelte/guides/queries
 	return createQuery(() => {
 		const $sessions = get(allSessions);
 		const currentPubkey = get(pubkey);
 
 		return {
-			queryKey: ['accounts', $sessions.map((s) => s.pubkey).join(';')],
+			queryKey: ['accounts', $sessions.map((s) => s.pubkey).join(';')] as const,
 			queryFn: async ({ signal }) => {
 				if ($sessions.length === 0) {
 					return { authors: [], currentUser: undefined, otherUsers: [] };
@@ -57,7 +66,6 @@ export function useLoggedInAccounts() {
 					relays: [],
 					filters: [{ kinds: [PROFILE], authors: pubkeys }],
 					signal,
-					timeout: 1500
 				});
 
 				const authors: Account[] = pubkeys.map((pk) => {

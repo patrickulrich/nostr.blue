@@ -9,7 +9,7 @@ import { nip57 } from 'nostr-tools';
 import type { Event } from 'nostr-tools';
 import type { WebLNProvider } from '@webbtc/webln-types';
 import { nwcStore, type NWCConnection } from './nwc.svelte';
-import { toast } from './toast.svelte';
+import { toastError, toastSuccess } from './toast.svelte';
 import { get } from 'svelte/store';
 
 /**
@@ -53,9 +53,17 @@ export function useZaps(
 	let isZapping = $state(false);
 	let invoice = $state<string | null>(null);
 
+	interface ZapQueryData {
+		zapCount: number;
+		totalSats: number;
+		zaps: TrustedEvent[];
+	}
+
 	// Query for zap receipts
+	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
 	const zapQuery = createQuery(() => ({
-		queryKey: ['zaps', target?.id],
+		queryKey: ['zaps', target?.id] as const,
 		staleTime: 30000, // 30 seconds
 		refetchInterval: 60000, // 1 minute
 		queryFn: async ({ signal }) => {
@@ -74,7 +82,6 @@ export function useZaps(
 						}
 					],
 					signal,
-					timeout: 5000
 				});
 				return events;
 			} else {
@@ -88,7 +95,6 @@ export function useZaps(
 						}
 					],
 					signal,
-					timeout: 5000
 				});
 				return events;
 			}
@@ -167,18 +173,14 @@ export function useZaps(
 		const currentPubkey = get(pubkey);
 
 		if (!currentSigner || !currentPubkey) {
-			toast.error('Login required', {
-				description: 'You must be logged in to send a zap.'
-			});
+			toastError('Login required', 'You must be logged in to send a zap.');
 			isZapping = false;
 			return;
 		}
 
 		try {
 			if (!author) {
-				toast.error('Author not found', {
-					description: 'Could not find the author of this item.'
-				});
+				toastError('Author not found', 'Could not find the author of this item.');
 				isZapping = false;
 				return;
 			}
@@ -188,18 +190,14 @@ export function useZaps(
 			const authorData = authorQuery.data;
 
 			if (!authorData?.metadata || !authorData?.event) {
-				toast.error('Author profile not loaded', {
-					description: 'Could not load the author profile.'
-				});
+				toastError('Author profile not loaded', 'Could not load the author profile.');
 				isZapping = false;
 				return;
 			}
 			const { lud06, lud16 } = authorData.metadata || {};
 
 			if (!lud06 && !lud16) {
-				toast.error('Lightning address not found', {
-					description: 'The author does not have a lightning address configured.'
-				});
+				toastError('Lightning address not found', 'The author does not have a lightning address configured.');
 				isZapping = false;
 				return;
 			}
@@ -207,9 +205,7 @@ export function useZaps(
 			// Get zap endpoint using the old reliable method
 			const zapEndpoint = await nip57.getZapEndpoint(authorData.event!);
 			if (!zapEndpoint) {
-				toast.error('Zap endpoint not found', {
-					description: 'Could not find a zap endpoint for the author.'
-				});
+				toastError('Zap endpoint not found', 'Could not find a zap endpoint for the author.');
 				isZapping = false;
 				return;
 			}
@@ -248,7 +244,7 @@ export function useZaps(
 				}
 
 				// Get the current active NWC connection dynamically
-				const currentNWCConnection = nwcConnection || nwcStore.getActive();
+				const currentNWCConnection = nwcConnection || nwcStore.getActiveConnection();
 
 				// Try NWC first if available and properly connected
 				if (
@@ -262,9 +258,7 @@ export function useZaps(
 						isZapping = false;
 						invoice = null;
 
-						toast.success('Zap successful!', {
-							description: `You sent ${amount} sats via NWC to the author.`
-						});
+						toastSuccess('Zap successful!', `You sent ${amount} sats via NWC to the author.`);
 
 						// Invalidate zap queries to refresh counts
 						queryClient.invalidateQueries({ queryKey: ['zaps'] });
@@ -276,9 +270,7 @@ export function useZaps(
 
 						const errorMessage =
 							nwcError instanceof Error ? nwcError.message : 'Unknown NWC error';
-						toast.error('NWC payment failed', {
-							description: `${errorMessage}. Falling back to other payment methods...`
-						});
+						toastError('NWC payment failed', `${errorMessage}. Falling back to other payment methods...`);
 					}
 				}
 
@@ -299,9 +291,7 @@ export function useZaps(
 						isZapping = false;
 						invoice = null;
 
-						toast.success('Zap successful!', {
-							description: `You sent ${amount} sats to the author.`
-						});
+						toastSuccess('Zap successful!', `You sent ${amount} sats to the author.`);
 
 						queryClient.invalidateQueries({ queryKey: ['zaps'] });
 
@@ -312,9 +302,7 @@ export function useZaps(
 
 						const errorMessage =
 							weblnError instanceof Error ? weblnError.message : 'Unknown WebLN error';
-						toast.error('WebLN payment failed', {
-							description: `${errorMessage}. Falling back to other payment methods...`
-						});
+						toastError('WebLN payment failed', `${errorMessage}. Falling back to other payment methods...`);
 
 						invoice = newInvoice;
 						isZapping = false;
@@ -326,16 +314,12 @@ export function useZaps(
 				}
 			} catch (err) {
 				console.error('Zap error:', err);
-				toast.error('Zap failed', {
-					description: (err as Error).message
-				});
+				toastError('Zap failed', (err as Error).message);
 				isZapping = false;
 			}
 		} catch (err) {
 			console.error('Zap error:', err);
-			toast.error('Zap failed', {
-				description: (err as Error).message
-			});
+			toastError('Zap failed', (err as Error).message);
 			isZapping = false;
 		}
 	}

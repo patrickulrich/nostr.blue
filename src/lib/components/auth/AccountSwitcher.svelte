@@ -16,8 +16,7 @@
   let isDropdownOpen = $state(false);
 
   // Get current session and other sessions from Welshman
-  const session = $derived(currentUser.get());
-  const otherUsers = $derived(otherSessions.get());
+  const otherUsers = $derived($otherSessions);
 
   function getDisplayName(account: any): string {
     return account?.metadata?.name ?? genUserName(account?.pubkey ?? '');
@@ -61,7 +60,7 @@
   });
 </script>
 
-{#if session}
+{#if $currentUser}
   <div class="account-switcher-dropdown relative">
     <!-- Trigger Button -->
     <button
@@ -71,15 +70,15 @@
     >
       <!-- Avatar -->
       <div class="w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center">
-        {#if session.metadata?.picture}
-          <img src={session.metadata.picture} alt={getDisplayName(session)} class="w-full h-full object-cover" />
+        {#if $currentUser.metadata?.picture}
+          <img src={$currentUser.metadata.picture} alt={getDisplayName($currentUser)} class="w-full h-full object-cover" />
         {:else}
-          <span class="text-lg font-medium">{getDisplayName(session).charAt(0)}</span>
+          <span class="text-lg font-medium">{getDisplayName($currentUser).charAt(0)}</span>
         {/if}
       </div>
 
       <div class="flex-1 text-left hidden md:block truncate">
-        <p class="font-medium text-sm truncate">{getDisplayName(session)}</p>
+        <p class="font-medium text-sm truncate">{getDisplayName($currentUser)}</p>
       </div>
 
       <!-- Chevron Down Icon -->
@@ -117,7 +116,7 @@
             <div class="flex-1 truncate">
               <p class="text-sm font-medium">{getDisplayName(user)}</p>
             </div>
-            {#if user.pubkey === session.pubkey}
+            {#if user.pubkey === $currentUser.pubkey}
               <div class="w-2 h-2 rounded-full bg-primary"></div>
             {/if}
           </button>
@@ -150,7 +149,7 @@
         <!-- Log Out -->
         <button
           type="button"
-          onclick={() => removeLogin(session.pubkey)}
+          onclick={() => removeLogin($currentUser.pubkey)}
           class="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md hover:bg-accent text-left text-red-500"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

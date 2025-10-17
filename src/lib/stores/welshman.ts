@@ -8,42 +8,72 @@
 import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { appConfig, presetRelays } from './appStore';
+import { routerContext } from '@welshman/router';
+import { pubkey } from '@welshman/app';
+import { RelayMode } from '@welshman/util';
+import { Pool } from '@welshman/net';
 
-// TODO: Import Welshman packages once they're set up
-// import { Router } from '@welshman/router';
-// import { connect } from '@welshman/net';
+/**
+ * Get relay quality score (0-1)
+ * Higher scores indicate better relay performance
+ */
+function getRelayQuality(url: string): number {
+	// TODO: Track relay performance and return actual quality scores
+	// For now, return a default quality
+	return 0.5;
+}
+
+/**
+ * Get relays for a given pubkey
+ * This will query NIP-65 relay lists in the future
+ */
+function getPubkeyRelays(pk: string, mode?: RelayMode): string[] {
+	// TODO: Query kind 10002 (NIP-65) relay lists for this pubkey
+	// For now, return default relays
+	const config = get(appConfig);
+	return [config.relayUrl, ...presetRelays.map(r => r.url)].slice(0, 5);
+}
 
 /**
  * Welshman Router store
  *
- * This will be initialized once Welshman is properly integrated.
- * For now, this is a placeholder structure.
+ * Manages Welshman Router configuration and connection pool
  */
 function createWelshmanStore() {
-  const { subscribe, set, update } = writable<any>(null);
+	const { subscribe, set, update } = writable<boolean>(false);
 
-  return {
-    subscribe,
-    init: () => {
-      if (!browser) return;
+	return {
+		subscribe,
+		init: () => {
+			if (!browser) return;
 
-      // TODO: Initialize Welshman Router
-      // const router = new Router({
-      //   getRelays: () => {
-      //     const config = get(appConfig);
-      //     return [config.relayUrl, ...presetRelays.map(r => r.url)];
-      //   }
-      // });
+			// Configure Welshman Router
+			const config = get(appConfig);
+			const defaultRelays = [config.relayUrl, ...presetRelays.map(r => r.url)].slice(0, 5);
 
-      // set(router);
+			routerContext.getUserPubkey = () => get(pubkey) || '';
+			routerContext.getDefaultRelays = () => defaultRelays;
+			routerContext.getPubkeyRelays = getPubkeyRelays;
+			routerContext.getRelayQuality = getRelayQuality;
+			routerContext.getIndexerRelays = () => defaultRelays;
+			routerContext.getSearchRelays = () => defaultRelays;
 
-      console.log('Welshman Router initialization placeholder');
-    },
-    cleanup: () => {
-      // TODO: Cleanup connections
-      set(null);
-    }
-  };
+			// Mark as initialized
+			set(true);
+
+			console.log('Welshman Router initialized with relays:', defaultRelays);
+		},
+		cleanup: () => {
+			if (!browser) return;
+
+			// Close all relay connections
+			const pool = Pool.get();
+			pool.clear();
+
+			set(false);
+			console.log('Welshman Router cleaned up');
+		}
+	};
 }
 
 export const welshmanRouter = createWelshmanStore();

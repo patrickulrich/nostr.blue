@@ -1,41 +1,53 @@
 # PuStack
 
-**The Complete Framework for Building Nostr Clients with AI**
+**The Complete Framework for Building Nostr Clients with Svelte 5 + Welshman**
 
-PuStack is an AI-powered framework for building Nostr applications with Svelte 5, SvelteKit, TailwindCSS 3.x, Vite, shadcn-svelte, and Welshman. Build powerful Nostr applications with AI-first development - from social feeds to private messaging, PuStack provides everything you need to create decentralized apps on the Nostr protocol.
+PuStack is a production-ready framework for building Nostr applications with Svelte 5, SvelteKit, TailwindCSS 3.x, and Welshman. This is a complete conversion of MKStack from React + Nostrify to Svelte 5 + Welshman, providing developers with everything needed to quickly build custom Nostr clients - from social feeds to messaging apps to marketplaces.
 
 ## 🚀 Quick Start
 
-Build your Nostr app in 3 simple steps:
+### Create Your Nostr App
 
-### 1. Install & Create
 ```bash
-npm install -g @getstacks/stacks
-stacks pustack
+# Clone the framework
+git clone https://github.com/yourusername/pustack.git my-nostr-app
+cd my-nostr-app
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Visit http://localhost:5173
 ```
 
-### 2. Build with AI
+The included demo app shows a basic Nostr social client. Use it as a starting point to build your own custom Nostr application!
+
+### Build & Deploy
+
 ```bash
-stacks agent
-# Tell Dork AI what you want: "Build a group chat application"
+# Type check your code
+npm run check
+
+# Run tests
+npm test
+
+# Build for production
+npm run build
 ```
 
-### 3. Deploy Instantly
-```bash
-npm run deploy
-# ✅ App deployed to NostrDeploy.com!
-```
+## ✨ Why Choose PuStack?
 
-## ✨ What Makes PuStack Special
-
-- **🤖 AI-First Development**: Build complete Nostr apps with just one prompt using Dork AI agent
-- **⚡ Fast & Reactive**: Svelte 5 runes for fine-grained reactivity and optimal performance
-- **🔗 50+ NIPs Supported**: Comprehensive Nostr protocol implementation via Welshman
-- **🎨 Beautiful UI**: 48+ shadcn-svelte components with light/dark theme support
-- **🔐 Built-in Security**: NIP-07 browser signing, NIP-44 encryption, event validation
-- **💰 Payments Ready**: Lightning zaps (NIP-57), Cashu wallets (NIP-60), Wallet Connect (NIP-47)
-- **📱 Production Ready**: TypeScript, testing, deployment, and responsive design included
-- **🛠 Battle-Tested**: Built on Welshman, the toolkit extracted from production Coracle client
+- **🚀 Start Building in Minutes**: Pre-configured setup with routing, auth, and data fetching
+- **⚡ Modern Stack**: Svelte 5 runes + Welshman = optimal performance and DX
+- **🎨 48+ UI Components**: Production-ready shadcn-svelte components with full theming
+- **🔐 Auth Built-In**: NIP-07, NIP-46, NIP-01 login flows ready to use
+- **📦 Reusable Components**: Note rendering, profiles, composer, comments - all included
+- **🔗 Welshman Powered**: Battle-tested Nostr toolkit extracted from Coracle
+- **💪 Type-Safe**: Full TypeScript support with strict mode
+- **📱 Responsive**: Mobile-first design that works everywhere
+- **🛠 Extensible**: Clean architecture makes it easy to add NIPs and features
 
 ## 🛠 Technology Stack
 
@@ -48,113 +60,181 @@ npm run deploy
 - **TanStack Query**: Data fetching, caching, and state management (Svelte version)
 - **TypeScript**: Type-safe JavaScript development
 
-## 🎯 Real-World Examples
+## 🎯 What Can You Build?
 
-PuStack is a conversion of MKStack from React to Svelte 5 + Welshman. The framework inherits proven patterns from production applications.
+PuStack provides the building blocks for any Nostr application. Here are some ideas:
 
-### Production Apps (MKStack Legacy)
+### Social Apps
+- **Twitter/X Alternative**: Microblogging with feeds, profiles, and reactions
+- **Reddit/Hacker News**: Link aggregation with threaded discussions
+- **Instagram/Pinterest**: Photo sharing with visual feeds
+- **Facebook Groups**: Community spaces with members and moderation
 
-Real Nostr applications that informed PuStack's development:
+### Messaging Apps
+- **Slack Alternative**: Team chat with channels (NIP-28/29)
+- **Discord Clone**: Communities with text channels
+- **Private Messenger**: End-to-end encrypted DMs (NIP-17)
+- **Group Chat**: Multi-user conversations with encryption
 
-- **[Chorus](https://chorus.community/)**: Facebook-style groups on Nostr with built-in eCash wallet
-- **[Blobbi](https://www.blobbi.pet/)**: Digital pet companions that live forever on the decentralized web
-- **[Treasures](https://treasures.to/)**: Decentralized geocaching adventure powered by Nostr
-- **[Coracle](https://coracle.social/)**: Social client that pioneered the Welshman toolkit
+### Marketplace Apps
+- **Classifieds**: Craigslist-style listings (NIP-99)
+- **eCommerce**: Product marketplace with Lightning payments
+- **Services Platform**: Gig economy on Nostr
+- **NFT Marketplace**: Digital collectibles trading
 
-These apps demonstrate the production-readiness of the patterns PuStack implements with Svelte + Welshman.
+### Content Platforms
+- **Blogging Platform**: Long-form articles (NIP-23)
+- **Newsletter**: Paid subscriptions with Lightning
+- **Video Platform**: YouTube alternative with zaps
+- **Podcast App**: Audio content with value-for-value
 
-## 🔧 Core Features
+### Other Ideas
+- **Event Platform**: Meetups and conferences (NIP-52)
+- **Job Board**: Decentralized hiring
+- **Q&A Platform**: Stack Overflow on Nostr
+- **Dating App**: Matchmaking with Nostr identities
 
-### Authentication & Users
-- `LoginArea` component with account switching
-- Welshman stores (`pubkey`, `session`, `signer`) for authentication state
-- `createQuery` with `load()` for fetching user profiles
-- Built-in login functions (`loginWithNip07`, `loginWithNip46`, etc.)
-- Multi-account management
+The included demo app (social feed) shows how these pieces work together. Fork it and build your vision!
 
-### Nostr Protocol Support
-- **Social Features**: User profiles (NIP-01), follow lists (NIP-02), reactions (NIP-25), reposts (NIP-18)
-- **Messaging**: Private DMs (NIP-17), public chat (NIP-28), group chat (NIP-29), encryption (NIP-44)
-- **Payments**: Lightning zaps (NIP-57), Cashu wallets (NIP-60), Nutzaps (NIP-61), Wallet Connect (NIP-47)
-- **Content**: Long-form articles (NIP-23), file metadata (NIP-94), live events (NIP-53), calendars (NIP-52)
+## 🏆 Inspired By Production Apps
 
-### Data Management
-- Welshman `load()` for querying and `publishEvent()` for publishing
-- Welshman Router for intelligent relay selection
-- Event validation and filtering
-- Infinite scroll with TanStack Query
-- Multi-relay support with quality scoring
+PuStack inherits proven patterns from real-world applications:
 
-### UI Components
-- 48+ shadcn-svelte components (buttons, forms, dialogs, etc.)
-- `NoteContent` component for rich text rendering (using `@welshman/content`)
-- `EditProfileForm` for profile management
-- `RelaySelector` for relay switching
-- `CommentsSection` for threaded discussions
-- Light/dark theme system with mode-watcher
+- **[Coracle](https://coracle.social/)**: Social client that pioneered Welshman
+- **[Chorus](https://chorus.community/)**: Facebook-style groups with eCash
+- **[Blobbi](https://www.blobbi.pet/)**: Digital pet companions
+- **[Treasures](https://treasures.to/)**: Decentralized geocaching
 
-### Media & Files
-- File upload with Blossom server integration
-- NIP-94 compatible file metadata
-- Image and video support
-- File attachment to events with `imeta` tags
+## 📦 What's Included
 
-### Advanced Features
-- NIP-19 identifier routing (`npub1`, `note1`, `nevent1`, `naddr1`)
-- Cryptographic operations via Welshman signers (NIP-44 encryption/decryption)
-- Lightning payments and zaps
-- Real-time event subscriptions with Welshman `subscribe()`
-- Responsive design with mobile support
+PuStack comes with a complete demo app that showcases the framework's capabilities. Use these pre-built components and patterns in your own app:
 
-## 🤖 AI Development with Dork
+### ✅ Authentication System
+- **LoginArea Component**: Login/signup UI with account switching
+- **Multi-Account Support**: Switch between multiple logged-in accounts
+- **NIP-07 Login**: Browser extension signing (Alby, nos2x, etc.)
+- **NIP-46 Login**: Remote signer support (nsecbunker)
+- **NIP-01 Login**: Private key login (nsec)
+- **Session Management**: Persistent sessions across page reloads
+- **Profile Editing**: Full profile editor with metadata fields
 
-PuStack includes Dork, a built-in AI agent that understands your codebase and Nostr protocols:
+### ✅ Feed Components
+- **Feed Query Pattern**: TanStack Query + Welshman load() integration
+- **Note Cards**: Reusable component with author, content, timestamp
+- **Skeleton Loading**: Beautiful loading states while data fetches
+- **Auto-Refresh**: Configurable polling for real-time updates
+- **Error Handling**: Graceful error states with retry buttons
 
-### Supported AI Providers
+### ✅ Publishing Components
+- **Note Composer**: Modal dialog for creating/replying to notes
+- **Character Counter**: Visual feedback with limit enforcement
+- **Reply Threading**: Proper e-tag structure for replies
+- **Mutation Hooks**: useNostrPublish() for easy publishing
+- **Toast Notifications**: User feedback for publish success/failure
 
-Configure your AI provider with `stacks configure`:
+### ✅ Content Rendering
+- **NoteContent Component**: Parse and render Nostr content
+- **Rich Text Support**: Links, mentions, hashtags, code, invoices
+- **Welshman Parser**: Uses `@welshman/content` for correct parsing
+- **Extensible**: Easy to add custom content types
+- **Styled**: Tailwind classes for consistent appearance
 
-- **OpenRouter** ([openrouter.ai](https://openrouter.ai/)): Enter your API key from settings
-- **Routstr** ([routstr.com](https://www.routstr.com/)): Use Cashu tokens for payment
-- **PayPerQ** ([ppq.ai](https://ppq.ai/)): OpenAI-compatible API
+### ✅ Profile System
+- **Profile Queries**: Fetch and cache user metadata (kind 0)
+- **Profile Editor**: Full modal for editing user profiles
+- **Avatar Display**: Fallback to generated names when no avatar
+- **Metadata Fields**: name, display_name, about, picture, banner, nip05, lud16
+- **Profile Publishing**: Uses Welshman publishProfile() helper
 
-### How Dork Works
+### ✅ Routing Patterns
+- **NIP-19 Route**: Dynamic `[nip19]` route handles all identifier types
+- **Type Detection**: Decodes and routes npub, note, nevent, nprofile, naddr
+- **Profile Pages**: Automatic profile view for npub/nprofile
+- **Note Pages**: Single note view for note/nevent/naddr
+- **Error Handling**: 404 redirect for invalid identifiers
 
-- **Context-Aware**: Understands your entire codebase and project structure
-- **Nostr Expert**: Built-in knowledge of 50+ NIPs and best practices
-- **Instant Implementation**: Makes changes directly to your code following Svelte 5/TypeScript best practices
+### ✅ Welshman Integration
+- **Router Setup**: Pre-configured Welshman Router in `stores/welshman.ts`
+- **Relay Selection**: Smart relay routing based on pubkey and mode
+- **Connection Pool**: Managed relay connections with cleanup
+- **Query Helpers**: TanStack Query patterns for Welshman load()
+- **Publish Helpers**: Mutation wrappers for event publishing
+- **Signer Support**: NIP-07, NIP-46, NIP-01 signing flows
 
-Example prompts:
-```bash
-"Add user profiles with avatars and bio using Welshman"
-"Implement NIP-17 private messaging with encryption"
-"Add a dark mode toggle with mode-watcher"
-"Create a marketplace with NIP-15 using addressable events"
-```
+### ✅ UI Component Library
+- **48+ shadcn-svelte Components**: Button, Card, Dialog, Input, etc.
+- **Theme System**: Light/dark mode with mode-watcher integration
+- **Toast Store**: Reactive toast notifications with useToast() hook
+- **Loading States**: Skeleton components for all data loading
+- **Empty States**: Consistent patterns for no data scenarios
+- **Responsive**: Mobile-first with Tailwind breakpoints
+- **Accessible**: ARIA labels and keyboard navigation
+
+## 🔨 Built With
+
+### Core Technologies
+- **Svelte 5**: Modern reactive framework with runes
+- **SvelteKit**: Full-stack framework with file-based routing
+- **Welshman**: Battle-tested Nostr toolkit from Coracle
+- **TanStack Query**: Powerful data fetching and caching
+- **TypeScript**: Type-safe development
+
+### UI & Styling
+- **shadcn-svelte**: 48+ accessible UI components
+- **TailwindCSS 3.x**: Utility-first CSS framework
+- **Melt UI**: Headless component primitives
+- **mode-watcher**: System-aware dark mode
+
+### Nostr Integration
+- **@welshman/app**: High-level Nostr client framework
+- **@welshman/net**: Relay connection and messaging
+- **@welshman/util**: Nostr utilities and helpers
+- **@welshman/signer**: NIP-07, NIP-46, NIP-01 signing
+- **@welshman/content**: Rich text content parsing
+- **@welshman/router**: Intelligent relay routing
+- **nostr-tools**: NIP-19 encoding/decoding
 
 ## 📁 Project Structure
 
 ```
 src/
-├── routes/              # SvelteKit file-based routing
-│   ├── +page.svelte    # Page components
-│   ├── +layout.svelte  # Layout components
-│   └── +page.ts        # Data loading functions
-├── lib/                 # Reusable library code
-│   ├── components/     # UI components
-│   │   ├── ui/         # shadcn-svelte components (48+ available)
-│   │   ├── auth/       # Authentication components
-│   │   └── comments/   # Comment system components
-│   ├── stores/         # Svelte stores for state management
-│   ├── welshman/       # Welshman integration utilities
-│   │   ├── setup.ts    # Router configuration
-│   │   └── client.ts   # Welshman helpers
-│   └── utils/          # Utility functions
-│       ├── nostr.ts    # Nostr helpers
-│       ├── blossom.ts  # File uploads
-│       └── zaps.ts     # Lightning payments
-├── test/               # Testing utilities
-└── app.html            # HTML template
+├── routes/                    # SvelteKit file-based routing
+│   ├── +page.svelte          # Home feed page
+│   ├── +layout.svelte        # Root layout with theme/query setup
+│   ├── +error.svelte         # Error boundary
+│   └── [nip19]/
+│       └── +page.svelte      # NIP-19 identifier routing
+├── lib/                       # Reusable library code
+│   ├── components/           # UI components
+│   │   ├── ui/              # shadcn-svelte components (48+)
+│   │   ├── auth/            # Authentication components
+│   │   │   ├── LoginArea.svelte
+│   │   │   ├── LoginDialog.svelte
+│   │   │   ├── SignupDialog.svelte
+│   │   │   └── AccountSwitcher.svelte
+│   │   ├── comments/        # Comment system
+│   │   │   ├── CommentsSection.svelte
+│   │   │   ├── CommentForm.svelte
+│   │   │   └── Comment.svelte
+│   │   ├── Note.svelte      # Note display with reactions
+│   │   ├── NoteContent.svelte  # Rich text content parser
+│   │   ├── NoteComposer.svelte # Note creation modal
+│   │   ├── ProfileEditor.svelte # Profile editing modal
+│   │   └── RelaySelector.svelte # Relay management
+│   ├── stores/              # Svelte stores (.svelte.ts)
+│   │   ├── auth.ts         # Authentication & session management
+│   │   ├── welshman.ts     # Welshman Router configuration
+│   │   ├── publish.svelte.ts    # Note publishing
+│   │   ├── comments.svelte.ts   # Comment queries
+│   │   ├── accounts.svelte.ts   # Multi-account management
+│   │   ├── toast.svelte.ts      # Toast notifications
+│   │   ├── theme.svelte.ts      # Theme management
+│   │   └── appStore.ts          # App configuration
+│   └── utils/               # Utility functions
+│       ├── genUserName.ts  # Fallback username generator
+│       └── ...
+├── test/                    # Testing utilities
+└── index.css               # Global styles and Tailwind
 ```
 
 ## 🎨 UI Components
@@ -191,19 +271,32 @@ PuStack includes 48+ shadcn-svelte components:
 - Test setup provides all necessary context and stores
 - Mocked browser APIs (matchMedia, scrollTo, IntersectionObserver, ResizeObserver)
 
-## 🚀 Deployment
+## 🧩 Extend the Framework
 
-Built-in deployment to NostrDeploy.com:
+PuStack is designed to be extended. Here are common additions developers make:
 
-```bash
-npm run deploy
-```
+### Popular Extensions
+- **Threaded Replies**: Add note detail pages with comment trees
+- **Follow Lists**: Implement NIP-02 for social graphs
+- **Personalized Feeds**: Filter by followed users
+- **Search**: Add NIP-50 relay search
+- **Lightning Zaps**: Integrate NIP-57 for tipping
+- **Private Messages**: Build NIP-17 encrypted DMs
+- **Notifications**: Real-time notification system
+- **Infinite Scroll**: Pagination for large feeds
+- **Media Uploads**: Blossom or NIP-96 file hosting
+- **Link Previews**: Open Graph meta tag parsing
 
-Your app goes live instantly with:
-- Automatic builds
-- CDN distribution
-- HTTPS support
-- Custom domains available
+### Framework Additions
+- **Long-form Articles** (NIP-23): Blog/newsletter components
+- **Communities** (NIP-72): Group discussion spaces
+- **Live Events** (NIP-53): Streaming and live chat
+- **Marketplaces** (NIP-15, NIP-99): eCommerce flows
+- **Calendar Events** (NIP-52): Event management
+- **Badges** (NIP-58): Achievement system
+- **Lists** (NIP-51): Bookmarks, mutes, pins
+- **Relay Hints**: Advanced relay discovery
+- **Offline Mode**: Service worker caching
 
 ## 📚 Documentation
 
@@ -215,14 +308,132 @@ For detailed documentation on building Nostr applications with PuStack:
 - [Nostr Protocol Documentation](https://nostr.com)
 - [shadcn-svelte Components](https://shadcn-svelte.com/)
 
-## 🤝 Contributing
+## 🧑‍💻 Building Your App
 
-PuStack is open source and welcomes contributions. The framework is designed to be:
+### Framework Patterns
 
-- **Extensible**: Easy to add new NIPs and features
-- **Maintainable**: Clean architecture with TypeScript and Svelte 5
-- **Testable**: Comprehensive testing setup included
-- **Documented**: Clear patterns and examples
+PuStack establishes clean patterns you can follow when building your app:
+
+#### 1. Querying Nostr Data
+
+```svelte
+<script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { load } from '@welshman/net';
+
+  // Create a query for any Nostr data
+  const myData = createQuery(() => ({
+    queryKey: ['my-data', /* params */],
+    queryFn: async ({ signal }) => {
+      return await load({
+        relays: [],  // Empty = use Router defaults
+        filters: [{ kinds: [1], limit: 20 }],
+        signal
+      });
+    }
+  }));
+</script>
+
+{#if $myData.isLoading}
+  <Skeleton />
+{:else if $myData.data}
+  {#each $myData.data as item}
+    <YourComponent {item} />
+  {/each}
+{/if}
+```
+
+#### 2. Publishing Events
+```svelte
+<script lang="ts">
+  import { useNostrPublish } from '$lib/stores/publish.svelte';
+
+  const publish = useNostrPublish();
+
+  function handlePublish() {
+    $publish.mutate({
+      kind: 1,
+      content: 'Hello Nostr!',
+      tags: []
+    });
+  }
+</script>
+```
+
+#### 3. Using Svelte 5 Runes
+```svelte
+<script lang="ts">
+  // Reactive state
+  let count = $state(0);
+
+  // Computed values
+  let doubled = $derived(count * 2);
+
+  // Effects
+  $effect(() => {
+    console.log('Count changed:', count);
+  });
+</script>
+```
+
+#### 4. Creating Reusable Components
+
+Follow the pattern in `src/lib/components/Note.svelte`:
+- Accept event data as props
+- Query related data (profiles, reactions, etc.)
+- Emit events for user interactions
+- Use shadcn-svelte for consistent UI
+
+### Customizing the Framework
+
+**Relay Configuration:**
+Edit `src/lib/stores/appStore.ts` to change default relays for your app.
+
+**Theme & Branding:**
+Modify `src/index.css` to customize colors, fonts, and design tokens.
+
+**Router Behavior:**
+Configure relay selection logic in `src/lib/stores/welshman.ts`.
+
+**Add NIPs:**
+Create new stores in `src/lib/stores/` for additional NIPs.
+
+**UI Components:**
+Add custom components to `src/lib/components/` and reuse across routes.
+
+## 🤝 Contributing to the Framework
+
+We welcome contributions that make PuStack better for all developers:
+
+### Framework Guidelines
+- **Svelte 5 runes** for all new reactivity (no legacy $: syntax)
+- **TanStack Query** patterns for all Nostr data fetching
+- **Welshman** for all Nostr protocol operations
+- **TypeScript strict mode** - no `any` types
+- **shadcn-svelte** for UI components (don't reinvent)
+- **Reusable patterns** - components should work in any app
+- **Clear documentation** - examples and JSDoc comments
+
+### What to Contribute
+- ✅ New reusable components (feeds, profiles, media, etc.)
+- ✅ NIP implementations (with proper TypeScript types)
+- ✅ Query patterns and hooks
+- ✅ UI component extensions
+- ✅ Documentation and examples
+- ✅ Bug fixes and improvements
+
+### What NOT to Contribute
+- ❌ App-specific business logic
+- ❌ Opinionated features (add as optional examples)
+- ❌ Heavy dependencies (keep the framework light)
+- ❌ Breaking changes without discussion
+
+## 🙏 Acknowledgments
+
+- **[Coracle](https://coracle.social/)** - For pioneering Welshman and Nostr client patterns
+- **[MKStack](https://github.com/michaelkernaghan/mkstack)** - Original React implementation
+- **[Welshman](https://github.com/coracle-social/welshman)** - Battle-tested Nostr toolkit
+- **[shadcn-svelte](https://shadcn-svelte.com/)** - Beautiful accessible components
 
 ## 📄 License
 
@@ -230,6 +441,5 @@ Open source - build amazing Nostr applications and help grow the decentralized w
 
 ---
 
-**Built with PuStack** - Powered by Svelte 5 + Welshman
-
-*Build your Nostr app in minutes, not months. Start with AI, deploy instantly.*
+**PuStack** - The framework for building Nostr clients with Svelte 5 + Welshman
+*Your app. Your rules. Built in hours, not months.*

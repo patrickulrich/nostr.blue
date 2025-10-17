@@ -15,7 +15,7 @@
   let { class: className }: Props = $props();
 
   // Get current session from Welshman
-  const session = $derived(currentUser.get());
+  
 
   let loginDialogOpen = $state(false);
   let signupDialogOpen = $state(false);
@@ -27,7 +27,7 @@
 </script>
 
 <div class={cn("inline-flex items-center justify-center", className)}>
-  {#if session}
+  {#if $currentUser}
     <AccountSwitcher onAddAccountClick={() => (loginDialogOpen = true)} />
   {:else}
     <div class="flex gap-3 justify-center">

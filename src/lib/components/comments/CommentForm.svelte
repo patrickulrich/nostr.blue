@@ -15,7 +15,6 @@
 
   let content = $state('');
   let isPending = $state(false);
-  const session = $derived(currentUser.get());
 
   // TODO: Integrate with Welshman publishing
   // import { publish } from '@welshman/app';
@@ -23,7 +22,7 @@
   async function handleSubmit(e: Event) {
     e.preventDefault();
 
-    if (!content.trim() || !session) return;
+    if (!content.trim() || !$currentUser) return;
 
     isPending = true;
     try {
@@ -70,7 +69,7 @@
 
 <div class="rounded-lg border bg-card text-card-foreground shadow-sm {compact ? 'border-dashed' : ''}">
   <div class="{compact ? 'p-4' : 'p-6'}">
-    {#if !session}
+    {#if !$currentUser}
       <div class="text-center space-y-4">
         <div class="flex items-center justify-center space-x-2 text-muted-foreground">
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

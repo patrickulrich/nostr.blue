@@ -24,8 +24,10 @@ import { load } from '@welshman/net';
  * ```
  */
 export function useAuthor(pubkey: string | undefined) {
+	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
 	return createQuery(() => ({
-		queryKey: ['author', pubkey ?? ''],
+		queryKey: ['author', pubkey ?? ''] as const,
 		queryFn: async ({ signal }) => {
 			if (!pubkey) {
 				return {};
@@ -35,7 +37,6 @@ export function useAuthor(pubkey: string | undefined) {
 				relays: [], // Will use default relays from router
 				filters: [{ kinds: [PROFILE], authors: [pubkey], limit: 1 }],
 				signal,
-				timeout: 1500
 			});
 
 			const event = events[0];
