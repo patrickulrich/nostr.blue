@@ -43,6 +43,10 @@ const presetRelays = [
   { url: 'wss://relay.primal.net', name: 'Primal' },
 ];
 
+/**
+ * Root application component with all necessary providers configured.
+ * Sets up React Query, Nostr connectivity, theming, wallet connect, and routing.
+ */
 export function App() {
   return (
     <UnheadProvider head={head}>

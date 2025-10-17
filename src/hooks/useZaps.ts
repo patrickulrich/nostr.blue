@@ -12,6 +12,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 
+/**
+ * Hook for managing Lightning zaps (NIP-57) on Nostr events.
+ * Handles fetching zap receipts, creating zap requests, and sending payments via NWC or WebLN.
+ *
+ * @param target - The event or array of events to zap
+ * @param webln - WebLN provider for browser-based lightning payments
+ * @param _nwcConnection - NWC connection (unused, kept for compatibility)
+ * @param onZapSuccess - Optional callback to run after successful zap
+ * @returns Object containing zap data, counts, totals, and zap functions
+ */
 export function useZaps(
   target: Event | Event[],
   webln: WebLNProvider | null,
@@ -198,7 +208,7 @@ export function useZaps(
 
       const zapRequest = nip57.makeZapRequest({
         profile: actualTarget.pubkey,
-        event: actualTarget, // Always pass full Event object, not string ID
+        event: actualTarget.id, // Pass event ID as string
         amount: zapAmount,
         relays: [config.relayUrl],
         comment

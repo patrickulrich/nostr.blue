@@ -34,7 +34,7 @@ export function useReplyCount(eventId: string | undefined) {
         );
 
         // If we get limit + 1 results, return limit + 1 to indicate "500+" in UI
-        return Math.min(replies.length, limit + 1);
+        return replies.length;
       } catch (error) {
         // Don't log AbortError as it's expected when queries are cancelled
         if (error instanceof Error && error.name === 'AbortError') {

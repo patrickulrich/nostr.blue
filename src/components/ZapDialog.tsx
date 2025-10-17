@@ -235,6 +235,15 @@ const ZapContent = forwardRef<HTMLDivElement, ZapContentProps>(({
 ));
 ZapContent.displayName = 'ZapContent';
 
+/**
+ * Dialog component for sending Lightning Network zaps to a Nostr event.
+ * Supports WebLN and NWC wallets, displays QR codes, and handles invoice generation.
+ *
+ * @param props - Component properties
+ * @param props.target - The Nostr event to zap
+ * @param props.children - Optional custom trigger element
+ * @param props.className - Optional CSS class names
+ */
 export function ZapDialog({ target, children, className }: ZapDialogProps) {
   const [open, setOpen] = useState(false);
   const { user } = useCurrentUser();

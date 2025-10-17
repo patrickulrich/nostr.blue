@@ -71,6 +71,13 @@ function MessageBubble({
   );
 }
 
+/**
+ * Component displaying a conversation thread with messages and input.
+ * Shows message history, handles sending new messages, and supports encryption.
+ *
+ * @param props - Component properties
+ * @param props.conversation - The conversation object with messages and recipient info
+ */
 export function ConversationThread({ conversation }: ConversationThreadProps) {
   const { user } = useCurrentUser();
   const author = useAuthor(conversation.pubkey);
@@ -180,6 +187,10 @@ export function ConversationThread({ conversation }: ConversationThreadProps) {
   );
 }
 
+/**
+ * Empty state component displayed when no conversation is selected.
+ * Shows a message prompting the user to select a conversation.
+ */
 export function EmptyConversationThread() {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">

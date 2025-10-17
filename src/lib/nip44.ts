@@ -1,6 +1,11 @@
 /**
- * Encrypt data using NIP-44 with the author's own keys
- * This creates a shared secret using the author's public and private keys
+ * Encrypt data using NIP-44 with the author's own keys.
+ * Creates a shared secret using the author's public and private keys for self-encryption.
+ * @param items - Array of string arrays to encrypt
+ * @param pubkey - Public key of the author
+ * @param signer - Signer object with NIP-44 encrypt capability
+ * @returns Encrypted ciphertext string
+ * @throws Error if signer does not support NIP-44 encryption
  */
 export async function encryptPrivateItems(
   items: string[][],
@@ -20,7 +25,12 @@ export async function encryptPrivateItems(
 }
 
 /**
- * Decrypt data using NIP-44 with the author's own keys
+ * Decrypt data using NIP-44 with the author's own keys.
+ * Decrypts self-encrypted data using the author's private key.
+ * @param ciphertext - Encrypted string to decrypt
+ * @param pubkey - Public key of the author
+ * @param signer - Signer object with NIP-44 decrypt capability
+ * @returns Array of decrypted string arrays, or empty array if decryption fails
  */
 export async function decryptPrivateItems(
   ciphertext: string,
@@ -45,8 +55,10 @@ export async function decryptPrivateItems(
 }
 
 /**
- * Check if content is encrypted (basic heuristic)
- * NIP-44 ciphertext is base64 encoded and typically contains certain patterns
+ * Check if content is encrypted using basic heuristics.
+ * NIP-44 ciphertext is base64 encoded and has specific patterns.
+ * @param content - String to check for encryption
+ * @returns True if content appears to be encrypted, false otherwise
  */
 export function isEncrypted(content: string): boolean {
   if (!content) return false;

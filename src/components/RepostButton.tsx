@@ -10,6 +10,14 @@ interface RepostButtonProps {
   className?: string;
 }
 
+/**
+ * Button component for reposting/boosting a Nostr event.
+ * Displays repost count and allows users to toggle their repost.
+ *
+ * @param props - Component properties
+ * @param props.event - The Nostr event to repost
+ * @param props.className - Optional CSS class names
+ */
 export function RepostButton({ event, className }: RepostButtonProps) {
   const { user } = useCurrentUser();
   const { count, userReposted, addRepost, removeRepost, isLoading } = useReposts(event.id);

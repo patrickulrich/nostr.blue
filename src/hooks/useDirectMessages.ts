@@ -3,6 +3,9 @@ import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useCurrentUser } from './useCurrentUser';
 
+/**
+ * Decrypted direct message with metadata.
+ */
 export interface DecryptedMessage {
   id: string;
   pubkey: string;
@@ -13,6 +16,9 @@ export interface DecryptedMessage {
   rawEvent: NostrEvent;
 }
 
+/**
+ * Conversation thread with a specific user.
+ */
 export interface Conversation {
   pubkey: string; // The other person's pubkey
   lastMessage: DecryptedMessage;

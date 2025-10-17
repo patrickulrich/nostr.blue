@@ -25,6 +25,11 @@ interface UploadedImage {
   tags: string[][];
 }
 
+/**
+ * Component for composing and publishing Nostr posts with rich features.
+ * Supports text content, image uploads, emoji picker, and user mentions.
+ * @param props - Composer configuration including callbacks and placeholder text
+ */
 export function PostComposer({
   onSuccess,
   placeholder = "What's happening?",

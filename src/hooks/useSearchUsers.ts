@@ -2,6 +2,9 @@ import { NSchema as n } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 
+/**
+ * User search result containing profile metadata.
+ */
 export interface UserSearchResult {
   pubkey: string;
   name?: string;

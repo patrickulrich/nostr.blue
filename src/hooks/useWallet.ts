@@ -9,6 +9,12 @@ export interface WalletStatus {
   preferredMethod: 'nwc' | 'webln' | 'manual';
 }
 
+/**
+ * Hook to get the current wallet status and available payment methods.
+ * Checks for NWC (Nostr Wallet Connect) and WebLN availability.
+ *
+ * @returns Wallet status with active connections and preferred payment method
+ */
 export function useWallet() {
   const { connections, getActiveConnection } = useNWC();
 

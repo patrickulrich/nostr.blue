@@ -18,4 +18,5 @@ export interface AppContextType {
   presetRelays?: { name: string; url: string }[];
 }
 
+/** React context for global application configuration and theme state */
 export const AppContext = createContext<AppContextType | undefined>(undefined);

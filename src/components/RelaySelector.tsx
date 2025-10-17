@@ -21,6 +21,13 @@ interface RelaySelectorProps {
   className?: string;
 }
 
+/**
+ * Dropdown component for selecting and managing Nostr relays.
+ * Supports preset relays and custom relay URLs with automatic wss:// prefix.
+ *
+ * @param props - Component properties
+ * @param props.className - Optional CSS class names
+ */
 export function RelaySelector(props: RelaySelectorProps) {
   const { className } = props;
   const { config, updateConfig, presetRelays = [] } = useAppContext();

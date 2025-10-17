@@ -10,6 +10,15 @@ interface FollowButtonProps {
   variant?: 'default' | 'outline';
 }
 
+/**
+ * Button component for following/unfollowing a Nostr user.
+ * Updates the user's contact list (kind 3) when clicked.
+ *
+ * @param props - Component properties
+ * @param props.pubkey - The public key of the user to follow/unfollow
+ * @param props.className - Optional CSS class names
+ * @param props.variant - Button variant (default: 'default')
+ */
 export function FollowButton({ pubkey, className, variant = 'default' }: FollowButtonProps) {
   const { user } = useCurrentUser();
   const { isFollowing, follow, unfollow, isLoading } = useFollowing();

@@ -40,6 +40,11 @@ export interface DVMJobFeedback {
   event: NostrEvent;
 }
 
+/**
+ * Hook to manage DVM (Data Vending Machine) job requests and results.
+ * Provides functionality to submit jobs, query results, and monitor job feedback.
+ * @returns Object containing job submission mutation and query hooks for results and feedback
+ */
 export function useDVMJob() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

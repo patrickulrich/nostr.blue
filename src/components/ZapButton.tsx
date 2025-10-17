@@ -13,6 +13,16 @@ interface ZapButtonProps {
   zapData?: { count: number; totalSats: number; isLoading?: boolean };
 }
 
+/**
+ * Button component for sending Lightning zaps to a Nostr event.
+ * Opens ZapDialog when clicked and displays total sats zapped.
+ *
+ * @param props - Component properties
+ * @param props.target - The Nostr event to zap
+ * @param props.className - Optional CSS class names
+ * @param props.showCount - Whether to display zap count (default: true)
+ * @param props.zapData - Optional external zap data to avoid refetching
+ */
 export function ZapButton({
   target,
   className = "text-xs ml-1",

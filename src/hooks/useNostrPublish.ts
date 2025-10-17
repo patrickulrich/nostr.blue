@@ -5,6 +5,12 @@ import { useCurrentUser } from "./useCurrentUser";
 
 import type { NostrEvent } from "@nostrify/nostrify";
 
+/**
+ * Hook to sign and publish Nostr events to relays.
+ * Automatically adds client tag and handles signing with current user's signer.
+ *
+ * @returns Mutation result for publishing Nostr events
+ */
 export function useNostrPublish(): UseMutationResult<NostrEvent> {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

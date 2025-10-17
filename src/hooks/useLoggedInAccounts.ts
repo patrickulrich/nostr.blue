@@ -10,6 +10,12 @@ export interface Account {
   metadata: NostrMetadata;
 }
 
+/**
+ * Hook to fetch all logged-in accounts and their metadata.
+ * Provides current user, other logged-in users, and account management functions.
+ *
+ * @returns Object containing account lists and management methods
+ */
 export function useLoggedInAccounts() {
   const { nostr } = useNostr();
   const { logins, setLogin, removeLogin } = useNostrLogin();

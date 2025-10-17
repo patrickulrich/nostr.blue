@@ -10,6 +10,14 @@ interface ReactionButtonProps {
   className?: string;
 }
 
+/**
+ * Button component for adding/removing reactions (likes) to a Nostr event.
+ * Displays reaction count and allows users to toggle their reaction.
+ *
+ * @param props - Component properties
+ * @param props.event - The Nostr event to react to
+ * @param props.className - Optional CSS class names
+ */
 export function ReactionButton({ event, className }: ReactionButtonProps) {
   const { user } = useCurrentUser();
   const { count, userReacted, addReaction, removeReaction, isLoading } = useReactions(event.id);

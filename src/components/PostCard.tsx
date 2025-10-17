@@ -22,6 +22,15 @@ interface PostCardProps {
   showThread?: boolean;
 }
 
+/**
+ * Component displaying a Nostr post with author info, content, and interaction buttons.
+ * Includes support for reactions, zaps, reposts, bookmarks, and replies.
+ *
+ * @param props - Component properties
+ * @param props.event - The Nostr event to display
+ * @param props.className - Optional CSS class names
+ * @param props.showThread - Whether to show thread indicator (default: true)
+ */
 export function PostCard({ event, className, showThread: _showThread = true }: PostCardProps) {
   const navigate = useNavigate();
   const { data: author } = useAuthor(event.pubkey);

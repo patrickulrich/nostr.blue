@@ -138,7 +138,16 @@ function EmbeddedNote({ event }: { event: NostrEvent }) {
   );
 }
 
-/** Parses content of text note events so that URLs and hashtags are linkified. */
+/**
+ * Component that parses and renders Nostr note content with rich formatting.
+ * Linkifies URLs, hashtags, and Nostr references (npub, note, etc.).
+ * Embeds images, videos, and referenced notes with NIP-92 support.
+ *
+ * @param props - Component properties
+ * @param props.event - The Nostr event to render
+ * @param props.className - Optional CSS class names
+ * @param props.depth - Embedding depth to prevent infinite loops (default: 0)
+ */
 export function NoteContent({
   event,
   className,

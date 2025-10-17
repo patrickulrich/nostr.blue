@@ -16,7 +16,12 @@ interface CommentsSectionProps {
   limit?: number;
 }
 
-export function CommentsSection({ 
+/**
+ * Comments section component displaying threaded comments with compose form.
+ * Shows loading state, empty state, and error handling for comment threads.
+ * @param props - Section configuration including root event, title, and display options
+ */
+export function CommentsSection({
   root,
   title = "Comments",
   emptyStateMessage = "No comments yet",

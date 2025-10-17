@@ -139,6 +139,11 @@ async function handleAPIError(response: Response) {
   }
 }
 
+/**
+ * Hook to interact with the Shakespeare AI API for chat completions and model management.
+ * Provides authenticated access to AI models using NIP-98 authentication.
+ * @returns Object containing loading state, error state, and methods for chat operations
+ */
 export function useShakespeare() {
   const { user } = useCurrentUser();
   const [isLoading, setIsLoading] = useState(false);

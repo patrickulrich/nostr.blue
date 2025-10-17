@@ -80,6 +80,14 @@ const EMOJI_CATEGORIES = {
   },
 };
 
+/**
+ * Emoji picker component with categorized emojis.
+ * Displays a popover with tabs for different emoji categories.
+ *
+ * @param props - Component properties
+ * @param props.onEmojiSelect - Callback function when an emoji is selected
+ * @param props.children - Trigger element for the popover
+ */
 export function EmojiPicker({ onEmojiSelect, children }: EmojiPickerProps) {
   return (
     <Popover>

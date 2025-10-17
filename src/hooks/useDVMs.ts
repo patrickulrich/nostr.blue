@@ -20,6 +20,11 @@ export interface DVMService {
   event: NostrEvent;
 }
 
+/**
+ * Hook to fetch and manage Data Vending Machine (DVM) services from the Nostr network.
+ * Queries for kind 31990 announcement events and provides filtering utilities.
+ * @returns Object containing DVM services array, loading state, and filter helper functions
+ */
 export function useDVMs() {
   const { nostr } = useNostr();
 
