@@ -10,6 +10,7 @@ import {
 } from '@/components/ConversationThread';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { MainLayout } from '@/components/MainLayout';
+import { AppSidebar } from '@/components/AppSidebar';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDirectMessages } from '@/hooks/useDirectMessages';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -39,7 +40,7 @@ export default function MessagesPage() {
   // Not logged in
   if (!user) {
     return (
-      <MainLayout>
+      <MainLayout sidebar={<AppSidebar />}>
         <div className="container max-w-4xl py-8">
           <Card className="p-8 text-center">
             <MessageCircle className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
@@ -60,7 +61,7 @@ export default function MessagesPage() {
   if (isMobile) {
     if (showThread && selectedConversation) {
       return (
-        <MainLayout>
+        <MainLayout sidebar={<AppSidebar />}>
           <div className="h-[calc(100vh-4rem)]">
             <div className="flex items-center gap-2 p-4 border-b">
               <Button variant="ghost" size="sm" onClick={handleBackToList}>
@@ -76,7 +77,7 @@ export default function MessagesPage() {
     }
 
     return (
-      <MainLayout>
+      <MainLayout sidebar={<AppSidebar />}>
         <div className="h-[calc(100vh-4rem)]">
           {/* Header */}
           <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
@@ -121,31 +122,33 @@ export default function MessagesPage() {
 
   // Desktop view - two column layout
   return (
-    <MainLayout>
-      <div className="container max-w-7xl py-6">
+    <MainLayout sidebar={<AppSidebar />}>
+      <div className="min-h-screen">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="h-6 w-6" />
-            <h1 className="text-2xl font-bold">Messages</h1>
+        <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border">
+          <div className="flex items-center justify-between p-4">
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-blue-500" />
+              Messages
+            </h1>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+            >
+              {isRefetching ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Refresh
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isRefetching}
-          >
-            {isRefetching ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Refresh
-          </Button>
         </div>
 
         {/* Two column layout */}
-        <Card className="h-[calc(100vh-12rem)] flex overflow-hidden">
+        <Card className="h-[calc(100vh-8rem)] flex overflow-hidden border-x-0 border-b-0 rounded-none">
           {/* Left: Conversation List */}
           <div className="w-80 border-r flex flex-col">
             {isLoading ? (

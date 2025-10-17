@@ -3,6 +3,7 @@ import { ScrollToTop } from "./components/ScrollToTop";
 
 import Index from "./pages/Index";
 import ExplorePage from "./pages/ExplorePage";
+import SearchPage from "./pages/SearchPage";
 import TrendingPage from "./pages/TrendingPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import BookmarksPage from "./pages/BookmarksPage";
@@ -30,6 +31,7 @@ export function AppRouter() {
       <Routes>
         <Route path="/" element={<Index />} />
         <Route path="/explore" element={<ExplorePage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/trending" element={<TrendingPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/messages" element={<MessagesPage />} />
