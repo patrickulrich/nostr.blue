@@ -1,5 +1,7 @@
 <script lang="ts">
   import { nip19 } from 'nostr-tools';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
   import { cn } from '$lib/utils';
   import { genUserName } from '$lib/genUserName';
 
@@ -11,15 +13,16 @@
 
   const npub = nip19.npubEncode(pubkey);
 
-  // TODO: Fetch author data using Welshman
-  // For now, using placeholder
-  let author = $state<{ metadata?: { name?: string } } | null>(null);
+  // Fetch author data using Welshman
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const authorQuery = createQuery<AuthorData>(() => ({
+    queryKey: ['author', pubkey],
+    queryFn: ({ signal }) => fetchAuthor(pubkey, signal),
+    enabled: !!pubkey,
+    staleTime: 5 * 60 * 1000 // 5 minutes
+  }));
 
-  // $effect(() => {
-  //   // Fetch author data using Welshman load()
-  //   // const data = await load({ kinds: [0], authors: [pubkey] });
-  //   // author = data;
-  // });
+  const author = $derived($authorQuery.data as AuthorData | undefined);
 
   const hasRealName = $derived(!!author?.metadata?.name);
   const displayName = $derived(author?.metadata?.name ?? genUserName(pubkey));

@@ -1,11 +1,9 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { z } from 'zod';
-
-  // Welshman imports for Nostr functionality
-  // TODO: These imports will need to be updated once Welshman integration is complete
-  // import { publishEvent } from '@welshman/...';
-  // import { getCurrentUser } from '@welshman/...';
+  import { currentPubkey, publishProfile } from '$lib/stores/auth';
+  import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
+  import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 
   const queryClient = useQueryClient();
 
@@ -41,29 +39,32 @@
   let pictureInputRef: HTMLInputElement;
   let bannerInputRef: HTMLInputElement;
 
-  // TODO: Query current user metadata using Welshman
-  // const userQuery = createQuery({
-  //   queryKey: ['currentUser'],
-  //   queryFn: async () => {
-  //     // Fetch using Welshman
-  //     return null;
-  //   }
-  // });
+  // Query current user metadata using Welshman
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const userQuery = createQuery<AuthorData>(() => ({
+    queryKey: ['author', $currentPubkey ?? ''],
+    queryFn: ({ signal }) => fetchAuthor($currentPubkey ?? '', signal),
+    enabled: !!$currentPubkey,
+    staleTime: 30000 // 30 seconds
+  }));
 
-  // TODO: Load user metadata into form when available
-  // $effect(() => {
-  //   if ($userQuery.data?.metadata) {
-  //     formData = {
-  //       name: $userQuery.data.metadata.name || '',
-  //       about: $userQuery.data.metadata.about || '',
-  //       picture: $userQuery.data.metadata.picture || '',
-  //       banner: $userQuery.data.metadata.banner || '',
-  //       website: $userQuery.data.metadata.website || '',
-  //       nip05: $userQuery.data.metadata.nip05 || '',
-  //       bot: $userQuery.data.metadata.bot || false,
-  //     };
-  //   }
-  // });
+  // Load user metadata into form when available
+  $effect(() => {
+    const userData = $userQuery.data as AuthorData | undefined;
+    if (userData?.metadata) {
+      // Cast to any to access bot field which isn't in Welshman's Profile type
+      const metadata = userData.metadata as any;
+      formData = {
+        name: userData.metadata.name || '',
+        about: userData.metadata.about || '',
+        picture: userData.metadata.picture || '',
+        banner: userData.metadata.banner || '',
+        website: userData.metadata.website || '',
+        nip05: userData.metadata.nip05 || '',
+        bot: metadata.bot || false,
+      };
+    }
+  });
 
   // File upload handler
   async function uploadFile(file: File, field: 'picture' | 'banner') {
@@ -107,22 +108,16 @@
         }
       }
 
-      // TODO: Publish metadata event (kind 0) using Welshman
-      // await publishEvent({
-      //   kind: 0,
-      //   content: JSON.stringify(cleanData),
-      //   tags: [],
-      // });
+      // Publish metadata event (kind 0) using Welshman
+      await publishProfile(cleanData);
 
-      console.log('Publishing metadata:', cleanData);
+      // Invalidate queries to refresh data
+      await queryClient.invalidateQueries({ queryKey: ['author'] });
 
-      // TODO: Invalidate queries to refresh data
-      // await queryClient.invalidateQueries({ queryKey: ['currentUser'] });
-
-      alert('Profile updated successfully! (Note: actual publishing not yet implemented)');
+      toastSuccess('Profile updated!', 'Your profile has been published to the network.');
     } catch (error) {
       console.error('Failed to update profile:', error);
-      alert('Failed to update profile. Please try again.');
+      toastError('Failed to update profile', (error as Error).message || 'Please try again.');
     } finally {
       isPending = false;
     }
