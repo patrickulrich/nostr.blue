@@ -1,8 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { currentUser } from '$lib/stores/auth';
+  import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
+  import { useZaps } from '$lib/stores/zaps.svelte';
+  import { getWalletStatus } from '$lib/stores/wallet.svelte';
+  import type { TrustedEvent } from '@welshman/util';
 
   interface Props {
-    target: any; // Nostr event
+    target: TrustedEvent;
     children?: import('svelte').Snippet;
     class?: string;
   }
@@ -12,30 +17,38 @@
   let isOpen = $state(false);
   let amount = $state<number | string>(100);
   let comment = $state('Zapped with PuStack!');
-  let invoice = $state<string | null>(null);
-  let isZapping = $state(false);
   let copied = $state(false);
   let qrCodeUrl = $state('');
 
-  // TODO: Integrate with current user hook
-  // import { currentUser } from '$lib/stores/auth';
-  // const user = $derived($currentUser);
-  const user = $state<any>(null);
+  // Query author metadata for lightning address
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const authorQuery = createQuery<AuthorData>(() => ({
+    queryKey: ['author', target.pubkey],
+    queryFn: ({ signal }) => fetchAuthor(target.pubkey, signal),
+    enabled: !!target?.pubkey,
+    staleTime: 5 * 60 * 1000 // 5 minutes
+  }));
 
-  // TODO: Integrate with author hook
-  // import { createQuery } from '@tanstack/svelte-query';
-  // const authorQuery = createQuery({...});
-  // const author = $derived($authorQuery.data);
-  const author = $state<any>(null);
+  const author = $derived($authorQuery.data as AuthorData | undefined);
 
-  // TODO: Integrate with wallet hook
-  // import { webln, activeNWC } from '$lib/stores/wallet';
-  const webln = $state<any>(null);
-  const activeNWC = $state<any>(null);
+  // Get wallet status
+  const walletStatus = getWalletStatus();
 
-  // TODO: Integrate with mobile detection
-  // import { isMobile } from '$lib/stores/device';
-  const isMobile = $state(false);
+  // Use zaps hook to fetch and manage zaps
+  const zaps = useZaps(
+    target as import('nostr-tools').Event,
+    walletStatus.webln,
+    walletStatus.activeNWC,
+    () => {
+      // On zap success, close dialog
+      isOpen = false;
+    }
+  );
+
+  // Mobile detection (simple check)
+  const isMobile = $state(
+    typeof window !== 'undefined' && window.innerWidth < 768
+  );
 
   // Preset zap amounts with icons
   const presetAmounts = [
@@ -46,11 +59,15 @@
     { amount: 1000, label: '🚀' },
   ];
 
+  // Get invoice from zaps hook
+  const invoice = $derived(zaps.invoice);
+  const isZapping = $derived(zaps.isZapping);
+
   // Reset state when dialog opens/closes
   $effect(() => {
     if (isOpen) {
       amount = 100;
-      invoice = null;
+      zaps.resetInvoice();
       copied = false;
       qrCodeUrl = '';
       comment = 'Zapped with PuStack!';
@@ -62,7 +79,7 @@
     if (invoice) {
       // TODO: Generate QR code using qrcode library
       // import QRCode from 'qrcode';
-      // QRCode.toDataURL(invoice.toUpperCase(), {...})
+      // QRCode.toDataURL(invoice.toUpperCase(), { width: 256, margin: 2 })
       //   .then(url => qrCodeUrl = url);
       console.log('Generate QR code for invoice:', invoice);
       qrCodeUrl = 'data:image/png;base64,placeholder'; // Placeholder
@@ -79,34 +96,8 @@
       return;
     }
 
-    isZapping = true;
-    try {
-      // TODO: Implement zap functionality using Welshman
-      // 1. Fetch author's lightning address from metadata
-      // 2. Request invoice from LNURL endpoint
-      // 3. Generate zap event (kind 9734)
-      // 4. If WebLN is available, pay directly
-      // 5. Otherwise, display invoice for manual payment
-
-      console.log('Zapping:', { amount: finalAmount, comment, target });
-
-      // Simulate invoice generation
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      invoice = 'lnbc1000n1...placeholder_invoice...';
-
-      // If WebLN is available, pay automatically
-      if (webln) {
-        // TODO: await webln.sendPayment(invoice);
-        console.log('Paying with WebLN');
-        alert('Payment sent! (placeholder)');
-        isOpen = false;
-      }
-    } catch (error) {
-      console.error('Failed to zap:', error);
-      alert('Failed to create zap. Please try again.');
-    } finally {
-      isZapping = false;
-    }
+    // Call the zap function from useZaps hook
+    await zaps.zap(finalAmount, comment);
   }
 
   async function handleCopy() {
@@ -126,14 +117,14 @@
 
   // Don't render if conditions aren't met
   const shouldShow = $derived(
-    user &&
-    user.pubkey !== target?.pubkey &&
+    $currentUser &&
+    target &&
+    $currentUser.pubkey !== target.pubkey &&
     (author?.metadata?.lud06 || author?.metadata?.lud16)
   );
 </script>
 
-{#if shouldShow || true}
-  <!-- Always show for now until hooks are integrated -->
+{#if shouldShow}
 
   <!-- Desktop Dialog -->
   {#if !isMobile && isOpen}
@@ -211,7 +202,7 @@
 
               <!-- Payment Buttons -->
               <div class="space-y-3">
-                {#if webln}
+                {#if walletStatus.webln}
                   <button
                     type="button"
                     onclick={handleZap}

@@ -1,8 +1,14 @@
 <script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { currentUser } from '$lib/stores/auth';
+  import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
+  import { useZaps } from '$lib/stores/zaps.svelte';
+  import { getWalletStatus } from '$lib/stores/wallet.svelte';
   import ZapDialog from './ZapDialog.svelte';
+  import type { TrustedEvent } from '@welshman/util';
 
   interface Props {
-    target: any; // Nostr event
+    target: TrustedEvent;
     class?: string;
     showCount?: boolean;
     zapData?: { count: number; totalSats: number; isLoading?: boolean };
@@ -15,37 +21,36 @@
     zapData: externalZapData
   }: Props = $props();
 
-  // TODO: Integrate with current user hook
-  // import { currentUser } from '$lib/stores/auth';
-  // const user = $derived($currentUser);
-  const user = $state<any>(null);
+  // Query author metadata for lightning address
+  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
+  const authorQuery = createQuery<AuthorData>(() => ({
+    queryKey: ['author', target.pubkey],
+    queryFn: ({ signal }) => fetchAuthor(target.pubkey, signal),
+    enabled: !!target?.pubkey,
+    staleTime: 5 * 60 * 1000 // 5 minutes
+  }));
 
-  // TODO: Integrate with author hook to fetch author metadata
-  // import { createQuery } from '@tanstack/svelte-query';
-  // const authorQuery = createQuery({...});
-  // const author = $derived($authorQuery.data);
-  const author = $state<any>(null);
+  const author = $derived($authorQuery.data as AuthorData | undefined);
 
-  // TODO: Integrate with wallet hook
-  // import { webln, activeNWC } from '$lib/stores/wallet';
-  const webln = $state<any>(null);
-  const activeNWC = $state<any>(null);
+  // Get wallet status
+  const walletStatus = getWalletStatus();
 
-  // TODO: Integrate with zaps hook to fetch zap stats
-  // import { useZaps } from '$lib/hooks/useZaps';
-  // const { totalSats, isLoading } = useZaps(target, webln, activeNWC);
-  const fetchedTotalSats = $state(0);
-  const isLoading = $state(false);
+  // Use zaps hook to fetch and manage zaps
+  const zaps = useZaps(
+    target as import('nostr-tools').Event,
+    walletStatus.webln,
+    walletStatus.activeNWC
+  );
 
   // Use external data if provided, otherwise use fetched data
-  const totalSats = $derived(externalZapData?.totalSats ?? fetchedTotalSats);
-  const showLoading = $derived(externalZapData?.isLoading || isLoading);
+  const totalSats = $derived(externalZapData?.totalSats ?? ($zaps.data?.totalSats || 0));
+  const showLoading = $derived(externalZapData?.isLoading || $zaps.isLoading);
 
   // Don't show zap button if user is not logged in, is the author, or author has no lightning address
   const shouldShow = $derived(
-    user &&
+    $currentUser &&
     target &&
-    user.pubkey !== target.pubkey &&
+    $currentUser.pubkey !== target.pubkey &&
     (author?.metadata?.lud16 || author?.metadata?.lud06)
   );
 </script>
