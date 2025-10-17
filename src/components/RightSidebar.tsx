@@ -38,6 +38,7 @@ export function RightSidebar() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-11 bg-muted/50 border-none rounded-full h-11 focus-visible:ring-1 focus-visible:ring-blue-500"
+          aria-label="Search posts and users"
         />
       </form>
 

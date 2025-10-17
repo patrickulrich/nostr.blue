@@ -1,5 +1,5 @@
 import { Home, Compass, User, Settings, PenSquare, Bell, Mail, List, Bookmark, Users, MoreHorizontal, Video, Calendar, Music, Zap } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { PostComposer } from '@/components/PostComposer';
@@ -41,7 +41,6 @@ function NavItem({ to, icon, label, active }: NavItemProps) {
  */
 export function AppSidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useCurrentUser();
   const [composeOpen, setComposeOpen] = useState(false);
@@ -57,10 +56,8 @@ export function AppSidebar() {
       // Invalidate feed queries to trigger a refresh
       queryClient.invalidateQueries({ queryKey: ['feed'] });
       queryClient.invalidateQueries({ queryKey: ['popular-feed-events'] });
-    } else {
-      // Otherwise navigate normally (Link will handle it)
-      navigate('/');
     }
+    // Otherwise let Link handle the navigation
   };
 
   return (

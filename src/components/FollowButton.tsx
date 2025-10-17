@@ -59,6 +59,7 @@ export function FollowButton({ pubkey, className, variant = 'default' }: FollowB
       onClick={handleClick}
       disabled={isPending}
       variant={following ? 'outline' : variant}
+      aria-pressed={following}
       className={cn(
         "rounded-full px-6 font-bold transition-colors",
         following && "hover:bg-destructive hover:text-destructive-foreground hover:border-destructive",
@@ -68,7 +69,7 @@ export function FollowButton({ pubkey, className, variant = 'default' }: FollowB
       {isPending ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : following ? (
-        <span className="group-hover:hidden">Following</span>
+        <span>Following</span>
       ) : (
         'Follow'
       )}

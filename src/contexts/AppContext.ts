@@ -20,3 +20,6 @@ export interface AppContextType {
 
 /** React context for global application configuration and theme state */
 export const AppContext = createContext<AppContextType | undefined>(undefined);
+
+// For clearer labeling in React DevTools
+AppContext.displayName = "AppContext";

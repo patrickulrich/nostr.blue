@@ -37,31 +37,31 @@ export function useNotifications() {
       }
 
       try {
-        // Fetch mentions (Kind 1 events that mention the user)
-        const mentionEvents = await nostr.query(
-          [{ kinds: [1], '#p': [userPubkey], ...filters }],
-          { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-        );
-
-        // Fetch reactions (Kind 7 events on user's posts)
-        // Note: We can't easily filter by "reactions to my posts" without knowing all post IDs
-        // So we'll fetch recent reactions with the user's pubkey mentioned
-        const reactionEvents = await nostr.query(
-          [{ kinds: [7], '#p': [userPubkey], ...filters }],
-          { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-        );
-
-        // Fetch reposts (Kind 6 events)
-        const repostEvents = await nostr.query(
-          [{ kinds: [6], '#p': [userPubkey], ...filters }],
-          { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-        );
-
-        // Fetch zaps (Kind 9735 zap receipts)
-        const zapEvents = await nostr.query(
-          [{ kinds: [9735], '#p': [userPubkey], ...filters }],
-          { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
-        );
+        // Fetch all notification types in parallel for better performance
+        const [mentionEvents, reactionEvents, repostEvents, zapEvents] = await Promise.all([
+          // Fetch mentions (Kind 1 events that mention the user)
+          nostr.query(
+            [{ kinds: [1], '#p': [userPubkey], ...filters }],
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
+          ),
+          // Fetch reactions (Kind 7 events on user's posts)
+          // Note: We can't easily filter by "reactions to my posts" without knowing all post IDs
+          // So we'll fetch recent reactions with the user's pubkey mentioned
+          nostr.query(
+            [{ kinds: [7], '#p': [userPubkey], ...filters }],
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
+          ),
+          // Fetch reposts (Kind 6 events)
+          nostr.query(
+            [{ kinds: [6], '#p': [userPubkey], ...filters }],
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
+          ),
+          // Fetch zaps (Kind 9735 zap receipts)
+          nostr.query(
+            [{ kinds: [9735], '#p': [userPubkey], ...filters }],
+            { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) }
+          ),
+        ]);
 
         // Combine and categorize all notifications
         const notifications: NotificationEvent[] = [];

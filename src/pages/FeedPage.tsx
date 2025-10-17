@@ -134,6 +134,7 @@ export function FeedPage() {
     },
     enabled: eventIds.length > 0 && feedType === 'popular',
     staleTime: 60000,
+    refetchOnMount: true, // Always refetch when component mounts
   });
 
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -167,11 +168,6 @@ export function FeedPage() {
   const allEvents = feedType === 'following'
     ? (data?.pages.flatMap((page) => page) || [])
     : [...parsedDirectEvents, ...fetchedDVMEvents];
-
-  console.log('[FeedPage] Current feedType:', feedType);
-  console.log('[FeedPage] allEvents count:', allEvents.length);
-  console.log('[FeedPage] parsedDirectEvents:', parsedDirectEvents.length);
-  console.log('[FeedPage] fetchedDVMEvents:', fetchedDVMEvents.length);
 
   const isLoading = feedType === 'following' ? isLoadingFollowing : isLoadingDVM;
   const isRefetching = feedType === 'following' ? isRefetchingFollowing : false;
