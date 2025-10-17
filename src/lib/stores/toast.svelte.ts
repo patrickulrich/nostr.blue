@@ -17,7 +17,7 @@ export function toast(options: ToastOptions) {
 
   // Combine title and description for sonner
   const message = title || '';
-  const opts: any = {
+  const opts: { description?: string; duration: number } = {
     description,
     duration: duration || 4000,
   };
@@ -52,7 +52,7 @@ export const toastPromise = <T,>(
   options: {
     loading: string;
     success: string | ((data: T) => string);
-    error: string | ((error: any) => string);
+    error: string | ((error: unknown) => string);
   }
 ) => {
   return sonnerToast.promise(promise, options);

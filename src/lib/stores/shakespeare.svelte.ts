@@ -147,7 +147,7 @@ async function handleAPIError(response: Response) {
 			throw new Error(
 				`Invalid request: ${error.error?.message || error.details || error.error || 'Please check your request parameters.'}`
 			);
-		} catch (parseError) {
+		} catch {
 			throw new Error('Invalid request. Please check your parameters and try again.');
 		}
 	} else if (response.status === 404) {
@@ -160,7 +160,7 @@ async function handleAPIError(response: Response) {
 			throw new Error(
 				`API error: ${errorData.error?.message || errorData.details || errorData.error || response.statusText}`
 			);
-		} catch (parseError) {
+		} catch {
 			throw new Error(
 				`Network error: ${response.statusText}. Please check your connection and try again.`
 			);

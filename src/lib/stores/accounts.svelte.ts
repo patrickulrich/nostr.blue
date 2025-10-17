@@ -2,7 +2,7 @@ import type { TrustedEvent, Profile } from '@welshman/util';
 import { PROFILE } from '@welshman/util';
 import { load } from '@welshman/net';
 import { sessions, pubkey } from '@welshman/app';
-import { derived, get } from 'svelte/store';
+import { derived } from 'svelte/store';
 
 export interface Account {
 	pubkey: string;

@@ -4,6 +4,7 @@
   import { currentPubkey, publishProfile } from '$lib/stores/auth';
   import { fetchAuthor, type AuthorData } from '$lib/stores/author.svelte';
   import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
+  import { uploadFileWithRetry } from '$lib/stores/upload.svelte';
 
   const queryClient = useQueryClient();
 
@@ -70,16 +71,14 @@
   async function uploadFile(file: File, field: 'picture' | 'banner') {
     isUploading = true;
     try {
-      // TODO: Implement Blossom upload
-      // const url = await blossomUpload(file);
-      // formData[field] = url;
-
-      console.log(`Upload ${field}:`, file.name);
-      // Mock success
-      alert(`${field === 'picture' ? 'Profile picture' : 'Banner'} upload not yet implemented`);
+      const result = await uploadFileWithRetry(file);
+      formData[field] = result.url;
+      console.log(`${field} uploaded successfully:`, result.url);
+      toastSuccess('Upload successful', `Your ${field === 'picture' ? 'profile picture' : 'banner'} has been uploaded.`);
     } catch (error) {
       console.error(`Failed to upload ${field}:`, error);
-      alert(`Failed to upload ${field === 'picture' ? 'profile picture' : 'banner'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toastError('Upload failed', `Failed to upload ${field === 'picture' ? 'profile picture' : 'banner'}: ${errorMessage}`);
     } finally {
       isUploading = false;
     }

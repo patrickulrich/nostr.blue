@@ -77,7 +77,7 @@ export async function loginWithBunker(bunkerUri: string): Promise<void> {
 	let parsed;
 	try {
 		parsed = Nip46Broker.parseBunkerUrl(bunkerUri);
-	} catch (error) {
+	} catch {
 		throw new Error('Invalid bunker URL format. Please check the URL and try again.');
 	}
 
@@ -158,7 +158,7 @@ export async function publishProfile(profile: Profile): Promise<void> {
 	// Check if any relay succeeded
 	// The thunk itself is a Svelte store that contains the results
 	const hasSuccess = Object.values(thunk.results).some(
-		(r: any) => r.status === 'success'
+		(r: { status: string }) => r.status === 'success'
 	);
 
 	if (!hasSuccess) {

@@ -31,8 +31,7 @@
   let isUploading = $state(false);
   let avatarFileInputRef = $state<HTMLInputElement | undefined>(undefined);
 
-  // TODO: Integrate file upload with Blossom
-  // import { uploadFile } from '$lib/blossom';
+  import { uploadFileWithRetry } from '$lib/stores/upload.svelte';
 
   const sanitizeFilename = (filename: string) => {
     return filename.replace(/[^a-z0-9_.-]/gi, '_');
@@ -128,16 +127,13 @@
 
     isUploading = true;
     try {
-      // TODO: Implement file upload using Blossom
-      // const tags = await uploadFile(file);
-      // const url = tags[0]?.[1];
-      // if (url) {
-      //   profileData.picture = url;
-      // }
-      console.log('Upload avatar:', file.name);
-      alert('Avatar upload placeholder - not yet implemented');
-    } catch {
-      alert('Upload failed. Failed to upload avatar. Please try again.');
+      const result = await uploadFileWithRetry(file);
+      profileData.picture = result.url;
+      console.log('Avatar uploaded successfully:', result.url);
+    } catch (error) {
+      console.error('Avatar upload failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Upload failed: ${errorMessage}. Please try again.`);
     } finally {
       isUploading = false;
     }

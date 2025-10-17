@@ -184,7 +184,7 @@ function getPubkeyRelaysSync(pk: string, mode?: RelayMode): string[] {
  * Manages Welshman Router configuration and connection pool
  */
 function createWelshmanStore() {
-	const { subscribe, set, update } = writable<boolean>(false);
+	const { subscribe, set } = writable<boolean>(false);
 
 	return {
 		subscribe,

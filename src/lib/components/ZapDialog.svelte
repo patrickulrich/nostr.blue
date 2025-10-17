@@ -5,6 +5,7 @@
   import { useZaps } from '$lib/stores/zaps.svelte';
   import { getWalletStatus } from '$lib/stores/wallet.svelte';
   import type { TrustedEvent } from '@welshman/util';
+  import QRCode from 'qrcode';
 
   interface Props {
     target: TrustedEvent;
@@ -77,12 +78,21 @@
   // Generate QR code when invoice changes
   $effect(() => {
     if (invoice) {
-      // TODO: Generate QR code using qrcode library
-      // import QRCode from 'qrcode';
-      // QRCode.toDataURL(invoice.toUpperCase(), { width: 256, margin: 2 })
-      //   .then(url => qrCodeUrl = url);
-      console.log('Generate QR code for invoice:', invoice);
-      qrCodeUrl = 'data:image/png;base64,placeholder'; // Placeholder
+      QRCode.toDataURL(invoice.toUpperCase(), {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      })
+        .then(url => {
+          qrCodeUrl = url;
+        })
+        .catch(error => {
+          console.error('Failed to generate QR code:', error);
+          qrCodeUrl = '';
+        });
     } else {
       qrCodeUrl = '';
     }
