@@ -260,7 +260,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
 
   useEffect(() => {
     if (target) {
-      setComment('Zapped with MKStack!');
+      setComment('Zapped via nostr.blue!');
     }
   }, [target]);
 
@@ -316,7 +316,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
   const openInWallet = () => {
     if (invoice) {
       const lightningUrl = `lightning:${invoice}`;
-      window.open(lightningUrl, '_blank');
+      window.open(lightningUrl, '_blank', 'noopener,noreferrer');
     }
   };
 

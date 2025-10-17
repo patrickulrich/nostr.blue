@@ -168,11 +168,6 @@ export function FeedPage() {
     ? (data?.pages.flatMap((page) => page) || [])
     : [...parsedDirectEvents, ...fetchedDVMEvents];
 
-  console.log('[FeedPage] Current feedType:', feedType);
-  console.log('[FeedPage] allEvents count:', allEvents.length);
-  console.log('[FeedPage] parsedDirectEvents:', parsedDirectEvents.length);
-  console.log('[FeedPage] fetchedDVMEvents:', fetchedDVMEvents.length);
-
   const isLoading = feedType === 'following' ? isLoadingFollowing : isLoadingDVM;
   const isRefetching = feedType === 'following' ? isRefetchingFollowing : false;
   const refetch = feedType === 'following' ? refetchFollowing : refetchDVM;

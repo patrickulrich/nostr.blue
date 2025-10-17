@@ -43,6 +43,7 @@ export function RepostButton({ event, className }: RepostButtonProps) {
       size="sm"
       onClick={handleClick}
       disabled={!user || isPending || isLoading}
+      aria-pressed={userReposted}
       className={cn(
         "gap-1 transition-colors",
         userReposted

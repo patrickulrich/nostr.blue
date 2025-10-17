@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createHead, UnheadProvider } from '@unhead/react/client';
-import { BrowserRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import { NostrLoginProvider } from '@nostrify/react/login';
 import NostrProvider from '@/components/NostrProvider';
 import { AppProvider } from '@/components/AppProvider';
@@ -38,9 +38,9 @@ export function TestApp({ children }: TestAppProps) {
           <NostrLoginProvider storageKey='test-login'>
             <NostrProvider>
               <NWCProvider>
-                <BrowserRouter>
+                <MemoryRouter>
                   {children}
-                </BrowserRouter>
+                </MemoryRouter>
               </NWCProvider>
             </NostrProvider>
           </NostrLoginProvider>

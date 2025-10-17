@@ -54,6 +54,11 @@ export function useDVMJob() {
     mutationFn: async (request: DVMJobRequest) => {
       if (!user) throw new Error('User not logged in');
 
+      // Validate DVM request kind
+      if (request.kind < 5000 || request.kind > 5999) {
+        throw new Error(`Invalid DVM job kind: ${request.kind}. Must be between 5000-5999.`);
+      }
+
       const tags: string[][] = [];
 
       // Add input tags
@@ -118,16 +123,20 @@ export function useDVMJob() {
             { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
           );
 
-          return events.map(event => ({
-            id: event.id,
-            jobRequestId,
-            dvmPubkey: event.pubkey,
-            content: event.content,
-            amount: parseInt(event.tags.find(t => t[0] === 'amount')?.[1] || '0'),
-            bolt11: event.tags.find(t => t[0] === 'amount')?.[2],
-            event,
-            createdAt: event.created_at,
-          })).sort((a, b) => b.createdAt - a.createdAt);
+          return events.map(event => {
+            const amountTag = event.tags.find(t => t[0] === 'amount');
+            const bolt11Tag = event.tags.find(t => t[0] === 'bolt11');
+            return {
+              id: event.id,
+              jobRequestId,
+              dvmPubkey: event.pubkey,
+              content: event.content,
+              amount: parseInt(amountTag?.[1] || '0'),
+              bolt11: bolt11Tag?.[1],
+              event,
+              createdAt: event.created_at,
+            };
+          }).sort((a, b) => b.createdAt - a.createdAt);
         } catch (error) {
           console.error('Failed to fetch job results:', error);
           return [];
@@ -154,14 +163,16 @@ export function useDVMJob() {
 
           return events.map(event => {
             const statusTag = event.tags.find(t => t[0] === 'status');
+            const amountTag = event.tags.find(t => t[0] === 'amount');
+            const bolt11Tag = event.tags.find(t => t[0] === 'bolt11');
             return {
               id: event.id,
               jobRequestId,
               dvmPubkey: event.pubkey,
               status: (statusTag?.[1] as DVMJobFeedback['status']) || 'processing',
               message: statusTag?.[2],
-              amount: parseInt(event.tags.find(t => t[0] === 'amount')?.[1] || '0'),
-              bolt11: event.tags.find(t => t[0] === 'amount')?.[2],
+              amount: parseInt(amountTag?.[1] || '0'),
+              bolt11: bolt11Tag?.[1],
               event,
             };
           }).sort((a, b) => b.event.created_at - a.event.created_at);
@@ -181,18 +192,12 @@ export function useDVMJob() {
     return useQuery<NostrEvent[]>({
       queryKey: ['dvm-feed', dvmPubkey, requestKind, resultKind],
       queryFn: async ({ signal }) => {
-        console.log('[useDVMFeed] Querying DVM:', dvmPubkey, 'kind:', resultKind);
         try {
           // Get results from this DVM
           const events = await nostr.query(
             [{ kinds: [resultKind], authors: [dvmPubkey], limit: 50 }],
             { signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) }
           );
-
-          console.log('[useDVMFeed] Received', events.length, 'DVM result events');
-          if (events.length > 0) {
-            console.log('[useDVMFeed] Sample event:', events[0]);
-          }
 
           return events.sort((a, b) => b.created_at - a.created_at);
         } catch (error) {

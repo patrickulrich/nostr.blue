@@ -60,8 +60,41 @@ export function useReactions(eventId: string | undefined) {
 
       return event;
     },
+    onMutate: async () => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['reactions', eventId] });
+
+      // Snapshot the previous value
+      const previousReactions = queryClient.getQueryData<NostrEvent[]>(['reactions', eventId]);
+
+      // Optimistically update with a temporary reaction
+      if (user && eventId) {
+        const optimisticReaction: NostrEvent = {
+          id: 'temp-' + Date.now(),
+          pubkey: user.pubkey,
+          created_at: Math.floor(Date.now() / 1000),
+          kind: 7,
+          tags: [['e', eventId]],
+          content: '+',
+          sig: '',
+        };
+
+        queryClient.setQueryData<NostrEvent[]>(
+          ['reactions', eventId],
+          (old) => [...(old || []), optimisticReaction]
+        );
+      }
+
+      return { previousReactions };
+    },
+    onError: (_err, _variables, context) => {
+      // Rollback on error
+      if (context?.previousReactions) {
+        queryClient.setQueryData(['reactions', eventId], context.previousReactions);
+      }
+    },
     onSuccess: () => {
-      // Invalidate reactions query to refetch
+      // Invalidate reactions query to refetch real data
       queryClient.invalidateQueries({ queryKey: ['reactions', eventId] });
     },
   });
@@ -82,6 +115,29 @@ export function useReactions(eventId: string | undefined) {
       });
 
       return event;
+    },
+    onMutate: async () => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['reactions', eventId] });
+
+      // Snapshot the previous value
+      const previousReactions = queryClient.getQueryData<NostrEvent[]>(['reactions', eventId]);
+
+      // Optimistically remove the user's reaction
+      if (user) {
+        queryClient.setQueryData<NostrEvent[]>(
+          ['reactions', eventId],
+          (old) => (old || []).filter((r) => r.pubkey !== user.pubkey)
+        );
+      }
+
+      return { previousReactions };
+    },
+    onError: (_err, _variables, context) => {
+      // Rollback on error
+      if (context?.previousReactions) {
+        queryClient.setQueryData(['reactions', eventId], context.previousReactions);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reactions', eventId] });

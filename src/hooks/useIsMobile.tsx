@@ -9,7 +9,9 @@ const MOBILE_BREAKPOINT = 768;
  * @returns True if viewport width is below mobile breakpoint
  */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < MOBILE_BREAKPOINT);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false
+  );
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
@@ -17,9 +19,8 @@ export function useIsMobile(): boolean {
       setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
     }
     mql.addEventListener("change", onChange);
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
-  return !!isMobile;
+  return isMobile;
 }

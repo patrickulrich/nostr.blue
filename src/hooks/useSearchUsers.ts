@@ -18,11 +18,12 @@ export interface UserSearchResult {
  */
 export function useSearchUsers(query: string) {
   const { nostr } = useNostr();
+  const q = query.trim();
 
   return useQuery<UserSearchResult[]>({
-    queryKey: ['search-users', query],
+    queryKey: ['search-users', q],
     queryFn: async ({ signal }) => {
-      if (!query || query.length < 2) return [];
+      if (q.length < 2) return [];
 
       // Search for kind 0 events (user metadata)
       // We'll search by fetching recent profiles and filter client-side
@@ -44,7 +45,7 @@ export function useSearchUsers(query: string) {
           const name = metadata.name?.toLowerCase() || '';
           const displayName = metadata.display_name?.toLowerCase() || '';
           const nip05 = metadata.nip05?.toLowerCase() || '';
-          const queryLower = query.toLowerCase();
+          const queryLower = q.toLowerCase();
 
           // Check if query matches any field
           if (
@@ -70,7 +71,7 @@ export function useSearchUsers(query: string) {
 
       return results;
     },
-    enabled: query.length >= 2,
+    enabled: q.length >= 2,
     staleTime: 30000,
   });
 }

@@ -58,7 +58,7 @@ export function RelaySelector(props: RelaySelectorProps) {
 
   // Handle adding a custom relay
   const handleAddCustomRelay = (url: string) => {
-    setSelectedRelay?.(normalizeRelayUrl(url));
+    setSelectedRelay(normalizeRelayUrl(url));
     setOpen(false);
     setInputValue("");
   };

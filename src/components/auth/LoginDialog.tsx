@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useLoginActions } from '@/hooks/useLoginActions';
 import { cn } from '@/lib/utils';
+import { nip19 } from 'nostr-tools';
 
 interface LoginDialogProps {
   isOpen: boolean;
@@ -19,11 +20,21 @@ interface LoginDialogProps {
 }
 
 const validateNsec = (nsec: string) => {
-  return /^nsec1[a-zA-Z0-9]{58}$/.test(nsec);
+  try {
+    const decoded = nip19.decode(nsec);
+    return decoded.type === 'nsec' && typeof decoded.data === 'string';
+  } catch {
+    return false;
+  }
 };
 
 const validateBunkerUri = (uri: string) => {
-  return uri.startsWith('bunker://');
+  try {
+    const u = new URL(uri);
+    return u.protocol.toLowerCase() === 'bunker:';
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -79,8 +90,6 @@ const LoginDialog: React.FC<LoginDialogProps> = ({ isOpen, onClose, onLogin, onS
       onClose();
     } catch (e: unknown) {
       const error = e as Error;
-      console.error('Bunker login failed:', error);
-      console.error('Nsec login failed:', error);
       console.error('Extension login failed:', error);
       setErrors(prev => ({
         ...prev,
@@ -187,7 +196,7 @@ const LoginDialog: React.FC<LoginDialogProps> = ({ isOpen, onClose, onLogin, onS
     }
   };
 
-  const defaultTab = 'nostr' in window ? 'extension' : 'key';
+  const defaultTab = typeof window !== 'undefined' && 'nostr' in window ? 'extension' : 'key';
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
