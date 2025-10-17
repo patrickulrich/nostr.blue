@@ -14,6 +14,7 @@ import DVMPage from "./pages/DVMPage";
 import DVMFeedPage from "./pages/DVMFeedPage";
 import CommunitiesPage from "./pages/CommunitiesPage";
 import CommunityFeedPage from "./pages/CommunityFeedPage";
+import HashtagFeedPage from "./pages/HashtagFeedPage";
 import SettingsPage from "./pages/SettingsPage";
 import MessagesPage from "./pages/MessagesPage";
 import { NIP19Router } from "./components/NIP19Router";
@@ -47,6 +48,7 @@ export function AppRouter() {
         <Route path="/dvm/:dvmId" element={<DVMFeedPage />} />
         <Route path="/communities" element={<CommunitiesPage />} />
         <Route path="/community/:aTag" element={<CommunityFeedPage />} />
+        <Route path="/t/:tag" element={<HashtagFeedPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Router />} />

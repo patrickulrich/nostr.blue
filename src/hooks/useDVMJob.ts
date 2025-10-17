@@ -191,7 +191,7 @@ export function useDVMJob() {
               jobRequestId,
               dvmPubkey: event.pubkey,
               content: event.content,
-              amount: parseInt(amountTag?.[1] || '0'),
+              amount: parseInt(amountTag?.[1] || '0', 10),
               bolt11: bolt11Tag?.[1],
               event,
               createdAt: event.created_at,
@@ -232,7 +232,7 @@ export function useDVMJob() {
               dvmPubkey: event.pubkey,
               status: (statusTag?.[1] as DVMJobFeedback['status']) || 'processing',
               message: statusTag?.[2],
-              amount: parseInt(amountTag?.[1] || '0'),
+              amount: parseInt(amountTag?.[1] || '0', 10),
               bolt11: bolt11Tag?.[1],
               event,
             };

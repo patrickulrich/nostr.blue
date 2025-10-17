@@ -10,14 +10,25 @@ export interface UseFeedOptions {
   excludeReplies?: boolean; // Exclude replies (top-level posts only)
 }
 
+export interface UseFeedQueryOptions {
+  enabled?: boolean;
+  staleTime?: number;
+  refetchOnMount?: boolean;
+  refetchOnWindowFocus?: boolean;
+}
+
 /**
  * Hook for fetching an infinite-scrolling feed of Nostr events.
  * Supports filtering by authors, kinds, hashtags, and optionally excluding replies.
  *
  * @param options - Feed configuration options
+ * @param queryOptions - React Query options (e.g., enabled, staleTime)
  * @returns Infinite query result with paginated events
  */
-export function useFeed(options: UseFeedOptions = {}) {
+export function useFeed(
+  options: UseFeedOptions = {},
+  queryOptions?: UseFeedQueryOptions
+) {
   const { nostr } = useNostr();
   const {
     authors,
@@ -106,8 +117,9 @@ export function useFeed(options: UseFeedOptions = {}) {
       return oldestEvent ? oldestEvent.created_at - 1 : undefined;
     },
     initialPageParam: undefined,
-    refetchOnWindowFocus: false,
-    refetchOnMount: true, // Always refetch when component mounts
-    staleTime: 30000, // Consider data fresh for 30 seconds
+    enabled: queryOptions?.enabled !== undefined ? queryOptions.enabled : true,
+    refetchOnWindowFocus: queryOptions?.refetchOnWindowFocus !== undefined ? queryOptions.refetchOnWindowFocus : false,
+    refetchOnMount: queryOptions?.refetchOnMount !== undefined ? queryOptions.refetchOnMount : true,
+    staleTime: queryOptions?.staleTime !== undefined ? queryOptions.staleTime : 30000,
   });
 }
