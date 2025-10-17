@@ -24,9 +24,15 @@
 	const toast = useToast();
 	const publish = useNostrPublish();
 
+	interface AuthorMetadata {
+		display_name?: string;
+		name?: string;
+		picture?: string;
+	}
+
 	// Fetch author profile
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	const authorQuery = createQuery(() => ({
+	const authorQuery = createQuery<AuthorMetadata>(() => ({
 		queryKey: ['profile', event.pubkey],
 		queryFn: async () => {
 			const profiles = await load({
@@ -55,14 +61,14 @@
 	let npub = $derived(nip19.npubEncode(event.pubkey));
 
 	// Get display name from metadata
-	// @ts-expect-error - Query data types need refinement
 	let displayName = $derived(
-		$authorQuery.data?.display_name || $authorQuery.data?.name || genUserName(event.pubkey)
+		($authorQuery.data as AuthorMetadata | undefined)?.display_name ||
+		($authorQuery.data as AuthorMetadata | undefined)?.name ||
+		genUserName(event.pubkey)
 	);
 
 	// Get profile picture
-	// @ts-expect-error - Query data types need refinement
-	let profilePicture = $derived($authorQuery.data?.picture);
+	let profilePicture = $derived(($authorQuery.data as AuthorMetadata | undefined)?.picture);
 
 	// Format timestamp
 	let formattedTime = $derived(
@@ -75,9 +81,14 @@
 		})
 	);
 
+	interface ReactionsData {
+		likes: number;
+		hasLiked: boolean;
+	}
+
 	// Query reactions for this note
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	const reactionsQuery = createQuery(() => ({
+	const reactionsQuery = createQuery<ReactionsData>(() => ({
 		queryKey: ['reactions', event.id],
 		queryFn: async () => {
 			const reactions = await load({
@@ -98,12 +109,16 @@
 		}
 	}));
 
+	// Derived variables for reactions with proper typing
+	let reactionsData = $derived($reactionsQuery.data as ReactionsData | undefined);
+	let hasLiked = $derived(reactionsData?.hasLiked ?? false);
+	let likesCount = $derived(reactionsData?.likes ?? 0);
+
 	// Like mutation
 	const likeMutation = createMutation({
 		mutationFn: async () => {
 			if (!$currentUser) {
-				// @ts-expect-error - Toast API types need alignment
-				toast.error('Please log in to like notes');
+				toast.toastError('Please log in to like notes');
 				throw new Error('Not logged in');
 			}
 
@@ -117,13 +132,11 @@
 			});
 		},
 		onSuccess: () => {
-			// @ts-expect-error - Toast API types need alignment
-			toast.success('Liked!');
+			toast.toastSuccess('Liked!');
 			$reactionsQuery.refetch();
 		},
 		onError: () => {
-			// @ts-expect-error - Toast API types need alignment
-			toast.error('Failed to like note');
+			toast.toastError('Failed to like note');
 		}
 	});
 
@@ -131,8 +144,7 @@
 	const repostMutation = createMutation({
 		mutationFn: async () => {
 			if (!$currentUser) {
-				// @ts-expect-error - Toast API types need alignment
-				toast.error('Please log in to repost notes');
+				toast.toastError('Please log in to repost notes');
 				throw new Error('Not logged in');
 			}
 
@@ -146,18 +158,16 @@
 			});
 		},
 		onSuccess: () => {
-			// @ts-expect-error - Toast API types need alignment
-			toast.success('Reposted!');
+			toast.toastSuccess('Reposted!');
 		},
 		onError: () => {
-			// @ts-expect-error - Toast API types need alignment
-			toast.error('Failed to repost note');
+			toast.toastError('Failed to repost note');
 		}
 	});
 
 	function handleLike() {
-		if ($reactionsQuery.data?.hasLiked) {
-			toast.info('You already liked this note');
+		if (hasLiked) {
+			toast.toastInfo('You already liked this note');
 			return;
 		}
 		$likeMutation.mutate();
@@ -236,15 +246,15 @@
 			<!-- Like -->
 			<button
 				class="flex items-center gap-1.5 text-sm transition-colors group"
-				class:text-muted-foreground={!$reactionsQuery.data?.hasLiked}
-				class:hover:text-red-500={!$reactionsQuery.data?.hasLiked}
-				class:text-red-500={$reactionsQuery.data?.hasLiked}
+				class:text-muted-foreground={!hasLiked}
+				class:hover:text-red-500={!hasLiked}
+				class:text-red-500={hasLiked}
 				onclick={handleLike}
 				disabled={$likeMutation.isPending || !$currentUser}
 			>
 				<svg
 					class="w-4 h-4 group-hover:scale-110 transition-transform"
-					fill={$reactionsQuery.data?.hasLiked ? 'currentColor' : 'none'}
+					fill={hasLiked ? 'currentColor' : 'none'}
 					stroke="currentColor"
 					viewBox="0 0 24 24"
 				>
@@ -255,7 +265,7 @@
 						d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
 					/>
 				</svg>
-				<span>{$reactionsQuery.data?.likes ?? 0}</span>
+				<span>{likesCount}</span>
 			</button>
 
 			<!-- Repost -->

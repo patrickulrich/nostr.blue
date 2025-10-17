@@ -145,7 +145,9 @@
       <div
         class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[425px] max-h-[95vh] overflow-hidden bg-background rounded-lg shadow-lg"
         onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
         role="dialog"
+        tabindex="-1"
       >
         <div class="p-6">
           <h2 class="text-lg font-semibold mb-2">

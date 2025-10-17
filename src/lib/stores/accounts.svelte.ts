@@ -49,7 +49,7 @@ export function useLoggedInAccounts() {
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
 	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
 	// This pattern works in React but not in Svelte. See: https://tanstack.com/query/latest/docs/framework/svelte/guides/queries
-	return createQuery(() => {
+	return createQuery<AccountsData>(() => {
 		const $sessions = get(allSessions);
 		const currentPubkey = get(pubkey);
 

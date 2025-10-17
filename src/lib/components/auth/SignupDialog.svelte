@@ -29,7 +29,7 @@
   });
   let isPublishing = $state(false);
   let isUploading = $state(false);
-  let avatarFileInputRef: HTMLInputElement;
+  let avatarFileInputRef = $state<HTMLInputElement | undefined>(undefined);
 
   // TODO: Integrate file upload with Blossom
   // import { uploadFile } from '$lib/blossom';
@@ -217,7 +217,9 @@
     <div
       class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] p-0 overflow-hidden rounded-2xl flex flex-col bg-background shadow-lg")}
       onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
       role="dialog"
+      tabindex="-1"
     >
       <!-- Header -->
       <div class="px-6 pt-6 pb-1 relative flex-shrink-0">

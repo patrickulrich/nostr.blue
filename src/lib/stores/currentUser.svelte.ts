@@ -38,5 +38,5 @@ export function getCurrentUserMetadata(): Profile | undefined {
 	if (!currentPubkey) return undefined;
 
 	const author = useAuthor(currentPubkey);
-	return author.data?.metadata;
+	return get(author).data?.metadata;
 }

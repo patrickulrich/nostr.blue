@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { load } from '@welshman/net';
+	import type { TrustedEvent } from '@welshman/util';
 	import Note from '$lib/components/Note.svelte';
 	import NoteComposer from '$lib/components/NoteComposer.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Card from '$lib/components/ui/card';
-	import { LoginArea } from '$lib/components/auth/LoginArea.svelte';
+	import LoginArea from '$lib/components/auth/LoginArea.svelte';
 	import { currentUser } from '$lib/stores/auth';
 
 	// Composer dialog state
@@ -25,8 +26,9 @@
 	}
 
 	// Query for recent notes (kind 1)
-	const feedQuery = createQuery(() => ({
-		queryKey: ['feed', 'global'],
+	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	const feedQuery = createQuery<TrustedEvent[]>(() => ({
+		queryKey: ['feed', 'global'] as const,
 		queryFn: async ({ signal }) => {
 			const events = await load({
 				relays: [],
@@ -45,6 +47,9 @@
 		staleTime: 30000, // 30 seconds
 		refetchInterval: 60000 // Refetch every minute
 	}));
+
+	// Derived variable with proper typing
+	let feedData = $derived($feedQuery.data as TrustedEvent[] | undefined);
 </script>
 
 <div class="min-h-screen bg-background">
@@ -114,7 +119,7 @@
 						</button>
 					</Card.Content>
 				</Card.Root>
-			{:else if $feedQuery.data && $feedQuery.data.length === 0}
+			{:else if feedData && feedData.length === 0}
 				<!-- Empty state -->
 				<Card.Root class="border-dashed">
 					<Card.Content class="py-12 text-center">
@@ -123,9 +128,9 @@
 						</p>
 					</Card.Content>
 				</Card.Root>
-			{:else if $feedQuery.data}
+			{:else if feedData}
 				<!-- Notes list -->
-				{#each $feedQuery.data as event (event.id)}
+				{#each feedData as event (event.id)}
 					<Note {event} showReplyButton={true} onReply={handleReply} />
 				{/each}
 			{/if}

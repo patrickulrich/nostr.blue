@@ -19,14 +19,15 @@
 		{#if part.type === 'text'}
 			{part.value}
 		{:else if part.type === 'link'}
-			<!-- @ts-expect-error - Welshman content types need refinement -->
+			{@const url = typeof part.value === 'string' ? part.value : part.value.url}
+			{@const hrefValue = typeof url === 'string' ? url : url.toString()}
 			<a
-				href={part.value}
+				href={hrefValue}
 				target="_blank"
 				rel="noopener noreferrer"
 				class="text-primary hover:underline"
 			>
-				{part.value}
+				{hrefValue}
 			</a>
 		{:else if part.type === 'invoice'}
 			<code class="px-2 py-1 bg-muted rounded text-sm font-mono">
@@ -36,10 +37,15 @@
 			<code class="px-1 bg-muted rounded text-sm font-mono">
 				{part.value}
 			</code>
-		{:else if part.type === 'event' || part.type === 'profile'}
-			<!-- @ts-expect-error - Welshman content types need refinement -->
-			<a href="/{part.value}" class="text-primary hover:underline font-medium">
-				@{part.value.slice(0, 8)}...
+		{:else if part.type === 'event'}
+			{@const eventValue = typeof part.value === 'object' && 'id' in part.value ? part.value.id : String(part.value)}
+			<a href="/{eventValue}" class="text-primary hover:underline font-medium">
+				@{eventValue.slice(0, 8)}...
+			</a>
+		{:else if part.type === 'profile'}
+			{@const profileValue = typeof part.value === 'object' && 'pubkey' in part.value ? part.value.pubkey : String(part.value)}
+			<a href="/{profileValue}" class="text-primary hover:underline font-medium">
+				@{profileValue.slice(0, 8)}...
 			</a>
 		{:else if part.type === 'topic'}
 			<a href="/search?q={encodeURIComponent(part.value)}" class="text-primary hover:underline">

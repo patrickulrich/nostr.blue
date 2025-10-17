@@ -32,7 +32,7 @@
     file?: string;
     extension?: string;
   }>({});
-  let fileInputRef: HTMLInputElement;
+  let fileInputRef = $state<HTMLInputElement | undefined>(undefined);
   let currentTab = $state<'extension' | 'key' | 'bunker'>('extension');
 
   // Reset state when dialog opens/closes
@@ -185,7 +185,9 @@
     <div
       class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] max-h-[90dvh] p-0 overflow-hidden rounded-2xl overflow-y-scroll bg-background shadow-lg")}
       onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
       role="dialog"
+      tabindex="-1"
     >
       <!-- Header -->
       <div class="px-6 pt-6 pb-1 relative">

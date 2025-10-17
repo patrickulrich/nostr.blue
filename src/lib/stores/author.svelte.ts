@@ -23,10 +23,10 @@ import { load } from '@welshman/net';
  * {/if}
  * ```
  */
-export function useAuthor(pubkey: string | undefined) {
+export function useAuthor(pubkey: string | undefined): ReturnType<typeof createQuery<AuthorData>> {
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
 	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
-	return createQuery(() => ({
+	return createQuery<AuthorData>(() => ({
 		queryKey: ['author', pubkey ?? ''] as const,
 		queryFn: async ({ signal }) => {
 			if (!pubkey) {

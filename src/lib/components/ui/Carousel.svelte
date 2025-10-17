@@ -23,10 +23,10 @@
   let canScrollPrev = $state(false);
   let canScrollNext = $state(false);
 
-  const finalOpts: EmblaOptionsType = {
+  const finalOpts = {
     ...opts,
     axis: orientation === 'horizontal' ? 'x' : 'y'
-  };
+  } as EmblaOptionsType;
 
   function scrollPrev() {
     emblaApi?.scrollPrev();
@@ -67,9 +67,11 @@
   });
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   bind:this={emblaNode}
-  use:emblaCarouselSvelte={finalOpts}
+  use:emblaCarouselSvelte={{ options: finalOpts, plugins: [] }}
   onemblaInit={onInit}
   class={cn('relative', className)}
   role="region"

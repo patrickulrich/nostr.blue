@@ -33,7 +33,9 @@
     )}
     data-state="open"
     onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => e.stopPropagation()}
     role="alertdialog"
+    tabindex="-1"
   >
     {#if children}
       {@render children()}

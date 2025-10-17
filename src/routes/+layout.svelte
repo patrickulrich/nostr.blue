@@ -9,6 +9,12 @@
   import { appConfig, applyTheme, setupThemeWatcher } from '$lib/stores/appStore';
   import { welshmanRouter } from '$lib/stores/welshman';
 
+  interface Props {
+    children?: import('svelte').Snippet;
+  }
+
+  let { children }: Props = $props();
+
   // Scroll to top on navigation
   afterNavigate(() => {
     window.scrollTo(0, 0);
@@ -44,5 +50,7 @@
 </script>
 
 <QueryClientProvider client={queryClient}>
-  <slot />
+  {#if children}
+    {@render children()}
+  {/if}
 </QueryClientProvider>

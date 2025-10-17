@@ -62,7 +62,7 @@ export function useZaps(
 	// Query for zap receipts
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
 	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
-	const zapQuery = createQuery(() => ({
+	const zapQuery = createQuery<TrustedEvent[], Error, ZapQueryData>(() => ({
 		queryKey: ['zaps', target?.id] as const,
 		staleTime: 30000, // 30 seconds
 		refetchInterval: 60000, // 1 minute
@@ -187,7 +187,7 @@ export function useZaps(
 
 			// Get the current author data
 			const authorQuery = author;
-			const authorData = authorQuery.data;
+			const authorData = get(authorQuery).data;
 
 			if (!authorData?.metadata || !authorData?.event) {
 				toastError('Author profile not loaded', 'Could not load the author profile.');
@@ -203,7 +203,7 @@ export function useZaps(
 			}
 
 			// Get zap endpoint using the old reliable method
-			const zapEndpoint = await nip57.getZapEndpoint(authorData.event!);
+			const zapEndpoint = await nip57.getZapEndpoint(authorData.event! as Event);
 			if (!zapEndpoint) {
 				toastError('Zap endpoint not found', 'Could not find a zap endpoint for the author.');
 				isZapping = false;

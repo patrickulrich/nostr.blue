@@ -3,6 +3,7 @@
   import { genUserName } from '$lib/genUserName';
   import NoteContent from '$lib/components/NoteContent.svelte';
   import CommentForm from './CommentForm.svelte';
+  import Comment from './Comment.svelte';
   import type { TrustedEvent } from '@welshman/util';
 
   interface Props {
@@ -159,7 +160,7 @@
   {#if hasReplies && showReplies}
     <div class="space-y-3">
       {#each replies as reply (reply.id)}
-        <svelte:self
+        <Comment
           {root}
           comment={reply}
           depth={depth + 1}

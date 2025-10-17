@@ -83,7 +83,9 @@
       <div
         class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[500px] max-h-[80vh] overflow-y-auto bg-background rounded-lg shadow-lg"
         onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
         role="dialog"
+        tabindex="-1"
       >
         <div class="p-6 space-y-4">
           <div class="space-y-2">
@@ -202,6 +204,7 @@
                           type="button"
                           onclick={() => handleSetActive(connection.connectionString)}
                           class="p-1 hover:bg-accent rounded"
+                          aria-label="Set as active wallet"
                         >
                           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -212,6 +215,7 @@
                         type="button"
                         onclick={() => handleRemoveConnection(connection.connectionString)}
                         class="p-1 hover:bg-accent rounded"
+                        aria-label="Remove wallet connection"
                       >
                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -265,7 +269,9 @@
       <div
         class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[425px] bg-background rounded-lg shadow-lg p-6"
         onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
         role="dialog"
+        tabindex="-1"
       >
         <h2 class="text-lg font-semibold mb-2">Connect NWC Wallet</h2>
         <p class="text-sm text-muted-foreground mb-4">

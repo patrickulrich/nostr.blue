@@ -42,7 +42,7 @@ function getTagValue(event: TrustedEvent, tagName: string): string | undefined {
 export function useComments(root: TrustedEvent | URL | undefined, limit?: number) {
 	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
 	// TODO: Refactor to use createQuery directly in components instead of wrapping in functions.
-	return createQuery(() => ({
+	return createQuery<CommentsData>(() => ({
 		queryKey: ['comments', root instanceof URL ? root.toString() : root?.id, limit] as const,
 		queryFn: async ({ signal }) => {
 			if (!root) {

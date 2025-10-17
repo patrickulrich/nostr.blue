@@ -76,6 +76,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class={cn('flex items-center gap-2', disabled && 'opacity-50', containerClass)}
   onclick={focusInput}

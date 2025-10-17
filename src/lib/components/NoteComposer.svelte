@@ -30,7 +30,7 @@
 	async function handleSubmit() {
 		if (!content.trim() || isOverLimit) return;
 		if (!$currentUser) {
-			toast.error('Please log in to publish notes');
+			toast.toastError('Please log in to publish notes');
 			return;
 		}
 
@@ -48,11 +48,11 @@
 				tags
 			});
 
-			toast.success('Note published successfully!');
+			toast.toastSuccess('Note published successfully!');
 			content = '';
 			onClose();
 		} catch (error) {
-			toast.error('Failed to publish note');
+			toast.toastError('Failed to publish note');
 			console.error('Publish error:', error);
 		}
 	}

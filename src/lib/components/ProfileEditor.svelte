@@ -20,9 +20,21 @@
 	const queryClient = useQueryClient();
 	const toast = useToast();
 
+	interface ProfileMetadata {
+		name?: string;
+		display_name?: string;
+		about?: string;
+		picture?: string;
+		banner?: string;
+		website?: string;
+		nip05?: string;
+		lud16?: string;
+	}
+
 	// Fetch current profile
-	const profileQuery = createQuery(() => ({
-		queryKey: ['my-profile', $currentPubkey],
+	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	const profileQuery = createQuery<ProfileMetadata>(() => ({
+		queryKey: ['my-profile', $currentPubkey ?? ''] as const,
 		queryFn: async () => {
 			if (!$currentPubkey) return {};
 
@@ -62,7 +74,7 @@
 	// Initialize form when profile loads
 	$effect(() => {
 		if ($profileQuery.data) {
-			const profile = $profileQuery.data;
+			const profile = $profileQuery.data as ProfileMetadata;
 			name = profile.name || '';
 			displayName = profile.display_name || '';
 			about = profile.about || '';
@@ -103,11 +115,11 @@
 			queryClient.invalidateQueries({ queryKey: ['my-profile'] });
 			queryClient.invalidateQueries({ queryKey: ['profile', $currentPubkey] });
 
-			toast.success('Profile updated successfully!');
+			toast.toastSuccess('Profile updated successfully!');
 			onClose();
 		},
 		onError: (error) => {
-			toast.error('Failed to update profile');
+			toast.toastError('Failed to update profile');
 			console.error('Profile update error:', error);
 		}
 	});

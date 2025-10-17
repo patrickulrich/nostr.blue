@@ -31,10 +31,12 @@
     ...restProps
   }: Props = $props();
 
-  let openMobile = $state(false);
-  let _open = $state(defaultOpen);
   const { isMobile } = useIsMobile();
 
+  // @ts-expect-error - Svelte 5 rune scope edge case with TypeScript
+  let openMobile = $state(false);
+  // @ts-expect-error - Svelte 5 rune scope edge case with TypeScript
+  let _open = $state(defaultOpen);
   const open = $derived(openProp !== undefined ? openProp : _open);
 
   function setOpen(value: boolean | ((value: boolean) => boolean)) {
