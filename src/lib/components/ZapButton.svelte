@@ -22,7 +22,6 @@
   }: Props = $props();
 
   // Query author metadata for lightning address
-  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
   const authorQuery = createQuery<AuthorData>(() => ({
     queryKey: ['author', target.pubkey],
     queryFn: ({ signal }) => fetchAuthor(target.pubkey, signal),
@@ -30,7 +29,7 @@
     staleTime: 5 * 60 * 1000 // 5 minutes
   }));
 
-  const author = $derived($authorQuery.data as AuthorData | undefined);
+  const author = $derived(authorQuery.data as AuthorData | undefined);
 
   // Get wallet status
   const walletStatus = getWalletStatus();
@@ -43,8 +42,8 @@
   );
 
   // Use external data if provided, otherwise use fetched data
-  const totalSats = $derived(externalZapData?.totalSats ?? ($zaps.data?.totalSats || 0));
-  const showLoading = $derived(externalZapData?.isLoading || $zaps.isLoading);
+  const totalSats = $derived(externalZapData?.totalSats ?? (zaps.data?.totalSats || 0));
+  const showLoading = $derived(externalZapData?.isLoading || zaps.isLoading);
 
   // Don't show zap button if user is not logged in, is the author, or author has no lightning address
   const shouldShow = $derived(

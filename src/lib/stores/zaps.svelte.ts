@@ -1,16 +1,16 @@
 import type { TrustedEvent } from '@welshman/util';
 import { ZAP_RESPONSE } from '@welshman/util';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { load } from '@welshman/net';
+import { loadWithRouter } from '$lib/services/outbox';
 import { pubkey, signer } from '@welshman/app';
 import { fetchAuthor } from './author.svelte';
-import { appConfig } from './appStore';
 import { nip57 } from 'nostr-tools';
 import type { Event } from 'nostr-tools';
 import type { WebLNProvider } from '@webbtc/webln-types';
 import { nwcStore, type NWCConnection } from './nwc.svelte';
 import { toastError, toastSuccess } from './toast.svelte';
 import { get } from 'svelte/store';
+import { Router } from '@welshman/router';
 
 /**
  * Query zap receipts for a Nostr event
@@ -62,7 +62,6 @@ export function useZaps(
 	// Query for zap receipts
 	// Note: This function provides complete zaps management including query, state, and zap functionality.
 	// It's intentionally kept as a module rather than refactored to a utility function.
-	// @ts-expect-error - TanStack Query type inference through wrapper function
 	const zapQuery = createQuery<TrustedEvent[], Error, ZapQueryData>(() => ({
 		queryKey: ['zaps', target?.id] as const,
 		staleTime: 30000, // 30 seconds
@@ -71,11 +70,11 @@ export function useZaps(
 			if (!target) return [];
 
 			// Query for zap receipts for this specific event
+			// Router will query the event author's relays where zaps should be posted
 			if (target.kind >= 30000 && target.kind < 40000) {
 				// Addressable event
 				const identifier = target.tags.find((t) => t[0] === 'd')?.[1] || '';
-				const events = await load({
-					relays: [],
+				const events = await loadWithRouter({
 					filters: [
 						{
 							kinds: [ZAP_RESPONSE],
@@ -87,8 +86,7 @@ export function useZaps(
 				return events;
 			} else {
 				// Regular event
-				const events = await load({
-					relays: [],
+				const events = await loadWithRouter({
 					filters: [
 						{
 							kinds: [ZAP_RESPONSE],
@@ -211,13 +209,14 @@ export function useZaps(
 
 			const zapAmount = amount * 1000; // convert to millisats
 
-			const config = get(appConfig);
+			// Use router to get user's write relays for publishing zap receipt
+			const relays = Router.get().FromUser().getUrls();
 
 			const zapRequest = nip57.makeZapRequest({
 				profile: target.pubkey,
 				event: event,
 				amount: zapAmount,
-				relays: [config.relayUrl],
+				relays: relays.length > 0 ? relays : Router.get().getDefaultRelays(),
 				comment
 			});
 

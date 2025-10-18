@@ -1,6 +1,6 @@
 import type { TrustedEvent, Profile } from '@welshman/util';
 import { PROFILE } from '@welshman/util';
-import { load } from '@welshman/net';
+import { loadWithRouter } from '$lib/services/outbox';
 
 /**
  * Fetch author profile by pubkey
@@ -35,8 +35,8 @@ export async function fetchAuthor(
 		return {};
 	}
 
-	const events = await load({
-		relays: [], // Will use default relays from router
+	// Router will use indexer relays for profile (kind 0) queries
+	const events = await loadWithRouter({
 		filters: [{ kinds: [PROFILE], authors: [pubkey], limit: 1 }],
 		signal,
 	});

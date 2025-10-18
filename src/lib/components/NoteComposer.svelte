@@ -42,7 +42,7 @@
 		}
 
 		try {
-			await $publish.mutateAsync({
+			await publish.mutateAsync({
 				kind: 1,
 				content: content.trim(),
 				tags
@@ -81,7 +81,7 @@
 				bind:value={content}
 				placeholder="What's on your mind?"
 				class="min-h-[200px] resize-none"
-				disabled={$publish.isPending}
+				disabled={publish.isPending}
 			/>
 
 			<!-- Character counter -->
@@ -99,14 +99,14 @@
 		</div>
 
 		<Dialog.Footer class="gap-2">
-			<Button variant="outline" onclick={handleCancel} disabled={$publish.isPending}>
+			<Button variant="outline" onclick={handleCancel} disabled={publish.isPending}>
 				Cancel
 			</Button>
 			<Button
 				onclick={handleSubmit}
-				disabled={!content.trim() || isOverLimit || $publish.isPending || !$currentUser}
+				disabled={!content.trim() || isOverLimit || publish.isPending || !$currentUser}
 			>
-				{#if $publish.isPending}
+				{#if publish.isPending}
 					Publishing...
 				{:else}
 					{replyTo ? 'Reply' : 'Publish'}

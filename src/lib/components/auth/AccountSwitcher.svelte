@@ -2,7 +2,6 @@
   // NOTE: This file is stable and usually should not be modified.
   // It is important that all functionality in this file is preserved, and should only be modified if explicitly requested.
 
-  import RelaySelector from '$lib/components/RelaySelector.svelte';
   import WalletModal from '$lib/components/WalletModal.svelte';
   import { genUserName } from '$lib/genUserName';
   import { currentUser, otherSessions, switchAccount, logout } from '$lib/stores/auth';
@@ -54,7 +53,10 @@
 
   $effect(() => {
     if (isDropdownOpen) {
-      document.addEventListener('click', handleClickOutside);
+      // Add listener on next tick to avoid catching the opening click
+      setTimeout(() => {
+        document.addEventListener('click', handleClickOutside);
+      }, 0);
       return () => document.removeEventListener('click', handleClickOutside);
     }
   });
@@ -65,7 +67,10 @@
     <!-- Trigger Button -->
     <button
       type="button"
-      onclick={() => (isDropdownOpen = !isDropdownOpen)}
+      onclick={(e) => {
+        e.stopPropagation();
+        isDropdownOpen = !isDropdownOpen;
+      }}
       class="flex items-center gap-3 p-3 rounded-full hover:bg-accent transition-all w-full text-foreground"
     >
       <!-- Avatar -->
@@ -89,13 +94,7 @@
 
     <!-- Dropdown Content -->
     {#if isDropdownOpen}
-      <div class="absolute bottom-full left-0 mb-2 w-56 bg-popover border rounded-md shadow-lg p-2 z-50 animate-scale-in">
-        <!-- Switch Relay Section -->
-        <div class="font-medium text-sm px-2 py-1.5">Switch Relay</div>
-        <RelaySelector class="w-full mb-2" />
-
-        <div class="h-px bg-border my-2"></div>
-
+      <div class="absolute top-full right-0 mt-2 w-64 bg-popover border rounded-md shadow-lg p-2 z-50 animate-scale-in">
         <!-- Switch Account Section -->
         <div class="font-medium text-sm px-2 py-1.5">Switch Account</div>
         {#each otherUsers as user}

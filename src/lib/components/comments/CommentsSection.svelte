@@ -33,7 +33,6 @@
   }
 
   // Query comments from the network
-  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
   const commentsQuery = createQuery<CommentsData>(() => ({
     queryKey: ['comments', getRootId(root), limit],
     queryFn: ({ signal }) => fetchComments(root, limit, signal),
@@ -42,9 +41,9 @@
     refetchInterval: 60000 // 1 minute
   }));
 
-  const commentsData = $derived($commentsQuery.data as CommentsData | undefined);
-  const isLoading = $derived($commentsQuery.isLoading);
-  const error = $derived($commentsQuery.error);
+  const commentsData = $derived(commentsQuery.data as CommentsData | undefined);
+  const isLoading = $derived(commentsQuery.isLoading);
+  const error = $derived(commentsQuery.error);
 
   const comments = $derived(commentsData?.topLevelComments || []);
 </script>

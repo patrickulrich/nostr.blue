@@ -4,6 +4,7 @@
 
   import { cn } from '$lib/utils';
   import { browser } from '$app/environment';
+  import { Dialog as DialogPrimitive } from 'bits-ui';
   import { generateSecretKey, nip19 } from 'nostr-tools';
   import { loginWithNsec, publishProfile } from '$lib/stores/auth';
 
@@ -203,20 +204,21 @@
 </script>
 
 {#if isOpen}
-  <!-- Dialog Overlay -->
-  <div
-    class="fixed inset-0 z-50 bg-black/50"
-    onclick={onClose}
-    role="presentation"
-  >
-    <!-- Dialog Content -->
+  <DialogPrimitive.Portal>
+    <!-- Dialog Overlay -->
     <div
-      class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] p-0 overflow-hidden rounded-2xl flex flex-col bg-background shadow-lg")}
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="dialog"
-      tabindex="-1"
+      class="fixed inset-0 z-50 bg-black/50"
+      onclick={onClose}
+      role="presentation"
     >
+      <!-- Dialog Content -->
+      <div
+        class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] p-0 overflow-hidden rounded-2xl flex flex-col bg-background shadow-lg")}
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+        role="dialog"
+        tabindex="-1"
+      >
       <!-- Header -->
       <div class="px-6 pt-6 pb-1 relative flex-shrink-0">
         <h2 class="font-semibold text-center text-lg">
@@ -455,5 +457,5 @@
         {/if}
       </div>
     </div>
-  </div>
+  </DialogPrimitive.Portal>
 {/if}

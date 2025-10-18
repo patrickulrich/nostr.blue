@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { TrustedEvent } from '@welshman/util';
 	import { createQuery, createMutation } from '@tanstack/svelte-query';
-	import { load } from '@welshman/net';
+	import { loadWithRouter } from '$lib/services/outbox';
 	import { nip19 } from 'nostr-tools';
 	import * as Card from '$lib/components/ui/card';
 	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
@@ -30,13 +30,11 @@
 		picture?: string;
 	}
 
-	// Fetch author profile
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// Fetch author profile - router will use indexer relays
 	const authorQuery = createQuery<AuthorMetadata>(() => ({
 		queryKey: ['profile', event.pubkey],
 		queryFn: async () => {
-			const profiles = await load({
-				relays: [],
+			const profiles = await loadWithRouter({
 				filters: [
 					{
 						kinds: [0],
@@ -62,13 +60,13 @@
 
 	// Get display name from metadata
 	let displayName = $derived(
-		($authorQuery.data as AuthorMetadata | undefined)?.display_name ||
-		($authorQuery.data as AuthorMetadata | undefined)?.name ||
+		(authorQuery.data as AuthorMetadata | undefined)?.display_name ||
+		(authorQuery.data as AuthorMetadata | undefined)?.name ||
 		genUserName(event.pubkey)
 	);
 
 	// Get profile picture
-	let profilePicture = $derived(($authorQuery.data as AuthorMetadata | undefined)?.picture);
+	let profilePicture = $derived((authorQuery.data as AuthorMetadata | undefined)?.picture);
 
 	// Format timestamp
 	let formattedTime = $derived(
@@ -86,13 +84,11 @@
 		hasLiked: boolean;
 	}
 
-	// Query reactions for this note
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// Query reactions for this note - router will query event author's relays
 	const reactionsQuery = createQuery<ReactionsData>(() => ({
 		queryKey: ['reactions', event.id],
 		queryFn: async () => {
-			const reactions = await load({
-				relays: [],
+			const reactions = await loadWithRouter({
 				filters: [
 					{
 						kinds: [7], // Reactions (NIP-25)
@@ -110,19 +106,19 @@
 	}));
 
 	// Derived variables for reactions with proper typing
-	let reactionsData = $derived($reactionsQuery.data as ReactionsData | undefined);
+	let reactionsData = $derived(reactionsQuery.data as ReactionsData | undefined);
 	let hasLiked = $derived(reactionsData?.hasLiked ?? false);
 	let likesCount = $derived(reactionsData?.likes ?? 0);
 
 	// Like mutation
-	const likeMutation = createMutation({
+	const likeMutation = createMutation(() => ({
 		mutationFn: async () => {
 			if (!$currentUser) {
 				toast.toastError('Please log in to like notes');
 				throw new Error('Not logged in');
 			}
 
-			await $publish.mutateAsync({
+			await publish.mutateAsync({
 				kind: 7, // Reaction
 				content: '+',
 				tags: [
@@ -133,22 +129,22 @@
 		},
 		onSuccess: () => {
 			toast.toastSuccess('Liked!');
-			$reactionsQuery.refetch();
+			reactionsQuery.refetch();
 		},
 		onError: () => {
 			toast.toastError('Failed to like note');
 		}
-	});
+	}));
 
 	// Repost mutation
-	const repostMutation = createMutation({
+	const repostMutation = createMutation(() => ({
 		mutationFn: async () => {
 			if (!$currentUser) {
 				toast.toastError('Please log in to repost notes');
 				throw new Error('Not logged in');
 			}
 
-			await $publish.mutateAsync({
+			await publish.mutateAsync({
 				kind: 6, // Repost (NIP-18)
 				content: JSON.stringify(event),
 				tags: [
@@ -163,18 +159,18 @@
 		onError: () => {
 			toast.toastError('Failed to repost note');
 		}
-	});
+	}));
 
 	function handleLike() {
 		if (hasLiked) {
 			toast.toastInfo('You already liked this note');
 			return;
 		}
-		$likeMutation.mutate();
+		likeMutation.mutate();
 	}
 
 	function handleRepost() {
-		$repostMutation.mutate();
+		repostMutation.mutate();
 	}
 
 	function handleReply() {
@@ -187,7 +183,7 @@
 <Card.Root class={className}>
 	<Card.Header class="flex flex-row items-start gap-3 space-y-0">
 		<a href="/{npub}" class="shrink-0">
-			{#if $authorQuery.isLoading}
+			{#if authorQuery.isLoading}
 				<Skeleton class="h-10 w-10 rounded-full" />
 			{:else}
 				<Avatar>
@@ -200,7 +196,7 @@
 		<div class="flex-1 min-w-0">
 			<div class="flex items-center gap-2">
 				<a href="/{npub}" class="font-semibold hover:underline truncate">
-					{#if $authorQuery.isLoading}
+					{#if authorQuery.isLoading}
 						<Skeleton class="h-4 w-24" />
 					{:else}
 						{displayName}
@@ -250,7 +246,7 @@
 				class:hover:text-red-500={!hasLiked}
 				class:text-red-500={hasLiked}
 				onclick={handleLike}
-				disabled={$likeMutation.isPending || !$currentUser}
+				disabled={likeMutation.isPending || !$currentUser}
 			>
 				<svg
 					class="w-4 h-4 group-hover:scale-110 transition-transform"
@@ -272,7 +268,7 @@
 			<button
 				class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-green-500 transition-colors group"
 				onclick={handleRepost}
-				disabled={$repostMutation.isPending || !$currentUser}
+				disabled={repostMutation.isPending || !$currentUser}
 			>
 				<svg
 					class="w-4 h-4 group-hover:scale-110 transition-transform"

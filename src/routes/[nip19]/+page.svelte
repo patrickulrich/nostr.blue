@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { nip19 } from 'nostr-tools';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { load } from '@welshman/net';
+	import { loadWithRouter } from '$lib/services/outbox';
 	import type { TrustedEvent } from '@welshman/util';
 	import Note from '$lib/components/Note.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -31,163 +31,162 @@
 		try {
 			return nip19.decode($page.params.nip19);
 		} catch {
-			goto('/404');
+			// Return null for invalid identifiers - will show error state
 			return null;
 		}
 	});
 
+	let isInvalidIdentifier = $derived(!decoded);
+
 	// Query based on decoded type
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	const contentQuery = createQuery(() => ({
-		queryKey: ['nip19', $page.params.nip19] as const,
-		queryFn: async () => {
-			if (!decoded) return null;
+	const contentQuery = createQuery(() => {
+		const nip19Param = $page.params.nip19;
 
-			if (decoded.type === 'npub') {
-				// Fetch profile for npub
-				const pubkey = decoded.data as string;
-				const profiles = await load({
-					relays: [],
-					filters: [
-						{
-							kinds: [0],
-							authors: [pubkey],
-							limit: 1
-						}
-					]
-				});
+		return {
+			queryKey: ['nip19', nip19Param],
+			queryFn: async () => {
+				if (!decoded) return null;
 
-				const profile = profiles.length > 0 ? JSON.parse(profiles[0].content) : {};
+				if (decoded.type === 'npub') {
+					// Fetch profile for npub - router will use indexer relays
+					const pubkey = decoded.data as string;
+					const profiles = await loadWithRouter({
+						filters: [
+							{
+								kinds: [0],
+								authors: [pubkey],
+								limit: 1
+							}
+						]
+					});
 
-				// Also fetch user's notes
-				const notes = await load({
-					relays: [],
-					filters: [
-						{
-							kinds: [1],
-							authors: [pubkey],
-							limit: 20
-						}
-					]
-				});
+					const profile = profiles.length > 0 ? JSON.parse(profiles[0].content) : {};
 
-				return {
-					type: 'profile',
-					pubkey,
-					profile,
-					notes: notes.sort((a, b) => b.created_at - a.created_at)
-				};
-			} else if (decoded.type === 'note') {
-				// Fetch single note
-				const noteId = decoded.data as string;
-				const events = await load({
-					relays: [],
-					filters: [
-						{
-							ids: [noteId]
-						}
-					]
-				});
+					// Fetch user's notes - router will use author's write relays
+					const notes = await loadWithRouter({
+						filters: [
+							{
+								kinds: [1],
+								authors: [pubkey],
+								limit: 20
+							}
+						]
+					});
 
-				return {
-					type: 'note',
-					event: events[0] || null
-				};
-			} else if (decoded.type === 'nevent') {
-				// Fetch event with hints
-				const data = decoded.data as { id: string; relays?: string[]; author?: string };
-				const events = await load({
-					relays: data.relays || [],
-					filters: [
-						{
-							ids: [data.id]
-						}
-					]
-				});
+					return {
+						type: 'profile',
+						pubkey,
+						profile,
+						notes: notes.sort((a, b) => b.created_at - a.created_at)
+					};
+				} else if (decoded.type === 'note') {
+					// Fetch single note - router will determine relays
+					const noteId = decoded.data as string;
+					const events = await loadWithRouter({
+						filters: [
+							{
+								ids: [noteId]
+							}
+						]
+					});
 
-				return {
-					type: 'note',
-					event: events[0] || null
-				};
-			} else if (decoded.type === 'nprofile') {
-				// Fetch profile with hints
-				const data = decoded.data as { pubkey: string; relays?: string[] };
-				const profiles = await load({
-					relays: data.relays || [],
-					filters: [
-						{
-							kinds: [0],
-							authors: [data.pubkey],
-							limit: 1
-						}
-					]
-				});
+					return {
+						type: 'note',
+						event: events[0] || null
+					};
+				} else if (decoded.type === 'nevent') {
+					// Fetch event with relay hints
+					const data = decoded.data as { id: string; relays?: string[]; author?: string };
+					const events = await loadWithRouter({
+						filters: [
+							{
+								ids: [data.id]
+							}
+						],
+						relayHints: data.relays // Pass relay hints from nevent
+					});
 
-				const profile = profiles.length > 0 ? JSON.parse(profiles[0].content) : {};
+					return {
+						type: 'note',
+						event: events[0] || null
+					};
+				} else if (decoded.type === 'nprofile') {
+					// Fetch profile with relay hints
+					const data = decoded.data as { pubkey: string; relays?: string[] };
+					const profiles = await loadWithRouter({
+						filters: [
+							{
+								kinds: [0],
+								authors: [data.pubkey],
+								limit: 1
+							}
+						],
+						relayHints: data.relays
+					});
 
-				// Also fetch user's notes
-				const notes = await load({
-					relays: data.relays || [],
-					filters: [
-						{
-							kinds: [1],
-							authors: [data.pubkey],
-							limit: 20
-						}
-					]
-				});
+					const profile = profiles.length > 0 ? JSON.parse(profiles[0].content) : {};
 
-				return {
-					type: 'profile',
-					pubkey: data.pubkey,
-					profile,
-					notes: notes.sort((a, b) => b.created_at - a.created_at)
-				};
-			} else if (decoded.type === 'naddr') {
-				// Fetch addressable event
-				const data = decoded.data as {
-					kind: number;
-					pubkey: string;
-					identifier: string;
-					relays?: string[];
-				};
+					// Fetch user's notes from author's write relays
+					const notes = await loadWithRouter({
+						filters: [
+							{
+								kinds: [1],
+								authors: [data.pubkey],
+								limit: 20
+							}
+						],
+						relayHints: data.relays
+					});
 
-				const events = await load({
-					relays: data.relays || [],
-					filters: [
-						{
-							kinds: [data.kind],
-							authors: [data.pubkey],
-							'#d': [data.identifier]
-						}
-					]
-				});
+					return {
+						type: 'profile',
+						pubkey: data.pubkey,
+						profile,
+						notes: notes.sort((a, b) => b.created_at - a.created_at)
+					};
+				} else if (decoded.type === 'naddr') {
+					// Fetch addressable event with relay hints
+					const data = decoded.data as {
+						kind: number;
+						pubkey: string;
+						identifier: string;
+						relays?: string[];
+					};
 
-				return {
-					type: 'note',
-					event: events[0] || null
-				};
-			}
+					const events = await loadWithRouter({
+						filters: [
+							{
+								kinds: [data.kind],
+								authors: [data.pubkey],
+								'#d': [data.identifier]
+							}
+						],
+						relayHints: data.relays
+					});
 
-			return null;
-		},
-		enabled: !!decoded
-	}));
+					return {
+						type: 'note',
+						event: events[0] || null
+					};
+				}
+
+				return null;
+			},
+			enabled: !!decoded
+		};
+	});
 </script>
 
 <div class="min-h-screen bg-background">
 	<main class="container max-w-4xl mx-auto px-4 py-6">
-		{#if $contentQuery.isLoading}
-			<!-- Loading state -->
-			<div class="space-y-4">
-				<Skeleton class="h-32 w-full" />
-				<Skeleton class="h-48 w-full" />
-			</div>
-		{:else if $contentQuery.error}
-			<!-- Error state -->
+		{#if isInvalidIdentifier}
+			<!-- Invalid NIP-19 identifier -->
 			<Card.Root class="border-destructive">
 				<Card.Content class="pt-6">
-					<p class="text-destructive">Failed to load content: {$contentQuery.error.message}</p>
+					<p class="text-destructive">Invalid Nostr identifier</p>
+					<p class="text-sm text-muted-foreground mt-2">
+						The identifier "{$page.params.nip19}" is not a valid NIP-19 identifier.
+					</p>
 					<button
 						class="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
 						onclick={() => goto('/')}
@@ -196,8 +195,27 @@
 					</button>
 				</Card.Content>
 			</Card.Root>
-		{:else if $contentQuery.data}
-			{@const data = $contentQuery.data as NIP19Data}
+		{:else if contentQuery.isLoading}
+			<!-- Loading state -->
+			<div class="space-y-4">
+				<Skeleton class="h-32 w-full" />
+				<Skeleton class="h-48 w-full" />
+			</div>
+		{:else if contentQuery.error}
+			<!-- Error state -->
+			<Card.Root class="border-destructive">
+				<Card.Content class="pt-6">
+					<p class="text-destructive">Failed to load content: {contentQuery.error.message}</p>
+					<button
+						class="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+						onclick={() => goto('/')}
+					>
+						Go Home
+					</button>
+				</Card.Content>
+			</Card.Root>
+		{:else if contentQuery.data}
+			{@const data = contentQuery.data as NIP19Data}
 
 			{#if data && data.type === 'profile'}
 				{@const profileData = data}

@@ -1,5 +1,9 @@
+import { writable, get } from 'svelte/store';
+import { browser } from '$app/environment';
+
 /**
- * Generic store factory for managing localStorage state with Svelte 5 runes
+ * Generic store factory for managing localStorage state with Svelte stores
+ * This version uses writable stores instead of runes to work at module level
  */
 export function createLocalStorage<T>(
   key: string,
@@ -14,7 +18,7 @@ export function createLocalStorage<T>(
 
   // Initialize state from localStorage
   let initialValue = defaultValue;
-  if (typeof window !== 'undefined') {
+  if (browser) {
     try {
       const item = localStorage.getItem(key);
       if (item !== null) {
@@ -25,27 +29,23 @@ export function createLocalStorage<T>(
     }
   }
 
-  let state = $state<T>(initialValue);
+  const store = writable<T>(initialValue);
 
-  // Save to localStorage when state changes
-  $effect(() => {
-    if (typeof window !== 'undefined') {
+  // Subscribe to store changes and save to localStorage
+  if (browser) {
+    store.subscribe((value) => {
       try {
-        localStorage.setItem(key, serialize(state));
+        localStorage.setItem(key, serialize(value));
       } catch (error) {
         console.warn(`Failed to save ${key} to localStorage:`, error);
       }
-    }
-  });
+    });
 
-  // Sync with localStorage changes from other tabs
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-
+    // Sync with localStorage changes from other tabs
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === key && e.newValue !== null) {
         try {
-          state = deserialize(e.newValue);
+          store.set(deserialize(e.newValue));
         } catch (error) {
           console.warn(`Failed to sync ${key} from localStorage:`, error);
         }
@@ -53,18 +53,17 @@ export function createLocalStorage<T>(
     };
 
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  });
+  }
 
   return {
+    subscribe: store.subscribe,
+    set: store.set,
+    update: store.update,
     get value() {
-      return state;
+      return get(store);
     },
     set value(newValue: T) {
-      state = newValue;
-    },
-    update(updater: (current: T) => T) {
-      state = updater(state);
+      store.set(newValue);
     }
   };
 }

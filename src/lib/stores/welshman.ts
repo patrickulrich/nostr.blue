@@ -192,8 +192,8 @@ function createWelshmanStore() {
 			if (!browser) return;
 
 			// Configure Welshman Router
-			const config = get(appConfig);
-			const defaultRelays = [config.relayUrl, ...presetRelays.map(r => r.url)].slice(0, 5);
+			// Use preset relays as defaults (outbox model will determine actual relay usage)
+			const defaultRelays = presetRelays.map(r => r.url);
 
 			routerContext.getUserPubkey = () => get(pubkey) || '';
 			routerContext.getDefaultRelays = () => defaultRelays;

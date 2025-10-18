@@ -2,6 +2,7 @@ import type { TrustedEvent } from '@welshman/util';
 import { makeEvent } from '@welshman/util';
 import { createMutation } from '@tanstack/svelte-query';
 import { publishThunk } from '@welshman/app';
+import { Router } from '@welshman/router';
 
 export interface PublishEventParams {
 	kind: number;
@@ -37,7 +38,7 @@ export interface PublishEventParams {
  * ```
  */
 export function useNostrPublish() {
-	return createMutation({
+	return createMutation(() => ({
 		mutationFn: async (params: PublishEventParams) => {
 			const tags = params.tags ?? [];
 
@@ -56,18 +57,21 @@ export function useNostrPublish() {
 				tags
 			});
 
+			// Use router to determine which relays to publish to
+			// This uses the user's write relays (outbox) and mentioned users' read relays
+			let relays = Router.get().PublishEvent(event).getUrls();
+
+			// Fallback to default relays if router returns no relays
+			// (e.g., user hasn't published a NIP-65 relay list yet)
+			if (relays.length === 0) {
+				relays = Router.get().getDefaultRelays();
+			}
+
 			// Publish to relays (publishThunk will sign and publish)
-			const thunk = publishThunk({ event, relays: [] });
+			const thunk = publishThunk({ event, relays });
 
-			// Wait for publication to complete (with timeout)
-			await Promise.race([
-				thunk.complete,
-				new Promise((_, reject) =>
-					setTimeout(() => reject(new Error('Publication timeout')), 5000)
-				)
-			]);
-
-			// Return the signed event
+			// Return the signed event immediately
+			// The thunk handles publishing in the background - we don't need to wait
 			return thunk.event as TrustedEvent;
 		},
 		onError: (error) => {
@@ -76,7 +80,7 @@ export function useNostrPublish() {
 		onSuccess: (data) => {
 			console.log('Event published successfully:', data);
 		}
-	});
+	}));
 }
 
 /**
@@ -124,16 +128,20 @@ export async function publishNostrEvent(params: PublishEventParams): Promise<Tru
 		tags
 	});
 
+	// Use router to determine which relays to publish to
+	// This uses the user's write relays (outbox) and mentioned users' read relays
+	let relays = Router.get().PublishEvent(event).getUrls();
+
+	// Fallback to default relays if router returns no relays
+	// (e.g., user hasn't published a NIP-65 relay list yet)
+	if (relays.length === 0) {
+		relays = Router.get().getDefaultRelays();
+	}
+
 	// Publish to relays (publishThunk will sign and publish)
-	const thunk = publishThunk({ event, relays: [] });
+	const thunk = publishThunk({ event, relays });
 
-	// Wait for publication to complete (with timeout)
-	await Promise.race([
-		thunk.complete,
-		new Promise((_, reject) =>
-			setTimeout(() => reject(new Error('Publication timeout')), 5000)
-		)
-	]);
-
+	// Return the signed event immediately
+	// The thunk handles publishing in the background - we don't need to wait
 	return thunk.event as TrustedEvent;
 }

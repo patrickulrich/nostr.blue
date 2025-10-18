@@ -14,6 +14,7 @@ import { Nip07Signer, getNip07, Nip46Broker, makeSecret } from '@welshman/signer
 import { nip19 } from 'nostr-tools';
 import type { Profile } from '@welshman/util';
 import { derived, get } from 'svelte/store';
+import { clearPersistedState } from './welshmanPersistence';
 
 // Re-export Welshman stores for convenience
 export { pubkey, session, sessions, signer };
@@ -142,6 +143,12 @@ export function logout(accountPubkey?: string): void {
 	}
 
 	dropSession(targetPubkey);
+
+	// If no sessions remain, clear all persisted state
+	const remainingSessions = get(sessions);
+	if (Object.keys(remainingSessions).length === 0) {
+		clearPersistedState();
+	}
 }
 
 /**

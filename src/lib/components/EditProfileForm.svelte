@@ -41,7 +41,6 @@
   let bannerInputRef: HTMLInputElement;
 
   // Query current user metadata using Welshman
-  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
   const userQuery = createQuery<AuthorData>(() => ({
     queryKey: ['author', $currentPubkey ?? ''],
     queryFn: ({ signal }) => fetchAuthor($currentPubkey ?? '', signal),
@@ -51,7 +50,7 @@
 
   // Load user metadata into form when available
   $effect(() => {
-    const userData = $userQuery.data as AuthorData | undefined;
+    const userData = userQuery.data as AuthorData | undefined;
     if (userData?.metadata) {
       // Cast to any to access bot field which isn't in Welshman's Profile type
       const metadata = userData.metadata as any;

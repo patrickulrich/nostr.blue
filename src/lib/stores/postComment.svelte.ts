@@ -45,7 +45,7 @@ interface PostCommentParams {
 export function usePostComment() {
 	const queryClient = useQueryClient();
 
-	return createMutation({
+	return createMutation(() => ({
 		mutationFn: async ({ root, reply, content }: PostCommentParams) => {
 			const tags: string[][] = [];
 
@@ -122,5 +122,5 @@ export function usePostComment() {
 				queryKey: ['comments', root instanceof URL ? root.toString() : root.id]
 			});
 		}
-	});
+	}));
 }

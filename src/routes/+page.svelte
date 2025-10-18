@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { load } from '@welshman/net';
 	import type { TrustedEvent } from '@welshman/util';
+	import { loadWithRouter } from '$lib/services/outbox';
 	import Note from '$lib/components/Note.svelte';
 	import NoteComposer from '$lib/components/NoteComposer.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -26,30 +26,33 @@
 	}
 
 	// Query for recent notes (kind 1)
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
-	const feedQuery = createQuery<TrustedEvent[]>(() => ({
-		queryKey: ['feed', 'global'] as const,
-		queryFn: async ({ signal }) => {
-			const events = await load({
-				relays: [],
-				filters: [
-					{
-						kinds: [1], // Text notes
-						limit: 50
-					}
-				],
-				signal
-			});
+	const feedQuery = createQuery<TrustedEvent[]>(() => {
+		return {
+			queryKey: ['feed', 'global'],
+			queryFn: async ({ signal }) => {
+				// Use router-based relay selection (outbox model)
+				// This will intelligently query default/indexer relays for global feed
+				const events = await loadWithRouter({
+					filters: [
+						{
+							kinds: [1], // Text notes
+							limit: 50
+						}
+					],
+					signal
+				});
 
-			// Sort by created_at descending (newest first)
-			return events.sort((a, b) => b.created_at - a.created_at);
-		},
-		staleTime: 30000, // 30 seconds
-		refetchInterval: 60000 // Refetch every minute
-	}));
+				// Sort by created_at descending (newest first)
+				return events.sort((a, b) => b.created_at - a.created_at);
+			},
+			staleTime: 30000, // 30 seconds
+			refetchInterval: 60000, // Refetch every minute
+			retry: 2 // Retry failed requests
+		};
+	});
 
 	// Derived variable with proper typing
-	let feedData = $derived($feedQuery.data as TrustedEvent[] | undefined);
+	let feedData = $derived(feedQuery.data as TrustedEvent[] | undefined);
 </script>
 
 <div class="min-h-screen bg-background">
@@ -84,7 +87,7 @@
 
 		<!-- Feed -->
 		<div class="space-y-4">
-			{#if $feedQuery.isLoading}
+			{#if feedQuery.isLoading}
 				<!-- Loading skeletons -->
 				{#each Array(5) as _, i}
 					<Card.Root>
@@ -104,16 +107,16 @@
 						</Card.Content>
 					</Card.Root>
 				{/each}
-			{:else if $feedQuery.error}
+			{:else if feedQuery.error}
 				<!-- Error state -->
 				<Card.Root class="border-destructive">
 					<Card.Content class="pt-6">
 						<p class="text-destructive">
-							Failed to load feed: {$feedQuery.error.message}
+							Failed to load feed: {feedQuery.error.message}
 						</p>
 						<button
 							class="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-							onclick={() => $feedQuery.refetch()}
+							onclick={() => feedQuery.refetch()}
 						>
 							Retry
 						</button>

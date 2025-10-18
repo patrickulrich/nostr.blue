@@ -1,6 +1,6 @@
 import type { TrustedEvent, Profile } from '@welshman/util';
 import { PROFILE } from '@welshman/util';
-import { load } from '@welshman/net';
+import { loadWithRouter } from '$lib/services/outbox';
 import { sessions, pubkey } from '@welshman/app';
 import { derived } from 'svelte/store';
 
@@ -55,8 +55,8 @@ export async function fetchAccounts(
 		return { authors: [], currentUser: undefined, otherUsers: [] };
 	}
 
-	const events = await load({
-		relays: [],
+	// Router will use indexer relays for profile (kind 0) queries
+	const events = await loadWithRouter({
 		filters: [{ kinds: [PROFILE], authors: sessionPubkeys }],
 		signal,
 	});

@@ -7,9 +7,24 @@
 		<meta property="og:type" content="website" />
 		<meta property="og:title" content="PuStack - Build Nostr Apps Fast" />
 		<meta property="og:description" content="A complete framework for building Nostr clients with Svelte 5, Welshman toolkit, and pre-built components." />
-		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			// Apply theme immediately to prevent flash
+			(function() {
+				try {
+					const config = JSON.parse(localStorage.getItem('app-config') || '{}');
+					const theme = config.theme || 'dark';
+					if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+						document.documentElement.classList.add('dark');
+					}
+				} catch (e) {
+					// Default to dark theme on error
+					document.documentElement.classList.add('dark');
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

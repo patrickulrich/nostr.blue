@@ -1,6 +1,6 @@
 import type { TrustedEvent, Filter } from '@welshman/util';
 import { COMMENT, isParameterizedReplaceableKind, isPlainReplaceableKind } from '@welshman/util';
-import { load } from '@welshman/net';
+import { loadWithRouter } from '$lib/services/outbox';
 
 /**
  * Get the value of a tag from an event
@@ -75,8 +75,8 @@ export async function fetchComments(
 	}
 
 	// Query for all kind 1111 comments
-	const events = await load({
-		relays: [],
+	// Router will query the root event author's relays if available
+	const events = await loadWithRouter({
 		filters: [filter],
 		signal,
 	});

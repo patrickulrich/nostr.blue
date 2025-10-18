@@ -4,6 +4,7 @@
 
   import { cn } from '$lib/utils';
   import { browser } from '$app/environment';
+  import { Dialog as DialogPrimitive } from 'bits-ui';
   import {
     loginWithExtension,
     loginWithNsec,
@@ -175,20 +176,21 @@
 </script>
 
 {#if isOpen}
-  <!-- Dialog Overlay -->
-  <div
-    class="fixed inset-0 z-50 bg-black/50"
-    onclick={onClose}
-    role="presentation"
-  >
-    <!-- Dialog Content -->
+  <DialogPrimitive.Portal>
+    <!-- Dialog Overlay -->
     <div
-      class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] max-h-[90dvh] p-0 overflow-hidden rounded-2xl overflow-y-scroll bg-background shadow-lg")}
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="dialog"
-      tabindex="-1"
+      class="fixed inset-0 z-50 bg-black/50"
+      onclick={onClose}
+      role="presentation"
     >
+      <!-- Dialog Content -->
+      <div
+        class={cn("fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[95vw] sm:max-w-md max-h-[90vh] max-h-[90dvh] p-0 overflow-hidden rounded-2xl overflow-y-scroll bg-background shadow-lg")}
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+        role="dialog"
+        tabindex="-1"
+      >
       <!-- Header -->
       <div class="px-6 pt-6 pb-1 relative">
         <p class="text-center text-muted-foreground text-sm">
@@ -400,5 +402,5 @@
         </div>
       </div>
     </div>
-  </div>
+  </DialogPrimitive.Portal>
 {/if}

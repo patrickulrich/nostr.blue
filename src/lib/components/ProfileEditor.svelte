@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { load } from '@welshman/net';
+	import { loadWithRouter } from '$lib/services/outbox';
 	import { publishProfile, currentPubkey } from '$lib/stores/auth';
 	import { useToast } from '$lib/stores/toast.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -31,15 +31,13 @@
 		lud16?: string;
 	}
 
-	// Fetch current profile
-	// @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context.
+	// Fetch current profile - router will use indexer relays
 	const profileQuery = createQuery<ProfileMetadata>(() => ({
 		queryKey: ['my-profile', $currentPubkey ?? ''] as const,
 		queryFn: async () => {
 			if (!$currentPubkey) return {};
 
-			const profiles = await load({
-				relays: [],
+			const profiles = await loadWithRouter({
 				filters: [
 					{
 						kinds: [0],
@@ -73,8 +71,8 @@
 
 	// Initialize form when profile loads
 	$effect(() => {
-		if ($profileQuery.data) {
-			const profile = $profileQuery.data as ProfileMetadata;
+		if (profileQuery.data) {
+			const profile = profileQuery.data as ProfileMetadata;
 			name = profile.name || '';
 			displayName = profile.display_name || '';
 			about = profile.about || '';
@@ -87,7 +85,7 @@
 	});
 
 	// Save mutation
-	const saveMutation = createMutation({
+	const saveMutation = createMutation(() => ({
 		mutationFn: async () => {
 			const profile = {
 				name: name.trim(),
@@ -122,10 +120,10 @@
 			toast.toastError('Failed to update profile');
 			console.error('Profile update error:', error);
 		}
-	});
+	}));
 
 	function handleSubmit() {
-		$saveMutation.mutate();
+		saveMutation.mutate();
 	}
 
 	function handleCancel() {
@@ -143,7 +141,7 @@
 		</Dialog.Header>
 
 		<div class="space-y-4">
-			{#if $profileQuery.isLoading}
+			{#if profileQuery.isLoading}
 				<p class="text-sm text-muted-foreground">Loading profile...</p>
 			{:else}
 				<!-- Display Name -->
@@ -153,7 +151,7 @@
 						id="display-name"
 						bind:value={displayName}
 						placeholder="Your display name"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -164,7 +162,7 @@
 						id="name"
 						bind:value={name}
 						placeholder="username"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -176,7 +174,7 @@
 						bind:value={about}
 						placeholder="Tell us about yourself"
 						class="min-h-[100px]"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -188,7 +186,7 @@
 						bind:value={picture}
 						placeholder="https://example.com/avatar.jpg"
 						type="url"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -200,7 +198,7 @@
 						bind:value={banner}
 						placeholder="https://example.com/banner.jpg"
 						type="url"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -212,7 +210,7 @@
 						bind:value={website}
 						placeholder="https://yourwebsite.com"
 						type="url"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 				</div>
 
@@ -223,7 +221,7 @@
 						id="nip05"
 						bind:value={nip05}
 						placeholder="name@domain.com"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 					<p class="text-xs text-muted-foreground">
 						Your Nostr address for verification (e.g., name@domain.com)
@@ -237,7 +235,7 @@
 						id="lud16"
 						bind:value={lud16}
 						placeholder="name@getalby.com"
-						disabled={$saveMutation.isPending}
+						disabled={saveMutation.isPending}
 					/>
 					<p class="text-xs text-muted-foreground">
 						Your Lightning address for receiving zaps (e.g., name@getalby.com)
@@ -247,11 +245,11 @@
 		</div>
 
 		<Dialog.Footer class="gap-2">
-			<Button variant="outline" onclick={handleCancel} disabled={$saveMutation.isPending}>
+			<Button variant="outline" onclick={handleCancel} disabled={saveMutation.isPending}>
 				Cancel
 			</Button>
-			<Button onclick={handleSubmit} disabled={$saveMutation.isPending || $profileQuery.isLoading}>
-				{#if $saveMutation.isPending}
+			<Button onclick={handleSubmit} disabled={saveMutation.isPending || profileQuery.isLoading}>
+				{#if saveMutation.isPending}
 					Saving...
 				{:else}
 					Save Changes

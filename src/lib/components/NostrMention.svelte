@@ -14,7 +14,6 @@
   const npub = nip19.npubEncode(pubkey);
 
   // Fetch author data using Welshman
-  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
   const authorQuery = createQuery<AuthorData>(() => ({
     queryKey: ['author', pubkey],
     queryFn: ({ signal }) => fetchAuthor(pubkey, signal),
@@ -22,7 +21,7 @@
     staleTime: 5 * 60 * 1000 // 5 minutes
   }));
 
-  const author = $derived($authorQuery.data as AuthorData | undefined);
+  const author = $derived(authorQuery.data as AuthorData | undefined);
 
   const hasRealName = $derived(!!author?.metadata?.name);
   const displayName = $derived(author?.metadata?.name ?? genUserName(pubkey));

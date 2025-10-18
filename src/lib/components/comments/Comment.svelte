@@ -24,7 +24,6 @@
   let showReplies = $state(depth < 2); // Auto-expand first 2 levels
 
   // Query author profile for this comment
-  // @ts-expect-error - TanStack Query in Svelte requires createQuery to be called within component context
   const authorQuery = createQuery<AuthorData>(() => ({
     queryKey: ['author', comment.pubkey],
     queryFn: ({ signal }) => fetchAuthor(comment.pubkey, signal),
@@ -32,7 +31,7 @@
     staleTime: 5 * 60 * 1000 // 5 minutes
   }));
 
-  const author = $derived($authorQuery.data as AuthorData | undefined);
+  const author = $derived(authorQuery.data as AuthorData | undefined);
 
   const metadata = $derived(author?.metadata);
   const displayName = $derived(metadata?.name ?? genUserName(comment.pubkey));
