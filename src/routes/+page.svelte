@@ -11,7 +11,6 @@
 	import { Loader2, RefreshCw } from 'lucide-svelte';
 	import { currentUser } from '$lib/stores/auth';
 	import { cn } from '$lib/utils';
-	import { onMount } from 'svelte';
 	import { POPULAR_DVM_PUBKEY } from '$lib/stores/dvm.svelte';
 	import { useDVMFeed } from '$lib/hooks/useDVMFeed.svelte';
 
@@ -241,7 +240,10 @@
 	// Intersection observer for infinite scroll (Following feed only)
 	let observerTarget: HTMLDivElement | null = $state(null);
 
-	onMount(() => {
+	// Set up intersection observer that reacts to observerTarget changes
+	$effect(() => {
+		if (!observerTarget) return;
+
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (
@@ -256,14 +258,10 @@
 			{ threshold: 0.1 }
 		);
 
-		if (observerTarget) {
-			observer.observe(observerTarget);
-		}
+		observer.observe(observerTarget);
 
 		return () => {
-			if (observerTarget) {
-				observer.unobserve(observerTarget);
-			}
+			observer.disconnect();
 		};
 	});
 </script>

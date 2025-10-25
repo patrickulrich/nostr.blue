@@ -71,6 +71,28 @@
 		return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
 	}
 
+	// Helper to check if a URL is a YouTube link
+	function isYouTubeUrl(url: string): boolean {
+		return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url);
+	}
+
+	// Helper to extract YouTube video ID from URL
+	function getYouTubeVideoId(url: string): string | null {
+		// Handle youtube.com/watch?v=VIDEO_ID
+		const watchMatch = url.match(/[?&]v=([^&]+)/);
+		if (watchMatch) return watchMatch[1];
+
+		// Handle youtu.be/VIDEO_ID
+		const shortMatch = url.match(/youtu\.be\/([^?]+)/);
+		if (shortMatch) return shortMatch[1];
+
+		// Handle youtube.com/embed/VIDEO_ID
+		const embedMatch = url.match(/youtube\.com\/embed\/([^?]+)/);
+		if (embedMatch) return embedMatch[1];
+
+		return null;
+	}
+
 	// Extract media URLs from raw parsed content (before reduceLinks)
 	// Get ALL links that look like media (images AND videos)
 	let mediaUrls = $derived.by(() => {
@@ -78,6 +100,22 @@
 			.filter(isLink)
 			.map((p) => p.value.url?.toString())
 			.filter((url): url is string => typeof url === 'string' && isMediaUrl(url));
+	});
+
+	// Extract YouTube URLs from raw parsed content
+	let youtubeUrls = $derived.by(() => {
+		return rawContent
+			.filter(isLink)
+			.map((p) => {
+				// Handle different value structures
+				if (typeof p.value === 'string') {
+					return p.value;
+				} else if (p.value && typeof p.value === 'object' && 'url' in p.value) {
+					return p.value.url?.toString();
+				}
+				return null;
+			})
+			.filter((url): url is string => typeof url === 'string' && isYouTubeUrl(url));
 	});
 </script>
 
@@ -92,20 +130,22 @@
 			{:else if isLink(item) && !isImage(item)}
 				{#if typeof (item as any).value === 'string'}
 					{@const linkValue = (item as any).value as string}
-					<a
-						href={linkValue}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="text-blue-500 hover:underline break-all"
-					>
-						{linkValue}
-					</a>
+					{#if !isMediaUrl(linkValue) && !isYouTubeUrl(linkValue)}
+						<a
+							href={linkValue}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="text-blue-500 hover:underline break-all"
+						>
+							{linkValue}
+						</a>
+					{/if}
 				{/if}
 			{:else if item.type === 'link-grid' && Array.isArray(item.value)}
 				<!-- Link Grid - multiple adjacent links -->
 				<div class="flex flex-wrap gap-2 my-2">
 					{#each item.value as link}
-						{#if isLink(link) && typeof link.value === 'string'}
+						{#if isLink(link) && typeof link.value === 'string' && !isMediaUrl(link.value) && !isYouTubeUrl(link.value)}
 							<a
 								href={link.value}
 								target="_blank"
@@ -277,6 +317,27 @@
 							class="max-w-full h-auto max-h-[500px] object-contain"
 						/>
 					</button>
+				{/if}
+			{/each}
+		</div>
+	{/if}
+
+	<!-- YouTube embeds -->
+	{#if youtubeUrls.length > 0}
+		<div class="mt-2 space-y-2">
+			{#each youtubeUrls as youtubeUrl}
+				{@const videoId = getYouTubeVideoId(youtubeUrl)}
+				{#if videoId}
+					<div class="my-2 rounded-lg overflow-hidden border border-border max-w-full aspect-video">
+						<iframe
+							src="https://www.youtube.com/embed/{videoId}"
+							title="YouTube video"
+							frameborder="0"
+							allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+							allowfullscreen
+							class="w-full h-full"
+						></iframe>
+					</div>
 				{/if}
 			{/each}
 		</div>

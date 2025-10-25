@@ -24,7 +24,7 @@ export function useDVMFeed(
 		signal?: AbortSignal;
 	} = {}
 ) {
-	const { limit = 50, params = {}, onEvent, onExhausted, signal } = options;
+	const { limit = 50, params = {}, onEvent, onExhausted: _onExhausted, signal } = options;
 
 	// Get current user info
 	const userPubkey = get(currentPubkey);
@@ -59,7 +59,7 @@ export function useDVMFeed(
 				onEvent: (event) => {
 					onEvent?.(event);
 				},
-				onResponse: (event) => {
+				onResponse: (_event) => {
 					// DVM response received
 				}
 			});
@@ -129,7 +129,7 @@ export function useDVMFeedReactive(
 		signal?: AbortSignal;
 	} = {}
 ) {
-	let events = $state<TrustedEvent[]>([]);
+	const events = $state<TrustedEvent[]>([]);
 	let isLoading = $state(false);
 	let isExhausted = $state(false);
 	let error = $state<Error | null>(null);
