@@ -44,7 +44,10 @@ function parseDVMEvents(events: TrustedEvent[]): DVMService[] {
 		}
 
 		// Extract d tag (identifier)
-		const dTag = fromPairs(event.tags).d || event.id;
+		const dTag = fromPairs(event.tags).d || '';
+
+		// For parameterized replaceable events, unique ID is pubkey + d tag
+		const id = `${event.pubkey}:${dTag}`;
 
 		// Extract supported kinds
 		const supportedKinds = event.tags
@@ -65,7 +68,7 @@ function parseDVMEvents(events: TrustedEvent[]): DVMService[] {
 			}));
 
 		return {
-			id: dTag,
+			id,
 			pubkey: event.pubkey,
 			name: metadata.name,
 			about: metadata.about,
@@ -81,11 +84,26 @@ function parseDVMEvents(events: TrustedEvent[]): DVMService[] {
 /**
  * Derived store for DVM handler events from welshman repository
  * This is reactive and will automatically update when new events arrive
+ *
+ * Kind 31990 is parameterized replaceable, so we deduplicate by pubkey+dtag
  */
 export const dvmHandlerEvents = derived(
 	deriveEvents(repository, { filters: [{ kinds: [DVM_ANNOUNCEMENT_KIND] }] }),
 	($events) => {
-		return $events.sort((a, b) => b.created_at - a.created_at);
+		// Deduplicate by pubkey + d tag, keeping only most recent
+		const seen = new Map<string, TrustedEvent>();
+
+		for (const event of $events) {
+			const dTag = fromPairs(event.tags).d || '';
+			const key = `${event.pubkey}:${dTag}`;
+
+			const existing = seen.get(key);
+			if (!existing || event.created_at > existing.created_at) {
+				seen.set(key, event);
+			}
+		}
+
+		return Array.from(seen.values()).sort((a, b) => b.created_at - a.created_at);
 	}
 );
 

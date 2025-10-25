@@ -62,18 +62,23 @@
 	// Parse content WITHOUT reduceLinks to get raw image links
 	let rawContent = $derived(parse({ content: event.content, tags: event.tags }));
 
-	// Extract media URLs from raw parsed content (before reduceLinks)
-	let mediaUrls = $derived.by(() => {
-		// Coracle does: rawContent.filter(isImage).map(p => p.value.url.toString())
-		return rawContent
-			.filter(isImage)
-			.map((p: any) => p.value.url?.toString())
-			.filter((url): url is string => typeof url === 'string');
-	});
+	// Helper to check if a URL is media (image or video)
+	function isMediaUrl(url: string): boolean {
+		return /\.(jpe?g|png|gif|webp|mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
+	}
 
 	function isVideoUrl(url: string): boolean {
 		return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
 	}
+
+	// Extract media URLs from raw parsed content (before reduceLinks)
+	// Get ALL links that look like media (images AND videos)
+	let mediaUrls = $derived.by(() => {
+		return rawContent
+			.filter(isLink)
+			.map((p) => p.value.url?.toString())
+			.filter((url): url is string => typeof url === 'string' && isMediaUrl(url));
+	});
 </script>
 
 <div class={cn('break-words', className)}>

@@ -78,49 +78,64 @@
 	let popularFeedController = $state<ReturnType<typeof useDVMFeed> | null>(null);
 	let popularLoading = $state(false);
 	let popularError = $state<Error | null>(null);
+	let popularCleanup: (() => void) | null = null;
 
 	// Initialize DVM feed controller for Popular feed
 	$effect(() => {
-		if (feedType === 'popular' && !popularFeedController) {
+		if (feedType === 'popular' && $currentUser && !popularFeedController) {
 			try {
-				// Only create if user is logged in (DVM requires signer)
-				if ($currentUser) {
-					popularFeedController = useDVMFeed(POPULAR_DVM_PUBKEY, 5300, {
-						limit: 50,
-						onEvent: (event) => {
-							// Deduplicate and add to popularEvents
-							if (!popularEvents.some((e) => e.id === event.id)) {
-								popularEvents.push(event);
-								// Sort by created_at descending
-								popularEvents.sort((a, b) => b.created_at - a.created_at);
-							}
-						},
-						onExhausted: () => {
+				popularFeedController = useDVMFeed(POPULAR_DVM_PUBKEY, 5300, {
+					limit: 50,
+					onEvent: (event) => {
+						// Deduplicate and add to popularEvents
+						if (!popularEvents.some((e) => e.id === event.id)) {
+							popularEvents.push(event);
+							// Sort by created_at descending
+							popularEvents.sort((a, b) => b.created_at - a.created_at);
+						}
+						// Clear loading state when first event arrives
+						if (popularLoading && popularEvents.length > 0) {
 							popularLoading = false;
 						}
-					});
-				}
+					},
+					onExhausted: () => {
+						popularLoading = false;
+					}
+				});
 			} catch (error) {
 				console.error('Failed to initialize popular feed:', error);
 				popularError = error instanceof Error ? error : new Error(String(error));
 			}
 		}
+
+		// Cleanup when feed type changes away from popular
+		return () => {
+			if (popularCleanup) {
+				popularCleanup();
+				popularCleanup = null;
+			}
+		};
 	});
 
-	// Auto-load popular feed when controller is ready
+	// Auto-start popular feed when controller is ready
 	$effect(() => {
 		if (
 			feedType === 'popular' &&
 			popularFeedController &&
 			!popularLoading &&
 			popularEvents.length === 0 &&
-			!popularError
+			!popularError &&
+			!popularCleanup
 		) {
 			popularLoading = true;
-			popularFeedController.load(50).catch((err) => {
-				popularError = err instanceof Error ? err : new Error(String(err));
-				popularLoading = false;
-			});
+			popularFeedController.listen(50)
+				.then((cleanup) => {
+					popularCleanup = cleanup;
+				})
+				.catch((err) => {
+					popularError = err instanceof Error ? err : new Error(String(err));
+					popularLoading = false;
+				});
 		}
 	});
 
@@ -200,13 +215,26 @@
 		if (feedType === 'following') {
 			followingFeedQuery.refetch();
 		} else if (popularFeedController) {
+			// Stop existing listener
+			if (popularCleanup) {
+				popularCleanup();
+				popularCleanup = null;
+			}
+
+			// Reset state
 			popularLoading = true;
 			popularEvents = [];
 			popularError = null;
-			popularFeedController.load(50).catch((err) => {
-				popularError = err instanceof Error ? err : new Error(String(err));
-				popularLoading = false;
-			});
+
+			// Restart listener
+			popularFeedController.listen(50)
+				.then((cleanup) => {
+					popularCleanup = cleanup;
+				})
+				.catch((err) => {
+					popularError = err instanceof Error ? err : new Error(String(err));
+					popularLoading = false;
+				});
 		}
 	}
 

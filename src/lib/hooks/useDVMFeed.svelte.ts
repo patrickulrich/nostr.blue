@@ -38,14 +38,23 @@ export function useDVMFeed(
 	return {
 		/**
 		 * Start the DVM request and listen for responses
-		 * @param loadLimit - Number of events to request (not used for DVMs)
+		 * @param loadLimit - Number of events to request
 		 */
 		load: async (loadLimit: number = limit) => {
-			// Use our custom DVM implementation
+			// Cleanup previous subscription before creating new one
+			if (cleanup) {
+				cleanup();
+				cleanup = null;
+			}
+
+			// Use our custom DVM implementation with max_results
 			cleanup = await customRequestDVM({
 				dvmPubkey,
 				requestKind,
-				params,
+				params: {
+					...params,
+					max_results: String(loadLimit)
+				},
 				signal,
 				onEvent: (event) => {
 					onEvent?.(event);
@@ -61,12 +70,21 @@ export function useDVMFeed(
 		 * For our custom implementation, this is the same as load()
 		 * @returns Cleanup function to stop listening
 		 */
-		listen: async () => {
-			// Use our custom DVM implementation
+		listen: async (loadLimit: number = limit) => {
+			// Cleanup previous subscription before creating new one
+			if (cleanup) {
+				cleanup();
+				cleanup = null;
+			}
+
+			// Use our custom DVM implementation with max_results
 			cleanup = await customRequestDVM({
 				dvmPubkey,
 				requestKind,
-				params,
+				params: {
+					...params,
+					max_results: String(loadLimit)
+				},
 				signal,
 				onEvent: (event) => {
 					onEvent?.(event);
