@@ -71,9 +71,9 @@
 		return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
 	}
 
-	// Helper to check if a URL is a YouTube link
+	// Helper to check if a URL is a YouTube link (including mobile subdomain)
 	function isYouTubeUrl(url: string): boolean {
-		return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url);
+		return /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url);
 	}
 
 	// Helper to extract YouTube video ID from URL
@@ -332,10 +332,10 @@
 						<iframe
 							src="https://www.youtube.com/embed/{videoId}"
 							title="YouTube video"
-							frameborder="0"
 							allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
 							allowfullscreen
-							class="w-full h-full"
+							loading="lazy"
+							class="w-full h-full border-0"
 						></iframe>
 					</div>
 				{/if}
