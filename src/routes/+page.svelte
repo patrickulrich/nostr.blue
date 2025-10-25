@@ -149,7 +149,7 @@
 				let events = await loadWithRouter({
 					filters: [
 						{
-							kinds: [1], // Text notes
+							kinds: [1, 6], // Text notes and reposts
 							authors: following,
 							limit: limit * 4, // Fetch more since we filter out replies
 							until: pageParam as number | undefined
@@ -158,16 +158,80 @@
 					signal
 				});
 
-				// Filter out replies for cleaner feed
+				// Filter out replies for cleaner feed (but keep reposts)
 				events = events.filter(
-					(event) => !event.tags.some((tag) => tag[0] === 'e')
+					(event) => event.kind === 6 || !event.tags.some((tag) => tag[0] === 'e')
 				);
 
+				// For reposts (kind 6), fetch the original events
+				const repostEventIds = events
+					.filter((e) => e.kind === 6)
+					.map((e) => {
+						// Extract event ID from 'e' tag
+						const eTag = e.tags.find((tag) => tag[0] === 'e');
+						return eTag ? eTag[1] : null;
+					})
+					.filter((id): id is string => id !== null);
+
+				let repostedEvents: TrustedEvent[] = [];
+				if (repostEventIds.length > 0) {
+					repostedEvents = await loadWithRouter({
+						filters: [{ ids: repostEventIds }],
+						signal
+					});
+				}
+
+				// Create a map of reposted events
+				const repostedEventMap = new Map<string, TrustedEvent>();
+				repostedEvents.forEach((e) => repostedEventMap.set(e.id, e));
+
+				// Transform reposts to include original event data
+				const transformedEvents = events.map((event) => {
+					if (event.kind === 6) {
+						// Get the original event from content or from fetched events
+						const eTag = event.tags.find((tag) => tag[0] === 'e');
+						const originalEventId = eTag ? eTag[1] : null;
+
+						let originalEvent: TrustedEvent | null = null;
+
+						// Try to parse from content first
+						try {
+							const parsed = JSON.parse(event.content);
+							if (parsed.id && parsed.pubkey && parsed.created_at) {
+								originalEvent = parsed as TrustedEvent;
+							}
+						} catch {
+							// Content parsing failed, try fetched events
+						}
+
+						// Fallback to fetched event
+						if (!originalEvent && originalEventId) {
+							originalEvent = repostedEventMap.get(originalEventId) || null;
+						}
+
+						// Store repost info in event for rendering
+						return {
+							...event,
+							_repostedEvent: originalEvent,
+							_repostAuthor: event.pubkey
+						} as TrustedEvent & { _repostedEvent?: TrustedEvent | null; _repostAuthor?: string };
+					}
+					return event;
+				});
+
+				// Filter out reposts without original events
+				const validEvents = transformedEvents.filter((event) => {
+					if (event.kind === 6) {
+						return (event as any)._repostedEvent !== null;
+					}
+					return true;
+				});
+
 				// Sort by created_at descending (newest first)
-				events = events.sort((a, b) => b.created_at - a.created_at);
+				const sortedEvents = validEvents.sort((a, b) => b.created_at - a.created_at);
 
 				// Return up to limit events
-				return events.slice(0, limit);
+				return sortedEvents.slice(0, limit);
 			},
 			getNextPageParam: (lastPage) => {
 				if (!lastPage || lastPage.length === 0) {
