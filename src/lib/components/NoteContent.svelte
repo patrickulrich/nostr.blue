@@ -58,27 +58,17 @@
 
 	let referencedEvents = $derived(referencedEventsQuery.data || {});
 
-	// Extract media URLs for gallery
+	// Extract media URLs using welshman's parser (like Coracle does)
+	// Parse content WITHOUT reduceLinks to get raw image links
+	let rawContent = $derived(parse({ content: event.content, tags: event.tags }));
+
+	// Extract media URLs from raw parsed content (before reduceLinks)
 	let mediaUrls = $derived.by(() => {
-		const urls: string[] = [];
-
-		// From parsed content
-		for (const item of parsedContent) {
-			if (isImage(item) && isLink(item) && typeof item.value === 'string') {
-				urls.push(item.value);
-			}
-		}
-
-		// From NIP-94 'imeta' tags
-		const imetaTags = event.tags.filter((tag) => tag[0] === 'imeta');
-		for (const tag of imetaTags) {
-			const urlParam = tag.find((param) => param.startsWith('url '));
-			if (urlParam) {
-				urls.push(urlParam.substring(4));
-			}
-		}
-
-		return Array.from(new Set(urls));
+		// Coracle does: rawContent.filter(isImage).map(p => p.value.url.toString())
+		return rawContent
+			.filter(isImage)
+			.map((p: any) => p.value.url?.toString())
+			.filter((url): url is string => typeof url === 'string');
 	});
 
 	function isVideoUrl(url: string): boolean {

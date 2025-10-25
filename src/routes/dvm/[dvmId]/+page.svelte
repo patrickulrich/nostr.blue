@@ -4,17 +4,14 @@
 	import AppSidebar from '$lib/components/AppSidebar.svelte';
 	import RightSidebar from '$lib/components/RightSidebar.svelte';
 	import { useDVMs } from '$lib/hooks/useDVMs.svelte';
-	import { useDVMJob } from '$lib/hooks/useDVMJob.svelte';
+	import { useDVMFeedReactive } from '$lib/hooks/useDVMFeed.svelte';
 	import { currentUser } from '$lib/stores/auth';
 	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { Loader2, Zap, RefreshCw, ArrowLeft } from 'lucide-svelte';
-	import { createQuery } from '@tanstack/svelte-query';
-	import { loadWithRouter } from '$lib/services/outbox';
 	import Note from '$lib/components/Note.svelte';
-	import type { TrustedEvent } from '@welshman/util';
 
 	const kindNames: Record<number, string> = {
 		5050: 'Search',
@@ -24,143 +21,65 @@
 	};
 
 	const dvmId = $derived($page.params.dvmId);
-	const { dvms, isLoading: loadingDVMs } = useDVMs();
-	const { submitJob, useDVMFeed } = useDVMJob();
-
-	let jobRequestId = $state<string | null>(null);
-	let eventIds = $state<string[]>([]);
-	let parsedDirectEvents = $state<TrustedEvent[]>([]);
+	const { dvmServices } = useDVMs();
 
 	// Find the DVM
-	const dvm = $derived(dvms.find((d) => d.id === dvmId || d.pubkey === dvmId));
+	const dvm = $derived($dvmServices.find((d) => d.id === dvmId || d.pubkey === dvmId));
 
 	// Get the first supported kind for content discovery (5300 is most common)
 	const requestKind = $derived(
 		dvm?.supportedKinds.find((k) => [5300, 5200, 5050, 5250].includes(k)) || 5300
 	);
-	const resultKind = $derived(requestKind + 1000);
 
-	// Create reactive values for the query
-	const dvmPubkey = $derived(dvm?.pubkey || '');
+	// Create reactive DVM feed using welshman's FeedController
+	let dvmFeed = $state<ReturnType<typeof useDVMFeedReactive> | null>(null);
 
-	// Fetch the feed from this DVM using reactive query
-	const feedQuery = $derived(useDVMFeed(dvmPubkey, requestKind, resultKind));
+	// Initialize feed when DVM and user are available (only once)
+	let feedInitialized = $state(false);
 
-	async function handleRequestFeed() {
-		if (!dvm || !$currentUser) return;
+	$effect(() => {
+		if (dvm && $currentUser && !feedInitialized) {
+			feedInitialized = true;
+			try {
+				dvmFeed = useDVMFeedReactive(dvm.pubkey, requestKind, {
+					limit: 50,
+					params: {}
+				});
+			} catch (error) {
+				console.error('Failed to initialize DVM feed:', error);
+				feedInitialized = false; // Allow retry
+			}
+		} else if (!dvm || !$currentUser) {
+			dvmFeed = null;
+			feedInitialized = false;
+		}
+	});
 
-		try {
-			const result = await submitJob.mutateAsync({
-				kind: requestKind,
-				targetPubkey: dvm.pubkey,
-				params: {
-					limit: '50'
-				}
-			});
-			jobRequestId = result.id;
-		} catch (error) {
-			console.error('Failed to request feed:', error);
+	// Track if we've attempted to load
+	let loadAttempted = $state(false);
+
+	// Auto-start DVM feed when initialized
+	$effect(() => {
+		if (dvmFeed && !dvmFeed.isLoading && dvmFeed.events.length === 0 && !loadAttempted) {
+			loadAttempted = true;
+			dvmFeed.load(50);
+		}
+	});
+
+	function handleRequestFeed() {
+		if (dvmFeed) {
+			dvmFeed.load(50);
 		}
 	}
 
-	// Auto-submit job request on mount if user is logged in
-	$effect(() => {
-		if (dvm && $currentUser && !jobRequestId) {
-			handleRequestFeed();
+	function handleRefresh() {
+		if (dvmFeed) {
+			dvmFeed.load(50);
 		}
-	});
-
-	// Parse feed events - use only the most recent result for freshest recommendations
-	$effect(() => {
-		const ids: string[] = [];
-		const directEvents: TrustedEvent[] = [];
-		const feedEvents = feedQuery.data;
-
-		// Use only the most recent DVM result (first in sorted array)
-		const mostRecentResult = feedEvents?.[0];
-
-		if (mostRecentResult) {
-			try {
-				const content = mostRecentResult.content.trim();
-
-				// Try parsing as JSON first
-				if (content.startsWith('[') || content.startsWith('{')) {
-					const parsed = JSON.parse(content);
-
-					if (Array.isArray(parsed)) {
-						parsed.forEach((item) => {
-							// Check if it's a tag array (DVM format: [["e", "id"], ["e", "id"]])
-							if (Array.isArray(item) && item.length >= 2 && item[0] === 'e') {
-								const eventId = item[1];
-								if (typeof eventId === 'string' && eventId.length === 64) {
-									ids.push(eventId);
-								}
-							}
-							// Full event object
-							else if (typeof item === 'object' && item.kind !== undefined) {
-								directEvents.push(item as TrustedEvent);
-							}
-							// Event ID string
-							else if (typeof item === 'string' && item.length === 64) {
-								ids.push(item);
-							}
-						});
-					} else if (typeof parsed === 'object' && parsed.kind !== undefined) {
-						// Single event object
-						directEvents.push(parsed as TrustedEvent);
-					}
-				} else {
-					// Plain text - might be newline-separated event IDs
-					const lines = content
-						.split('\n')
-						.map((l) => l.trim())
-						.filter((l) => l.length === 64);
-					ids.push(...lines);
-				}
-			} catch (e) {
-				console.error('Failed to parse DVM result:', e, mostRecentResult.content);
-			}
-		}
-
-		eventIds = ids;
-		parsedDirectEvents = directEvents;
-	});
-
-	// Fetch full events if we have event IDs
-	const eventsQuery = createQuery(() => ({
-		queryKey: ['dvm-feed-events', eventIds],
-		queryFn: async ({ signal }) => {
-			if (eventIds.length === 0) return [];
-
-			console.log('[DVMFeedPage] Querying relay for', eventIds.length, 'event IDs');
-
-			try {
-				const events = await loadWithRouter({
-					filters: [{ ids: eventIds }],
-					signal
-				});
-
-				console.log('[DVMFeedPage] Relay returned', events.length, 'events');
-
-				// Sort by the DVM's ranking order (preserve order from eventIds)
-				const eventMap = new Map(events.map((e) => [e.id, e]));
-				return eventIds
-					.map((id) => eventMap.get(id))
-					.filter((e): e is TrustedEvent => e !== undefined);
-			} catch (error) {
-				console.error('Failed to fetch events by IDs:', error);
-				return [];
-			}
-		},
-		enabled: eventIds.length > 0,
-		staleTime: 60000
-	}));
-
-	// Combine directly parsed events and fetched events
-	const parsedEvents = $derived([...(parsedDirectEvents || []), ...(eventsQuery.data || [])]);
+	}
 </script>
 
-{#if loadingDVMs}
+{#if !dvm && $dvmServices.length === 0}
 	<MainLayout>
 		{#snippet sidebar()}
 			<AppSidebar />
@@ -173,6 +92,7 @@
 		{#snippet children()}
 			<div class="flex items-center justify-center py-20">
 				<Loader2 class="h-8 w-8 animate-spin text-blue-500" />
+				<p class="ml-3 text-muted-foreground">Loading DVMs...</p>
 			</div>
 		{/snippet}
 	</MainLayout>
@@ -249,26 +169,26 @@
 						<div class="flex gap-2">
 							<Button
 								onclick={handleRequestFeed}
-								disabled={!$currentUser || submitJob.isPending}
+								disabled={!$currentUser || dvmFeed?.isLoading}
 								class="gap-2"
 								size="sm"
 							>
-								{#if submitJob.isPending}
+								{#if dvmFeed?.isLoading}
 									<Loader2 class="h-4 w-4 animate-spin" />
-									Requesting...
+									Loading...
 								{:else}
 									<Zap class="h-4 w-4" />
 									Request Feed
 								{/if}
 							</Button>
 							<Button
-								onclick={() => feedQuery.refetch()}
-								disabled={feedQuery.isLoading}
+								onclick={handleRefresh}
+								disabled={dvmFeed?.isLoading}
 								variant="outline"
 								size="sm"
 								class="gap-2"
 							>
-								<RefreshCw class={`h-4 w-4 ${feedQuery.isLoading ? 'animate-spin' : ''}`} />
+								<RefreshCw class={`h-4 w-4 ${dvmFeed?.isLoading ? 'animate-spin' : ''}`} />
 								Refresh
 							</Button>
 						</div>
@@ -288,41 +208,63 @@
 							</Card.Content>
 						</Card.Root>
 					</div>
-				{:else if feedQuery.isLoading && parsedEvents.length === 0}
+				{:else if dvmFeed?.isLoading && dvmFeed.events.length === 0}
 					<div class="flex items-center justify-center py-20">
 						<Loader2 class="h-8 w-8 animate-spin text-blue-500" />
 					</div>
-				{:else if parsedEvents.length === 0}
+				{:else if dvmFeed?.error}
+					<div class="p-8 text-center">
+						<Card.Root>
+							<Card.Content class="py-12">
+								<Zap class="h-12 w-12 text-destructive mx-auto mb-4" />
+								<h3 class="text-lg font-semibold mb-2">Error Loading Feed</h3>
+								<p class="text-muted-foreground mb-4">
+									{dvmFeed.error.message}
+								</p>
+								<Button onclick={handleRequestFeed}>
+									<RefreshCw class="h-4 w-4 mr-2" />
+									Try Again
+								</Button>
+							</Card.Content>
+						</Card.Root>
+					</div>
+				{:else if !dvmFeed || dvmFeed.events.length === 0}
 					<div class="p-8 text-center">
 						<Card.Root>
 							<Card.Content class="py-12">
 								<Zap class="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-								<h3 class="text-lg font-semibold mb-2">No Results Yet</h3>
-								<p class="text-muted-foreground mb-4">
-									{feedQuery.data && feedQuery.data.length > 0
-										? `Found ${feedQuery.data.length} DVM result(s) but couldn't parse them. Check console for details.`
-										: 'No feed results have been published by this DVM yet. Try requesting a feed or check back later.'}
+								<h3 class="text-lg font-semibold mb-2">DVM Feeds - Experimental Feature</h3>
+								<p class="text-muted-foreground mb-4 max-w-md mx-auto">
+									Data Vending Machines (DVMs) are AI-powered services that curate content for you.
+									This feature is currently experimental.
 								</p>
-								{#if feedQuery.data && feedQuery.data.length > 0}
-									<p class="text-xs text-muted-foreground mb-4">
-										Debug info: {eventIds.length} event IDs found, {parsedDirectEvents.length} direct
-										events parsed. Open browser console (F12) to see raw DVM responses.
+								<div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-4 max-w-md mx-auto">
+									<p class="text-sm text-yellow-800 dark:text-yellow-200">
+										<strong>Note:</strong> DVMs process requests asynchronously and may take time to respond.
+										The DVM at pubkey <code class="text-xs bg-yellow-100 dark:bg-yellow-900/40 px-1 py-0.5 rounded">{dvm.pubkey.slice(0, 16)}...</code>
+										{dvmFeed?.isExhausted ? 'did not return any results' : 'has not responded yet'}.
 									</p>
-								{/if}
-								{#if !jobRequestId}
-									<Button onclick={handleRequestFeed} disabled={submitJob.isPending}>
-										<Zap class="h-4 w-4 mr-2" />
-										Request Feed
-									</Button>
-								{/if}
+								</div>
+								<p class="text-xs text-muted-foreground mb-4">
+									DVMs need to be online and actively processing requests. Many DVMs listed may not be operational.
+								</p>
+								<Button onclick={() => (window.location.href = '/dvm')} variant="outline">
+									<ArrowLeft class="h-4 w-4 mr-2" />
+									Back to DVM List
+								</Button>
 							</Card.Content>
 						</Card.Root>
 					</div>
 				{:else}
 					<div>
-						{#each parsedEvents as event (event.id)}
+						{#each dvmFeed.events as event (event.id)}
 							<Note {event} />
 						{/each}
+						{#if dvmFeed.isExhausted}
+							<div class="p-4 text-center text-sm text-muted-foreground">
+								No more results available
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>

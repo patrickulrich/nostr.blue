@@ -12,7 +12,8 @@
 	import { currentUser } from '$lib/stores/auth';
 	import { cn } from '$lib/utils';
 	import { onMount } from 'svelte';
-	import { queryDVMFeed, parseDVMEventIds, fetchEventsByIds, POPULAR_DVM_PUBKEY } from '$lib/stores/dvm.svelte';
+	import { POPULAR_DVM_PUBKEY } from '$lib/stores/dvm.svelte';
+	import { useDVMFeed } from '$lib/hooks/useDVMFeed.svelte';
 
 	// Composer dialog state
 	let composerOpen = $state(false);
@@ -72,34 +73,56 @@
 			.filter((pk): pk is string => typeof pk === 'string') || []
 	);
 
-	// Query DVM results for Popular feed
-	const dvmQuery = createQuery<TrustedEvent[]>(() => ({
-		queryKey: ['dvm-feed', POPULAR_DVM_PUBKEY],
-		queryFn: async () => {
-			return await queryDVMFeed(POPULAR_DVM_PUBKEY, 6300, 10);
-		},
-		enabled: feedType === 'popular',
-		staleTime: 60000 // Cache for 1 minute
-	}));
+	// Popular feed using DVM
+	let popularEvents = $state<TrustedEvent[]>([]);
+	let popularFeedController = $state<ReturnType<typeof useDVMFeed> | null>(null);
+	let popularLoading = $state(false);
+	let popularError = $state<Error | null>(null);
 
-	// Parse DVM results and fetch actual events
-	const popularEventsQuery = createQuery<TrustedEvent[]>(() => ({
-		queryKey: ['popular-events', dvmQuery.data],
-		queryFn: async () => {
-			if (!dvmQuery.data || dvmQuery.data.length === 0) return [];
+	// Initialize DVM feed controller for Popular feed
+	$effect(() => {
+		if (feedType === 'popular' && !popularFeedController) {
+			try {
+				// Only create if user is logged in (DVM requires signer)
+				if ($currentUser) {
+					popularFeedController = useDVMFeed(POPULAR_DVM_PUBKEY, 5300, {
+						limit: 50,
+						onEvent: (event) => {
+							// Deduplicate and add to popularEvents
+							if (!popularEvents.some((e) => e.id === event.id)) {
+								popularEvents.push(event);
+								// Sort by created_at descending
+								popularEvents.sort((a, b) => b.created_at - a.created_at);
+							}
+						},
+						onExhausted: () => {
+							popularLoading = false;
+						}
+					});
+				}
+			} catch (error) {
+				console.error('Failed to initialize popular feed:', error);
+				popularError = error instanceof Error ? error : new Error(String(error));
+			}
+		}
+	});
 
-			// Use the most recent DVM result
-			const mostRecentResult = dvmQuery.data[0];
-			const eventIds = parseDVMEventIds(mostRecentResult.content);
-
-			if (eventIds.length === 0) return [];
-
-			// Fetch the actual events
-			return await fetchEventsByIds(eventIds);
-		},
-		enabled: feedType === 'popular' && !!dvmQuery.data && dvmQuery.data.length > 0,
-		staleTime: 60000
-	}));
+	// Auto-load popular feed when controller is ready
+	$effect(() => {
+		if (
+			feedType === 'popular' &&
+			popularFeedController &&
+			!popularLoading &&
+			popularEvents.length === 0 &&
+			!popularError
+		) {
+			popularLoading = true;
+			popularFeedController.load(50).catch((err) => {
+				popularError = err instanceof Error ? err : new Error(String(err));
+				popularLoading = false;
+			});
+		}
+	});
 
 	// Query for Following feed with infinite scroll
 	const followingFeedQuery = createInfiniteQuery<TrustedEvent[]>(() => {
@@ -151,34 +174,39 @@
 	let feedData = $derived(
 		feedType === 'following'
 			? (followingFeedQuery.data?.pages.flatMap((page) => page) as TrustedEvent[] | undefined)
-			: popularEventsQuery.data
+			: popularEvents
 	);
 
 	// Combined loading and error states
 	let isLoading = $derived(
 		feedType === 'following'
 			? followingFeedQuery.isLoading
-			: dvmQuery.isLoading || popularEventsQuery.isLoading
+			: popularLoading
 	);
 
 	let error = $derived(
 		feedType === 'following'
 			? followingFeedQuery.error
-			: dvmQuery.error || popularEventsQuery.error
+			: popularError
 	);
 
 	let isRefetching = $derived(
 		feedType === 'following'
 			? followingFeedQuery.isRefetching
-			: dvmQuery.isRefetching || popularEventsQuery.isRefetching
+			: popularLoading
 	);
 
 	function refetchFeed() {
 		if (feedType === 'following') {
 			followingFeedQuery.refetch();
-		} else {
-			dvmQuery.refetch();
-			popularEventsQuery.refetch();
+		} else if (popularFeedController) {
+			popularLoading = true;
+			popularEvents = [];
+			popularError = null;
+			popularFeedController.load(50).catch((err) => {
+				popularError = err instanceof Error ? err : new Error(String(err));
+				popularLoading = false;
+			});
 		}
 	}
 

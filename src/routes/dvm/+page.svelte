@@ -7,7 +7,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Loader2, Zap, ExternalLink, Globe, Smartphone, Monitor, ArrowRight } from 'lucide-svelte';
+	import { Loader2, Zap, ExternalLink, Globe, Smartphone, Monitor, ArrowRight, RefreshCw } from 'lucide-svelte';
 	import { nip19 } from 'nostr-tools';
 
 	// Map kind numbers to human-readable names
@@ -35,15 +35,23 @@
 		desktop: Monitor
 	};
 
-	const { dvms, isLoading } = useDVMs();
+	const { dvmServices } = useDVMs();
+
+	// Debug logging
+	$effect(() => {
+		console.log('[DVM Page] DVMs count:', $dvmServices.length);
+	});
+
 	let selectedCategory = $state('all');
 
 	// Get unique categories from DVMs
-	const categories = $derived(['all', ...new Set(dvms.flatMap((dvm) => dvm.tags))]);
+	const categories = $derived(['all', ...new Set($dvmServices.flatMap((dvm) => dvm.tags))]);
 
 	// Filter DVMs by category
 	let filteredDVMs = $derived(
-		selectedCategory === 'all' ? dvms : dvms.filter((dvm) => dvm.tags.includes(selectedCategory))
+		selectedCategory === 'all'
+			? $dvmServices
+			: $dvmServices.filter((dvm) => dvm.tags.includes(selectedCategory))
 	);
 
 	// Sort to show feed-capable DVMs first (those with kinds 5050, 5200, 5250, 5300)
@@ -73,13 +81,19 @@
 			<!-- Header -->
 			<div class="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border">
 				<div class="p-4">
-					<h1 class="text-xl font-bold flex items-center gap-2 mb-3">
+					<h1 class="text-xl font-bold flex items-center gap-2 mb-2">
 						<Zap class="h-5 w-5 text-blue-500" />
 						Data Vending Machines
 					</h1>
-					<p class="text-sm text-muted-foreground mb-3">
-						Discover AI-powered services that can process your content
+					<p class="text-sm text-muted-foreground mb-2">
+						AI-powered services that curate and process Nostr content
 					</p>
+					<div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-3">
+						<p class="text-xs text-blue-800 dark:text-blue-200">
+							<strong>Experimental:</strong> DVM feeds are a new feature. Many listed DVMs may not be operational.
+							DVMs process requests asynchronously and responses may take time.
+						</p>
+					</div>
 
 					<!-- Category filters -->
 					<div class="flex gap-2 overflow-x-auto pb-2 -mb-2">
@@ -98,18 +112,17 @@
 			</div>
 
 			<!-- Content -->
-			{#if isLoading}
-				<div class="flex items-center justify-center py-20">
-					<Loader2 class="h-8 w-8 animate-spin text-blue-500" />
-				</div>
-			{:else if sortedDVMs.length === 0}
+			{#if sortedDVMs.length === 0}
 				<div class="flex flex-col items-center justify-center py-20 px-4 text-center">
 					<Zap class="h-16 w-16 text-muted-foreground mb-4" />
 					<h2 class="text-2xl font-bold mb-2">No DVMs Found</h2>
-					<p class="text-muted-foreground max-w-sm">
+					<p class="text-muted-foreground max-w-sm mb-4">
 						{selectedCategory === 'all'
-							? 'No Data Vending Machines are currently available. Connect to more relays to discover services.'
+							? 'No Data Vending Machines are currently available. This might be because DVMs are not announced on your configured relays.'
 							: `No DVMs found for category "${selectedCategory}"`}
+					</p>
+					<p class="text-xs text-muted-foreground">
+						DVMs announce themselves using kind 31990 events. Try configuring different relays in Settings or check back later.
 					</p>
 				</div>
 			{:else}
