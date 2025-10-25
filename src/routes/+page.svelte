@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { createQuery, createInfiniteQuery } from '@tanstack/svelte-query';
 	import type { TrustedEvent } from '@welshman/util';
+	import type { RepostEvent } from '$lib/types/nostr';
+	import { isTrustedEvent } from '$lib/types/nostr';
 	import { loadWithRouter } from '$lib/services/outbox';
 	import Note from '$lib/components/Note.svelte';
 	import NoteComposer from '$lib/components/NoteComposer.svelte';
@@ -139,7 +141,7 @@
 	});
 
 	// Query for Following feed with infinite scroll
-	const followingFeedQuery = createInfiniteQuery<TrustedEvent[]>(() => {
+	const followingFeedQuery = createInfiniteQuery<RepostEvent[]>(() => {
 		return {
 			queryKey: ['following-feed', following],
 			queryFn: async ({ pageParam, signal }) => {
@@ -186,7 +188,7 @@
 				repostedEvents.forEach((e) => repostedEventMap.set(e.id, e));
 
 				// Transform reposts to include original event data
-				const transformedEvents = events.map((event) => {
+				const transformedEvents: RepostEvent[] = events.map((event): RepostEvent => {
 					if (event.kind === 6) {
 						// Get the original event from content or from fetched events
 						const eTag = event.tags.find((tag) => tag[0] === 'e');
@@ -194,11 +196,11 @@
 
 						let originalEvent: TrustedEvent | null = null;
 
-						// Try to parse from content first
+						// Try to parse from content first with runtime validation
 						try {
-							const parsed = JSON.parse(event.content);
-							if (parsed.id && parsed.pubkey && parsed.created_at) {
-								originalEvent = parsed as TrustedEvent;
+							const parsed: unknown = JSON.parse(event.content);
+							if (isTrustedEvent(parsed)) {
+								originalEvent = parsed;
 							}
 						} catch {
 							// Content parsing failed, try fetched events
@@ -214,15 +216,16 @@
 							...event,
 							_repostedEvent: originalEvent,
 							_repostAuthor: event.pubkey
-						} as TrustedEvent & { _repostedEvent?: TrustedEvent | null; _repostAuthor?: string };
+						};
 					}
+					// Regular events (kind 1) - just return as RepostEvent (compatible)
 					return event;
 				});
 
 				// Filter out reposts without original events
-				const validEvents = transformedEvents.filter((event) => {
+				const validEvents: RepostEvent[] = transformedEvents.filter((event) => {
 					if (event.kind === 6) {
-						return (event as any)._repostedEvent !== null;
+						return event._repostedEvent !== null && event._repostedEvent !== undefined;
 					}
 					return true;
 				});
@@ -251,7 +254,7 @@
 	// Combined feed data based on feed type
 	let feedData = $derived(
 		feedType === 'following'
-			? (followingFeedQuery.data?.pages.flatMap((page) => page) as TrustedEvent[] | undefined)
+			? (followingFeedQuery.data?.pages.flatMap((page) => page) as RepostEvent[] | undefined)
 			: popularEvents
 	);
 
