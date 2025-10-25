@@ -2,7 +2,8 @@ import type { TrustedEvent } from '@welshman/util';
 import { makeEvent } from '@welshman/util';
 import { createMutation } from '@tanstack/svelte-query';
 import { publishThunk } from '@welshman/app';
-import { Router } from '@welshman/router';
+import { routerContext } from '@welshman/router';
+import { presetRelays } from './appStore';
 
 export interface PublishEventParams {
 	kind: number;
@@ -57,15 +58,9 @@ export function useNostrPublish() {
 				tags
 			});
 
-			// Use router to determine which relays to publish to
-			// This uses the user's write relays (outbox) and mentioned users' read relays
-			let relays = Router.get().PublishEvent(event).getUrls();
-
-			// Fallback to default relays if router returns no relays
-			// (e.g., user hasn't published a NIP-65 relay list yet)
-			if (relays.length === 0) {
-				relays = Router.get().getDefaultRelays();
-			}
+			// Get default relays from router context
+			// In a full implementation, this would use the outbox model to determine optimal relays
+			const relays = routerContext.getDefaultRelays?.() || presetRelays.map(r => r.url);
 
 			// Publish to relays (publishThunk will sign and publish)
 			const thunk = publishThunk({ event, relays });
@@ -128,15 +123,8 @@ export async function publishNostrEvent(params: PublishEventParams): Promise<Tru
 		tags
 	});
 
-	// Use router to determine which relays to publish to
-	// This uses the user's write relays (outbox) and mentioned users' read relays
-	let relays = Router.get().PublishEvent(event).getUrls();
-
-	// Fallback to default relays if router returns no relays
-	// (e.g., user hasn't published a NIP-65 relay list yet)
-	if (relays.length === 0) {
-		relays = Router.get().getDefaultRelays();
-	}
+	// Get default relays from router context
+	const relays = routerContext.getDefaultRelays?.() || presetRelays.map(r => r.url);
 
 	// Publish to relays (publishThunk will sign and publish)
 	const thunk = publishThunk({ event, relays });

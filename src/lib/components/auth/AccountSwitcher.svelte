@@ -5,6 +5,8 @@
   import WalletModal from '$lib/components/WalletModal.svelte';
   import { genUserName } from '$lib/genUserName';
   import { currentUser, otherSessions, switchAccount, logout } from '$lib/stores/auth';
+  import { profilesByPubkey } from '@welshman/app';
+  import { derived } from 'svelte/store';
 
   interface Props {
     onAddAccountClick: () => void;
@@ -17,8 +19,35 @@
   // Get current session and other sessions from Welshman
   const otherUsers = $derived($otherSessions);
 
+  // Create a reactive store for current user's profile
+  const currentUserProfile = derived(
+    [currentUser, profilesByPubkey],
+    ([$currentUser, $profilesByPubkey]) => {
+      if (!$currentUser?.pubkey) return null;
+      return $profilesByPubkey.get($currentUser.pubkey);
+    }
+  );
+
   function getDisplayName(account: any): string {
-    return account?.metadata?.name ?? genUserName(account?.pubkey ?? '');
+    if (!account?.pubkey) return 'Unknown';
+
+    // Check if this is the current user and we have profile data
+    if ($currentUser && account.pubkey === $currentUser.pubkey) {
+      return $currentUserProfile?.name || genUserName(account.pubkey);
+    }
+
+    return genUserName(account.pubkey);
+  }
+
+  function getProfilePicture(account: any): string | undefined {
+    if (!account?.pubkey) return undefined;
+
+    // Check if this is the current user and we have profile data
+    if ($currentUser && account.pubkey === $currentUser.pubkey) {
+      return $currentUserProfile?.picture;
+    }
+
+    return undefined;
   }
 
   function setLogin(accountPubkey: string) {
@@ -75,8 +104,8 @@
     >
       <!-- Avatar -->
       <div class="w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center">
-        {#if $currentUser.metadata?.picture}
-          <img src={$currentUser.metadata.picture} alt={getDisplayName($currentUser)} class="w-full h-full object-cover" />
+        {#if getProfilePicture($currentUser)}
+          <img src={getProfilePicture($currentUser)} alt={getDisplayName($currentUser)} class="w-full h-full object-cover" />
         {:else}
           <span class="text-lg font-medium">{getDisplayName($currentUser).charAt(0)}</span>
         {/if}
@@ -94,7 +123,7 @@
 
     <!-- Dropdown Content -->
     {#if isDropdownOpen}
-      <div class="absolute top-full right-0 mt-2 w-64 bg-popover border rounded-md shadow-lg p-2 z-50 animate-scale-in">
+      <div class="absolute bottom-full right-0 mb-2 w-64 bg-popover border rounded-md shadow-lg p-2 z-50 animate-scale-in">
         <!-- Switch Account Section -->
         <div class="font-medium text-sm px-2 py-1.5">Switch Account</div>
         {#each otherUsers as user}

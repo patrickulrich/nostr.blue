@@ -1,8 +1,8 @@
 {
-  "name": "pustack",
-  "title": "PuStack",
-  "description": "Build Nostr apps in minutes with this Svelte framework",
-  "uri": "git+https://code.undiscoveredweb.com/patrickulrich/pustack.git",
+  "name": "nostr.blue",
+  "title": "nostr.blue",
+  "description": "Decentralized social network on Nostr with DVMs, communities, and Lightning zaps",
+  "uri": "git+https://github.com/patrickulrich/nostr.blue.git",
   "image": "https://gitlab.com/-/project/69048882/uploads/0a9e3a19f2901d5c772952c1de10ce4f/image.png",
   "commands": [
     "npm",

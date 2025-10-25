@@ -6,7 +6,7 @@
  */
 
 import { load, request, type Tracker } from '@welshman/net';
-import { getFilterSelections, addMinimalFallbacks, routerContext } from '@welshman/router';
+import { getFilterSelections, routerContext } from '@welshman/router';
 import type { Filter, TrustedEvent } from '@welshman/util';
 import { presetRelays } from '$lib/stores/appStore';
 
@@ -69,7 +69,7 @@ export async function loadWithRouter(options: LoadWithRouterOptions): Promise<Tr
 	const { filters, signal, relayHints = [], onEvent, onEose, onClose } = options;
 
 	// Use getFilterSelections to automatically determine optimal relays for each filter
-	let selections = getFilterSelections(filters);
+	const selections = getFilterSelections(filters);
 
 	// If we have explicit relay hints, merge them with selections
 	if (relayHints.length > 0 && selections.length > 0) {
@@ -211,7 +211,7 @@ export async function requestWithRouter(
 	} = options;
 
 	// Use getFilterSelections for intelligent routing
-	let selections = getFilterSelections(filters);
+	const selections = getFilterSelections(filters);
 
 	// Merge relay hints if provided
 	if (relayHints.length > 0 && selections.length > 0) {

@@ -6,7 +6,6 @@
     checked?: boolean;
     indeterminate?: boolean;
     disabled?: boolean;
-    readonly?: boolean;
     required?: boolean;
     name?: string;
     value?: string;
@@ -18,7 +17,6 @@
     checked = $bindable(false),
     indeterminate = $bindable(false),
     disabled = false,
-    readonly = false,
     required = false,
     name,
     value,
@@ -31,7 +29,6 @@
   bind:checked
   bind:indeterminate
   {disabled}
-  {readonly}
   {required}
   {name}
   {value}

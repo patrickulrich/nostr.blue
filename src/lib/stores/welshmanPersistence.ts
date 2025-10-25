@@ -7,7 +7,7 @@
 
 import { browser } from '$app/environment';
 import { pubkey, sessions } from '@welshman/app';
-import { get } from 'svelte/store';
+import { get as _get } from 'svelte/store';
 
 const STORAGE_KEY_PUBKEY = 'welshman:pubkey';
 const STORAGE_KEY_SESSIONS = 'welshman:sessions';

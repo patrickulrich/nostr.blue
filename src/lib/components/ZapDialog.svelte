@@ -17,7 +17,7 @@
 
   let isOpen = $state(false);
   let amount = $state<number | string>(100);
-  let comment = $state('Zapped with PuStack!');
+  let comment = $state('Zapped with nostr.blue!');
   let copied = $state(false);
   let qrCodeUrl = $state('');
 
@@ -70,7 +70,7 @@
       zaps.resetInvoice();
       copied = false;
       qrCodeUrl = '';
-      comment = 'Zapped with PuStack!';
+      comment = 'Zapped with nostr.blue!';
     }
   });
 

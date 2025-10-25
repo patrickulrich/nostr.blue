@@ -1,7 +1,7 @@
 {
-  "name": "PuStack",
-  "short_name": "PuStack",
-  "description": "A complete framework for building Nostr clients with Svelte 5",
+  "name": "nostr.blue",
+  "short_name": "nostr.blue",
+  "description": "Decentralized social network on Nostr",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

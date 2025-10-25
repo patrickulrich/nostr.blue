@@ -9,12 +9,21 @@
   import { appConfig, applyTheme, setupThemeWatcher } from '$lib/stores/appStore';
   import { welshmanRouter } from '$lib/stores/welshman';
   import { setupWelshmanPersistence } from '$lib/stores/welshmanPersistence';
+  import { currentUser } from '$lib/stores/auth';
+  import { loadProfile } from '@welshman/app';
 
   interface Props {
     children?: import('svelte').Snippet;
   }
 
   let { children }: Props = $props();
+
+  // Load current user's profile when they log in
+  $effect(() => {
+    if ($currentUser?.pubkey) {
+      loadProfile($currentUser.pubkey);
+    }
+  });
 
   // Scroll to top on navigation
   afterNavigate(() => {

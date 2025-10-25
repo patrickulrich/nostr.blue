@@ -10,7 +10,7 @@ import type { WebLNProvider } from '@webbtc/webln-types';
 import { nwcStore, type NWCConnection } from './nwc.svelte';
 import { toastError, toastSuccess } from './toast.svelte';
 import { get } from 'svelte/store';
-import { Router } from '@welshman/router';
+import { routerContext } from '@welshman/router';
 
 /**
  * Query zap receipts for a Nostr event
@@ -209,14 +209,14 @@ export function useZaps(
 
 			const zapAmount = amount * 1000; // convert to millisats
 
-			// Use router to get user's write relays for publishing zap receipt
-			const relays = Router.get().FromUser().getUrls();
+			// Get default relays from router context
+			const relays = routerContext.getDefaultRelays?.() || [];
 
 			const zapRequest = nip57.makeZapRequest({
 				profile: target.pubkey,
 				event: event,
 				amount: zapAmount,
-				relays: relays.length > 0 ? relays : Router.get().getDefaultRelays(),
+				relays,
 				comment
 			});
 

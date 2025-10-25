@@ -1,28 +1,29 @@
 <script lang="ts">
 	import type { TrustedEvent } from '@welshman/util';
-	import { createQuery, createMutation } from '@tanstack/svelte-query';
+	import { createQuery } from '@tanstack/svelte-query';
 	import { loadWithRouter } from '$lib/services/outbox';
 	import { nip19 } from 'nostr-tools';
-	import * as Card from '$lib/components/ui/card';
 	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
-	import { Skeleton } from '$lib/components/ui/skeleton';
+	import { Button } from '$lib/components/ui/button';
 	import NoteContent from './NoteContent.svelte';
+	import ReactionButton from './ReactionButton.svelte';
+	import RepostButton from './RepostButton.svelte';
+	import ZapButton from './ZapButton.svelte';
+	import BookmarkButton from './BookmarkButton.svelte';
 	import { genUserName } from '$lib/genUserName';
-	import { useNostrPublish } from '$lib/stores/publish.svelte';
-	import { useToast } from '$lib/stores/toast.svelte';
-	import { currentUser } from '$lib/stores/auth';
+	import { useReplyCount } from '$lib/hooks/useReplyCount.svelte';
+	import { formatDistanceToNow } from '$lib/utils/formatTime';
+	import { cn } from '$lib/utils';
+	import { MessageCircle, MoreHorizontal, Share } from 'lucide-svelte';
+	import { goto } from '$app/navigation';
 
 	interface Props {
 		event: TrustedEvent;
-		showReplyButton?: boolean;
-		onReply?: (eventId: string) => void;
+		showThread?: boolean;
 		class?: string;
 	}
 
-	let { event, showReplyButton = false, onReply, class: className = '' }: Props = $props();
-
-	const toast = useToast();
-	const publish = useNostrPublish();
+	let { event, showThread = true, class: className = '' }: Props = $props();
 
 	interface AuthorMetadata {
 		display_name?: string;
@@ -30,7 +31,7 @@
 		picture?: string;
 	}
 
-	// Fetch author profile - router will use indexer relays
+	// Fetch author profile
 	const authorQuery = createQuery<AuthorMetadata>(() => ({
 		queryKey: ['profile', event.pubkey],
 		queryFn: async () => {
@@ -52,239 +53,142 @@
 				}
 			}
 			return {};
-		}
+		},
+		staleTime: 5 * 60 * 1000
 	}));
 
-	// Generate npub for profile link
+	const replyCountQuery = useReplyCount(event.id);
+
 	let npub = $derived(nip19.npubEncode(event.pubkey));
+	let noteId = $derived(nip19.noteEncode(event.id));
 
-	// Get display name from metadata
 	let displayName = $derived(
-		(authorQuery.data as AuthorMetadata | undefined)?.display_name ||
-		(authorQuery.data as AuthorMetadata | undefined)?.name ||
-		genUserName(event.pubkey)
+		authorQuery.data?.display_name || authorQuery.data?.name || genUserName(event.pubkey)
 	);
 
-	// Get profile picture
-	let profilePicture = $derived((authorQuery.data as AuthorMetadata | undefined)?.picture);
+	let username = $derived(authorQuery.data?.name || `@${npub.slice(0, 12)}...`);
+	let profilePicture = $derived(authorQuery.data?.picture);
+	let timestamp = $derived(formatDistanceToNow(event.created_at));
+	let replyCount = $derived(replyCountQuery.data || 0);
 
-	// Format timestamp
-	let formattedTime = $derived(
-		new Date(event.created_at * 1000).toLocaleDateString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
-		})
-	);
-
-	interface ReactionsData {
-		likes: number;
-		hasLiked: boolean;
-	}
-
-	// Query reactions for this note - router will query event author's relays
-	const reactionsQuery = createQuery<ReactionsData>(() => ({
-		queryKey: ['reactions', event.id],
-		queryFn: async () => {
-			const reactions = await loadWithRouter({
-				filters: [
-					{
-						kinds: [7], // Reactions (NIP-25)
-						'#e': [event.id]
-					}
-				]
-			});
-
-			const likes = reactions.filter((r) => r.content === '+' || r.content === '❤️');
-			return {
-				likes: likes.length,
-				hasLiked: likes.some((r) => r.pubkey === $currentUser?.pubkey)
-			};
-		}
-	}));
-
-	// Derived variables for reactions with proper typing
-	let reactionsData = $derived(reactionsQuery.data as ReactionsData | undefined);
-	let hasLiked = $derived(reactionsData?.hasLiked ?? false);
-	let likesCount = $derived(reactionsData?.likes ?? 0);
-
-	// Like mutation
-	const likeMutation = createMutation(() => ({
-		mutationFn: async () => {
-			if (!$currentUser) {
-				toast.toastError('Please log in to like notes');
-				throw new Error('Not logged in');
-			}
-
-			await publish.mutateAsync({
-				kind: 7, // Reaction
-				content: '+',
-				tags: [
-					['e', event.id],
-					['p', event.pubkey]
-				]
-			});
-		},
-		onSuccess: () => {
-			toast.toastSuccess('Liked!');
-			reactionsQuery.refetch();
-		},
-		onError: () => {
-			toast.toastError('Failed to like note');
-		}
-	}));
-
-	// Repost mutation
-	const repostMutation = createMutation(() => ({
-		mutationFn: async () => {
-			if (!$currentUser) {
-				toast.toastError('Please log in to repost notes');
-				throw new Error('Not logged in');
-			}
-
-			await publish.mutateAsync({
-				kind: 6, // Repost (NIP-18)
-				content: JSON.stringify(event),
-				tags: [
-					['e', event.id],
-					['p', event.pubkey]
-				]
-			});
-		},
-		onSuccess: () => {
-			toast.toastSuccess('Reposted!');
-		},
-		onError: () => {
-			toast.toastError('Failed to repost note');
-		}
-	}));
-
-	function handleLike() {
-		if (hasLiked) {
-			toast.toastInfo('You already liked this note');
+	function handleCardClick(e: MouseEvent) {
+		// Don't navigate if clicking on a button, link, or interactive element
+		const target = e.target as HTMLElement;
+		if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
 			return;
 		}
-		likeMutation.mutate();
+		goto(`/${noteId}`);
 	}
 
-	function handleRepost() {
-		repostMutation.mutate();
-	}
+	function handleShare(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
 
-	function handleReply() {
-		if (onReply) {
-			onReply(event.id);
+		if (navigator.share) {
+			navigator.share({
+				title: `Post by ${displayName}`,
+				url: `${window.location.origin}/${noteId}`
+			});
+		} else {
+			// Fallback: copy to clipboard
+			navigator.clipboard.writeText(`${window.location.origin}/${noteId}`);
 		}
 	}
 </script>
 
-<Card.Root class={className}>
-	<Card.Header class="flex flex-row items-start gap-3 space-y-0">
-		<a href="/{npub}" class="shrink-0">
-			{#if authorQuery.isLoading}
-				<Skeleton class="h-10 w-10 rounded-full" />
-			{:else}
-				<Avatar>
-					<AvatarImage src={profilePicture} alt={displayName} />
-					<AvatarFallback>{displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
-				</Avatar>
-			{/if}
+<div
+	class={cn(
+		'border-b border-border hover:bg-accent/50 transition-colors cursor-pointer',
+		className
+	)}
+	onclick={handleCardClick}
+	role="button"
+	tabindex="0"
+	onkeydown={(e) => e.key === 'Enter' && handleCardClick(e as any)}
+>
+	<div class="flex gap-3 p-4">
+		<!-- Avatar -->
+		<a href="/{npub}" class="flex-shrink-0" onclick={(e) => e.stopPropagation()}>
+			<Avatar class="w-12 h-12">
+				<AvatarImage src={profilePicture} alt={displayName} />
+				<AvatarFallback>{displayName[0]?.toUpperCase() || 'A'}</AvatarFallback>
+			</Avatar>
 		</a>
 
+		<!-- Content -->
 		<div class="flex-1 min-w-0">
-			<div class="flex items-center gap-2">
-				<a href="/{npub}" class="font-semibold hover:underline truncate">
-					{#if authorQuery.isLoading}
-						<Skeleton class="h-4 w-24" />
-					{:else}
+			<!-- Header -->
+			<div class="flex items-start justify-between gap-2 mb-1">
+				<div class="flex items-center gap-2 flex-wrap min-w-0">
+					<a
+						href="/{npub}"
+						class="font-bold hover:underline truncate"
+						onclick={(e) => e.stopPropagation()}
+					>
 						{displayName}
-					{/if}
-				</a>
-				<span class="text-sm text-muted-foreground">·</span>
-				<time class="text-sm text-muted-foreground whitespace-nowrap" datetime={new Date(event.created_at * 1000).toISOString()}>
-					{formattedTime}
-				</time>
+					</a>
+					<a
+						href="/{npub}"
+						class="text-muted-foreground text-sm truncate"
+						onclick={(e) => e.stopPropagation()}
+					>
+						{username}
+					</a>
+					<span class="text-muted-foreground text-sm">·</span>
+					<a
+						href="/{noteId}"
+						class="text-muted-foreground text-sm hover:underline"
+						onclick={(e) => e.stopPropagation()}
+					>
+						{timestamp}
+					</a>
+				</div>
+				<Button variant="ghost" size="icon" class="flex-shrink-0 -mt-1 -mr-2">
+					<MoreHorizontal class="h-4 w-4" />
+				</Button>
+			</div>
+
+			<!-- Post Content -->
+			<div class="block">
+				<NoteContent {event} class="text-base mb-3" />
+			</div>
+
+			<!-- Actions -->
+			<div class="flex items-center justify-between max-w-lg mt-2">
+				<Button
+					variant="ghost"
+					size="sm"
+					class="text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 gap-1 -ml-2"
+					onclick={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						// TODO: Open reply dialog
+					}}
+				>
+					<MessageCircle class="h-[18px] w-[18px]" />
+					<span class="text-xs">
+						{replyCount > 500 ? '500+' : replyCount > 0 ? replyCount : ''}
+					</span>
+				</Button>
+
+				<RepostButton {event} />
+
+				<ReactionButton eventId={event.id} authorPubkey={event.pubkey} />
+
+				<ZapButton target={event} showCount={true} />
+
+				<div class="flex items-center gap-0">
+					<BookmarkButton eventId={event.id} />
+					<Button
+						variant="ghost"
+						size="sm"
+						class="text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 p-2"
+						onclick={handleShare}
+					>
+						<Share class="h-[18px] w-[18px]" />
+					</Button>
+				</div>
 			</div>
 		</div>
-	</Card.Header>
-
-	<Card.Content>
-		<NoteContent {event} />
-
-		<!-- Reaction buttons -->
-		<div class="mt-4 flex items-center gap-6">
-			<!-- Reply -->
-			{#if showReplyButton}
-				<button
-					class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors group"
-					onclick={handleReply}
-					disabled={!$currentUser}
-				>
-					<svg
-						class="w-4 h-4 group-hover:scale-110 transition-transform"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-						/>
-					</svg>
-					<span>Reply</span>
-				</button>
-			{/if}
-
-			<!-- Like -->
-			<button
-				class="flex items-center gap-1.5 text-sm transition-colors group"
-				class:text-muted-foreground={!hasLiked}
-				class:hover:text-red-500={!hasLiked}
-				class:text-red-500={hasLiked}
-				onclick={handleLike}
-				disabled={likeMutation.isPending || !$currentUser}
-			>
-				<svg
-					class="w-4 h-4 group-hover:scale-110 transition-transform"
-					fill={hasLiked ? 'currentColor' : 'none'}
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-					/>
-				</svg>
-				<span>{likesCount}</span>
-			</button>
-
-			<!-- Repost -->
-			<button
-				class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-green-500 transition-colors group"
-				onclick={handleRepost}
-				disabled={repostMutation.isPending || !$currentUser}
-			>
-				<svg
-					class="w-4 h-4 group-hover:scale-110 transition-transform"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-					/>
-				</svg>
-				<span>Repost</span>
-			</button>
-		</div>
-	</Card.Content>
-</Card.Root>
+	</div>
+</div>
