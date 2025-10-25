@@ -14,16 +14,21 @@
 	import { useReplyCount } from '$lib/hooks/useReplyCount.svelte';
 	import { formatDistanceToNow } from '$lib/utils/formatTime';
 	import { cn } from '$lib/utils';
-	import { MessageCircle, MoreHorizontal, Share } from 'lucide-svelte';
+	import { MessageCircle, MoreHorizontal, Share, Repeat2 } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 
 	interface Props {
-		event: TrustedEvent;
+		event: TrustedEvent & { _repostedEvent?: TrustedEvent | null; _repostAuthor?: string };
 		showThread?: boolean;
 		class?: string;
 	}
 
 	let { event, showThread = true, class: className = '' }: Props = $props();
+
+	// Check if this is a repost (kind 6)
+	let isRepost = $derived(event.kind === 6 && event._repostedEvent);
+	let repostAuthorPubkey = $derived(isRepost ? event._repostAuthor || event.pubkey : null);
+	let displayEvent = $derived(isRepost ? event._repostedEvent! : event);
 
 	interface AuthorMetadata {
 		display_name?: string;
@@ -31,15 +36,15 @@
 		picture?: string;
 	}
 
-	// Fetch author profile
+	// Fetch author profile (of the original post author)
 	const authorQuery = createQuery<AuthorMetadata>(() => ({
-		queryKey: ['profile', event.pubkey],
+		queryKey: ['profile', displayEvent.pubkey],
 		queryFn: async () => {
 			const profiles = await loadWithRouter({
 				filters: [
 					{
 						kinds: [0],
-						authors: [event.pubkey],
+						authors: [displayEvent.pubkey],
 						limit: 1
 					}
 				]
@@ -57,19 +62,55 @@
 		staleTime: 5 * 60 * 1000
 	}));
 
-	const replyCountQuery = useReplyCount(event.id);
+	// Fetch repost author profile if this is a repost
+	const repostAuthorQuery = createQuery<AuthorMetadata>(() => ({
+		queryKey: ['profile', repostAuthorPubkey],
+		queryFn: async () => {
+			if (!repostAuthorPubkey) return {};
 
-	let npub = $derived(nip19.npubEncode(event.pubkey));
-	let noteId = $derived(nip19.noteEncode(event.id));
+			const profiles = await loadWithRouter({
+				filters: [
+					{
+						kinds: [0],
+						authors: [repostAuthorPubkey],
+						limit: 1
+					}
+				]
+			});
+
+			if (profiles.length > 0) {
+				try {
+					return JSON.parse(profiles[0].content);
+				} catch {
+					return {};
+				}
+			}
+			return {};
+		},
+		enabled: !!repostAuthorPubkey,
+		staleTime: 5 * 60 * 1000
+	}));
+
+	let npub = $derived(nip19.npubEncode(displayEvent.pubkey));
+	let noteId = $derived(nip19.noteEncode(displayEvent.id));
+	let repostAuthorNpub = $derived(repostAuthorPubkey ? nip19.npubEncode(repostAuthorPubkey) : null);
+
+	// Note: The warning about displayEvent is safe to ignore since event prop is stable
+	const replyCountQuery = useReplyCount(displayEvent.id);
 
 	let displayName = $derived(
-		authorQuery.data?.display_name || authorQuery.data?.name || genUserName(event.pubkey)
+		authorQuery.data?.display_name || authorQuery.data?.name || genUserName(displayEvent.pubkey)
 	);
 
 	let username = $derived(authorQuery.data?.name || `@${npub.slice(0, 12)}...`);
 	let profilePicture = $derived(authorQuery.data?.picture);
-	let timestamp = $derived(formatDistanceToNow(event.created_at));
+	let timestamp = $derived(formatDistanceToNow(displayEvent.created_at));
 	let replyCount = $derived(replyCountQuery.data || 0);
+
+	let repostAuthorDisplayName = $derived(
+		repostAuthorQuery.data?.display_name || repostAuthorQuery.data?.name ||
+		(repostAuthorPubkey ? genUserName(repostAuthorPubkey) : '')
+	);
 
 	function handleCardClick(e: MouseEvent) {
 		// Don't navigate if clicking on a button, link, or interactive element
@@ -106,6 +147,21 @@
 	tabindex="0"
 	onkeydown={(e) => e.key === 'Enter' && handleCardClick(e as any)}
 >
+	<!-- Repost Header -->
+	{#if isRepost && repostAuthorNpub}
+		<div class="flex items-center gap-2 px-4 pt-3 pb-1 text-sm text-muted-foreground">
+			<Repeat2 class="h-4 w-4 ml-9" />
+			<a
+				href="/{repostAuthorNpub}"
+				class="font-semibold hover:underline"
+				onclick={(e) => e.stopPropagation()}
+			>
+				{repostAuthorDisplayName}
+			</a>
+			<span>reposted</span>
+		</div>
+	{/if}
+
 	<div class="flex gap-3 p-4">
 		<!-- Avatar -->
 		<a href="/{npub}" class="flex-shrink-0" onclick={(e) => e.stopPropagation()}>
@@ -150,7 +206,7 @@
 
 			<!-- Post Content -->
 			<div class="block">
-				<NoteContent {event} class="text-base mb-3" />
+				<NoteContent event={displayEvent} class="text-base mb-3" />
 			</div>
 
 			<!-- Actions -->
@@ -171,14 +227,14 @@
 					</span>
 				</Button>
 
-				<RepostButton {event} />
+				<RepostButton event={displayEvent} />
 
-				<ReactionButton eventId={event.id} authorPubkey={event.pubkey} />
+				<ReactionButton eventId={displayEvent.id} authorPubkey={displayEvent.pubkey} />
 
-				<ZapButton target={event} showCount={true} />
+				<ZapButton target={displayEvent} showCount={true} />
 
 				<div class="flex items-center gap-0">
-					<BookmarkButton eventId={event.id} />
+					<BookmarkButton eventId={displayEvent.id} />
 					<Button
 						variant="ghost"
 						size="sm"
