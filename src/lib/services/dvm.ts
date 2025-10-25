@@ -82,7 +82,7 @@ export async function requestDVM(options: DVMRequestOptions): Promise<() => void
 	const requestSignal = signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal;
 
 	// Subscribe WITHOUT autoClose - keeps subscription open
-	const responsePromise = request({
+	const _responsePromise = request({
 		filters,
 		relays: DVM_RELAYS,
 		signal: requestSignal,
