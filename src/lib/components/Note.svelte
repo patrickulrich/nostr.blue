@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TrustedEvent } from '@welshman/util';
+	import type { RepostEvent } from '$lib/types/nostr';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { loadWithRouter } from '$lib/services/outbox';
 	import { nip19 } from 'nostr-tools';
@@ -18,17 +19,23 @@
 	import { goto } from '$app/navigation';
 
 	interface Props {
-		event: TrustedEvent & { _repostedEvent?: TrustedEvent | null; _repostAuthor?: string };
+		event: RepostEvent;
 		showThread?: boolean;
 		class?: string;
 	}
 
 	let { event, showThread = true, class: className = '' }: Props = $props();
 
-	// Check if this is a repost (kind 6)
-	let isRepost = $derived(event.kind === 6 && event._repostedEvent);
-	let repostAuthorPubkey = $derived(isRepost ? event._repostAuthor || event.pubkey : null);
-	let displayEvent = $derived(isRepost ? event._repostedEvent! : event);
+	// Check if this is a repost (kind 6) with a valid original event
+	let isRepost = $derived(event.kind === 6 && !!event._repostedEvent);
+
+	// Defensive fallback: use original event if available, otherwise use the event itself
+	let displayEvent = $derived<TrustedEvent>(
+		(event.kind === 6 && event._repostedEvent) ? event._repostedEvent : event
+	);
+
+	// Repost author: use stored author or fallback to event pubkey
+	let repostAuthorPubkey = $derived(isRepost ? (event._repostAuthor ?? event.pubkey) : null);
 
 	interface AuthorMetadata {
 		display_name?: string;
