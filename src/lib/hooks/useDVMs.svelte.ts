@@ -1,8 +1,16 @@
-import { createQuery } from '@tanstack/svelte-query';
-import { loadWithRouter } from '$lib/services/outbox';
+import { repository } from '@welshman/app';
+import { derived } from 'svelte/store';
+import { deriveEvents } from '@welshman/store';
 import type { TrustedEvent } from '@welshman/util';
+import { fromPairs, groupBy } from '@welshman/lib';
+import { load } from '@welshman/net';
+import { presetRelays } from '$lib/stores/appStore';
+import { browser } from '$app/environment';
 
 const DVM_ANNOUNCEMENT_KIND = 31990;
+
+// Track if we've loaded DVMs
+let dvmsLoaded = false;
 
 export interface DVMService {
 	id: string;
@@ -21,32 +29,10 @@ export interface DVMService {
 }
 
 /**
- * Hook to fetch and manage Data Vending Machine (DVM) services from the Nostr network.
- * Queries for kind 31990 announcement events and provides filtering utilities.
- * @returns Object containing DVM services array, loading state, and filter helper functions
+ * Parse DVM events into DVMService objects
  */
-export function useDVMs() {
-	const dvmEventsQuery = createQuery(() => ({
-		queryKey: ['dvms'],
-		queryFn: async ({ signal }) => {
-			try {
-				const events = await loadWithRouter({
-					filters: [{ kinds: [DVM_ANNOUNCEMENT_KIND], limit: 100 }],
-					signal
-				});
-
-				// Sort by created_at descending
-				return events.sort((a, b) => b.created_at - a.created_at);
-			} catch (error) {
-				console.error('Failed to fetch DVM announcements:', error);
-				return [];
-			}
-		},
-		staleTime: 60000 // 1 minute
-	}));
-
-	// Parse DVMs from events
-	const dvms: DVMService[] = (dvmEventsQuery.data || []).map((event) => {
+function parseDVMEvents(events: TrustedEvent[]): DVMService[] {
+	return events.map((event) => {
 		// Parse metadata from content field if present
 		let metadata: { name?: string; about?: string; picture?: string } = {};
 		if (event.content) {
@@ -58,7 +44,10 @@ export function useDVMs() {
 		}
 
 		// Extract d tag (identifier)
-		const dTag = event.tags.find((tag) => tag[0] === 'd')?.[1] || event.id;
+		const dTag = fromPairs(event.tags).d || '';
+
+		// For parameterized replaceable events, unique ID is pubkey + d tag
+		const id = `${event.pubkey}:${dTag}`;
 
 		// Extract supported kinds
 		const supportedKinds = event.tags
@@ -79,7 +68,7 @@ export function useDVMs() {
 			}));
 
 		return {
-			id: dTag,
+			id,
 			pubkey: event.pubkey,
 			name: metadata.name,
 			about: metadata.about,
@@ -90,23 +79,92 @@ export function useDVMs() {
 			event
 		};
 	});
+}
 
-	// Helper function to filter DVMs by supported kind
-	const getDVMsByKind = (kind: number): DVMService[] => {
-		return dvms.filter(
-			(dvm) => dvm.supportedKinds.length === 0 || dvm.supportedKinds.includes(kind)
-		);
-	};
+/**
+ * Derived store for DVM handler events from welshman repository
+ * This is reactive and will automatically update when new events arrive
+ *
+ * Kind 31990 is parameterized replaceable, so we deduplicate by pubkey+dtag
+ */
+export const dvmHandlerEvents = derived(
+	deriveEvents(repository, { filters: [{ kinds: [DVM_ANNOUNCEMENT_KIND] }] }),
+	($events) => {
+		// Deduplicate by pubkey + d tag, keeping only most recent
+		const seen = new Map<string, TrustedEvent>();
 
-	// Helper function to filter DVMs by tag
-	const getDVMsByTag = (tag: string): DVMService[] => {
-		return dvms.filter((dvm) => dvm.tags.includes(tag));
-	};
+		for (const event of $events) {
+			const dTag = fromPairs(event.tags).d || '';
+			const key = `${event.pubkey}:${dTag}`;
 
+			const existing = seen.get(key);
+			if (!existing || event.created_at > existing.created_at) {
+				seen.set(key, event);
+			}
+		}
+
+		return Array.from(seen.values()).sort((a, b) => b.created_at - a.created_at);
+	}
+);
+
+/**
+ * Derived store for parsed DVM services
+ */
+export const dvmServices = derived(dvmHandlerEvents, ($events) => {
+	const services = parseDVMEvents($events);
+	return services;
+});
+
+/**
+ * Derived store for DVMs indexed by kind
+ */
+export const dvmsByKind = derived(dvmServices, ($services) => {
+	return groupBy((dvm: DVMService) => {
+		// Return all supported kinds for this DVM
+		return dvm.supportedKinds.length > 0 ? dvm.supportedKinds : [0];
+	}, $services);
+});
+
+/**
+ * Load DVM announcements from relays into the repository
+ */
+async function loadDVMsIntoRepository() {
+	if (!browser || dvmsLoaded) return;
+
+	dvmsLoaded = true;
+
+	try {
+		// Use preset relays directly - router might not be initialized yet
+		const relays = presetRelays.map((r) => r.url);
+
+		// Load events into repository
+		const events = await load({
+			relays,
+			filters: [{ kinds: [DVM_ANNOUNCEMENT_KIND], limit: 100 }]
+		});
+
+		// Manually publish to repository to ensure they're there
+		events.forEach((event) => repository.publish(event));
+
+		console.log('[useDVMs] Loaded', events.length, 'DVM announcements');
+	} catch (error) {
+		console.error('[useDVMs] Failed to load DVM announcements:', error);
+		dvmsLoaded = false; // Allow retry
+	}
+}
+
+/**
+ * Hook to access DVM services
+ * Uses welshman's repository for native reactivity
+ */
+export function useDVMs() {
+	// Load DVMs on first call
+	loadDVMsIntoRepository();
+
+	// Return the stores - they're already reactive
 	return {
-		dvms,
-		isLoading: dvmEventsQuery.isLoading,
-		getDVMsByKind,
-		getDVMsByTag
+		dvmHandlerEvents,
+		dvmServices,
+		dvmsByKind
 	};
 }

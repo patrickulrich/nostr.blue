@@ -58,32 +58,27 @@
 
 	let referencedEvents = $derived(referencedEventsQuery.data || {});
 
-	// Extract media URLs for gallery
-	let mediaUrls = $derived.by(() => {
-		const urls: string[] = [];
+	// Extract media URLs using welshman's parser (like Coracle does)
+	// Parse content WITHOUT reduceLinks to get raw image links
+	let rawContent = $derived(parse({ content: event.content, tags: event.tags }));
 
-		// From parsed content
-		for (const item of parsedContent) {
-			if (isImage(item) && isLink(item) && typeof item.value === 'string') {
-				urls.push(item.value);
-			}
-		}
-
-		// From NIP-94 'imeta' tags
-		const imetaTags = event.tags.filter((tag) => tag[0] === 'imeta');
-		for (const tag of imetaTags) {
-			const urlParam = tag.find((param) => param.startsWith('url '));
-			if (urlParam) {
-				urls.push(urlParam.substring(4));
-			}
-		}
-
-		return Array.from(new Set(urls));
-	});
+	// Helper to check if a URL is media (image or video)
+	function isMediaUrl(url: string): boolean {
+		return /\.(jpe?g|png|gif|webp|mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
+	}
 
 	function isVideoUrl(url: string): boolean {
 		return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
 	}
+
+	// Extract media URLs from raw parsed content (before reduceLinks)
+	// Get ALL links that look like media (images AND videos)
+	let mediaUrls = $derived.by(() => {
+		return rawContent
+			.filter(isLink)
+			.map((p) => p.value.url?.toString())
+			.filter((url): url is string => typeof url === 'string' && isMediaUrl(url));
+	});
 </script>
 
 <div class={cn('break-words', className)}>
