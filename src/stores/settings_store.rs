@@ -1,7 +1,7 @@
 /// NIP-78: Application Data Storage
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, Kind, Tag};
+use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -62,7 +62,8 @@ pub async fn load_settings() -> Result<(), String> {
 
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_str = auth.pubkey.as_ref().ok_or("No pubkey")?;
-    let pubkey = nostr_sdk::PublicKey::parse(pubkey_str)
+    let pubkey = nostr_sdk::PublicKey::from_bech32(pubkey_str)
+        .or_else(|_| nostr_sdk::PublicKey::from_hex(pubkey_str))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Build filter for settings event
@@ -154,8 +155,8 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
 /// Update theme and save to Nostr
 #[allow(dead_code)] // Called from theme_store.rs
 pub async fn update_theme(theme: theme_store::Theme) {
-    // Apply theme locally
-    theme_store::set_theme(theme.clone());
+    // Apply theme locally (using internal function to avoid recursion)
+    theme_store::set_theme_internal(theme.clone());
 
     // Update settings
     let mut settings = SETTINGS.read().clone();

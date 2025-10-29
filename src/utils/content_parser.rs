@@ -58,8 +58,13 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     // Sort matches by position
     matches.sort_by_key(|m| m.0);
 
-    // Build token list with text in between
+    // Build token list with text in between, skipping overlapping matches
     for (start, end, token) in matches {
+        // Skip if this match overlaps with the previous one
+        if start < last_end {
+            continue;
+        }
+
         // Add text before this match
         if start > last_end {
             let text = content[last_end..start].to_string();

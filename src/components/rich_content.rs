@@ -286,11 +286,15 @@ fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
     let pubkey = event.pubkey;
     let pubkey_str = pubkey.to_hex();
 
-    // Truncate content if too long
-    let display_content = if content.len() > 280 {
-        format!("{}...", &content[..280])
-    } else {
-        content.clone()
+    // Truncate content if too long (character-aware)
+    let display_content = {
+        let char_count = content.chars().count();
+        if char_count > 280 {
+            let truncated: String = content.chars().take(280).collect();
+            format!("{}...", truncated)
+        } else {
+            content.clone()
+        }
     };
 
     // Get display name
@@ -521,10 +525,12 @@ fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &s
         format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..])
     };
 
-    // Truncate summary if too long
+    // Truncate summary if too long (character-aware)
     let display_summary = if let Some(sum) = summary {
-        if sum.len() > 200 {
-            format!("{}...", &sum[..200])
+        let char_count = sum.chars().count();
+        if char_count > 200 {
+            let truncated: String = sum.chars().take(200).collect();
+            format!("{}...", truncated)
         } else {
             sum
         }

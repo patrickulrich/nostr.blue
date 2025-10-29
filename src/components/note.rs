@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 #[component]
-pub fn Note() -> Element {
+pub fn NoteDisplay() -> Element {
     rsx! {
         div {
             class: "note-placeholder",

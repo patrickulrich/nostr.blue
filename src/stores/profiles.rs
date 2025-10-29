@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -92,7 +92,8 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
-    let public_key = PublicKey::parse(&pubkey)
+    let public_key = PublicKey::from_bech32(&pubkey)
+        .or_else(|_| PublicKey::from_hex(&pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch Kind 0 metadata events

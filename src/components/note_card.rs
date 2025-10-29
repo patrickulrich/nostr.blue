@@ -43,7 +43,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Fetch counts
+    // Fetch counts - consolidated into a single batched fetch
     use_effect(move || {
         let event_id_for_counts = event_id_counts.clone();
         spawn(async move {
@@ -57,72 +57,68 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 Err(_) => return,
             };
 
-            // Fetch reply count (kind 1 events with 'e' tag referencing this event)
-            let reply_filter = Filter::new()
-                .kind(Kind::TextNote)
+            // Create a combined filter for all interaction kinds (replies, likes, reposts, zaps)
+            let combined_filter = Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,      // kind 1 - replies
+                    Kind::Reaction,      // kind 7 - likes
+                    Kind::Repost,        // kind 6 - reposts
+                    Kind::from(9735),    // kind 9735 - zaps
+                ])
                 .event(event_id_parsed)
-                .limit(500);
+                .limit(2000); // Increased limit to accommodate all event types
 
-            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
-                reply_count.set(replies.len());
-            }
+            // Single fetch for all interaction types
+            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
+                // Partition events by kind
+                let mut replies = 0;
+                let mut likes = 0;
+                let mut reposts = 0;
+                let mut total_sats = 0u64;
 
-            // Fetch like count (kind 7 reactions)
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                like_count.set(likes.len());
-            }
-
-            // Fetch repost count (kind 6 reposts)
-            let repost_filter = Filter::new()
-                .kind(Kind::Repost)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(reposts) = client.fetch_events(repost_filter, Duration::from_secs(5)).await {
-                repost_count.set(reposts.len());
-            }
-
-            // Fetch zap receipts (kind 9735) and calculate total
-            let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
-                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Look for the description tag which contains the zap request
-                    zap_event.tags.iter().find_map(|tag| {
-                        let tag_vec = tag.clone().to_vec();
-                        if tag_vec.first()?.as_str() == "description" {
-                            // Parse the JSON zap request
-                            let zap_request_json = tag_vec.get(1)?.as_str();
-                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                // Find the amount tag in the zap request
-                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                    for tag_array in tags {
-                                        if let Some(tag_vals) = tag_array.as_array() {
-                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                    // Amount is in millisats, convert to sats
-                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                        return Some(millisats / 1000);
+                for event in events {
+                    match event.kind {
+                        Kind::TextNote => replies += 1,
+                        Kind::Reaction => likes += 1,
+                        Kind::Repost => reposts += 1,
+                        kind if kind == Kind::from(9735) => {
+                            // Calculate zap amount
+                            if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    // Parse the JSON zap request
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                        // Find the amount tag in the zap request
+                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
+                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
+                                                            // Amount is in millisats, convert to sats
+                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                                return Some(millisats / 1000);
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                                None
+                            }) {
+                                total_sats += amount;
                             }
                         }
-                        None
-                    })
-                }).sum();
+                        _ => {}
+                    }
+                }
 
+                // Update all counts at once
+                reply_count.set(replies.min(500));
+                like_count.set(likes.min(500));
+                repost_count.set(reposts.min(500));
                 zap_amount_sats.set(total_sats);
             }
         });

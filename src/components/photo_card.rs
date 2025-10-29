@@ -126,9 +126,8 @@ pub fn PhotoCard(event: Event) -> Element {
         }
     }
 
-    // Fetch counts
-    use_effect(move || {
-        let event_id_for_counts = event_id_counts.clone();
+    // Fetch counts - only run once per event_id
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
         spawn(async move {
             let client = match get_client() {
                 Some(c) => c,
@@ -199,12 +198,10 @@ pub fn PhotoCard(event: Event) -> Element {
                 zap_amount_sats.set(total_sats);
             }
         });
-    });
+    }));
 
-    // Fetch author's profile metadata
-    use_effect(move || {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
+    // Fetch author's profile metadata - only run once per pubkey
+    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
                 .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
@@ -230,7 +227,7 @@ pub fn PhotoCard(event: Event) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Format timestamp
     let timestamp = format_timestamp(created_at.as_u64());

@@ -54,9 +54,9 @@ pub fn init_theme() {
     apply_theme();
 }
 
-/// Set theme and persist to localStorage and Nostr (NIP-78)
-pub fn set_theme(theme: Theme) {
-    // Check if theme is already set to avoid infinite recursion
+/// Set theme UI state only (internal use, no Nostr sync)
+pub fn set_theme_internal(theme: Theme) {
+    // Check if theme is already set to avoid redundant updates
     if *THEME.read() == theme {
         return;
     }
@@ -65,6 +65,11 @@ pub fn set_theme(theme: Theme) {
     LocalStorage::set(STORAGE_KEY, theme.as_str()).ok();
     log::info!("Theme changed to: {:?}", theme);
     apply_theme();
+}
+
+/// Set theme and persist to localStorage and Nostr (NIP-78)
+pub fn set_theme(theme: Theme) {
+    set_theme_internal(theme);
 
     // Sync to Nostr in background
     #[cfg(target_arch = "wasm32")]

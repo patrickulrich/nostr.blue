@@ -12,7 +12,7 @@ pub fn NoteComposer() -> Element {
     // Check if user is authenticated (can publish) using auth_store
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
 
-    let char_count = content.read().len();
+    let char_count = content.read().chars().count();
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;

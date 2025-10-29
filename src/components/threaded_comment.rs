@@ -5,6 +5,7 @@ use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::utils::time::format_relative_time_ex;
 use nostr_sdk::{Metadata, Filter, Kind};
 use std::time::Duration;
 
@@ -249,7 +250,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
                             span {
                                 class: "text-xs text-muted-foreground",
-                                "{format_relative_time(event.created_at.as_u64())}"
+                                "{format_relative_time_ex(event.created_at, true, true)}"
                             }
                         }
 
@@ -548,39 +549,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     }
 }
 
-/// Format timestamp as relative time (e.g., "2 hours ago")
-fn format_relative_time(timestamp: u64) -> String {
-    use chrono::{DateTime, Utc};
-
-    let now = Utc::now().timestamp() as u64;
-    let _dt = DateTime::<Utc>::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| Utc::now());
-
-    if now < timestamp {
-        return "just now".to_string();
-    }
-
-    let diff = now - timestamp;
-
-    if diff < 60 {
-        return "just now".to_string();
-    } else if diff < 3600 {
-        let minutes = diff / 60;
-        return format!("{}m ago", minutes);
-    } else if diff < 86400 {
-        let hours = diff / 3600;
-        return format!("{}h ago", hours);
-    } else if diff < 2592000 {
-        let days = diff / 86400;
-        return format!("{}d ago", days);
-    } else if diff < 31536000 {
-        let months = diff / 2592000;
-        return format!("{}mo ago", months);
-    } else {
-        let years = diff / 31536000;
-        return format!("{}y ago", years);
-    }
-}
 
 /// Helper function to format sats amounts
 fn format_sats(sats: u64) -> String {

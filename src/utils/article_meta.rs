@@ -70,13 +70,15 @@ pub fn calculate_read_time(content: &str) -> usize {
     minutes.max(1) // Minimum 1 minute
 }
 
-/// Generate a preview of the content (first N characters)
+/// Generate a preview of the content (first N characters, character-aware)
 #[allow(dead_code)]
 pub fn get_content_preview(content: &str, max_chars: usize) -> String {
-    if content.len() <= max_chars {
+    let char_count = content.chars().count();
+    if char_count <= max_chars {
         content.to_string()
     } else {
-        let truncated = &content[..max_chars];
+        // Collect first max_chars characters
+        let truncated: String = content.chars().take(max_chars).collect();
         // Try to truncate at word boundary
         if let Some(last_space) = truncated.rfind(' ') {
             format!("{}...", &truncated[..last_space])
