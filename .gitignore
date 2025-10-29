@@ -1,0 +1,39 @@
+# Rust
+/target/
+**/*.rs.bk
+# Note: Cargo.lock is committed for applications to ensure reproducible builds
+
+# Trunk / WASM
+/dist/
+
+# Node
+/node_modules/
+package-lock.json
+
+# Environment
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.wasm
+*.wasm.map
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# CSS (generated)
+/public/tailwind.css
