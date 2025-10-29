@@ -23,13 +23,6 @@ fn main() {
     log::info!("Starting nostr.blue Rust client");
 
     // Launch the Dioxus web app
-    #[cfg(target_arch = "wasm32")]
-    dioxus::launch_cfg(
-        App,
-        dioxus::dioxus_core::prelude::Config::new().with_root_name("main")
-    );
-
-    #[cfg(not(target_arch = "wasm32"))]
     dioxus::launch(App);
 }
 
