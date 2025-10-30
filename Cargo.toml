@@ -1,0 +1,80 @@
+[package]
+name = "nostrbluerust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Patrick Ulrich"]
+description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
+license = "MIT"
+
+[dependencies]
+# Dioxus web framework
+dioxus = { version = "0.6", features = ["web", "router"] }
+
+# Nostr protocol
+nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57"] }
+nostr = { version = "0.43", default-features = false, features = ["nip57"] }
+nostr-database = { version = "0.43", default-features = false }
+nostr-browser-signer = "0.43"
+
+# Async runtime for WASM
+tokio = { version = "1", features = ["sync", "macros"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Browser APIs and storage
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlHeadElement",
+    "Storage",
+    "MediaQueryList",
+    "Navigator",
+    "Clipboard",
+    "DomRect",
+    "console",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Headers",
+] }
+gloo-storage = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Logging
+log = "0.4"
+wasm-logger = "0.2"
+console_error_panic_hook = "0.1"
+
+# Utilities
+chrono = { version = "0.4", features = ["wasmbind"] }
+anyhow = "1.0"
+regex = "1.10"
+urlencoding = "2.1"
+uuid = { version = "1.0", features = ["v4", "js"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+bech32 = "0.11"
+qrcode = "0.14"
+base64 = "0.22"
+
+# Markdown rendering
+pulldown-cmark = "0.12"
+ammonia = "4.0"
+maplit = "1.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0

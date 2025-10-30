@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Decentralized social network on the Nostr protocol">
+    <title>nostr.blue - Decentralized Social Network</title>
+    <link data-trunk rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link data-trunk rel="icon" type="image/x-icon" href="assets/favicon.ico">
+    <link data-trunk rel="css" href="public/tailwind.css">
+    <style>
+        /* Hide scrollbar but keep scrolling functionality */
+        .hide-scrollbar {
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        /* Ensure app container is visible */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #main {
+            width: 100%;
+            height: 100%;
+            display: block;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div id="main"></div>
+</body>
+</html>

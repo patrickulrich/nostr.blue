@@ -1,0 +1,12 @@
+{
+  "name": "nostrbluerust",
+  "version": "0.1.0",
+  "description": "Nostr.blue Rust client",
+  "scripts": {
+    "tailwind:watch": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --watch",
+    "tailwind:build": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  }
+}

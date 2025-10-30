@@ -1,0 +1,23 @@
+[application]
+name = "nostrbluerust"
+default_platform = "web"
+
+[web.app]
+title = "nostr.blue - Decentralized Social Network"
+base_path = "."
+
+[web.watcher]
+watch_path = ["src", "assets"]
+reload_html = true
+index_on_404 = true
+
+[web.resource]
+style = ["public/tailwind.css"]
+script = []
+
+[web.resource.dev]
+style = []
+script = []
+
+[[web.proxy]]
+backend = "http://localhost:8000"
