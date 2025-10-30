@@ -31,7 +31,8 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
-    let is_bookmarked = use_memo(move || bookmarks::is_bookmarked(&event_id_memo));
+    // Read bookmark state reactively - will update when store changes
+    let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
     // State for counts
@@ -205,7 +206,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
         "flex items-center text-muted-foreground hover:text-green-500 transition"
     };
 
-    let bookmark_button_class = if *is_bookmarked.read() {
+    let bookmark_button_class = if is_bookmarked {
         "flex items-center text-blue-500 transition"
     } else {
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
@@ -470,7 +471,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                                 }
 
                                 let event_id_clone = event_id_bookmark.clone();
-                                let currently_bookmarked = *is_bookmarked.read();
+                                let currently_bookmarked = bookmarks::is_bookmarked(&event_id_clone);
 
                                 is_bookmarking.set(true);
 
@@ -494,7 +495,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                             },
                             BookmarkIcon {
                                 class: "h-4 w-4".to_string(),
-                                filled: *is_bookmarked.read()
+                                filled: is_bookmarked
                             }
                         }
 

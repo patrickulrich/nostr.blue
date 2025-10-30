@@ -1,6 +1,7 @@
 // UI Components
 // This module contains all reusable UI components
 
+pub mod note;
 pub mod note_card;
 pub mod note_composer;
 pub mod rich_content;
@@ -14,6 +15,7 @@ pub mod article_content;
 pub mod photo_card;
 pub mod zap_modal;
 
+pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
 pub use note_composer::NoteComposer;
 pub use rich_content::RichContent;

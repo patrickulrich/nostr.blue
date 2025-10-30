@@ -84,13 +84,13 @@ pub async fn load_settings() -> Result<(), String> {
                     Ok(settings) => {
                         log::info!("Loaded settings from Nostr: {:?}", settings);
 
-                        // Apply theme
+                        // Apply theme (use internal to avoid re-publishing)
                         let theme = match settings.theme.as_str() {
                             "light" => theme_store::Theme::Light,
                             "dark" => theme_store::Theme::Dark,
                             _ => theme_store::Theme::System,
                         };
-                        theme_store::set_theme(theme);
+                        theme_store::set_theme_internal(theme);
 
                         // Update global settings
                         SETTINGS.write().clone_from(&settings);

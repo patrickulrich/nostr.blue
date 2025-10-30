@@ -98,7 +98,8 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
-    let is_bookmarked = use_memo(move || bookmarks::is_bookmarked(&event_id_memo));
+    // Read bookmark state reactively - will update when store changes
+    let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
     // State for current image (carousel)
@@ -273,7 +274,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     } else {
                         div {
                             class: "w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm",
-                            "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
+                            "{display_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
                         }
                     }
                 }
@@ -356,40 +357,32 @@ pub fn PhotoCard(event: Event) -> Element {
                     } else {
                         "flex items-center gap-1 hover:text-red-500 transition"
                     },
-                    disabled: !has_signer || *is_liking.read(),
+                    disabled: !has_signer || *is_liking.read() || *is_liked.read(),
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
-                        if !has_signer || *is_liking.read() {
+                        if !has_signer || *is_liking.read() || *is_liked.read() {
                             return;
                         }
 
-                        let currently_liked = *is_liked.read();
                         let event_id_clone = event_id_like.clone();
                         let author_pubkey_clone = author_pubkey_like.clone();
 
                         is_liking.set(true);
 
-                        if currently_liked {
-                            is_liked.set(false);
-                            let current_count = *like_count.read();
-                            like_count.set(current_count.saturating_sub(1));
-                            is_liking.set(false);
-                        } else {
-                            spawn(async move {
-                                match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                    Ok(_) => {
-                                        is_liked.set(true);
-                                        let current_count = *like_count.read();
-                                        like_count.set(current_count + 1);
-                                        is_liking.set(false);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to like: {}", e);
-                                        is_liking.set(false);
-                                    }
+                        spawn(async move {
+                            match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
+                                Ok(_) => {
+                                    is_liked.set(true);
+                                    let current_count = *like_count.read();
+                                    like_count.set(current_count + 1);
+                                    is_liking.set(false);
                                 }
-                            });
-                        }
+                                Err(e) => {
+                                    log::error!("Failed to like: {}", e);
+                                    is_liking.set(false);
+                                }
+                            }
+                        });
                     },
                     HeartIcon {
                         class: "w-6 h-6".to_string(),
@@ -445,7 +438,7 @@ pub fn PhotoCard(event: Event) -> Element {
 
                 // Bookmark button
                 button {
-                    class: if *is_bookmarked.read() {
+                    class: if is_bookmarked {
                         "flex items-center gap-1 text-blue-500"
                     } else {
                         "flex items-center gap-1 hover:text-blue-500 transition ml-auto"
@@ -480,7 +473,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     },
                     BookmarkIcon {
                         class: "w-6 h-6".to_string(),
-                        filled: *is_bookmarked.read()
+                        filled: is_bookmarked
                     }
                 }
             }

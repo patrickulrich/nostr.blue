@@ -32,10 +32,6 @@ pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long
             let hours = diff / 3600;
             format!("{}h{}", hours, ago_suffix)
         }
-        86400..=604799 => {
-            let days = diff / 86400;
-            format!("{}d{}", days, ago_suffix)
-        }
         86400..=2591999 if use_long_format => {
             let days = diff / 86400;
             format!("{}d{}", days, ago_suffix)
@@ -48,8 +44,12 @@ pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long
             let years = diff / 31536000;
             format!("{}y{}", years, ago_suffix)
         }
+        86400..=604799 => {
+            let days = diff / 86400;
+            format!("{}d{}", days, ago_suffix)
+        }
         _ => {
-            // For older than 7 days, show the date (unless using long format)
+            // For older than 7 days, show the date
             let dt = DateTime::from_timestamp(ts as i64, 0)
                 .unwrap_or_else(|| Utc::now());
             dt.format("%b %d").to_string()
