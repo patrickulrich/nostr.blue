@@ -25,10 +25,11 @@ nostr.blue is a modern, performant Nostr client built entirely in Rust and compi
 - ✅ **Communities (NIP-72)** - Moderated topic-based communities
 - ✅ **Lists (NIP-51)** - Create and manage custom lists and bookmarks
 - ✅ **Lightning Zaps (NIP-57)** - Send and receive Bitcoin micropayments
-- ✅ **Direct Messages (NIP-44)** - End-to-end encrypted private messaging
+- ✅ **Direct Messages (NIP-04/NIP-17/NIP-44)** - Encrypted private messaging with legacy and modern protocols
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata
-- ✅ **Photos Feed** - Dedicated feed for image content
+- ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
 - ✅ **Videos (NIP-71)** - Video event support with playback controls
+- ✅ **Music Player (NIP-38)** - Wavlake integration with listening status
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
 - ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
 
@@ -77,11 +78,14 @@ nostrbluerust/
 │   │   ├── note_composer.rs # Post creation
 │   │   ├── reply_composer.rs # Reply creation
 │   │   ├── profile_card.rs # User profile display
-│   │   ├── photo_card.rs   # Photo grid item
+│   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
 │   │   ├── zap_modal.rs    # Lightning zap interface
-│   │   ├── rich_content.rs # Content rendering
+│   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
 │   │   ├── threaded_comment.rs # Comment threads
+│   │   ├── music_player.rs # Wavlake music player (NIP-38)
+│   │   ├── track_card.rs   # Music track display
+│   │   ├── wavlake_zap_dialog.rs # Music artist zaps
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
 │   │   └── icons.rs        # SVG icon components
@@ -90,17 +94,23 @@ nostrbluerust/
 │   │   ├── profile.rs      # User profiles
 │   │   ├── note.rs         # Single note view
 │   │   ├── photos.rs       # Photo feed
-│   │   ├── videos.rs       # Video feed
-│   │   ├── communities.rs  # Communities
-│   │   ├── lists.rs        # User lists
-│   │   ├── dms.rs          # Direct messages
+│   │   ├── videos.rs       # Video feed (NIP-71)
+│   │   ├── communities.rs  # Communities (NIP-72)
+│   │   ├── lists.rs        # User lists (NIP-51)
+│   │   ├── dms.rs          # Direct messages (NIP-04/17/44)
 │   │   ├── notifications.rs # Notifications
-│   │   ├── settings.rs     # User settings
+│   │   ├── settings.rs     # User settings (NIP-78 sync)
 │   │   ├── trending.rs     # Trending content
 │   │   ├── explore.rs      # Discover feed
-│   │   ├── dvm.rs          # Data Vending Machines
+│   │   ├── dvm.rs          # Data Vending Machines (NIP-90)
 │   │   ├── search.rs       # Search interface
 │   │   ├── hashtag.rs      # Hashtag feed
+│   │   ├── music/          # Music routes
+│   │   │   ├── music_home.rs # Music discovery
+│   │   │   ├── artist.rs   # Artist pages
+│   │   │   ├── album.rs    # Album pages
+│   │   │   ├── radio.rs    # Wavlake radio
+│   │   │   └── leaderboard.rs # Music leaderboard
 │   │   ├── terms.rs        # Terms of Service
 │   │   ├── privacy.rs      # Privacy Policy
 │   │   ├── cookies.rs      # Cookie Policy
@@ -113,11 +123,12 @@ nostrbluerust/
 │   │   └── use_infinite_scroll.rs # Pagination
 │   ├── stores/             # Global state management
 │   │   ├── nostr_client.rs # Nostr SDK client instance
-│   │   ├── auth_store.rs   # Authentication state
+│   │   ├── auth_store.rs   # Authentication state (NIP-07)
 │   │   ├── profiles.rs     # Profile cache
-│   │   ├── bookmarks.rs    # Bookmarked content
-│   │   ├── dms.rs          # DM conversations
+│   │   ├── bookmarks.rs    # Bookmarked content (NIP-51)
+│   │   ├── dms.rs          # DM conversations (NIP-04/17/44)
 │   │   ├── notifications.rs # Notification state
+│   │   ├── music_player.rs # Music player state (NIP-38)
 │   │   ├── settings_store.rs # NIP-78 synced settings
 │   │   ├── theme_store.rs  # Theme preferences
 │   │   └── signer.rs       # Event signing
@@ -132,6 +143,7 @@ nostrbluerust/
 │   │   └── article_meta.rs # Article metadata
 │   ├── services/           # External services
 │   │   ├── lnurl.rs        # Lightning URL handling
+│   │   ├── wavlake.rs      # Wavlake API integration
 │   │   └── trending.rs     # Trending algorithm
 │   └── main.rs             # Application entry point
 ├── assets/                 # Static assets
@@ -222,15 +234,21 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 |-----|-------------|--------|
 | [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic protocol (events, signatures, filters) | ✅ |
 | [NIP-02](https://github.com/nostr-protocol/nips/blob/master/02.md) | Contact/follow lists | ✅ |
+| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted direct messages (legacy) | ✅ |
 | [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md) | Browser extension signing | ✅ |
-| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | bech32 identifiers (npub, note, etc.) | ✅ |
+| [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Reply conventions and threading | ✅ |
+| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private direct messages | ✅ |
+| [NIP-18](https://github.com/nostr-protocol/nips/blob/master/18.md) | Reposts | ✅ |
+| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | bech32 identifiers (npub, note, naddr, etc.) | ✅ |
 | [NIP-23](https://github.com/nostr-protocol/nips/blob/master/23.md) | Long-form articles | ✅ |
 | [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md) | Reactions | ✅ |
-| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages | ✅ |
-| [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, etc.) | ✅ |
+| [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User status (music listening, etc.) | ✅ |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
+| [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay list metadata | ✅ |
+| [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) | Picture events with imeta tags | ✅ |
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
