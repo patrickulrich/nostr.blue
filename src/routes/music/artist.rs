@@ -4,16 +4,23 @@ use crate::services::wavlake::{get_artist, WavlakeArtist};
 
 #[component]
 pub fn MusicArtist(artist_id: String) -> Element {
-    let artist_id_for_effect = artist_id.clone();
     let mut artist_state = use_signal(|| None::<WavlakeArtist>);
-    let mut loading = use_signal(|| true);
+    let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 
-    // Fetch artist data
+    // Store artist_id in a signal so we can track changes
+    let artist_id_signal = use_signal(|| artist_id.clone());
+
+    // Fetch artist data - only runs when artist_id_signal changes
     use_effect(move || {
-        let id = artist_id_for_effect.clone();
+        // Read the signal to create a reactive dependency
+        let id = artist_id_signal.read().clone();
+
+        // Set loading true before spawning
+        loading.set(true);
+        error_msg.set(None);
+
         spawn(async move {
-            loading.set(true);
             match get_artist(&id).await {
                 Ok(artist_data) => {
                     artist_state.set(Some(artist_data));

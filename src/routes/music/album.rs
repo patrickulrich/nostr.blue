@@ -6,15 +6,23 @@ use crate::stores::music_player::{self, MusicTrack};
 #[component]
 pub fn MusicAlbum(album_id: String) -> Element {
     let mut album_state = use_signal(|| None::<WavlakeAlbum>);
-    let mut loading = use_signal(|| true);
+    let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 
-    // Fetch album data
+    // Store album_id in a signal so we can track changes
+    let album_id_signal = use_signal(|| album_id.clone());
+
+    // Fetch album data - only runs when album_id_signal changes
     use_effect(move || {
-        let album_id = album_id.clone();
+        // Read the signal to create a reactive dependency
+        let id = album_id_signal.read().clone();
+
+        // Set loading true before spawning
+        loading.set(true);
+        error_msg.set(None);
+
         spawn(async move {
-            loading.set(true);
-            match get_album(&album_id).await {
+            match get_album(&id).await {
                 Ok(album_data) => {
                     album_state.set(Some(album_data));
                     loading.set(false);
