@@ -10,4 +10,5 @@ pub mod dms;
 pub mod notifications;
 pub mod profiles;
 pub mod settings_store;
+pub mod music_player;
 

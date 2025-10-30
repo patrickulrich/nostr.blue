@@ -16,6 +16,7 @@ pub mod videos;
 pub mod video_detail;
 pub mod articles;
 pub mod article_detail;
+pub mod music;
 
 // Placeholder modules for missing routes
 mod lists;
@@ -42,6 +43,7 @@ use videos::Videos;
 use video_detail::VideoDetail;
 use articles::Articles;
 use article_detail::ArticleDetail;
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use lists::Lists;
@@ -75,6 +77,21 @@ pub enum Route {
 
         #[route("/videos/:video_id")]
         VideoDetail { video_id: String },
+
+        #[route("/music")]
+        MusicHome {},
+
+        #[route("/music/radio")]
+        MusicRadio {},
+
+        #[route("/music/leaderboard")]
+        MusicLeaderboard {},
+
+        #[route("/music/artist/:artist_id")]
+        MusicArtist { artist_id: String },
+
+        #[route("/music/album/:album_id")]
+        MusicAlbum { album_id: String },
 
         #[route("/search")]
         Search {},
@@ -191,6 +208,28 @@ fn Layout() -> Element {
                                 label: "Articles"
                             }
 
+                            NavLink {
+                                to: Route::MusicHome {},
+                                icon: rsx! {
+                                    svg {
+                                        class: "w-7 h-7",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M9 18V5l12-2v13" }
+                                        circle { cx: "6", cy: "18", r: "3" }
+                                        circle { cx: "18", cy: "16", r: "3" }
+                                    }
+                                },
+                                label: "Music"
+                            }
+
                             // Show authenticated nav items
                             if auth.is_authenticated {
                                 NavLink {
@@ -213,11 +252,6 @@ fn Layout() -> Element {
                                     to: Route::DMs {},
                                     icon: rsx! { crate::components::icons::MailIcon { class: "w-7 h-7" } },
                                     label: "Messages"
-                                }
-                                NavLink {
-                                    to: Route::Lists {},
-                                    icon: rsx! { crate::components::icons::ListIcon { class: "w-7 h-7" } },
-                                    label: "Lists"
                                 }
                                 NavLink {
                                     to: Route::Bookmarks {},
@@ -264,17 +298,6 @@ fn Layout() -> Element {
                                         div {
                                             class: "flex flex-col",
                                             a {
-                                                href: "https://vlogstr.com",
-                                                target: "_blank",
-                                                rel: "noopener noreferrer",
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                crate::components::icons::VideoIcon { class: "w-5 h-5" }
-                                                span {
-                                                    "Vlogstr"
-                                                }
-                                            }
-                                            a {
                                                 href: "https://nostrcal.com",
                                                 target: "_blank",
                                                 rel: "noopener noreferrer",
@@ -283,17 +306,6 @@ fn Layout() -> Element {
                                                 crate::components::icons::CalendarIcon { class: "w-5 h-5" }
                                                 span {
                                                     "nostrcal"
-                                                }
-                                            }
-                                            a {
-                                                href: "https://nostrmusic.com",
-                                                target: "_blank",
-                                                rel: "noopener noreferrer",
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                crate::components::icons::MusicIcon { class: "w-5 h-5" }
-                                                span {
-                                                    "nostrmusic"
                                                 }
                                             }
                                         }
@@ -413,9 +425,25 @@ fn Layout() -> Element {
                                         div {
                                             onclick: move |_| sidebar_open.set(false),
                                             NavLink {
-                                                to: Route::Lists {},
-                                                icon: rsx! { crate::components::icons::ListIcon { class: "w-7 h-7" } },
-                                                label: "Lists"
+                                                to: Route::MusicHome {},
+                                                icon: rsx! {
+                                                    svg {
+                                                        class: "w-7 h-7",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        width: "24",
+                                                        height: "24",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M9 18V5l12-2v13" }
+                                                        circle { cx: "6", cy: "18", r: "3" }
+                                                        circle { cx: "18", cy: "16", r: "3" }
+                                                    }
+                                                },
+                                                label: "Music"
                                             }
                                         }
                                         div {
@@ -473,22 +501,6 @@ fn Layout() -> Element {
                                                 div {
                                                     class: "flex flex-col",
                                                     a {
-                                                        href: "https://vlogstr.com",
-                                                        target: "_blank",
-                                                        rel: "noopener noreferrer",
-                                                        onclick: move |_| {
-                                                            more_menu_open.set(false);
-                                                            sidebar_open.set(false);
-                                                        },
-                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                        crate::components::icons::VideoIcon {
-                                                            class: "w-5 h-5".to_string()
-                                                        }
-                                                        span {
-                                                            "Vlogstr"
-                                                        }
-                                                    }
-                                                    a {
                                                         href: "https://nostrcal.com",
                                                         target: "_blank",
                                                         rel: "noopener noreferrer",
@@ -502,22 +514,6 @@ fn Layout() -> Element {
                                                         }
                                                         span {
                                                             "nostrcal"
-                                                        }
-                                                    }
-                                                    a {
-                                                        href: "https://nostrmusic.com",
-                                                        target: "_blank",
-                                                        rel: "noopener noreferrer",
-                                                        onclick: move |_| {
-                                                            more_menu_open.set(false);
-                                                            sidebar_open.set(false);
-                                                        },
-                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                        crate::components::icons::MusicIcon {
-                                                            class: "w-5 h-5".to_string()
-                                                        }
-                                                        span {
-                                                            "nostrmusic"
                                                         }
                                                     }
                                                 }
@@ -616,6 +612,12 @@ fn Layout() -> Element {
                     }
                 }
             }
+
+            // Global persistent music player
+            crate::components::PersistentMusicPlayer {}
+
+            // Global zap dialog (rendered at layout level to escape music player's stacking context)
+            crate::components::WavlakeZapDialog {}
         }
     }
 }
@@ -639,7 +641,9 @@ fn NavLink(
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
         (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => p1 == p2,
-        (Route::Lists {}, Route::Lists {}) => true,
+        (Route::MusicHome {}, Route::MusicHome {}) => true,
+        (Route::MusicRadio {}, Route::MusicRadio {}) => true,
+        (Route::MusicLeaderboard {}, Route::MusicLeaderboard {}) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
