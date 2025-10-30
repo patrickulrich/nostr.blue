@@ -240,7 +240,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                         } else {
                             div {
                                 class: "w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-lg",
-                                "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
+                                "{display_name.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_else(|| \"?\".to_string())}"
                             }
                         }
                     }
@@ -364,45 +364,36 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                         // Like button
                         button {
                             class: "{like_button_class} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded",
-                            disabled: !has_signer || *is_liking.read(),
+                            disabled: !has_signer || *is_liking.read() || *is_liked.read(),
                             onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
 
-                                if !has_signer || *is_liking.read() {
+                                if !has_signer || *is_liking.read() || *is_liked.read() {
                                     return;
                                 }
 
-                                let currently_liked = *is_liked.read();
                                 let event_id_clone = event_id_like.clone();
                                 let author_pubkey_clone = author_pubkey_like.clone();
 
                                 is_liking.set(true);
 
-                                if currently_liked {
-                                    // Unlike - just toggle state locally (Nostr doesn't have unlike)
-                                    is_liked.set(false);
-                                    let current_count = *like_count.read();
-                                    like_count.set(current_count.saturating_sub(1));
-                                    is_liking.set(false);
-                                } else {
-                                    // Like - publish reaction
-                                    spawn(async move {
-                                        match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                            Ok(reaction_id) => {
-                                                log::info!("Liked event, reaction ID: {}", reaction_id);
-                                                is_liked.set(true);
-                                                // Increment like count locally
-                                                let current_count = *like_count.read();
-                                                like_count.set(current_count.saturating_add(1));
-                                                is_liking.set(false);
-                                            }
-                                            Err(e) => {
-                                                log::error!("Failed to like event: {}", e);
-                                                is_liking.set(false);
-                                            }
+                                // Like - publish reaction
+                                spawn(async move {
+                                    match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
+                                        Ok(reaction_id) => {
+                                            log::info!("Liked event, reaction ID: {}", reaction_id);
+                                            is_liked.set(true);
+                                            // Increment like count locally
+                                            let current_count = *like_count.read();
+                                            like_count.set(current_count.saturating_add(1));
+                                            is_liking.set(false);
                                         }
-                                    });
-                                }
+                                        Err(e) => {
+                                            log::error!("Failed to like event: {}", e);
+                                            is_liking.set(false);
+                                        }
+                                    }
+                                });
                             },
                             HeartIcon {
                                 class: "h-4 w-4".to_string(),
