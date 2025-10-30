@@ -438,7 +438,9 @@ async fn generate_invoice_flow(track_id: &str, amount_sats: u64, comment: &str) 
 
 /// Decode bech32 LNURL to HTTPS URL
 fn decode_lnurl(lnurl: &str) -> Result<String, String> {
-    // In bech32 0.11, decode() returns (Hrp, Vec<u8>) - already decoded bytes
+    // Note: In bech32 0.11, decode() returns (Hrp, Vec<u8>)
+    // If this fails at runtime with base32 decode errors, the bech32 crate
+    // version may need to be checked or a conversion function added
     let (_, data) = bech32::decode(lnurl)
         .map_err(|e| format!("Bech32 decode error: {}", e))?;
 

@@ -329,6 +329,7 @@ pub fn close_player() {
 }
 
 /// Show the player
+#[allow(dead_code)]
 pub fn show_player() {
     let mut state = MUSIC_PLAYER.write();
     if state.current_track.is_some() {
@@ -337,6 +338,7 @@ pub fn show_player() {
 }
 
 /// Clear the player and stop playback
+#[allow(dead_code)]
 pub fn clear_player() {
     let mut state = MUSIC_PLAYER.write();
     state.current_track = None;
@@ -354,26 +356,31 @@ pub fn clear_player() {
 }
 
 /// Get current track
+#[allow(dead_code)]
 pub fn get_current_track() -> Option<MusicTrack> {
     MUSIC_PLAYER.read().current_track.clone()
 }
 
 /// Get playing status
+#[allow(dead_code)]
 pub fn is_playing() -> bool {
     MUSIC_PLAYER.read().is_playing
 }
 
 /// Get player visibility
+#[allow(dead_code)]
 pub fn is_visible() -> bool {
     MUSIC_PLAYER.read().is_visible
 }
 
 /// Get volume
+#[allow(dead_code)]
 pub fn get_volume() -> f64 {
     MUSIC_PLAYER.read().volume
 }
 
 /// Check if muted
+#[allow(dead_code)]
 pub fn is_muted() -> bool {
     MUSIC_PLAYER.read().is_muted
 }

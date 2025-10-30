@@ -76,14 +76,19 @@ pub fn PersistentMusicPlayer() -> Element {
             let is_playing = state.is_playing;
 
             spawn(async move {
+                // Properly escape strings using JSON serialization to prevent injection
+                let audio_id_json = serde_json::to_string(&audio_id).unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                let media_url_json = serde_json::to_string(&media_url).unwrap_or_else(|_| "\"\"".to_string());
+                let is_playing_literal = if is_playing { "true" } else { "false" };
+
                 let script = format!(
                     r#"
                     (function() {{
-                        let audio = document.getElementById('{audio_id}');
+                        let audio = document.getElementById({audio_id});
                         if (!audio) return;
 
-                        if (audio.src !== '{media_url}') {{
-                            audio.src = '{media_url}';
+                        if (audio.src !== {media_url}) {{
+                            audio.src = {media_url};
                             audio.load();
                         }}
 
@@ -94,9 +99,9 @@ pub fn PersistentMusicPlayer() -> Element {
                         }}
                     }})();
                     "#,
-                    audio_id = audio_id,
-                    media_url = media_url,
-                    is_playing = if is_playing { "true" } else { "false" }
+                    audio_id = audio_id_json,
+                    media_url = media_url_json,
+                    is_playing = is_playing_literal
                 );
                 let _ = eval(&script);
             });
@@ -109,14 +114,17 @@ pub fn PersistentMusicPlayer() -> Element {
         let volume = if state.is_muted { 0.0 } else { state.volume };
 
         spawn(async move {
+            // Properly escape audio_id using JSON serialization
+            let audio_id_json = serde_json::to_string(&audio_id).unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
             let script = format!(
                 r#"
                 (function() {{
-                    let audio = document.getElementById('{audio_id}');
+                    let audio = document.getElementById({audio_id});
                     if (audio) audio.volume = {volume};
                 }})();
                 "#,
-                audio_id = audio_id,
+                audio_id = audio_id_json,
                 volume = volume
             );
             let _ = eval(&script);
@@ -296,10 +304,13 @@ pub fn PersistentMusicPlayer() -> Element {
                                 let audio_id_str = audio_id.to_string();
 
                                 spawn(async move {
+                                    // Properly escape audio_id using JSON serialization
+                                    let audio_id_json = serde_json::to_string(&audio_id_str).unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
                                     let script = format!(
                                         r#"
                                         (function() {{
-                                            let audio = document.getElementById('{audio_id}');
+                                            let audio = document.getElementById({audio_id});
                                             if (!audio) return;
 
                                             let element = document.elementFromPoint({client_x}, {client_y});
@@ -317,7 +328,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                             }}
                                         }})();
                                         "#,
-                                        audio_id = audio_id_str,
+                                        audio_id = audio_id_json,
                                         client_x = client_x,
                                         client_y = client_y
                                     );

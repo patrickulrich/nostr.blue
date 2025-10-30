@@ -113,6 +113,7 @@ pub struct WavlakeLnurlResponse {
 }
 
 /// Error response from Wavlake API
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakeErrorResponse {
     pub code: u32,

@@ -3,7 +3,7 @@ use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use crate::stores::nostr_client;
-use crate::services::wavlake::{WavlakeAPI, WavlakeTrack, WavlakeAlbum, WavlakeArtist, WavlakePlaylist};
+use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
 
@@ -637,36 +637,18 @@ fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &s
 
 #[component]
 fn WavlakeTrackRenderer(track_id: String) -> Element {
-    let track_id_for_effect = track_id.clone();
-    let mut track_state = use_signal(|| None::<WavlakeTrack>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| false);
-
-    // Fetch track data
-    use_effect(move || {
-        let id = track_id_for_effect.clone();
-        spawn(async move {
-            loading.set(true);
-            error.set(false);
-
+    // Use use_resource to make fetch reactive to track_id changes
+    let track_resource = use_resource(move || {
+        let id = track_id.clone();
+        async move {
             let api = WavlakeAPI::new();
-            match api.get_track(&id).await {
-                Ok(track_data) => {
-                    track_state.set(Some(track_data));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to load Wavlake track {}: {}", id, e);
-                    error.set(true);
-                    loading.set(false);
-                }
-            }
-        });
+            api.get_track(&id).await
+        }
     });
 
-    // Loading state
-    if *loading.read() {
-        return rsx! {
+    match track_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
             div {
                 class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -678,27 +660,21 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
                     }
                 }
             }
-        };
-    }
-
-    // Error state
-    if *error.read() {
-        return rsx! {
+        },
+        // Error state
+        Some(Err(e)) => rsx! {
             div {
                 class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
                 div {
                     class: "flex items-center gap-2 text-red-500 text-sm",
                     icons::MusicIcon { class: "w-4 h-4" }
-                    span { "Unable to load track" }
+                    span { "Unable to load track: {e}" }
                 }
             }
-        };
-    }
-
-    // Render track card
-    let track_option = track_state.read().clone();
-    if let Some(track) = track_option {
+        },
+        // Success state - render track card
+        Some(Ok(track)) => {
         let track_clone = track.clone();
 
         let handle_play = move |_: MouseEvent| {
@@ -790,45 +766,24 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
                 }
             }
         }
-    } else {
-        rsx! {
-            div { "Error loading track" }
-        }
+        },
     }
 }
 
 #[component]
 fn WavlakeAlbumRenderer(album_id: String) -> Element {
-    let album_id_for_effect = album_id.clone();
-    let mut album_state = use_signal(|| None::<WavlakeAlbum>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| false);
-
-    // Fetch album data
-    use_effect(move || {
-        let id = album_id_for_effect.clone();
-        spawn(async move {
-            loading.set(true);
-            error.set(false);
-
+    // Use use_resource to make fetch reactive to album_id changes
+    let album_resource = use_resource(move || {
+        let id = album_id.clone();
+        async move {
             let api = WavlakeAPI::new();
-            match api.get_album(&id).await {
-                Ok(album_data) => {
-                    album_state.set(Some(album_data));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to load Wavlake album {}: {}", id, e);
-                    error.set(true);
-                    loading.set(false);
-                }
-            }
-        });
+            api.get_album(&id).await
+        }
     });
 
-    // Loading state
-    if *loading.read() {
-        return rsx! {
+    match album_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
             div {
                 class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -841,27 +796,21 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
                     }
                 }
             }
-        };
-    }
-
-    // Error state
-    if *error.read() {
-        return rsx! {
+        },
+        // Error state
+        Some(Err(e)) => rsx! {
             div {
                 class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
                 div {
                     class: "flex items-center gap-2 text-red-500 text-sm",
                     icons::DiscIcon { class: "w-4 h-4" }
-                    span { "Unable to load album" }
+                    span { "Unable to load album: {e}" }
                 }
             }
-        };
-    }
-
-    // Render album card with track list
-    let album_option = album_state.read().clone();
-    if let Some(album) = album_option {
+        },
+        // Success state - render album card with track list
+        Some(Ok(album)) => {
         let tracks: Vec<MusicTrack> = album.tracks.iter().map(|track| MusicTrack {
             id: track.id.clone(),
             title: track.title.clone(),
@@ -1001,45 +950,24 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
                 }
             }
         }
-    } else {
-        rsx! {
-            div { "Error loading album" }
-        }
+        },
     }
 }
 
 #[component]
 fn WavlakeArtistRenderer(artist_id: String) -> Element {
-    let artist_id_for_effect = artist_id.clone();
-    let mut artist_state = use_signal(|| None::<WavlakeArtist>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| false);
-
-    // Fetch artist data
-    use_effect(move || {
-        let id = artist_id_for_effect.clone();
-        spawn(async move {
-            loading.set(true);
-            error.set(false);
-
+    // Use use_resource to make fetch reactive to artist_id changes
+    let artist_resource = use_resource(move || {
+        let id = artist_id.clone();
+        async move {
             let api = WavlakeAPI::new();
-            match api.get_artist(&id).await {
-                Ok(artist_data) => {
-                    artist_state.set(Some(artist_data));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to load Wavlake artist {}: {}", id, e);
-                    error.set(true);
-                    loading.set(false);
-                }
-            }
-        });
+            api.get_artist(&id).await
+        }
     });
 
-    // Loading state
-    if *loading.read() {
-        return rsx! {
+    match artist_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
             div {
                 class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -1051,37 +979,33 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                     }
                 }
             }
-        };
-    }
-
-    // Error state
-    if *error.read() {
-        return rsx! {
+        },
+        // Error state
+        Some(Err(e)) => rsx! {
             div {
                 class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
                 div {
                     class: "flex items-center gap-2 text-red-500 text-sm",
                     icons::UserIcon { class: "w-4 h-4" }
-                    span { "Unable to load artist" }
+                    span { "Unable to load artist: {e}" }
                 }
             }
-        };
-    }
-
-    // Render artist card
-    let artist_option = artist_state.read().clone();
-    if let Some(artist) = artist_option {
-        let artist_id_clone = artist_id.clone();
+        },
+        // Success state - render artist card
+        Some(Ok(artist)) => {
 
         rsx! {
             div {
                 class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
-                onclick: move |e: MouseEvent| {
-                    e.stop_propagation();
-                    // Navigate to artist page
-                    let navigator = navigator();
-                    navigator.push(Route::MusicArtist { artist_id: artist_id_clone.clone() });
+                onclick: {
+                    let artist_id_nav = artist.id.clone();
+                    move |e: MouseEvent| {
+                        e.stop_propagation();
+                        // Navigate to artist page
+                        let navigator = navigator();
+                        navigator.push(Route::MusicArtist { artist_id: artist_id_nav.clone() });
+                    }
                 },
 
                 div {
@@ -1142,45 +1066,24 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                 }
             }
         }
-    } else {
-        rsx! {
-            div { "Error loading artist" }
-        }
+        },
     }
 }
 
 #[component]
 fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
-    let playlist_id_for_effect = playlist_id.clone();
-    let mut playlist_state = use_signal(|| None::<WavlakePlaylist>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| false);
-
-    // Fetch playlist data
-    use_effect(move || {
-        let id = playlist_id_for_effect.clone();
-        spawn(async move {
-            loading.set(true);
-            error.set(false);
-
+    // Use use_resource to make fetch reactive to playlist_id changes
+    let playlist_resource = use_resource(move || {
+        let id = playlist_id.clone();
+        async move {
             let api = WavlakeAPI::new();
-            match api.get_playlist(&id).await {
-                Ok(playlist_data) => {
-                    playlist_state.set(Some(playlist_data));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Failed to load Wavlake playlist {}: {}", id, e);
-                    error.set(true);
-                    loading.set(false);
-                }
-            }
-        });
+            api.get_playlist(&id).await
+        }
     });
 
-    // Loading state
-    if *loading.read() {
-        return rsx! {
+    match playlist_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
             div {
                 class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -1192,27 +1095,21 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                     }
                 }
             }
-        };
-    }
-
-    // Error state
-    if *error.read() {
-        return rsx! {
+        },
+        // Error state
+        Some(Err(e)) => rsx! {
             div {
                 class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
                 div {
                     class: "flex items-center gap-2 text-red-500 text-sm",
                     icons::MusicIcon { class: "w-4 h-4" }
-                    span { "Unable to load playlist" }
+                    span { "Unable to load playlist: {e}" }
                 }
             }
-        };
-    }
-
-    // Render playlist card with track list
-    let playlist_option = playlist_state.read().clone();
-    if let Some(playlist) = playlist_option {
+        },
+        // Success state - render playlist card with track list
+        Some(Ok(playlist)) => {
         let tracks: Vec<MusicTrack> = playlist.tracks.iter().map(|track| MusicTrack {
             id: track.id.clone(),
             title: track.title.clone(),
@@ -1340,9 +1237,6 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                 }
             }
         }
-    } else {
-        rsx! {
-            div { "Error loading playlist" }
-        }
+        },
     }
 }

@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::icons::*;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
-use crate::stores::music_player::MusicTrack;
 
 #[component]
 pub fn MusicArtist(artist_id: String) -> Element {
@@ -98,35 +97,11 @@ pub fn MusicArtist(artist_id: String) -> Element {
                                         if artist.albums.len() == 1 { "Album" } else { "Albums" }
                                     }
 
-                                    // Zap artist button (using first track from most recent album)
-                                    if let Some(first_album) = artist.albums.first() {
-                                        // Get the first track from first album for zapping
-                                        // Note: In production, you'd want to fetch album details to get tracks
-                                        // For now, we'll use the album info to create a minimal track
-                                        {
-                                            let track = MusicTrack {
-                                                id: first_album.id.clone(),
-                                                title: first_album.title.clone(),
-                                                artist: artist.name.clone(),
-                                                album: Some(first_album.title.clone()),
-                                                media_url: String::new(), // Not needed for zapping
-                                                album_art_url: Some(first_album.album_art_url.clone()),
-                                                artist_art_url: artist.artist_art_url.clone(),
-                                                duration: None,
-                                                artist_id: Some(artist_id.clone()),
-                                                album_id: Some(first_album.id.clone()),
-                                                artist_npub: artist.artist_npub.clone(),
-                                            };
-                                            let zap_track = track.clone();
-                                            rsx! {
-                                                button {
-                                                    class: "inline-flex items-center gap-1 px-3 py-1 rounded border border-gray-600 hover:border-purple-500 text-sm transition-colors",
-                                                    onclick: move |_| crate::stores::music_player::show_zap_dialog_for_track(Some(zap_track.clone())),
-                                                    ZapIcon { class: "w-3 h-3" }
-                                                    "Zap Artist"
-                                                }
-                                            }
-                                        }
+                                    // Zap artist button - disabled until we have a real track
+                                    // (Zapping requires a valid track ID, not an album ID)
+                                    span {
+                                        class: "text-sm text-gray-500 italic",
+                                        "Zap feature requires selecting a track"
                                     }
                                 }
 
