@@ -62,31 +62,24 @@ pub fn MusicHome() -> Element {
             match api.search_content(&query).await {
                 Ok(results) => {
                     // Filter only track results
-                    let track_results: Vec<WavlakeTrack> = results
+                    let track_ids: Vec<String> = results
                         .into_iter()
                         .filter(|r| r.result_type == "track")
-                        .filter_map(|r| {
-                            Some(WavlakeTrack {
-                                id: r.id.clone(),
-                                title: r.title.unwrap_or_else(|| r.name.clone()),
-                                album_title: r.album_title.unwrap_or_default(),
-                                artist: r.artist.unwrap_or_default(),
-                                artist_id: r.artist_id.unwrap_or_default(),
-                                album_id: r.album_id.unwrap_or_default(),
-                                artist_art_url: r.artist_art_url.unwrap_or_default(),
-                                album_art_url: r.album_art_url.unwrap_or_default(),
-                                media_url: String::new(),
-                                duration: r.duration.unwrap_or(0),
-                                release_date: None,
-                                msat_total: String::new(),
-                                artist_npub: None,
-                                order: None,
-                                url: None,
-                            })
-                        })
+                        .map(|r| r.id)
                         .collect();
 
-                    log::info!("Found {} tracks", track_results.len());
+                    log::info!("Found {} track IDs, fetching full details...", track_ids.len());
+
+                    // Fetch full track details for each ID to get media_url
+                    let mut track_results = Vec::new();
+                    for track_id in track_ids {
+                        match api.get_track(&track_id).await {
+                            Ok(track) => track_results.push(track),
+                            Err(e) => log::warn!("Failed to fetch track {}: {}", track_id, e),
+                        }
+                    }
+
+                    log::info!("Successfully loaded {} tracks", track_results.len());
                     tracks.set(track_results);
                     loading.set(false);
                 }

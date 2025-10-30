@@ -439,10 +439,10 @@ async fn generate_invoice_flow(track_id: &str, amount_sats: u64, comment: &str) 
 /// Decode bech32 LNURL to HTTPS URL
 fn decode_lnurl(lnurl: &str) -> Result<String, String> {
     // In bech32 0.11, decode() returns (Hrp, Vec<u8>) - already decoded bytes
-    let (_, bytes) = bech32::decode(lnurl)
+    let (_, data) = bech32::decode(lnurl)
         .map_err(|e| format!("Bech32 decode error: {}", e))?;
 
-    String::from_utf8(bytes)
+    String::from_utf8(data)
         .map_err(|e| format!("UTF-8 conversion error: {}", e))
 }
 

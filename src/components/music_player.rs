@@ -50,8 +50,8 @@ async fn vote_for_track(track_id: &str, title: &str, artist: &str) {
     let builder = EventBuilder::new(nostr_sdk::Kind::Custom(30003), "").tags(tags);
 
     match client.send_event_builder(builder).await {
-        Ok(output) => {
-            log::info!("Vote submitted for track: {} by {} (event: {})", title, artist, output.id());
+        Ok(event_id) => {
+            log::info!("Vote submitted for track: {} by {} (event: {})", title, artist, event_id.to_hex());
             // TODO: Show success toast
         }
         Err(e) => {
@@ -292,6 +292,7 @@ pub fn PersistentMusicPlayer() -> Element {
                             class: "flex-1 relative h-2 bg-secondary rounded-full overflow-hidden cursor-pointer",
                             onclick: move |evt| {
                                 let client_x = evt.client_coordinates().x;
+                                let client_y = evt.client_coordinates().y;
                                 let audio_id_str = audio_id.to_string();
 
                                 spawn(async move {
@@ -301,20 +302,24 @@ pub fn PersistentMusicPlayer() -> Element {
                                             let audio = document.getElementById('{audio_id}');
                                             if (!audio) return;
 
-                                            let progressBar = document.elementFromPoint({client_x}, 0);
-                                            if (!progressBar) return;
+                                            let element = document.elementFromPoint({client_x}, {client_y});
+                                            if (!element) return;
 
+                                            // Find the progress bar element (it might be the clicked element or an ancestor)
+                                            let progressBar = element.closest('.cursor-pointer') || element;
                                             let rect = progressBar.getBoundingClientRect();
+
                                             let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
                                             let newTime = percent * audio.duration;
 
-                                            if (!isNaN(newTime)) {{
+                                            if (!isNaN(newTime) && isFinite(newTime)) {{
                                                 audio.currentTime = newTime;
                                             }}
                                         }})();
                                         "#,
                                         audio_id = audio_id_str,
-                                        client_x = client_x
+                                        client_x = client_x,
+                                        client_y = client_y
                                     );
                                     let _ = eval(&script);
                                 });
