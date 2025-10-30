@@ -44,9 +44,8 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Fetch counts - consolidated into a single batched fetch
-    use_effect(move || {
-        let event_id_for_counts = event_id_counts.clone();
+    // Fetch counts - consolidated into a single batched fetch, only run once per event_id
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
         spawn(async move {
             let client = match get_client() {
                 Some(c) => c,
@@ -123,12 +122,10 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 zap_amount_sats.set(total_sats);
             }
         });
-    });
+    }));
 
-    // Fetch author's profile metadata
-    use_effect(move || {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
+    // Fetch author's profile metadata - only run once per pubkey
+    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             // Parse pubkey
             let pubkey = match PublicKey::from_hex(&pubkey_str)
@@ -157,7 +154,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Format timestamp
     let timestamp = format_timestamp(created_at.as_u64());
@@ -179,11 +176,19 @@ pub fn NoteCard(event: NostrEvent) -> Element {
         .unwrap_or_else(|| {
             // Truncated npub
             if let Ok(pk) = PublicKey::from_hex(&author_pubkey) {
-                let npub = pk.to_bech32().expect("to_bech32 is infallible");
-                if npub.len() > 18 {
-                    format!("{}...{}", &npub[..12], &npub[npub.len()-6..])
-                } else {
-                    npub
+                match pk.to_bech32() {
+                    Ok(npub) => {
+                        if npub.len() > 18 {
+                            format!("{}...{}", &npub[..12], &npub[npub.len()-6..])
+                        } else {
+                            npub
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to encode pubkey to bech32: {}, using hex fallback", e);
+                        // Fallback to hex truncation
+                        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
+                    }
                 }
             } else {
                 "unknown".to_string()
