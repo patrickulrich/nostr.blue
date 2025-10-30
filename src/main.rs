@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, nostr_client, theme_store};
+use stores::{auth_store, nostr_client, theme_store, music_player};
 
 // Modules
 mod components;
@@ -32,6 +32,7 @@ fn App() -> Element {
     use_effect(move || {
         theme_store::init_theme();
         auth_store::init_auth();
+        music_player::init_player();
 
         // Initialize Nostr client
         spawn(async move {

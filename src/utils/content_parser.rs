@@ -8,8 +8,12 @@ pub enum ContentToken {
     Link(String),
     Image(String),
     Video(String),
-    Mention(String),      // npub/nprofile
-    EventMention(String), // note/nevent
+    WavlakeTrack(String),    // Track ID from wavlake.com/track/{id}
+    WavlakeAlbum(String),    // Album ID from wavlake.com/album/{id}
+    WavlakeArtist(String),   // Artist ID from wavlake.com/artist/{id}
+    WavlakePlaylist(String), // Playlist ID from wavlake.com/playlist/{id}
+    Mention(String),         // npub/nprofile
+    EventMention(String),    // note/nevent
     Hashtag(String),
 }
 
@@ -32,6 +36,14 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             ContentToken::Image(url)
         } else if is_video_url(&url) {
             ContentToken::Video(url)
+        } else if let Some(track_id) = extract_wavlake_track_id(&url) {
+            ContentToken::WavlakeTrack(track_id)
+        } else if let Some(album_id) = extract_wavlake_album_id(&url) {
+            ContentToken::WavlakeAlbum(album_id)
+        } else if let Some(artist_id) = extract_wavlake_artist_id(&url) {
+            ContentToken::WavlakeArtist(artist_id)
+        } else if let Some(playlist_id) = extract_wavlake_playlist_id(&url) {
+            ContentToken::WavlakePlaylist(playlist_id)
         } else {
             ContentToken::Link(url)
         };
@@ -109,6 +121,92 @@ fn is_image_url(url: &str) -> bool {
     path.ends_with(".bmp") ||
     lower.contains("/image/") ||
     lower.contains("image")
+}
+
+/// Extract track ID from Wavlake URLs
+/// Supports: https://wavlake.com/track/{id}
+fn extract_wavlake_track_id(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    // Match wavlake.com/track/{id}
+    if lower.contains("wavlake.com/track/") {
+        if let Some(track_part) = url.split("/track/").nth(1) {
+            // Extract just the ID (remove query params or trailing slashes)
+            let track_id = track_part
+                .split('?').next()
+                .unwrap_or(track_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !track_id.is_empty() {
+                return Some(track_id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract album ID from Wavlake URLs
+/// Supports: https://wavlake.com/album/{id}
+fn extract_wavlake_album_id(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    if lower.contains("wavlake.com/album/") {
+        if let Some(album_part) = url.split("/album/").nth(1) {
+            let album_id = album_part
+                .split('?').next()
+                .unwrap_or(album_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !album_id.is_empty() {
+                return Some(album_id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract artist ID from Wavlake URLs
+/// Supports: https://wavlake.com/artist/{id}
+fn extract_wavlake_artist_id(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    if lower.contains("wavlake.com/artist/") {
+        if let Some(artist_part) = url.split("/artist/").nth(1) {
+            let artist_id = artist_part
+                .split('?').next()
+                .unwrap_or(artist_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !artist_id.is_empty() {
+                return Some(artist_id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract playlist ID from Wavlake URLs
+/// Supports: https://wavlake.com/playlist/{id}
+fn extract_wavlake_playlist_id(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    if lower.contains("wavlake.com/playlist/") {
+        if let Some(playlist_part) = url.split("/playlist/").nth(1) {
+            let playlist_id = playlist_part
+                .split('?').next()
+                .unwrap_or(playlist_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !playlist_id.is_empty() {
+                return Some(playlist_id);
+            }
+        }
+    }
+
+    None
 }
 
 /// Check if a URL points to a video

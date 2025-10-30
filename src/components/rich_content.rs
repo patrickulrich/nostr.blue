@@ -3,6 +3,9 @@ use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use crate::stores::nostr_client;
+use crate::services::wavlake::{WavlakeAPI, WavlakeTrack, WavlakeAlbum, WavlakeArtist, WavlakePlaylist};
+use crate::stores::music_player::{self, MusicTrack};
+use crate::components::icons;
 
 #[component]
 pub fn RichContent(content: String, tags: Vec<Tag>) -> Element {
@@ -90,6 +93,22 @@ fn render_token(token: &ContentToken) -> Element {
                     "#{tag}"
                 }
             }
+        },
+
+        ContentToken::WavlakeTrack(track_id) => rsx! {
+            WavlakeTrackRenderer { track_id: track_id.clone() }
+        },
+
+        ContentToken::WavlakeAlbum(album_id) => rsx! {
+            WavlakeAlbumRenderer { album_id: album_id.clone() }
+        },
+
+        ContentToken::WavlakeArtist(artist_id) => rsx! {
+            WavlakeArtistRenderer { artist_id: artist_id.clone() }
+        },
+
+        ContentToken::WavlakePlaylist(playlist_id) => rsx! {
+            WavlakePlaylistRenderer { playlist_id: playlist_id.clone() }
         },
     }
 }
@@ -612,6 +631,718 @@ fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &s
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn WavlakeTrackRenderer(track_id: String) -> Element {
+    let track_id_for_effect = track_id.clone();
+    let mut track_state = use_signal(|| None::<WavlakeTrack>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| false);
+
+    // Fetch track data
+    use_effect(move || {
+        let id = track_id_for_effect.clone();
+        spawn(async move {
+            loading.set(true);
+            error.set(false);
+
+            let api = WavlakeAPI::new();
+            match api.get_track(&id).await {
+                Ok(track_data) => {
+                    track_state.set(Some(track_data));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load Wavlake track {}: {}", id, e);
+                    error.set(true);
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Loading state
+    if *loading.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex items-center gap-3",
+                    div { class: "w-16 h-16 bg-muted rounded" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-4 bg-muted rounded w-3/4" }
+                        div { class: "h-3 bg-muted rounded w-1/2" }
+                    }
+                }
+            }
+        };
+    }
+
+    // Error state
+    if *error.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div {
+                    class: "flex items-center gap-2 text-red-500 text-sm",
+                    icons::MusicIcon { class: "w-4 h-4" }
+                    span { "Unable to load track" }
+                }
+            }
+        };
+    }
+
+    // Render track card
+    let track_option = track_state.read().clone();
+    if let Some(track) = track_option {
+        let track_clone = track.clone();
+
+        let handle_play = move |_: MouseEvent| {
+            let music_track = MusicTrack {
+                id: track_clone.id.clone(),
+                title: track_clone.title.clone(),
+                artist: track_clone.artist.clone(),
+                album: Some(track_clone.album_title.clone()),
+                media_url: track_clone.media_url.clone(),
+                album_art_url: Some(track_clone.album_art_url.clone()),
+                artist_art_url: Some(track_clone.artist_art_url.clone()),
+                duration: Some(track_clone.duration),
+                artist_id: Some(track_clone.artist_id.clone()),
+                album_id: Some(track_clone.album_id.clone()),
+                artist_npub: track_clone.artist_npub.clone(),
+            };
+            music_player::play_track(music_track, None, None);
+        };
+
+        rsx! {
+            div {
+                class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                div {
+                    class: "flex items-center gap-4 p-4",
+
+                    // Album art
+                    div {
+                        class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted group",
+                        img {
+                            src: "{track.album_art_url}",
+                            alt: "Album art",
+                            class: "w-full h-full object-cover"
+                        }
+
+                        // Play button overlay
+                        button {
+                            class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                            onclick: handle_play,
+                            dangerous_inner_html: icons::PLAY
+                        }
+                    }
+
+                    // Track info
+                    div {
+                        class: "flex-1 min-w-0",
+                        div {
+                            class: "font-semibold text-sm truncate",
+                            "{track.title}"
+                        }
+                        div {
+                            class: "text-xs text-muted-foreground truncate",
+                            a {
+                                href: "/music/artist/{track.artist_id}",
+                                class: "hover:text-foreground hover:underline",
+                                onclick: move |e| e.stop_propagation(),
+                                "{track.artist}"
+                            }
+                        }
+                        div {
+                            class: "text-xs text-muted-foreground/80 truncate mt-1",
+                            a {
+                                href: "/music/album/{track.album_id}",
+                                class: "hover:text-foreground hover:underline",
+                                onclick: move |e| e.stop_propagation(),
+                                "{track.album_title}"
+                            }
+                        }
+                    }
+
+                    // Duration and Wavlake badge
+                    div {
+                        class: "flex flex-col items-end gap-1 flex-shrink-0",
+                        div {
+                            class: "text-xs text-muted-foreground",
+                            {
+                                let mins = track.duration / 60;
+                                let secs = track.duration % 60;
+                                format!("{:02}:{:02}", mins, secs)
+                            }
+                        }
+                        div {
+                            class: "flex items-center gap-1 text-xs text-purple-400",
+                            icons::MusicIcon { class: "w-3 h-3" }
+                            "Wavlake"
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { "Error loading track" }
+        }
+    }
+}
+
+#[component]
+fn WavlakeAlbumRenderer(album_id: String) -> Element {
+    let album_id_for_effect = album_id.clone();
+    let mut album_state = use_signal(|| None::<WavlakeAlbum>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| false);
+
+    // Fetch album data
+    use_effect(move || {
+        let id = album_id_for_effect.clone();
+        spawn(async move {
+            loading.set(true);
+            error.set(false);
+
+            let api = WavlakeAPI::new();
+            match api.get_album(&id).await {
+                Ok(album_data) => {
+                    album_state.set(Some(album_data));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load Wavlake album {}: {}", id, e);
+                    error.set(true);
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Loading state
+    if *loading.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex gap-4",
+                    div { class: "w-32 h-32 bg-muted rounded" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-5 bg-muted rounded w-3/4" }
+                        div { class: "h-3 bg-muted rounded w-1/2" }
+                        div { class: "h-3 bg-muted rounded w-1/3" }
+                    }
+                }
+            }
+        };
+    }
+
+    // Error state
+    if *error.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div {
+                    class: "flex items-center gap-2 text-red-500 text-sm",
+                    icons::DiscIcon { class: "w-4 h-4" }
+                    span { "Unable to load album" }
+                }
+            }
+        };
+    }
+
+    // Render album card with track list
+    let album_option = album_state.read().clone();
+    if let Some(album) = album_option {
+        let tracks: Vec<MusicTrack> = album.tracks.iter().map(|track| MusicTrack {
+            id: track.id.clone(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: Some(track.album_title.clone()),
+            media_url: track.media_url.clone(),
+            album_art_url: Some(track.album_art_url.clone()),
+            artist_art_url: Some(track.artist_art_url.clone()),
+            duration: Some(track.duration),
+            artist_id: Some(track.artist_id.clone()),
+            album_id: Some(track.album_id.clone()),
+            artist_npub: track.artist_npub.clone(),
+        }).collect();
+
+        rsx! {
+            div {
+                class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                // Album header
+                div {
+                    class: "flex gap-4 p-4 border-b border-border",
+
+                    // Album art
+                    if let Some(art_url) = &album.album_art_url {
+                        img {
+                            src: "{art_url}",
+                            alt: "Album art",
+                            class: "w-32 h-32 rounded object-cover flex-shrink-0"
+                        }
+                    } else {
+                        div {
+                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                            icons::DiscIcon { class: "w-16 h-16 text-muted-foreground" }
+                        }
+                    }
+
+                    // Album info
+                    div {
+                        class: "flex-1 min-w-0",
+                        div {
+                            class: "text-xs text-muted-foreground mb-1",
+                            "ALBUM"
+                        }
+                        div {
+                            class: "font-bold text-lg truncate mb-1",
+                            "{album.title}"
+                        }
+                        div {
+                            class: "text-sm text-muted-foreground truncate mb-2",
+                            a {
+                                href: if let Some(first_track) = album.tracks.first() {
+                                    format!("/music/artist/{}", first_track.artist_id)
+                                } else {
+                                    "#".to_string()
+                                },
+                                class: "hover:text-foreground hover:underline",
+                                onclick: move |e| e.stop_propagation(),
+                                "{album.artist}"
+                            }
+                        }
+                        div {
+                            class: "flex items-center gap-3 text-xs text-muted-foreground",
+                            span {
+                                {album.release_date.split('T').next().unwrap_or("Unknown").split('-').next().unwrap_or("Unknown")}
+                            }
+                            span { "•" }
+                            span {
+                                "{album.tracks.len()} "
+                                {if album.tracks.len() == 1 { "track" } else { "tracks" }}
+                            }
+                            span { "•" }
+                            span {
+                                class: "flex items-center gap-1 text-purple-400",
+                                icons::MusicIcon { class: "w-3 h-3" }
+                                "Wavlake"
+                            }
+                        }
+                    }
+                }
+
+                // Track list
+                div {
+                    class: "divide-y divide-border",
+                    for (index, track_data) in album.tracks.iter().enumerate() {
+                        {
+                            let track_clone = tracks[index].clone();
+                            let playlist = tracks.clone();
+                            let track_title = track_data.title.clone();
+                            let track_artist = track_data.artist.clone();
+                            let track_duration = track_data.duration;
+
+                            rsx! {
+                                div {
+                                    key: "{track_data.id}",
+                                    class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                    onclick: move |_| {
+                                        music_player::play_track(track_clone.clone(), Some(playlist.clone()), Some(index));
+                                    },
+
+                                    // Track number / play icon
+                                    div {
+                                        class: "w-8 text-center text-sm text-muted-foreground flex-shrink-0",
+                                        span { class: "group-hover:hidden", "{index + 1}" }
+                                        div {
+                                            class: "hidden group-hover:flex items-center justify-center",
+                                            dangerous_inner_html: icons::PLAY
+                                        }
+                                    }
+
+                                    // Track info
+                                    div {
+                                        class: "flex-1 min-w-0",
+                                        div {
+                                            class: "font-medium text-sm truncate",
+                                            "{track_title}"
+                                        }
+                                        div {
+                                            class: "text-xs text-muted-foreground truncate",
+                                            "{track_artist}"
+                                        }
+                                    }
+
+                                    // Duration
+                                    div {
+                                        class: "text-xs text-muted-foreground flex-shrink-0",
+                                        {
+                                            let mins = track_duration / 60;
+                                            let secs = track_duration % 60;
+                                            format!("{:02}:{:02}", mins, secs)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { "Error loading album" }
+        }
+    }
+}
+
+#[component]
+fn WavlakeArtistRenderer(artist_id: String) -> Element {
+    let artist_id_for_effect = artist_id.clone();
+    let mut artist_state = use_signal(|| None::<WavlakeArtist>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| false);
+
+    // Fetch artist data
+    use_effect(move || {
+        let id = artist_id_for_effect.clone();
+        spawn(async move {
+            loading.set(true);
+            error.set(false);
+
+            let api = WavlakeAPI::new();
+            match api.get_artist(&id).await {
+                Ok(artist_data) => {
+                    artist_state.set(Some(artist_data));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load Wavlake artist {}: {}", id, e);
+                    error.set(true);
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Loading state
+    if *loading.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex items-center gap-4",
+                    div { class: "w-20 h-20 bg-muted rounded-full" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-5 bg-muted rounded w-1/2" }
+                        div { class: "h-3 bg-muted rounded w-1/3" }
+                    }
+                }
+            }
+        };
+    }
+
+    // Error state
+    if *error.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div {
+                    class: "flex items-center gap-2 text-red-500 text-sm",
+                    icons::UserIcon { class: "w-4 h-4" }
+                    span { "Unable to load artist" }
+                }
+            }
+        };
+    }
+
+    // Render artist card
+    let artist_option = artist_state.read().clone();
+    if let Some(artist) = artist_option {
+        let artist_id_clone = artist_id.clone();
+
+        rsx! {
+            div {
+                class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    // Navigate to artist page
+                    let navigator = navigator();
+                    navigator.push(Route::MusicArtist { artist_id: artist_id_clone.clone() });
+                },
+
+                div {
+                    class: "flex items-center gap-4 p-4",
+
+                    // Artist image
+                    if let Some(art_url) = &artist.artist_art_url {
+                        if !art_url.is_empty() {
+                            img {
+                                src: "{art_url}",
+                                alt: "Artist",
+                                class: "w-20 h-20 rounded-full object-cover flex-shrink-0"
+                            }
+                        } else {
+                            div {
+                                class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center flex-shrink-0",
+                                icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
+                            }
+                        }
+                    } else {
+                        div {
+                            class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center flex-shrink-0",
+                            icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
+                        }
+                    }
+
+                    // Artist info
+                    div {
+                        class: "flex-1 min-w-0",
+                        div {
+                            class: "text-xs text-muted-foreground mb-1",
+                            "ARTIST"
+                        }
+                        div {
+                            class: "font-bold text-lg truncate mb-1",
+                            "{artist.name}"
+                        }
+                        div {
+                            class: "flex items-center gap-2 text-xs text-muted-foreground",
+                            span {
+                                "{artist.albums.len()} "
+                                {if artist.albums.len() == 1 { "album" } else { "albums" }}
+                            }
+                            span { "•" }
+                            span {
+                                class: "flex items-center gap-1 text-purple-400",
+                                icons::MusicIcon { class: "w-3 h-3" }
+                                "Wavlake"
+                            }
+                        }
+                    }
+
+                    // Arrow icon
+                    div {
+                        class: "flex-shrink-0 text-muted-foreground",
+                        dangerous_inner_html: r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>"#
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { "Error loading artist" }
+        }
+    }
+}
+
+#[component]
+fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
+    let playlist_id_for_effect = playlist_id.clone();
+    let mut playlist_state = use_signal(|| None::<WavlakePlaylist>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| false);
+
+    // Fetch playlist data
+    use_effect(move || {
+        let id = playlist_id_for_effect.clone();
+        spawn(async move {
+            loading.set(true);
+            error.set(false);
+
+            let api = WavlakeAPI::new();
+            match api.get_playlist(&id).await {
+                Ok(playlist_data) => {
+                    playlist_state.set(Some(playlist_data));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load Wavlake playlist {}: {}", id, e);
+                    error.set(true);
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Loading state
+    if *loading.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex gap-4",
+                    div { class: "w-32 h-32 bg-muted rounded" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-5 bg-muted rounded w-3/4" }
+                        div { class: "h-3 bg-muted rounded w-1/2" }
+                    }
+                }
+            }
+        };
+    }
+
+    // Error state
+    if *error.read() {
+        return rsx! {
+            div {
+                class: "my-2 p-3 border border-border rounded-lg bg-red-500/10 border-red-500/30",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div {
+                    class: "flex items-center gap-2 text-red-500 text-sm",
+                    icons::MusicIcon { class: "w-4 h-4" }
+                    span { "Unable to load playlist" }
+                }
+            }
+        };
+    }
+
+    // Render playlist card with track list
+    let playlist_option = playlist_state.read().clone();
+    if let Some(playlist) = playlist_option {
+        let tracks: Vec<MusicTrack> = playlist.tracks.iter().map(|track| MusicTrack {
+            id: track.id.clone(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: Some(track.album_title.clone()),
+            media_url: track.media_url.clone(),
+            album_art_url: Some(track.album_art_url.clone()),
+            artist_art_url: Some(track.artist_art_url.clone()),
+            duration: Some(track.duration),
+            artist_id: Some(track.artist_id.clone()),
+            album_id: Some(track.album_id.clone()),
+            artist_npub: track.artist_npub.clone(),
+        }).collect();
+
+        rsx! {
+            div {
+                class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                // Playlist header
+                div {
+                    class: "flex gap-4 p-4 border-b border-border",
+
+                    // Playlist cover (use first track's album art)
+                    if let Some(first_track) = playlist.tracks.first() {
+                        img {
+                            src: "{first_track.album_art_url}",
+                            alt: "Playlist cover",
+                            class: "w-32 h-32 rounded object-cover flex-shrink-0"
+                        }
+                    } else {
+                        div {
+                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                            icons::MusicIcon { class: "w-16 h-16 text-muted-foreground" }
+                        }
+                    }
+
+                    // Playlist info
+                    div {
+                        class: "flex-1 min-w-0",
+                        div {
+                            class: "text-xs text-muted-foreground mb-1",
+                            "PLAYLIST"
+                        }
+                        div {
+                            class: "font-bold text-lg truncate mb-1",
+                            "{playlist.title}"
+                        }
+                        div {
+                            class: "flex items-center gap-3 text-xs text-muted-foreground",
+                            span {
+                                "{playlist.tracks.len()} "
+                                {if playlist.tracks.len() == 1 { "track" } else { "tracks" }}
+                            }
+                            span { "•" }
+                            span {
+                                class: "flex items-center gap-1 text-purple-400",
+                                icons::MusicIcon { class: "w-3 h-3" }
+                                "Wavlake"
+                            }
+                        }
+                    }
+                }
+
+                // Track list
+                div {
+                    class: "divide-y divide-border max-h-96 overflow-y-auto",
+                    for (index, track_data) in playlist.tracks.iter().enumerate() {
+                        {
+                            let track_clone = tracks[index].clone();
+                            let playlist_clone = tracks.clone();
+                            let track_title = track_data.title.clone();
+                            let track_artist = track_data.artist.clone();
+                            let track_duration = track_data.duration;
+                            let track_album_art = track_data.album_art_url.clone();
+
+                            rsx! {
+                                div {
+                                    key: "{track_data.id}",
+                                    class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                    onclick: move |_| {
+                                        music_player::play_track(track_clone.clone(), Some(playlist_clone.clone()), Some(index));
+                                    },
+
+                                    // Album art thumbnail
+                                    div {
+                                        class: "relative w-10 h-10 flex-shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
+                                        img {
+                                            src: "{track_album_art}",
+                                            alt: "Album art",
+                                            class: "w-full h-full object-cover"
+                                        }
+                                        div {
+                                            class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                            dangerous_inner_html: icons::PLAY_SMALL
+                                        }
+                                    }
+
+                                    // Track info
+                                    div {
+                                        class: "flex-1 min-w-0",
+                                        div {
+                                            class: "font-medium text-sm truncate",
+                                            "{track_title}"
+                                        }
+                                        div {
+                                            class: "text-xs text-muted-foreground truncate",
+                                            "{track_artist}"
+                                        }
+                                    }
+
+                                    // Duration
+                                    div {
+                                        class: "text-xs text-muted-foreground flex-shrink-0",
+                                        {
+                                            let mins = track_duration / 60;
+                                            let secs = track_duration % 60;
+                                            format!("{:02}:{:02}", mins, secs)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { "Error loading playlist" }
         }
     }
 }
