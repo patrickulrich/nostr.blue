@@ -994,16 +994,17 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
         },
         // Success state - render artist card
         Some(Ok(artist)) => {
+        let nav = use_navigator();
 
         rsx! {
             div {
                 class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
                 onclick: {
                     let artist_id_nav = artist.id.clone();
+                    let navigator = nav.clone();
                     move |e: MouseEvent| {
                         e.stop_propagation();
                         // Navigate to artist page
-                        let navigator = navigator();
                         navigator.push(Route::MusicArtist { artist_id: artist_id_nav.clone() });
                     }
                 },

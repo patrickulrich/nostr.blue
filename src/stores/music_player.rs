@@ -144,8 +144,8 @@ async fn publish_music_status(track: &MusicTrack) {
     let builder = EventBuilder::new(Kind::UserStatus, content).tags(tags);
 
     match client.send_event_builder(builder).await {
-        Ok(output) => {
-            log::info!("Music status published: {} (event: {})", track.title, output.id());
+        Ok(event_id) => {
+            log::info!("Music status published: {} (event: {})", track.title, event_id.to_hex());
         }
         Err(e) => {
             log::error!("Failed to publish music status: {}", e);
