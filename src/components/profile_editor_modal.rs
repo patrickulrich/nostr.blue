@@ -27,9 +27,9 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut show_picture_uploader = use_signal(|| false);
     let mut show_banner_uploader = use_signal(|| false);
 
-    // Load current profile on mount
-    use_effect(move || {
-        if *props.show.read() {
+    // Load current profile when modal opens
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
             spawn(async move {
                 if let Some(pubkey) = auth_store::get_pubkey() {
                     if let Some(metadata) = profiles::get_profile(&pubkey) {
@@ -45,7 +45,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                 }
             });
         }
-    });
+    }));
 
     // Save profile
     let handle_save = move |_| {

@@ -57,7 +57,12 @@ pub fn CommentComposer(
 
     // Handle removing uploaded media
     let mut handle_remove_media = move |index: usize| {
-        uploaded_media.write().remove(index);
+        let mut media = uploaded_media.write();
+        if index < media.len() {
+            media.remove(index);
+        } else {
+            log::warn!("Attempted to remove media at invalid index: {}", index);
+        }
     };
 
     // Handler when emoji is selected

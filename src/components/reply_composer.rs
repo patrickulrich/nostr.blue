@@ -16,7 +16,18 @@ pub fn ReplyComposer(
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(|| Vec::<String>::new());
 
-    let char_count = content.read().len();
+    // Calculate total length including media URLs
+    let content_len = content.read().len();
+    let media_len = if !uploaded_media.read().is_empty() {
+        let separator_len = if content_len > 0 { 2 } else { 0 }; // "\n\n"
+        let urls_with_newlines: usize = uploaded_media.read().iter()
+            .map(|url| url.len() + 1) // +1 for '\n' after each URL
+            .sum();
+        separator_len + urls_with_newlines
+    } else {
+        0
+    };
+    let char_count = content_len + media_len;
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
@@ -51,7 +62,12 @@ pub fn ReplyComposer(
 
     // Handle removing uploaded media
     let mut handle_remove_media = move |index: usize| {
-        uploaded_media.write().remove(index);
+        let mut media = uploaded_media.write();
+        if index < media.len() {
+            media.remove(index);
+        } else {
+            log::warn!("Attempted to remove media at invalid index: {}", index);
+        }
     };
 
     // Handler when emoji is selected
