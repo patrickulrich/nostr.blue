@@ -222,10 +222,6 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
     // Add until timestamp if provided for pagination
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        // For initial load, get posts from last 24 hours
-        let since = Timestamp::now() - Duration::from_secs(86400);
-        filter = filter.since(since);
     }
 
     log::info!("Fetching events with filter: {:?}", filter);

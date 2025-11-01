@@ -2,46 +2,13 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
-![Performance](https://img.shields.io/badge/performance-50x_faster-brightgreen)
 
 ## 🌟 Overview
 
-nostr.blue is a modern, **blazing-fast** Nostr client built entirely in Rust and compiled to WebAssembly. It provides a comprehensive social networking experience on the decentralized Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, and Data Vending Machines.
-
-### ⚡ What's New in 0.2.0
-
-**Major Performance & UX Improvements:**
-
-- 🚀 **50x Faster Feed Loads** - IndexedDB integration enables instant cache hits (<100ms vs 2-5s)
-- 💾 **Persistent Offline Storage** - Events survive page refreshes with local database
-- ⚡ **3x Faster DM Loading** - Parallel fetching reduces 30s to 10s
-- 🔄 **Real-Time Updates** - Live feed and notifications without manual refresh
-- 🎨 **Beautiful Loading UX** - Friendly bouncing "N" animation during initialization
-- 📊 **95% Fewer Network Requests** - Smart caching reduces bandwidth usage
-- 🎯 **Optimized Relay Pool** - Auto-ban slow relays, adaptive retry intervals
-
-**Technical Highlights:**
-- Database-first architecture with IndexedDB persistence
-- Parallel event fetching with `tokio::join!()`
-- Background relay synchronization
-- Advanced relay options (max latency, verification, auto-ban)
-- Subscription management for live updates
-
-### 🆕 Latest Improvements (Post-0.2.0)
-
-**NIP-22 Structured Comments:**
-- 💬 **Article Comments** - Full threaded comment support on long-form articles
-- 🎬 **Video Comments** - Engage in discussions on video content
-- 🔗 **Proper Threading** - Nested replies with K/k, E/e, P/p tag compliance
-- ✨ **Comment Composer** - Beautiful modal interface using `EventBuilder::comment()`
-
-**Protocol Compliance Enhancements:**
-- ✅ **NIP-17 Full Compliance** - DMs now create sender copies for retrievability
-- ✅ **NIP-38 Optimization** - Music status uses `EventBuilder::live_status()` helper
-- 🔧 **nostr-sdk Integration** - Migrated to official helper functions for better maintainability
+nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAssembly. It provides a comprehensive social networking experience on the decentralized Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, and Data Vending Machines.
 
 ## ✨ Features
 
@@ -108,16 +75,6 @@ nostr.blue is a modern, **blazing-fast** Nostr client built entirely in Rust and
 
 ## 📊 Performance Metrics
 
-### Load Time Improvements (0.2.0)
-
-| Operation | Before | After | Improvement |
-|-----------|--------|-------|-------------|
-| **Home Feed (cached)** | 2-5s | <100ms | **50x faster** |
-| **DM Loading** | 30s | 10s | **3x faster** |
-| **Note Thread Loading** | 30s | 10s | **3x faster** |
-| **Profile Fetch (cached)** | 5s | <50ms | **100x faster** |
-| **Network Requests** | 200+/feed | 5-10/feed | **95% reduction** |
-
 ### Architecture Improvements
 
 - **Database-First Pattern**: Check IndexedDB → Background relay sync
@@ -151,7 +108,7 @@ nostrbluerust/
 │   │   ├── wavlake_zap_dialog.rs # Music artist zaps
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
-│   │   ├── client_initializing.rs # Loading animation (NEW 0.2.0)
+│   │   ├── client_initializing.rs # Loading animation
 │   │   └── icons.rs        # SVG icon components
 │   ├── routes/             # Page routes
 │   │   ├── home.rs         # Home feed
@@ -159,6 +116,7 @@ nostrbluerust/
 │   │   ├── note.rs         # Single note view with threading
 │   │   ├── article_detail.rs # Article view with NIP-22 comments
 │   │   ├── video_detail.rs # Video view with NIP-22 comments
+│   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
 │   │   ├── communities.rs  # Communities (NIP-72)
@@ -188,13 +146,13 @@ nostrbluerust/
 │   │   ├── use_lists.rs    # List management
 │   │   └── use_infinite_scroll.rs # Pagination
 │   ├── stores/             # Global state management
-│   │   ├── nostr_client.rs # Nostr SDK client with IndexedDB (UPDATED 0.2.0)
+│   │   ├── nostr_client.rs # Nostr SDK client with IndexedDB
 │   │   ├── auth_store.rs   # Authentication state (NIP-07)
-│   │   ├── profiles.rs     # Profile cache with batch fetching (UPDATED 0.2.0)
+│   │   ├── profiles.rs     # Profile cache with batch fetching
 │   │   ├── bookmarks.rs    # Bookmarked content (NIP-51)
-│   │   ├── dms.rs          # DM conversations with NIP-17 compliance (UPDATED 0.2.0)
-│   │   ├── notifications.rs # Notification state with real-time (UPDATED 0.2.0)
-│   │   ├── music_player.rs # Music player state with NIP-38 status (UPDATED)
+│   │   ├── dms.rs          # DM conversations with NIP-17 compliance
+│   │   ├── notifications.rs # Notification state with real-time
+│   │   ├── music_player.rs # Music player state with NIP-38 status
 │   │   ├── settings_store.rs # NIP-78 synced settings
 │   │   ├── theme_store.rs  # Theme preferences
 │   │   └── signer.rs       # Event signing
@@ -292,25 +250,6 @@ Production builds are optimized with:
 - Single codegen unit for minimal binary size
 - Panic abort for smaller WASM binaries
 
-## 🚀 Migration to 0.2.0
-
-### Breaking Changes
-**None!** Version 0.2.0 is fully backwards compatible. All improvements are transparent to users.
-
-### What Gets Better Automatically
-- ✅ **Instant loads** - First visit builds cache, subsequent visits are instant
-- ✅ **Offline browsing** - Cached content available without internet
-- ✅ **Live updates** - No more manual refresh button
-- ✅ **Reduced bandwidth** - 95% fewer network requests
-
-### How It Works
-1. **First Load**: Client initializes IndexedDB, fetches from relays (same as before)
-2. **Cache Built**: Events stored locally in IndexedDB
-3. **Next Visit**: Instant load from cache (<100ms), background relay sync
-4. **Real-Time**: Live subscriptions prepend new events automatically
-
-No user action required - just enjoy the speed! 🚀
-
 ## 🔌 Nostr Protocol Support
 
 This client implements the following Nostr Improvement Proposals (NIPs):
@@ -360,22 +299,11 @@ Themes are configured in `tailwind.config.js` with CSS variables for easy custom
 
 ## 🎯 Roadmap
 
-### Version 0.2.0 - ✅ COMPLETE
-- ✅ IndexedDB persistent storage
-- ✅ Parallel event fetching (3x faster)
-- ✅ Real-time feed & notification updates
-- ✅ Optimized relay pool management
-- ✅ Beautiful loading UX
-- ✅ 50x performance improvement
-
-### Version 0.3.0 - In Planning
+### In Planning
 - 🔄 **Negentropy Sync** - 10-100x bandwidth reduction
 - 🔄 **Database Cleanup** - Auto-delete old events
 - 🔄 **Relay Statistics UI** - Monitor relay performance
 - 🔄 **Background Sync Tasks** - Auto-update every 5 minutes
-
-### Future Enhancements
-- 🔄 **Media Uploads** - Direct image/video uploads via NIP-94/NIP-96
 - 🔄 **Advanced Filters** - Custom feed filtering and muting
 - 🔄 **Web of Trust** - Configurable WoT scoring
 - 🔄 **Virtual Scrolling** - Handle feeds with 10,000+ events
@@ -427,7 +355,6 @@ MIT License - See [LICENSE](LICENSE) file for details
 ## 📞 Support
 
 - Open an [issue](https://github.com/patrickulrich/nostr.blue/issues) for bug reports
-- Join discussions in [GitHub Discussions](https://github.com/patrickulrich/nostr.blue/discussions)
 - Find the developer on Nostr: `npub1...` (if you have a public key to share)
 
 ---

@@ -673,26 +673,54 @@ fn VideoInfo(
                 }
             };
 
-            // Fetch both Kind 1 (TextNote) and Kind 1111 (NIP-22 Comment) events that reference this video
-            // This matches the counter logic which counts both kinds
-            let filter = Filter::new()
+            // Fetch comments for this video
+            // NIP-22 comments use uppercase E tags for root reference
+            // We need to use custom_tag() to filter for uppercase 'E' tags
+            // Also include lowercase 'e' tags for standard kind 1 replies
+            let event_id_hex = event_id_parsed.to_hex();
+
+            // Create filter for uppercase E tags (NIP-22 comments)
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let filter_upper = Filter::new()
+                .kind(Kind::Comment)
+                .custom_tag(upper_e_tag, event_id_hex.clone())
+                .limit(500);
+
+            // Create filter for lowercase e tags (standard replies)
+            let filter_lower = Filter::new()
                 .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
-                .limit(2000);
+                .limit(500);
 
-            log::info!("Fetching comments with filter: {:?}", filter);
+            log::info!("Fetching comments with uppercase E and lowercase e tag filters");
 
-            match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                Ok(mut comment_events) => {
-                    comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                    log::info!("Loaded {} NIP-22 comments for video", comment_events.len());
-                    comments.set(comment_events);
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch video comments: {}", e);
-                    comments.set(Vec::new()); // Set empty vec to show "no comments" state
-                }
+            // Fetch both filters and combine results
+            let mut all_comments = Vec::new();
+
+            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
+                log::info!("Loaded {} comments with uppercase E tags", upper_comments.len());
+                all_comments.extend(upper_comments.into_iter());
+            } else {
+                log::warn!("Failed to fetch comments with uppercase E tags");
             }
+
+            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
+                log::info!("Loaded {} comments with lowercase e tags", lower_comments.len());
+                all_comments.extend(lower_comments.into_iter());
+            } else {
+                log::warn!("Failed to fetch comments with lowercase e tags");
+            }
+
+            // Deduplicate by event ID
+            let mut seen_ids = std::collections::HashSet::new();
+            let unique_comments: Vec<Event> = all_comments.into_iter()
+                .filter(|event| seen_ids.insert(event.id))
+                .collect();
+
+            let mut sorted_comments = unique_comments;
+            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            log::info!("Total unique comments: {}", sorted_comments.len());
+            comments.set(sorted_comments);
 
             loading_comments.set(false);
         });

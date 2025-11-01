@@ -10,53 +10,70 @@ pub struct ThreadNode {
 
 /// Get the parent event ID from a reply event
 ///
-/// This implements NIP-10 logic:
-/// - Looks for 'e' tags with "reply" marker
-/// - Falls back to 'e' tags with "root" marker if no reply marker
-/// - Falls back to last 'e' tag if no markers present (positional)
+/// This implements NIP-10 logic for regular replies and NIP-22 logic for comments:
+/// - For NIP-10 (kind 1 replies):
+///   - Looks for lowercase 'e' tags with "reply" marker
+///   - Falls back to 'e' tags with "root" marker if no reply marker
+///   - Falls back to last 'e' tag if no markers present (positional)
+/// - For NIP-22 (kind 1111 comments):
+///   - Looks for lowercase 'e' tag (parent reference)
+///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
 fn get_parent_id(event: &Event) -> Option<EventId> {
+    // First, try lowercase 'e' tags (standard NIP-10 and NIP-22 parent reference)
     let e_tags: Vec<_> = event.tags.iter()
         .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)))
         .collect();
 
-    if e_tags.is_empty() {
-        return None;
-    }
+    if !e_tags.is_empty() {
+        // First, look for a tag with "reply" marker (NIP-10 preferred reply)
+        for tag in &e_tags {
+            let content = tag.content();
+            if let Some(parts) = content {
+                let parts_vec: Vec<&str> = parts.split('\t').collect();
+                // parts_vec[0] = event id, parts_vec[2] = marker (optional)
+                if parts_vec.len() >= 3 && parts_vec[2] == "reply" {
+                    if let Ok(event_id) = EventId::from_hex(parts_vec[0]) {
+                        return Some(event_id);
+                    }
+                }
+            }
+        }
 
-    // First, look for a tag with "reply" marker (NIP-10 preferred reply)
-    for tag in &e_tags {
-        let content = tag.content();
-        if let Some(parts) = content {
-            let parts_vec: Vec<&str> = parts.split('\t').collect();
-            // parts_vec[0] = event id, parts_vec[2] = marker (optional)
-            if parts_vec.len() >= 3 && parts_vec[2] == "reply" {
-                if let Ok(event_id) = EventId::from_hex(parts_vec[0]) {
+        // If we only have one 'e' tag, it's the parent
+        if e_tags.len() == 1 {
+            if let Some(content) = e_tags[0].content() {
+                let parts: Vec<&str> = content.split('\t').collect();
+                if let Ok(event_id) = EventId::from_hex(parts[0]) {
+                    return Some(event_id);
+                }
+            }
+        }
+
+        // Positional fallback: last 'e' tag is the parent (NIP-10 deprecated positional)
+        if let Some(last_tag) = e_tags.last() {
+            if let Some(content) = last_tag.content() {
+                let parts: Vec<&str> = content.split('\t').collect();
+                if let Ok(event_id) = EventId::from_hex(parts[0]) {
                     return Some(event_id);
                 }
             }
         }
     }
 
-    // Second, look for a tag with "root" marker - but we want to skip root and use the next one
-    // Actually for NIP-10, if there's only a root marker, this is a direct reply to root
-    // If there's both root and reply markers, reply marker is the parent
+    // NIP-22 fallback: For kind 1111 comments, if no lowercase 'e' tag found,
+    // check for uppercase 'E' tag (root reference)
+    // This handles non-compliant comments that might only have uppercase tags
+    if event.kind == nostr_sdk::Kind::Comment {
+        let upper_e_tags: Vec<_> = event.tags.iter()
+            .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E)))
+            .collect();
 
-    // If we only have one 'e' tag, it's the parent
-    if e_tags.len() == 1 {
-        if let Some(content) = e_tags[0].content() {
-            let parts: Vec<&str> = content.split('\t').collect();
-            if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                return Some(event_id);
-            }
-        }
-    }
-
-    // Positional fallback: last 'e' tag is the parent (NIP-10 deprecated positional)
-    if let Some(last_tag) = e_tags.last() {
-        if let Some(content) = last_tag.content() {
-            let parts: Vec<&str> = content.split('\t').collect();
-            if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                return Some(event_id);
+        if let Some(first_tag) = upper_e_tags.first() {
+            if let Some(content) = first_tag.content() {
+                let parts: Vec<&str> = content.split('\t').collect();
+                if let Ok(event_id) = EventId::from_hex(parts[0]) {
+                    return Some(event_id);
+                }
             }
         }
     }

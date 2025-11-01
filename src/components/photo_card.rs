@@ -140,15 +140,41 @@ pub fn PhotoCard(event: Event) -> Element {
                 Err(_) => return,
             };
 
-            // Fetch reply count (kind 1 events with 'e' tag referencing this event)
-            let reply_filter = Filter::new()
-                .kind(Kind::TextNote)
+            // Fetch reply count - include both kind 1 text notes and kind 1111 NIP-22 comments
+            // NIP-22 comments use uppercase E tags for root, so we need to check both
+            let event_id_hex = event_id_parsed.to_hex();
+
+            // Filter for lowercase 'e' tags (standard kind 1 replies)
+            let reply_filter_lower = Filter::new()
+                .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
-                reply_count.set(replies.len());
+            // Filter for uppercase 'E' tags (NIP-22 comments)
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let reply_filter_upper = Filter::new()
+                .kind(Kind::Comment)
+                .custom_tag(upper_e_tag, event_id_hex)
+                .limit(500);
+
+            // Fetch both and combine
+            let mut all_replies = Vec::new();
+
+            if let Ok(lower_replies) = client.fetch_events(reply_filter_lower, Duration::from_secs(5)).await {
+                all_replies.extend(lower_replies.into_iter());
             }
+
+            if let Ok(upper_replies) = client.fetch_events(reply_filter_upper, Duration::from_secs(5)).await {
+                all_replies.extend(upper_replies.into_iter());
+            }
+
+            // Deduplicate by event ID
+            let mut seen_ids = std::collections::HashSet::new();
+            let unique_replies: Vec<_> = all_replies.into_iter()
+                .filter(|event| seen_ids.insert(event.id))
+                .collect();
+
+            reply_count.set(unique_replies.len());
 
             // Fetch like count (kind 7 reactions)
             let like_filter = Filter::new()
