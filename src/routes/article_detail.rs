@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind};
 use crate::routes::Route;
 use crate::stores::bookmarks;
-use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer};
+use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer, ClientInitializing};
 use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, calculate_read_time
@@ -137,16 +137,11 @@ pub fn ArticleDetail(naddr: String) -> Element {
                 class: "max-w-4xl mx-auto px-4 py-8",
 
                 // Loading state
-                if *loading.read() {
-                    div {
-                        class: "space-y-4 animate-pulse",
-                        div { class: "h-12 bg-muted rounded w-3/4" }
-                        div { class: "h-6 bg-muted rounded w-1/2" }
-                        div { class: "h-64 bg-muted rounded" }
-                        div { class: "h-4 bg-muted rounded w-full" }
-                        div { class: "h-4 bg-muted rounded w-full" }
-                        div { class: "h-4 bg-muted rounded w-3/4" }
-                    }
+                if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && article.read().is_none()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial article load (loading + no article, regardless of error state)
+                    ClientInitializing {}
                 }
 
                 // Error state

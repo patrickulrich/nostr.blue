@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
-use crate::components::{ThreadedComment, CommentComposer, icons::MessageCircleIcon};
+use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, icons::MessageCircleIcon};
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, EventId};
 use std::time::Duration;
@@ -100,18 +100,11 @@ pub fn VideoDetail(video_id: String) -> Element {
             div {
                 class: "max-w-[1200px] mx-auto",
 
-                if *loading.read() {
-                    // Loading state
-                    div {
-                        class: "flex items-center justify-center h-[80vh] text-white",
-                        span {
-                            class: "flex items-center gap-3",
-                            span {
-                                class: "inline-block w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"
-                            }
-                            "Loading video..."
-                        }
-                    }
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && video_event.read().is_none()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial video load (loading + no video, regardless of error state)
+                    ClientInitializing {}
                 } else if let Some(err) = error.read().as_ref() {
                     // Error state
                     div {

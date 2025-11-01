@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
-use crate::components::{NoteCard, NoteCardSkeleton};
+use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
@@ -22,6 +22,12 @@ pub fn Hashtag(tag: String) -> Element {
     use_effect(move || {
         let _ = refresh_trigger.read();
         let hashtag = tag_clone.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);
@@ -33,7 +39,9 @@ pub fn Hashtag(tag: String) -> Element {
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_u64()));
                     }
-                    has_more.set(feed_events.len() >= 50);
+                    // Only disable has_more if we got 0 results
+                    // Getting less than limit doesn't mean there's no more, could be relay limits
+                    has_more.set(!feed_events.is_empty());
                     events.set(feed_events);
                     loading.set(false);
                 }
@@ -61,7 +69,8 @@ pub fn Hashtag(tag: String) -> Element {
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_u64()));
                     }
-                    has_more.set(new_events.len() >= 50);
+                    // Stop pagination only when we get 0 new events
+                    has_more.set(!new_events.is_empty());
 
                     // Append new events
                     let mut current = events.read().clone();
@@ -149,13 +158,11 @@ pub fn Hashtag(tag: String) -> Element {
             }
 
             // Loading state (initial)
-            if *loading.read() && events.read().is_empty() {
-                div {
-                    class: "divide-y divide-border",
-                    for _ in 0..5 {
-                        NoteCardSkeleton {}
-                    }
-                }
+            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
+                // Show client initializing animation during:
+                // 1. Client initialization
+                // 2. Initial feed load (loading + no events, regardless of error state)
+                ClientInitializing {}
             }
 
             // Events feed
@@ -230,11 +237,8 @@ async fn load_hashtag_feed(tag: &str, until: Option<u64>) -> Result<Vec<Event>, 
     // Add until timestamp if provided for pagination
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        // For initial load, get posts from last 7 days
-        let since = Timestamp::now() - Duration::from_secs(7 * 86400);
-        filter = filter.since(since);
     }
+    // Note: No since filter on initial load to get all historical posts
 
     log::info!("Fetching events with filter: {:?}", filter);
 

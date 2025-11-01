@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
-use crate::components::{ThreadedComment, CommentComposer, icons::MessageCircleIcon};
+use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, icons::MessageCircleIcon};
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
@@ -378,17 +378,11 @@ pub fn Videos() -> Element {
                         }
                     }
                 }
-            } else if *loading.read() && events.read().is_empty() {
-                div {
-                    class: "flex items-center justify-center h-full text-white",
-                    span {
-                        class: "flex items-center gap-3",
-                        span {
-                            class: "inline-block w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"
-                        }
-                        "Loading videos..."
-                    }
-                }
+            } else if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
+                // Show client initializing animation during:
+                // 1. Client initialization
+                // 2. Initial video load (loading + no videos, regardless of error state)
+                ClientInitializing {}
             } else if events.read().is_empty() {
                 div {
                     class: "flex items-center justify-center h-full text-white",

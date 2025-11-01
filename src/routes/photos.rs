@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
-use crate::components::PhotoCard;
+use crate::components::{PhotoCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
@@ -230,53 +230,25 @@ pub fn Photos() -> Element {
             div {
                 class: "p-4",
 
-                if let Some(err) = error.read().as_ref() {
-                    div {
-                        class: "p-6 text-center",
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial photo load (loading + no photos, regardless of error state)
+                    ClientInitializing {}
+                } else if let Some(err) = error.read().as_ref() {
+                    // Only show error if we're not loading and have no events
+                    if !*loading.read() && events.read().is_empty() {
                         div {
-                            class: "max-w-md mx-auto",
+                            class: "p-6 text-center",
                             div {
-                                class: "text-4xl mb-2",
-                                "⚠️"
-                            }
-                            p {
-                                class: "text-red-600 dark:text-red-400",
-                                "Error loading photos: {err}"
-                            }
-                        }
-                    }
-                } else if *loading.read() && events.read().is_empty() {
-                    // Loading skeletons (initial load only)
-                    div {
-                        class: "max-w-[600px] mx-auto space-y-4",
-                        for _ in 0..3 {
-                            div {
-                                class: "border-b border-border bg-background pb-4",
-                                // Header skeleton
+                                class: "max-w-md mx-auto",
                                 div {
-                                    class: "p-3 flex items-center gap-3 mb-2",
-                                    div {
-                                        class: "w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 animate-pulse"
-                                    }
-                                    div {
-                                        class: "flex-1",
-                                        div {
-                                            class: "h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"
-                                        }
-                                    }
+                                    class: "text-4xl mb-2",
+                                    "⚠️"
                                 }
-                                // Image skeleton
-                                div {
-                                    class: "relative w-full pb-[100%] bg-gray-200 dark:bg-gray-800 animate-pulse"
-                                }
-                                // Action buttons skeleton
-                                div {
-                                    class: "p-3 flex gap-4",
-                                    for _ in 0..3 {
-                                        div {
-                                            class: "w-6 h-6 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"
-                                        }
-                                    }
+                                p {
+                                    class: "text-red-600 dark:text-red-400",
+                                    "Error loading photos: {err}"
                                 }
                             }
                         }

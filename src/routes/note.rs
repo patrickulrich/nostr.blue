@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::routes::Route;
-use crate::components::{NoteCard, ThreadedComment};
+use crate::components::{NoteCard, ThreadedComment, ClientInitializing};
 use crate::utils::build_thread_tree;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
@@ -69,6 +69,14 @@ pub fn Note(note_id: String) -> Element {
     // PARALLEL LOADING - Fetch all data at once (10s instead of 30s)
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            log::info!("Waiting for client initialization before loading note...");
+            return;
+        }
+
         spawn(async move {
             loading.set(true);
             loading_parents.set(true);
@@ -157,21 +165,11 @@ pub fn Note(note_id: String) -> Element {
                 }
             }
 
-            if *loading.read() {
-                div {
-                    class: "flex items-center justify-center py-10",
-                    div {
-                        class: "text-center",
-                        div {
-                            class: "animate-spin text-4xl mb-2",
-                            "⚡"
-                        }
-                        p {
-                            class: "text-muted-foreground",
-                            "Loading note..."
-                        }
-                    }
-                }
+            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && note_data.read().is_none()) {
+                // Show client initializing animation during:
+                // 1. Client initialization
+                // 2. Initial note load (loading + no note, regardless of error state)
+                ClientInitializing {}
             } else if let Some(err) = error.read().as_ref() {
                 div {
                     class: "p-6",
