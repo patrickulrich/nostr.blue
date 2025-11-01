@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, theme_store, nostr_client, settings_store};
+use crate::routes::Route;
 
 #[component]
 pub fn Settings() -> Element {
@@ -465,7 +466,13 @@ fn render_account_info() -> Element {
             // Logout button
             button {
                 class: "w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition",
-                onclick: move |_| auth_store::logout(),
+                onclick: move |_| {
+                    let nav = navigator();
+                    spawn(async move {
+                        auth_store::logout().await;
+                        nav.push(Route::Home {});
+                    });
+                },
                 "🚪 Logout"
             }
         }
