@@ -4,6 +4,7 @@ use crate::components::{RichContent, ReplyComposer, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
+use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
 use nostr_sdk::{Metadata, Filter, Kind};
@@ -101,7 +102,22 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 .limit(500);
 
             if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
+                // Get current user's pubkey to check if they've already liked
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_liked = false;
+
+                // Check if current user has liked
+                if let Some(ref user_pk) = current_user_pubkey {
+                    for like in likes.iter() {
+                        if like.pubkey.to_string() == *user_pk {
+                            user_has_liked = true;
+                            break;
+                        }
+                    }
+                }
+
                 like_count.set(likes.len());
+                is_liked.set(user_has_liked);
             }
 
             // Fetch repost count
@@ -111,7 +127,22 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 .limit(500);
 
             if let Ok(reposts) = client.fetch_events(repost_filter, Duration::from_secs(5)).await {
+                // Get current user's pubkey to check if they've already reposted
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_reposted = false;
+
+                // Check if current user has reposted
+                if let Some(ref user_pk) = current_user_pubkey {
+                    for repost in reposts.iter() {
+                        if repost.pubkey.to_string() == *user_pk {
+                            user_has_reposted = true;
+                            break;
+                        }
+                    }
+                }
+
                 repost_count.set(reposts.len());
+                is_reposted.set(user_has_reposted);
             }
 
             // Fetch zap receipts (kind 9735) and calculate total

@@ -43,16 +43,27 @@ pub async fn fetch_custom_emojis(pubkey: String) {
         }
     };
 
-    // Fetch user's emoji list (kind 10030)
+    // Fetch user's emoji list (kind 10030) from relays first, then query local DB
     let emoji_list_filter = Filter::new()
         .kind(Kind::from(10030))
         .author(public_key)
         .limit(1);
 
+    // Fetch from relays to populate local database
+    let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
+        emoji_list_filter.clone(),
+        std::time::Duration::from_secs(5)
+    ).await;
+
+    if let Err(e) = fetch_result {
+        log::warn!("Failed to fetch emoji list from relays: {}, will try local DB", e);
+    }
+
+    // Now query the local database which should have the fetched events
     let emoji_list_events = match client.database().query(emoji_list_filter).await {
         Ok(events) => events,
         Err(e) => {
-            log::error!("Failed to fetch emoji list: {}", e);
+            log::error!("Failed to query emoji list from database: {}", e);
             return;
         }
     };
@@ -101,13 +112,24 @@ pub async fn fetch_custom_emojis(pubkey: String) {
                 }
             };
 
-            // Fetch this emoji set
+            // Fetch this emoji set from relays first, then query local DB
             let set_filter = Filter::new()
                 .kind(Kind::from(30030))
                 .author(author_pk)
                 .identifier(identifier.clone())
                 .limit(1);
 
+            // Fetch from relays to populate local database
+            let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
+                set_filter.clone(),
+                std::time::Duration::from_secs(5)
+            ).await;
+
+            if let Err(e) = fetch_result {
+                log::warn!("Failed to fetch emoji set {} from relays: {}, will try local DB", identifier, e);
+            }
+
+            // Now query the local database which should have the fetched events
             if let Ok(set_events) = client.database().query(set_filter).await {
                 if let Some(set_event) = set_events.first() {
                     let mut set_emojis = Vec::new();

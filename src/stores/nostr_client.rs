@@ -710,6 +710,10 @@ pub async fn update_profile_picture(url: String) -> Result<(), String> {
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .unwrap_or_default();
 
+    // Validate URL by parsing it, then convert back to String
+    let _validated_url = Url::parse(&url)
+        .map_err(|e| format!("Invalid picture URL: {}", e))?;
+
     // Update picture field
     let updated_metadata = Metadata {
         picture: Some(url),
@@ -729,6 +733,10 @@ pub async fn update_profile_banner(url: String) -> Result<(), String> {
 
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .unwrap_or_default();
+
+    // Validate URL by parsing it, then convert back to String
+    let _validated_url = Url::parse(&url)
+        .map_err(|e| format!("Invalid banner URL: {}", e))?;
 
     // Update banner field
     let updated_metadata = Metadata {

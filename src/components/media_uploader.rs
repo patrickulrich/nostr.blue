@@ -23,9 +23,11 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let upload_progress = blossom_store::UPLOAD_PROGRESS.read();
 
-    // Clone input_id for use in rsx! and closure
+    // Clone input_id for use in rsx! and closures
     let input_id = props.input_id.clone();
     let input_id_for_handler = input_id.clone();
+    let input_id_for_upload = input_id.clone();
+    let input_id_for_clear_handler = input_id.clone();
 
     // File input change handler
     let handle_file_select = move |evt: Event<FormData>| {
@@ -58,6 +60,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
             let quality_val = *quality.read();
             let on_upload = props.on_upload.clone();
+            let input_id_for_clear = input_id_for_upload.clone();
 
             uploading.set(true);
             error.set(None);
@@ -69,6 +72,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                         on_upload.call(url);
                         selected_file.set(None);
                         uploading.set(false);
+                        // Clear the file input value
+                        clear_file_input(&input_id_for_clear);
                     }
                     Err(e) => {
                         log::error!("Upload failed: {}", e);
@@ -84,6 +89,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let handle_clear = move |_| {
         selected_file.set(None);
         error.set(None);
+        // Clear the file input value
+        clear_file_input(&input_id_for_clear_handler);
     };
 
     let quality_label = match *quality.read() {
@@ -259,5 +266,21 @@ fn format_file_size(bytes: usize) -> String {
         format!("{:.1} KB", bytes as f64 / KB as f64)
     } else {
         format!("{} bytes", bytes)
+    }
+}
+
+/// Helper function to clear the file input element value
+fn clear_file_input(input_id: &str) {
+    use web_sys::window;
+
+    if let Some(window) = window() {
+        if let Some(document) = window.document() {
+            if let Some(element) = document.get_element_by_id(input_id) {
+                if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
+                    input.set_value("");
+                    log::debug!("Cleared file input: {}", input_id);
+                }
+            }
+        }
     }
 }

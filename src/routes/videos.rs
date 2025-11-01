@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
+use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, icons::MessageCircleIcon};
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
@@ -536,6 +537,10 @@ fn VideoInfo(
     let mut like_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
+    // State for interactions
+    let mut is_liked = use_signal(|| false);
+    let mut is_liking = use_signal(|| false);
+
     // State for comments modal
     let mut show_comments_modal = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
@@ -568,15 +573,27 @@ fn VideoInfo(
 
             // Single fetch for all interaction types
             if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
+                // Get current user's pubkey to check if they've already reacted
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+
                 // Partition events by kind
                 let mut replies = 0;
                 let mut likes = 0;
                 let mut total_sats = 0u64;
+                let mut user_has_liked = false;
 
                 for event in events {
                     match event.kind {
                         Kind::TextNote | Kind::Comment => replies += 1,
-                        Kind::Reaction => likes += 1,
+                        Kind::Reaction => {
+                            likes += 1;
+                            // Check if this reaction is from the current user
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_liked = true;
+                                }
+                            }
+                        },
                         kind if kind == Kind::from(9735) => {
                             // Calculate zap amount
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
@@ -611,10 +628,11 @@ fn VideoInfo(
                     }
                 }
 
-                // Update all counts at once
+                // Update all counts and states at once
                 reply_count.set(replies.min(500));
                 like_count.set(likes.min(500));
                 zap_amount_sats.set(total_sats);
+                is_liked.set(user_has_liked);
             }
         });
     }));
@@ -796,14 +814,48 @@ fn VideoInfo(
 
                     // Like button with count
                     button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
+                        class: if *is_liked.read() {
+                            "text-red-500 hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center"
+                        } else {
+                            "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center"
+                        },
+                        disabled: *is_liking.read(),
+                        onclick: move |_| {
+                            if *is_liking.read() {
+                                return;
+                            }
+
+                            let event_id_clone = event_id.clone();
+                            let author_pk_clone = event.pubkey.to_string();
+
+                            is_liking.set(true);
+
+                            spawn(async move {
+                                match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string()).await {
+                                    Ok(_) => {
+                                        is_liked.set(true);
+                                        let current_count = *like_count.read();
+                                        like_count.set(current_count.saturating_add(1));
+                                        is_liking.set(false);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to like video: {}", e);
+                                        is_liking.set(false);
+                                    }
+                                }
+                            });
+                        },
                         crate::components::icons::HeartIcon {
                             class: "w-6 h-6".to_string(),
-                            filled: false
+                            filled: *is_liked.read()
                         }
                         if *like_count.read() > 0 {
                             span {
-                                class: "text-xs mt-1 font-semibold",
+                                class: if *is_liked.read() {
+                                    "text-xs mt-1 font-semibold text-red-500"
+                                } else {
+                                    "text-xs mt-1 font-semibold"
+                                },
                                 {
                                     let count = *like_count.read();
                                     if count > 500 {

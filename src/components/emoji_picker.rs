@@ -221,12 +221,14 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         for set in emoji_sets.iter() {
                             {
                                 let identifier = set.identifier.clone();
+                                let identifier_for_key = identifier.clone();
+                                let identifier_for_class = identifier.clone();
                                 let set_name = set.name.clone().unwrap_or_else(|| set.identifier.clone());
                                 let display_name = format!("📦 {}", set_name);
                                 rsx! {
                                     button {
-                                        key: "set-{identifier}",
-                                        class: if *selected_category.read() == EmojiCategory::Set(identifier.clone()) {
+                                        key: "set-{identifier_for_key}",
+                                        class: if *selected_category.read() == EmojiCategory::Set(identifier_for_class) {
                                             "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap"
                                         } else {
                                             "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap"
