@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
+use crate::components::{MediaUploader, EmojiPicker};
 use nostr_sdk::{Event as NostrEvent, EventBuilder};
 
 const MAX_LENGTH: usize = 5000;
@@ -16,6 +17,8 @@ pub fn CommentComposer(
 ) -> Element {
     let mut content = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
+    let mut show_media_uploader = use_signal(|| false);
+    let mut uploaded_media = use_signal(|| Vec::<String>::new());
 
     let char_count = content.read().len();
     let remaining = MAX_LENGTH.saturating_sub(char_count);
@@ -35,8 +38,38 @@ pub fn CommentComposer(
         "text-gray-500"
     };
 
+    // Handle media upload
+    let handle_media_uploaded = move |url: String| {
+        uploaded_media.write().push(url);
+        show_media_uploader.set(false);
+    };
+
+    // Handle removing uploaded media
+    let mut handle_remove_media = move |index: usize| {
+        uploaded_media.write().remove(index);
+    };
+
+    // Handler when emoji is selected
+    let handle_emoji_selected = move |emoji: String| {
+        // Insert emoji at the end of the current content
+        let mut current = content.read().clone();
+        current.push_str(&emoji);
+        content.set(current);
+    };
+
     let handle_publish = move |_| {
-        let content_value = content.read().clone();
+        let mut content_value = content.read().clone();
+
+        // Append media URLs to content
+        if !uploaded_media.read().is_empty() {
+            if !content_value.is_empty() {
+                content_value.push_str("\n\n");
+            }
+            for url in uploaded_media.read().iter() {
+                content_value.push_str(&url);
+                content_value.push('\n');
+            }
+        }
 
         if content_value.is_empty() || is_over_limit {
             return;
@@ -75,6 +108,7 @@ pub fn CommentComposer(
                 Ok(event_id) => {
                     log::info!("NIP-22 comment published: {}", event_id.to_hex());
                     content.set(String::new());
+                    uploaded_media.set(Vec::new());
                     is_publishing.set(false);
                     on_success.call(());
                 }
@@ -153,6 +187,47 @@ pub fn CommentComposer(
                         }
                     }
 
+                    // Media uploader
+                    if *show_media_uploader.read() {
+                        MediaUploader {
+                            on_upload: handle_media_uploaded,
+                            button_label: "Upload Media"
+                        }
+                    }
+
+                    // Display uploaded media
+                    if !uploaded_media.read().is_empty() {
+                        div {
+                            class: "space-y-2",
+                            p {
+                                class: "text-sm font-medium text-foreground",
+                                "Uploaded Media:"
+                            }
+                            for (index, url) in uploaded_media.read().iter().enumerate() {
+                                div {
+                                    key: "{index}",
+                                    class: "flex items-center gap-2 p-2 bg-accent rounded-lg",
+                                    if url.ends_with(".mp4") || url.ends_with(".webm") || url.contains("video") {
+                                        span { class: "text-sm", "🎥 Video" }
+                                    } else {
+                                        span { class: "text-sm", "🖼️ Image" }
+                                    }
+                                    a {
+                                        class: "text-sm text-primary hover:underline truncate flex-1",
+                                        href: "{url}",
+                                        target: "_blank",
+                                        "{url}"
+                                    }
+                                    button {
+                                        class: "px-2 py-1 text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300",
+                                        onclick: move |_| handle_remove_media(index),
+                                        "Remove"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if !has_signer {
                         div {
                             class: "p-4 bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg",
@@ -166,24 +241,54 @@ pub fn CommentComposer(
 
                 // Footer
                 div {
-                    class: "sticky bottom-0 bg-card border-t border-border px-6 py-4 flex items-center justify-end gap-3 z-10",
-                    button {
-                        class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
-                        onclick: move |_| on_close.call(()),
-                        "Cancel"
+                    class: "sticky bottom-0 bg-card border-t border-border px-6 py-4 flex items-center justify-between gap-3 z-10",
+
+                    // Left side - Media upload button
+                    div {
+                        class: "flex items-center gap-3",
+                        if has_signer {
+                            button {
+                                class: if *show_media_uploader.read() {
+                                    "px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium transition"
+                                } else {
+                                    "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                                },
+                                onclick: move |_| {
+                                    let current = *show_media_uploader.read();
+                                    show_media_uploader.set(!current);
+                                },
+                                disabled: *is_publishing.read(),
+                                "📎 Media"
+                            }
+
+                            // Emoji picker
+                            EmojiPicker {
+                                on_emoji_selected: handle_emoji_selected
+                            }
+                        }
                     }
-                    button {
-                        class: if can_publish {
-                            "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition"
-                        } else {
-                            "px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed"
-                        },
-                        disabled: !can_publish,
-                        onclick: handle_publish,
-                        if *is_publishing.read() {
-                            "Publishing..."
-                        } else {
-                            "Publish Comment"
+
+                    // Right side - Action buttons
+                    div {
+                        class: "flex items-center gap-3",
+                        button {
+                            class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition",
+                            onclick: move |_| on_close.call(()),
+                            "Cancel"
+                        }
+                        button {
+                            class: if can_publish {
+                                "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition"
+                            } else {
+                                "px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed"
+                            },
+                            disabled: !can_publish,
+                            onclick: handle_publish,
+                            if *is_publishing.read() {
+                                "Publishing..."
+                            } else {
+                                "Publish Comment"
+                            }
                         }
                     }
                 }

@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -11,11 +11,16 @@ license = "MIT"
 dioxus = { version = "0.6", features = ["web", "router"] }
 
 # Nostr protocol
-nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57", "indexeddb"] }
 nostr = { version = "0.43", default-features = false, features = ["nip57"] }
+nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57"] }
 nostr-database = { version = "0.43", default-features = false }
-nostr-indexeddb = "0.43"
-nostr-browser-signer = "0.43"
+nostr-indexeddb = { version = "0.43" }
+nostr-browser-signer = { version = "0.43" }
+nostr-blossom = { version = "0.43" }
+
+# Image processing for Blossom uploads
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+sha2 = "0.10"
 
 # Async runtime for WASM
 tokio = { version = "1", features = ["sync", "macros"], default-features = false }
@@ -47,6 +52,14 @@ web-sys = { version = "0.3", features = [
     "RequestMode",
     "Response",
     "Headers",
+    # File upload features for Blossom integration
+    "HtmlInputElement",
+    "FileList",
+    "File",
+    "Blob",
+    "FileReader",
+    "Event",
+    "EventTarget",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -67,6 +80,7 @@ gloo-net = "0.5"
 bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
+hex = "0.4"
 
 # Markdown rendering
 pulldown-cmark = "0.12"

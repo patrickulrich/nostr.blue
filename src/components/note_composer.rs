@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client::publish_note, auth_store};
+use crate::components::{MediaUploader, EmojiPicker};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -8,6 +9,7 @@ pub fn NoteComposer() -> Element {
     let mut content = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
     let mut is_focused = use_signal(|| false);
+    let mut show_image_uploader = use_signal(|| false);
 
     // Check if user is authenticated (can publish) using auth_store
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -41,6 +43,7 @@ pub fn NoteComposer() -> Element {
                 Ok(event_id) => {
                     log::info!("Note published successfully: {}", event_id);
                     content.set(String::new());
+                    show_image_uploader.set(false);
                     is_publishing.set(false);
                 }
                 Err(e) => {
@@ -53,7 +56,29 @@ pub fn NoteComposer() -> Element {
 
     let handle_cancel = move |_| {
         content.set(String::new());
+        show_image_uploader.set(false);
         is_focused.set(false);
+    };
+
+    // Handler when image upload completes
+    let handle_image_uploaded = move |url: String| {
+        // Insert URL at the end of the current content
+        let mut current = content.read().clone();
+        if !current.is_empty() && !current.ends_with('\n') && !current.ends_with(' ') {
+            current.push(' ');
+        }
+        current.push_str(&url);
+        content.set(current);
+
+        log::info!("Image URL inserted: {}", url);
+    };
+
+    // Handler when emoji is selected
+    let handle_emoji_selected = move |emoji: String| {
+        // Insert emoji at the end of the current content
+        let mut current = content.read().clone();
+        current.push_str(&emoji);
+        content.set(current);
     };
 
     rsx! {
@@ -85,18 +110,54 @@ pub fn NoteComposer() -> Element {
                             }
                         }
 
+                        // Media uploader (conditionally shown)
+                        if *show_image_uploader.read() {
+                            div {
+                                class: "mt-3",
+                                MediaUploader {
+                                    on_upload: handle_image_uploaded,
+                                    button_label: "Upload Media"
+                                }
+                            }
+                        }
+
                         // Actions (only show when focused or has content)
                         if *is_focused.read() || char_count > 0 {
                             div {
                                 class: "mt-3 flex items-center justify-between",
 
-                                // Character counter
+                                // Left side: Image button and character counter
                                 div {
-                                    class: "text-sm {counter_color}",
-                                    if is_over_limit {
-                                        span { "Over limit by {char_count - MAX_LENGTH}" }
-                                    } else {
-                                        span { "{char_count} / {MAX_LENGTH}" }
+                                    class: "flex items-center gap-3",
+
+                                    // Media upload toggle button
+                                    button {
+                                        class: if *show_image_uploader.read() {
+                                            "px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium transition"
+                                        } else {
+                                            "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                                        },
+                                        onclick: move |_| {
+                                            let current = *show_image_uploader.read();
+                                            show_image_uploader.set(!current);
+                                        },
+                                        disabled: *is_publishing.read(),
+                                        "📎 Media"
+                                    }
+
+                                    // Emoji picker
+                                    EmojiPicker {
+                                        on_emoji_selected: handle_emoji_selected
+                                    }
+
+                                    // Character counter
+                                    div {
+                                        class: "text-sm {counter_color}",
+                                        if is_over_limit {
+                                            span { "Over limit by {char_count - MAX_LENGTH}" }
+                                        } else {
+                                            span { "{char_count} / {MAX_LENGTH}" }
+                                        }
                                     }
                                 }
 

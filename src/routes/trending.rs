@@ -3,7 +3,6 @@ use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::components::{NoteCard, NoteCardSkeleton};
 use nostr_sdk::{Event as NostrEvent, EventId, PublicKey, Timestamp, Kind, Tag};
 use nostr::secp256k1::schnorr::Signature;
-use nostr::util::hex;
 
 #[component]
 pub fn Trending() -> Element {

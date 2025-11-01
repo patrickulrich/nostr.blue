@@ -23,8 +23,6 @@ impl FeedType {
 
 #[component]
 pub fn Home() -> Element {
-    let relays = nostr_client::RELAY_POOL.read();
-
     // State for feed events
     let mut events = use_signal(|| Vec::<Event>::new());
     let mut loading = use_signal(|| false);
@@ -508,43 +506,6 @@ pub fn Home() -> Element {
                             div {
                                 class: "p-8 text-center text-muted-foreground",
                                 "You've reached the end"
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Relay Status (collapsed at bottom)
-            details {
-                class: "border-b border-gray-200 dark:border-gray-800",
-                summary {
-                    class: "px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 text-sm text-gray-600 dark:text-gray-400",
-                    "📡 Relay Status ({relays.len()} connected)"
-                }
-                div {
-                    class: "px-4 py-2 space-y-1",
-                    if relays.is_empty() {
-                        div {
-                            class: "py-4 text-center text-gray-500 dark:text-gray-400 text-sm",
-                            "Connecting to relays..."
-                        }
-                    } else {
-                        for relay in relays.iter() {
-                            div {
-                                class: "flex justify-between items-center py-2 text-sm",
-                                span {
-                                    class: "font-mono text-gray-600 dark:text-gray-400 truncate flex-1",
-                                    "{relay.url}"
-                                }
-                                span {
-                                    class: match relay.status {
-                                        nostr_client::RelayStatus::Connected => "text-green-600 dark:text-green-400 text-xs",
-                                        nostr_client::RelayStatus::Connecting => "text-yellow-600 dark:text-yellow-400 text-xs",
-                                        nostr_client::RelayStatus::Disconnected => "text-gray-600 dark:text-gray-400 text-xs",
-                                        nostr_client::RelayStatus::Error(_) => "text-red-600 dark:text-red-400 text-xs",
-                                    },
-                                    "●"
-                                }
                             }
                         }
                     }

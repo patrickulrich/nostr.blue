@@ -1,8 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store};
-use crate::components::{NoteCard, ClientInitializing};
+use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal};
 use crate::hooks::use_infinite_scroll;
-use crate::routes::Route;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, TagKind};
 use std::time::Duration;
@@ -39,6 +38,9 @@ pub fn Profile(pubkey: String) -> Element {
     let mut following_count = use_signal(|| 0);
     let mut followers_count = use_signal(|| 0);
     let mut post_count = use_signal(|| 0);
+
+    // Profile editor modal
+    let mut show_profile_modal = use_signal(|| false);
 
     // Clone pubkey for various uses
     let pubkey_for_metadata = pubkey.clone();
@@ -387,9 +389,9 @@ pub fn Profile(pubkey: String) -> Element {
                 div {
                     class: "flex justify-end pt-4 mb-16",
                     if is_own_profile {
-                        Link {
-                            to: Route::Settings {},
-                            class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition inline-block",
+                        button {
+                            class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                            onclick: move |_| show_profile_modal.set(true),
                             "Edit Profile"
                         }
                     } else if auth.is_authenticated {
@@ -614,6 +616,9 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
         }
+
+        // Profile Editor Modal
+        ProfileEditorModal { show: show_profile_modal }
     }
 }
 

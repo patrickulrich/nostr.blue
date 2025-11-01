@@ -19,6 +19,9 @@ pub mod music_player;
 pub mod track_card;
 pub mod wavlake_zap_dialog;
 pub mod client_initializing;
+pub mod media_uploader;
+pub mod profile_editor_modal;
+pub mod emoji_picker;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -37,3 +40,6 @@ pub use music_player::PersistentMusicPlayer;
 pub use track_card::{TrackCard, TrackCardSkeleton};
 pub use wavlake_zap_dialog::WavlakeZapDialog;
 pub use client_initializing::ClientInitializing;
+pub use media_uploader::MediaUploader;
+pub use profile_editor_modal::ProfileEditorModal;
+pub use emoji_picker::EmojiPicker;

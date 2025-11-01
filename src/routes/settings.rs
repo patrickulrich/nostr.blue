@@ -1,11 +1,15 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, theme_store, nostr_client, settings_store};
+use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store};
 use crate::routes::Route;
 
 #[component]
 pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
     let relays = nostr_client::RELAY_POOL.read();
+    let blossom_servers = blossom_store::BLOSSOM_SERVERS.read();
+
+    let mut new_server_input = use_signal(|| String::new());
+    let mut server_error = use_signal(|| None::<String>);
 
     // Load settings from Nostr on mount
     use_effect(move || {
@@ -53,6 +57,44 @@ pub fn Settings() -> Element {
     let remove_relay = move |url: String| {
         spawn(async move {
             nostr_client::remove_relay(&url).await.ok();
+        });
+    };
+
+    // Blossom server handlers
+    let add_blossom_server = move |_| {
+        let server_url = new_server_input.read().clone();
+        if server_url.is_empty() {
+            server_error.set(Some("Please enter a server URL".to_string()));
+            return;
+        }
+
+        if !server_url.starts_with("https://") && !server_url.starts_with("http://") {
+            server_error.set(Some("Server URL must start with http:// or https://".to_string()));
+            return;
+        }
+
+        blossom_store::add_server(server_url);
+        new_server_input.set(String::new());
+        server_error.set(None);
+
+        // Save to Nostr
+        spawn(async move {
+            let settings = settings_store::SETTINGS.read().clone();
+            if let Err(e) = settings_store::save_settings(&settings).await {
+                log::error!("Failed to save settings: {}", e);
+            }
+        });
+    };
+
+    let remove_blossom_server = move |url: String| {
+        blossom_store::remove_server(&url);
+
+        // Save to Nostr
+        spawn(async move {
+            let settings = settings_store::SETTINGS.read().clone();
+            if let Err(e) = settings_store::save_settings(&settings).await {
+                log::error!("Failed to save settings: {}", e);
+            }
         });
     };
 
@@ -166,6 +208,86 @@ pub fn Settings() -> Element {
                         },
                         onclick: move |_| theme_store::set_theme(theme_store::Theme::System),
                         "💻 System"
+                    }
+                }
+            }
+
+            // Blossom Servers section
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                h3 {
+                    class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
+                    "🌸 Blossom Servers"
+                }
+
+                p {
+                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Configure servers for image and media uploads. The first server in the list is used for uploads."
+                }
+
+                // Server list
+                div {
+                    class: "space-y-2 mb-4",
+                    for (index, server) in blossom_servers.iter().enumerate() {
+                        div {
+                            key: "{server}",
+                            class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                            div {
+                                class: "flex items-center gap-2 flex-wrap",
+                                if server == blossom_store::DEFAULT_SERVER {
+                                    span {
+                                        class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
+                                        "Default"
+                                    }
+                                }
+                                if index == 0 {
+                                    span {
+                                        class: "px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded",
+                                        "Primary"
+                                    }
+                                }
+                                span {
+                                    class: "text-gray-900 dark:text-white font-mono text-sm",
+                                    "{server}"
+                                }
+                            }
+                            if blossom_servers.len() > 1 {
+                                button {
+                                    class: "px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded-lg text-sm transition",
+                                    onclick: {
+                                        let server = server.clone();
+                                        move |_| remove_blossom_server(server.clone())
+                                    },
+                                    "Remove"
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add new server
+                div {
+                    class: "space-y-2",
+                    div {
+                        class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            r#type: "url",
+                            placeholder: "https://your-blossom-server.com",
+                            value: "{new_server_input}",
+                            oninput: move |evt| new_server_input.set(evt.value())
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                            onclick: add_blossom_server,
+                            "Add Server"
+                        }
+                    }
+                    if let Some(err) = server_error.read().as_ref() {
+                        div {
+                            class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                            "❌ {err}"
+                        }
                     }
                 }
             }
