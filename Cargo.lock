@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "accessory"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87537f9ae7cfa78d5b8ebd1a1db25959f5e737126be4d8eb44a5452fc4b63cde"
+dependencies = [
+ "macroific",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -517,6 +529,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
+name = "delegate-display"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98a85201f233142ac819bbf6226e36d0b5e129a47bd325084674261c82d4cd66"
+dependencies = [
+ "macroific",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -960,10 +984,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy_constructor"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07b19d0e43eae2bfbafe4931b5e79c73fb1a849ca15cd41a761a7b8587f9a1a2"
+dependencies = [
+ "macroific",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52051878f80a721bb68ebfbc930e07b65ba72f2da88968ea5c06fd6ca3d3a127"
+
+[[package]]
+name = "flatbuffers"
+version = "25.9.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09b6620799e7340ebd9968d2e0708eb82cf1971e9a16821e2091b6d6e475eed5"
+dependencies = [
+ "bitflags",
+ "rustc_version",
+]
 
 [[package]]
 name = "fnv"
@@ -1532,6 +1578,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "indexed_db_futures"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43315957678a70eb21fb0d2384fe86dde0d6c859a01e24ce127eb65a0143d28c"
+dependencies = [
+ "accessory",
+ "cfg-if",
+ "delegate-display",
+ "fancy_constructor",
+ "js-sys",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1656,6 +1719,53 @@ name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
+
+[[package]]
+name = "macroific"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05c00ac596022625d01047c421a0d97d7f09a18e429187b341c201cb631b9dd"
+dependencies = [
+ "macroific_attr_parse",
+ "macroific_core",
+ "macroific_macro",
+]
+
+[[package]]
+name = "macroific_attr_parse"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd94d5da95b30ae6e10621ad02340909346ad91661f3f8c0f2b62345e46a2f67"
+dependencies = [
+ "cfg-if",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "macroific_core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13198c120864097a565ccb3ff947672d969932b7975ebd4085732c9f09435e55"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "macroific_macro"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c9853143cbed7f1e41dc39fee95f9b361bec65c8dc2a01bf609be01b61f5ae"
+dependencies = [
+ "macroific_attr_parse",
+ "macroific_core",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "manganis"
@@ -1803,9 +1913,21 @@ version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c75a8c2175d2785ba73cfddef21d1e30da5fbbdf158569b6808ba44973a15b"
 dependencies = [
+ "flatbuffers",
  "lru",
  "nostr",
  "tokio",
+]
+
+[[package]]
+name = "nostr-indexeddb"
+version = "0.43.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02ff9ac4bb625c5bfb6899d4a8475066675adafa33fa6c608a66411fc1935dea"
+dependencies = [
+ "indexed_db_futures",
+ "nostr",
+ "nostr-database",
 ]
 
 [[package]]
@@ -1834,6 +1956,7 @@ dependencies = [
  "async-utility",
  "nostr",
  "nostr-database",
+ "nostr-indexeddb",
  "nostr-relay-pool",
  "tokio",
 ]
@@ -1858,6 +1981,7 @@ dependencies = [
  "nostr",
  "nostr-browser-signer",
  "nostr-database",
+ "nostr-indexeddb",
  "nostr-sdk",
  "pulldown-cmark",
  "qrcode",
@@ -2355,6 +2479,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
+name = "rustc_version"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustls"
 version = "0.23.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2447,6 +2580,12 @@ checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "send_wrapper"

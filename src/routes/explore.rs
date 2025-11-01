@@ -18,6 +18,12 @@ pub fn Explore() -> Element {
     // Load initial feed
     use_effect(move || {
         let _ = refresh_trigger.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);
@@ -206,8 +212,6 @@ pub fn Explore() -> Element {
 
 // Helper function to load global feed
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading global feed (until: {:?})...", until);
 
     // Create filter for recent text notes (kind 1)
@@ -226,8 +230,8 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 

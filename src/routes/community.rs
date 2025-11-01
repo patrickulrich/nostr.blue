@@ -277,8 +277,6 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
 // Fetch a specific community by a_tag
 async fn fetch_community(a_tag: &str) -> Result<Option<Community>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Fetching community: {}", a_tag);
 
     // Parse a_tag: "34550:pubkey:d_tag"
@@ -304,7 +302,7 @@ async fn fetch_community(a_tag: &str) -> Result<Option<Community>, String> {
         )
         .limit(1);
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 Ok(super::communities::parse_community_event(event))
@@ -321,8 +319,6 @@ async fn fetch_community(a_tag: &str) -> Result<Option<Community>, String> {
 
 // Fetch posts for a community
 async fn fetch_community_posts(a_tag: &str, until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Fetching posts for community: {}", a_tag);
 
     // Create filter for both kind 1111 (NIP-72) and kind 1 (backwards compatibility)
@@ -341,7 +337,7 @@ async fn fetch_community_posts(a_tag: &str, until: Option<u64>) -> Result<Vec<Ev
     }
 
     // Fetch events
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));

@@ -39,6 +39,12 @@ pub fn Photos() -> Element {
         // Watch refresh trigger and feed type
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);
@@ -336,8 +342,6 @@ pub fn Photos() -> Element {
 
 // Helper function to load following photos feed (NIP-68 kind 20 events from followed users)
 async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -387,8 +391,8 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     log::info!("Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} photo events from following", events.len());
 
@@ -413,8 +417,6 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
 
 // Helper function to load global photos feed (NIP-68 kind 20 events from everyone)
 async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading global photos feed (until: {:?})...", until);
 
     // Create filter for NIP-68 picture events (kind 20)
@@ -432,8 +434,8 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching global photo events with filter: {:?}", filter);
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} global photo events", events.len());
 

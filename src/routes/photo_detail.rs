@@ -10,9 +10,19 @@ pub fn PhotoDetail(photo_id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Load photo on mount
+    // Load photo on mount - wait for client to be initialized
     use_effect(move || {
         let id = photo_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            log::info!("Waiting for client initialization before loading photo...");
+            return;
+        }
+
+        loading.set(true);
+        error.set(None);
 
         spawn(async move {
             match load_photo_by_id(&id).await {
@@ -128,8 +138,6 @@ pub fn PhotoDetail(photo_id: String) -> Element {
 
 // Helper function to load a single photo by ID
 async fn load_photo_by_id(photo_id: &str) -> Result<Event, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading photo by ID: {}", photo_id);
 
     // Parse the event ID (could be hex or note1...)
@@ -145,7 +153,7 @@ async fn load_photo_by_id(photo_id: &str) -> Result<Event, String> {
     log::info!("Fetching photo event with filter: {:?}", filter);
 
     // Fetch event from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 log::info!("Loaded photo event: {}", event.id);

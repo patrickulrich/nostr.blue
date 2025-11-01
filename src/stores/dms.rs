@@ -29,9 +29,7 @@ pub async fn init_dms() -> Result<(), String> {
 
     log::info!("Loading DMs for {}", pubkey_str);
 
-    let mut all_messages = Vec::new();
-
-    // Fetch NIP-04 DMs (Kind 4) - Legacy encrypted direct messages
+    // Create filters for all DM types
     let received_nip04 = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .pubkey(pubkey)
@@ -42,51 +40,45 @@ pub async fn init_dms() -> Result<(), String> {
         .author(pubkey)
         .limit(200);
 
-    // Fetch NIP-17 DMs (Kind 1059) - Gift wrapped private messages
-    let received_nip17 = Filter::new()
+    // NIP-17: Query gift wraps with our pubkey in p-tag
+    // This gets BOTH received messages AND sent message copies (per NIP-17 spec)
+    let nip17_all = Filter::new()
         .kind(Kind::GiftWrap)
         .pubkey(pubkey)
-        .limit(200);
+        .limit(300);
 
-    // Note: NIP-17 sent messages are wrapped with ephemeral keys,
-    // so we can't easily query our sent messages by author.
-    // We'll rely on receiving the rumor from relays.
+    // PARALLEL FETCHES - All three at once!
+    let (received_nip04_result, sent_nip04_result, nip17_all_result) = tokio::join!(
+        nostr_client::fetch_events_aggregated(received_nip04, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated(sent_nip04, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated(nip17_all, Duration::from_secs(10))
+    );
 
-    // Fetch received NIP-04 messages
-    match client.fetch_events(received_nip04, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let count = events.len();
-            all_messages.extend(events.into_iter());
-            log::info!("Fetched {} received NIP-04 DMs", count);
-        }
-        Err(e) => {
-            log::error!("Failed to fetch received NIP-04 DMs: {}", e);
-        }
+    // Combine all messages
+    let mut all_messages = Vec::new();
+
+    if let Ok(events) = received_nip04_result {
+        log::info!("Fetched {} received NIP-04 DMs", events.len());
+        all_messages.extend(events);
+    } else if let Err(e) = received_nip04_result {
+        log::error!("Failed to fetch received NIP-04 DMs: {}", e);
     }
 
-    // Fetch sent NIP-04 messages
-    match client.fetch_events(sent_nip04, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let count = events.len();
-            all_messages.extend(events.into_iter());
-            log::info!("Fetched {} sent NIP-04 DMs", count);
-        }
-        Err(e) => {
-            log::error!("Failed to fetch sent NIP-04 DMs: {}", e);
-        }
+    if let Ok(events) = sent_nip04_result {
+        log::info!("Fetched {} sent NIP-04 DMs", events.len());
+        all_messages.extend(events);
+    } else if let Err(e) = sent_nip04_result {
+        log::error!("Failed to fetch sent NIP-04 DMs: {}", e);
     }
 
-    // Fetch received NIP-17 messages (gift wraps)
-    match client.fetch_events(received_nip17, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let count = events.len();
-            all_messages.extend(events.into_iter());
-            log::info!("Fetched {} received NIP-17 DMs (gift wraps)", count);
-        }
-        Err(e) => {
-            log::error!("Failed to fetch received NIP-17 DMs: {}", e);
-        }
+    if let Ok(events) = nip17_all_result {
+        log::info!("Fetched {} NIP-17 DMs (gift wraps - both received and sent)", events.len());
+        all_messages.extend(events);
+    } else if let Err(e) = nip17_all_result {
+        log::error!("Failed to fetch NIP-17 DMs: {}", e);
     }
+
+    log::info!("Loaded {} total DM events", all_messages.len());
 
     // Group messages by conversation partner
     let mut conversations: HashMap<String, Conversation> = HashMap::new();
@@ -94,16 +86,32 @@ pub async fn init_dms() -> Result<(), String> {
     for msg in all_messages {
         // Handle NIP-17 (GiftWrap) vs NIP-04 (EncryptedDirectMessage)
         if msg.kind == Kind::GiftWrap {
-            // NIP-17: Unwrap the gift wrap to get the actual sender
+            // NIP-17: Unwrap the gift wrap to get the actual sender and receiver
             match client.unwrap_gift_wrap(&msg).await {
                 Ok(unwrapped) => {
                     // The rumor contains the actual message (Kind 14)
                     if unwrapped.rumor.kind == Kind::PrivateDirectMessage {
                         let sender_pubkey = unwrapped.sender.to_string();
-                        let other_pubkey = sender_pubkey;
 
-                        // Create a pseudo-event for the conversation (use the rumor content)
-                        // We'll store the original gift wrap event but note it's NIP-17
+                        // Determine the other party (conversation partner)
+                        let other_pubkey = if sender_pubkey == pubkey_str {
+                            // WE sent this message - get receiver from rumor's p-tag
+                            unwrapped.rumor.tags.iter()
+                                .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+                                .and_then(|tag| tag.content())
+                                .unwrap_or_default()
+                                .to_string()
+                        } else {
+                            // We RECEIVED this message - sender is the other party
+                            sender_pubkey
+                        };
+
+                        if other_pubkey.is_empty() {
+                            log::warn!("Failed to determine conversation partner for NIP-17 message");
+                            continue;
+                        }
+
+                        // Store the original gift wrap event
                         conversations.entry(other_pubkey.clone())
                             .or_insert_with(|| Conversation {
                                 pubkey: other_pubkey.clone(),
@@ -158,8 +166,10 @@ pub async fn init_dms() -> Result<(), String> {
     Ok(())
 }
 
-/// Send an encrypted DM to a recipient
+/// Send an encrypted DM to a recipient (NIP-17 compliant with sender copy)
 pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), String> {
+    use nostr_sdk::EventBuilder;
+
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
@@ -170,22 +180,46 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
     let recipient_pk = PublicKey::parse(&recipient_pubkey)
         .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
 
-    log::info!("Sending DM to {}", recipient_pubkey);
+    let signer = client.signer().await
+        .map_err(|e| format!("Failed to get signer: {}", e))?;
 
-    match client.send_private_msg(recipient_pk, content, None).await {
-        Ok(event_id) => {
-            log::info!("DM sent successfully: {:?}", event_id);
+    let sender_pk = signer.get_public_key().await
+        .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
 
-            // Refresh conversations to include new message
-            let _ = init_dms().await;
+    log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
 
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("Failed to send DM: {}", e);
-            Err(format!("Failed to send DM: {}", e))
-        }
+    // Build the rumor (kind 14 unsigned message)
+    let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
+        .build(sender_pk);
+
+    // Create gift wrap for RECEIVER (with receiver's p-tag)
+    let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
+        .await
+        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
+
+    // Create gift wrap for SENDER (with sender's p-tag) - NIP-17 requirement!
+    let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
+
+    // Send both gift wraps
+    let receiver_result = client.send_event(&receiver_gift_wrap).await
+        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+
+    log::info!("Sent gift wrap to receiver: {:?}", receiver_result.val);
+
+    let sender_result = client.send_event(&sender_gift_wrap).await
+        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+
+    log::info!("Sent gift wrap to sender (copy): {:?}", sender_result.val);
+
+    // Refresh conversations to include new message
+    if let Err(e) = init_dms().await {
+        log::error!("Failed to refresh DM conversations after sending message: {}", e);
+        // Continue despite refresh failure - message was sent successfully
     }
+
+    Ok(())
 }
 
 /// Decrypt a DM event (supports both NIP-04 and NIP-17)

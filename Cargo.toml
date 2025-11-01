@@ -11,9 +11,10 @@ license = "MIT"
 dioxus = { version = "0.6", features = ["web", "router"] }
 
 # Nostr protocol
-nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57"] }
+nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57", "indexeddb"] }
 nostr = { version = "0.43", default-features = false, features = ["nip57"] }
 nostr-database = { version = "0.43", default-features = false }
+nostr-indexeddb = "0.43"
 nostr-browser-signer = "0.43"
 
 # Async runtime for WASM

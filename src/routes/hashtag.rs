@@ -216,8 +216,6 @@ pub fn Hashtag(tag: String) -> Element {
 
 // Helper function to load hashtag feed
 async fn load_hashtag_feed(tag: &str, until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading hashtag feed for #{} (until: {:?})...", tag, until);
 
     // Normalize hashtag to lowercase
@@ -241,7 +239,7 @@ async fn load_hashtag_feed(tag: &str, until: Option<u64>) -> Result<Vec<Event>, 
     log::info!("Fetching events with filter: {:?}", filter);
 
     // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events for #{}", events.len(), tag);
 

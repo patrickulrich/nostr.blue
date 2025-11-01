@@ -5,11 +5,59 @@ use crate::components::{NoteCard, ThreadedComment};
 use crate::utils::build_thread_tree;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
+use std::time::Duration;
+
+// Helper functions for parallel loading
+
+async fn fetch_main_note(event_id: EventId) -> Result<NostrEvent, String> {
+    let filter = Filter::new().id(event_id);
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    events.into_iter().next().ok_or("Event not found".to_string())
+}
+
+async fn fetch_parent_notes(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+    // First get the main note to extract parent IDs
+    let main_note = fetch_main_note(event_id).await?;
+
+    let parent_ids: Vec<EventId> = main_note.tags.iter()
+        .filter_map(|tag| {
+            if tag.kind() == nostr_sdk::TagKind::SingleLetter(
+                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
+            ) {
+                if let Some(content) = tag.content() {
+                    let parts: Vec<&str> = content.split('\t').collect();
+                    EventId::from_hex(parts[0]).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parent_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let filter = Filter::new()
+        .ids(parent_ids)
+        .kind(Kind::TextNote);
+
+    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+}
+
+async fn fetch_replies(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+    let filter = Filter::new()
+        .kind(Kind::TextNote)
+        .event(event_id)
+        .limit(100);
+
+    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+}
 
 #[component]
 pub fn Note(note_id: String) -> Element {
-    let note_id_for_replies = note_id.clone();
-    let note_id_for_parents = note_id.clone();
     let mut note_data = use_signal(|| None::<NostrEvent>);
     let mut parent_events = use_signal(|| Vec::<NostrEvent>::new());
     let mut replies = use_signal(|| Vec::<NostrEvent>::new());
@@ -18,169 +66,61 @@ pub fn Note(note_id: String) -> Element {
     let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
-    // Fetch note on mount and when note_id changes
+    // PARALLEL LOADING - Fetch all data at once (10s instead of 30s)
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
         spawn(async move {
             loading.set(true);
+            loading_parents.set(true);
+            loading_replies.set(true);
             error.set(None);
 
-            // Parse the note ID (can be note1... bech32 or hex)
+            // Parse the note ID
             let event_id = match EventId::from_bech32(&note_id_str)
                 .or_else(|_| EventId::from_hex(&note_id_str)) {
                 Ok(id) => id,
                 Err(e) => {
                     error.set(Some(format!("Invalid note ID: {}", e)));
                     loading.set(false);
+                    loading_parents.set(false);
+                    loading_replies.set(false);
                     return;
                 }
             };
 
-            // Get the client
-            let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
-                Some(c) => c.clone(),
-                None => {
-                    error.set(Some("Nostr client not initialized".to_string()));
-                    loading.set(false);
-                    return;
-                }
-            };
+            // PARALLEL FETCHES - All three at once!
+            let (note_result, parents_result, replies_result) = tokio::join!(
+                fetch_main_note(event_id),
+                fetch_parent_notes(event_id),
+                fetch_replies(event_id)
+            );
 
-            // Create filter for this specific event
-            let filter = Filter::new().id(event_id);
-
-            // Query relays
-            match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
-                Ok(events) => {
-                    if let Some(event) = events.into_iter().next() {
-                        note_data.set(Some(event.clone()));
-                    } else {
-                        error.set(Some("Note not found".to_string()));
-                    }
+            // Process main note
+            match note_result {
+                Ok(event) => {
+                    note_data.set(Some(event));
                 }
                 Err(e) => {
-                    error.set(Some(format!("Failed to fetch note: {}", e)));
+                    error.set(Some(e));
                 }
+            }
+
+            // Process parents
+            if let Ok(mut parents) = parents_result {
+                parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                parent_events.set(parents);
+            }
+
+            // Process replies
+            if let Ok(mut reply_vec) = replies_result {
+                reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                let count = reply_vec.len();
+                replies.set(reply_vec);
+                log::info!("Loaded {} replies", count);
             }
 
             loading.set(false);
-        });
-    }));
-
-    // Fetch parent events for thread context
-    use_effect(use_reactive!(|note_id_for_parents| {
-        let note_id_str = note_id_for_parents.clone();
-        spawn(async move {
-            loading_parents.set(true);
-
-            // Parse the note ID
-            let event_id = match EventId::from_bech32(&note_id_str)
-                .or_else(|_| EventId::from_hex(&note_id_str)) {
-                Ok(id) => id,
-                Err(_) => {
-                    loading_parents.set(false);
-                    return;
-                }
-            };
-
-            // Get the client
-            let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
-                Some(c) => c.clone(),
-                None => {
-                    loading_parents.set(false);
-                    return;
-                }
-            };
-
-            // First get the main event to extract parent IDs
-            let filter = Filter::new().id(event_id);
-            if let Ok(events) = client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
-                if let Some(event) = events.into_iter().next() {
-                    // Extract parent event IDs from 'e' tags
-                    let parent_ids: Vec<EventId> = event.tags.iter()
-                        .filter_map(|tag| {
-                            if tag.kind() == nostr_sdk::TagKind::SingleLetter(
-                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-                            ) {
-                                if let Some(content) = tag.content() {
-                                    let parts: Vec<&str> = content.split('\t').collect();
-                                    EventId::from_hex(parts[0]).ok()
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    if !parent_ids.is_empty() {
-                        // Fetch parent events
-                        let parent_filter = Filter::new()
-                            .ids(parent_ids)
-                            .kind(Kind::TextNote);
-
-                        if let Ok(parent_evts) = client.fetch_events(
-                            parent_filter,
-                            std::time::Duration::from_secs(10)
-                        ).await {
-                            let mut parents: Vec<NostrEvent> = parent_evts.into_iter().collect();
-                            // Sort by created_at ascending (oldest first)
-                            parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                            parent_events.set(parents);
-                        }
-                    }
-                }
-            }
-
             loading_parents.set(false);
-        });
-    }));
-
-    // Fetch replies to this note
-    use_effect(use_reactive!(|note_id_for_replies| {
-        let note_id_str = note_id_for_replies.clone();
-        spawn(async move {
-            loading_replies.set(true);
-
-            // Parse the note ID
-            let event_id = match EventId::from_bech32(&note_id_str)
-                .or_else(|_| EventId::from_hex(&note_id_str)) {
-                Ok(id) => id,
-                Err(_) => {
-                    loading_replies.set(false);
-                    return;
-                }
-            };
-
-            // Get the client
-            let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
-                Some(c) => c.clone(),
-                None => {
-                    loading_replies.set(false);
-                    return;
-                }
-            };
-
-            // Create filter for replies (events with 'e' tag pointing to this event)
-            let filter = Filter::new()
-                .kind(Kind::TextNote)
-                .event(event_id)
-                .limit(100);
-
-            // Query relays
-            match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
-                Ok(events) => {
-                    let mut reply_vec: Vec<NostrEvent> = events.into_iter().collect();
-                    reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at)); // Chronological order
-                    replies.set(reply_vec);
-                    log::info!("Loaded {} replies", replies.read().len());
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch replies: {}", e);
-                }
-            }
-
             loading_replies.set(false);
         });
     }));

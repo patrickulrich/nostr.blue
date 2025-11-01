@@ -62,8 +62,10 @@ pub fn Notifications() -> Element {
     // Load initial notifications
     use_effect(move || {
         let is_authenticated = auth_store::is_authenticated();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        if !is_authenticated {
+        // Only load notifications if both authenticated AND client is initialized
+        if !is_authenticated || !client_initialized {
             return;
         }
 
@@ -92,6 +94,110 @@ pub fn Notifications() -> Element {
                 }
             }
             loading.set(false);
+        });
+    });
+
+    // Real-time subscription for live notifications
+    use_effect(move || {
+        let is_authenticated = auth_store::is_authenticated();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only subscribe if both authenticated AND client is initialized
+        if !is_authenticated || !client_initialized {
+            return;
+        }
+
+        spawn(async move {
+            let my_pubkey = match auth_store::get_pubkey() {
+                Some(pk) => pk,
+                None => return,
+            };
+
+            let pubkey = match nostr_sdk::PublicKey::parse(&my_pubkey) {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
+
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => return,
+            };
+
+            // Subscribe to new notifications (mentions, replies, reactions, reposts, zaps)
+            let filter = Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,      // For mentions and replies
+                    Kind::Repost,        // Reposts
+                    Kind::Reaction,      // Reactions (likes)
+                    Kind::ZapReceipt,    // Zap receipts
+                ])
+                .pubkey(pubkey)          // Events where we're mentioned/tagged
+                .since(Timestamp::now())
+                .limit(0);               // Only new events
+
+            log::info!("Starting real-time notifications subscription");
+
+            match client.subscribe(filter, None).await {
+                Ok(output) => {
+                    log::info!("Subscribed to notifications: {:?}", output.val);
+
+                    spawn(async move {
+                        let mut notif_stream = client.notifications();
+
+                        while let Ok(notification) = notif_stream.recv().await {
+                            if let nostr_sdk::RelayPoolNotification::Event { event, .. } = notification {
+                                log::info!("New notification received!");
+
+                                // Increment unread count
+                                notif_store::increment_unread_count();
+
+                                // Convert to NotificationType and prepend
+                                let notif_type = match event.kind {
+                                    Kind::TextNote => {
+                                        // Check if it's a reply or mention
+                                        let has_e_tag = event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e());
+                                        if has_e_tag {
+                                            NotificationType::Reply((*event).clone())
+                                        } else {
+                                            NotificationType::Mention((*event).clone())
+                                        }
+                                    }
+                                    Kind::Reaction => NotificationType::Reaction((*event).clone()),
+                                    Kind::Repost => NotificationType::Repost((*event).clone()),
+                                    Kind::ZapReceipt => NotificationType::Zap((*event).clone()),
+                                    _ => continue,
+                                };
+
+                                // Check if event already exists (avoid duplicates)
+                                let exists = {
+                                    let current_notifs = notifications.read();
+                                    current_notifs.iter().any(|n| {
+                                        let id = match n {
+                                            NotificationType::Mention(e) => e.id,
+                                            NotificationType::Reply(e) => e.id,
+                                            NotificationType::Reaction(e) => e.id,
+                                            NotificationType::Repost(e) => e.id,
+                                            NotificationType::Zap(e) => e.id,
+                                        };
+                                        id == event.id
+                                    })
+                                };
+
+                                if !exists {
+                                    // Prepend to notifications
+                                    let current_notifs = notifications.read().clone();
+                                    let mut new_notifs = vec![notif_type];
+                                    new_notifs.extend(current_notifs);
+                                    notifications.set(new_notifs);
+                                }
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    log::error!("Failed to subscribe to notifications: {}", e);
+                }
+            }
         });
     });
 

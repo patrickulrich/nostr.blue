@@ -338,9 +338,6 @@ fn UserSearchResult(pubkey: PublicKey, metadata: Metadata) -> Element {
 
 // Search functions
 async fn search_users(query: String) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
-
     log::info!("Searching for users: {}", query);
 
     // Try to parse as npub first
@@ -352,7 +349,7 @@ async fn search_users(query: String) -> Result<(), String> {
                 .kind(Kind::Metadata)
                 .limit(1);
 
-            match client.fetch_events(filter, Duration::from_secs(10)).await {
+            match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(events) => {
                     if let Some(event) = events.into_iter().next() {
                         if let Ok(_metadata) = serde_json::from_str::<Metadata>(&event.content) {
@@ -375,7 +372,7 @@ async fn search_users(query: String) -> Result<(), String> {
         .kind(Kind::Metadata)
         .limit(100);
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let query_lower = query.to_lowercase();
             let mut found_users = Vec::new();
@@ -404,9 +401,6 @@ async fn search_users(query: String) -> Result<(), String> {
 }
 
 async fn search_notes(query: String) -> Result<Vec<NostrEvent>, String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
-
     log::info!("Searching for notes: {}", query);
 
     // Fetch recent notes and filter client-side
@@ -415,7 +409,7 @@ async fn search_notes(query: String) -> Result<Vec<NostrEvent>, String> {
         .kind(Kind::TextNote)
         .limit(200);
 
-    match client.fetch_events(filter, Duration::from_secs(15)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await {
         Ok(events) => {
             let query_lower = query.to_lowercase();
             let matching_notes: Vec<NostrEvent> = events
@@ -433,9 +427,6 @@ async fn search_notes(query: String) -> Result<Vec<NostrEvent>, String> {
 }
 
 async fn search_hashtags(query: String) -> Result<Vec<NostrEvent>, String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
-
     // Remove # if present
     let tag = query.trim_start_matches('#');
 
@@ -447,7 +438,7 @@ async fn search_hashtags(query: String) -> Result<Vec<NostrEvent>, String> {
         .hashtag(tag)
         .limit(100);
 
-    match client.fetch_events(filter, Duration::from_secs(15)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await {
         Ok(events) => {
             let notes: Vec<NostrEvent> = events.into_iter().collect();
             log::info!("Found {} notes with #{}", notes.len(), tag);

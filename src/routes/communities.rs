@@ -228,8 +228,6 @@ fn CommunityCard(community: Community) -> Element {
 
 // Fetch all communities from relays
 async fn fetch_communities() -> Result<Vec<Community>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Fetching communities...");
 
     // Fetch kind 34550 (NIP-72 community definitions)
@@ -237,7 +235,7 @@ async fn fetch_communities() -> Result<Vec<Community>, String> {
         .kind(Kind::Custom(34550))
         .limit(100);
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Fetched {} community events", events.len());
 

@@ -80,16 +80,6 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             };
 
-            // Get the client
-            let client = match nostr_client::get_client() {
-                Some(c) => c,
-                None => {
-                    error.set(Some("Nostr client not initialized".to_string()));
-                    loading.set(false);
-                    return;
-                }
-            };
-
             // Create filter for kind 0 (metadata) events
             let filter = Filter::new()
                 .author(public_key)
@@ -97,7 +87,7 @@ pub fn Profile(pubkey: String) -> Element {
                 .limit(1);
 
             // Query relays
-            match client.fetch_events(filter, Duration::from_secs(10)).await {
+            match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                 Ok(events) => {
                     if let Some(event) = events.into_iter().next() {
                         match nostr_sdk::Metadata::from_json(&event.content) {
@@ -639,8 +629,6 @@ fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<Mou
 
 // Helper function to load events based on tab type
 async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<Vec<NostrEvent>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
@@ -684,7 +672,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
     log::info!("Fetching events with filter: {:?}", filter);
 
     // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
 
