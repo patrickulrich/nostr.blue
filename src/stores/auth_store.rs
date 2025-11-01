@@ -156,6 +156,10 @@ pub async fn login_with_nsec(nsec: &str) -> Result<(), String> {
     LocalStorage::set(STORAGE_KEY_METHOD, "private_key").ok();
 
     log::info!("Successfully logged in with pubkey: {}", pubkey);
+
+    // Start real-time notification subscription
+    crate::stores::notifications::start_realtime_subscription().await;
+
     Ok(())
 }
 
@@ -221,6 +225,10 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
 
         log::info!("Successfully logged in via browser extension with pubkey: {}", pubkey_str);
+
+        // Start real-time notification subscription
+        crate::stores::notifications::start_realtime_subscription().await;
+
         Ok(())
     }
     #[cfg(not(target_family = "wasm"))]
@@ -284,8 +292,12 @@ pub fn get_login_method() -> Option<LoginMethod> {
 }
 
 /// Logout and clear credentials
-pub fn logout() {
+pub async fn logout() {
     log::info!("Logging out...");
+
+    // Stop real-time notification subscription
+    crate::stores::notifications::stop_realtime_subscription().await;
+
     clear_auth();
 
     // Clear from localStorage
