@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
-use crate::components::{NoteCard, NoteCardSkeleton, NoteComposer, ArticleCard};
+use crate::components::{NoteCard, NoteComposer, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
@@ -44,7 +44,10 @@ pub fn Home() -> Element {
         let current_feed_type = *feed_type.read();
 
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        if is_authenticated {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load feed if both authenticated AND client is initialized
+        if is_authenticated && client_initialized {
             loading.set(true);
             error.set(None);
             oldest_timestamp.set(None);
@@ -95,6 +98,115 @@ pub fn Home() -> Element {
                 }
             });
         }
+    });
+
+    // Real-time subscription for live feed updates
+    use_effect(move || {
+        let current_feed_type = *feed_type.read();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only subscribe if both authenticated AND client is initialized
+        if !is_authenticated || !client_initialized {
+            return;
+        }
+
+        spawn(async move {
+            // Get user's pubkey
+            let pubkey_str = match auth_store::get_pubkey() {
+                Some(pk) => pk,
+                None => return,
+            };
+
+            // Fetch contacts to subscribe to their posts
+            let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("Failed to fetch contacts for real-time subscription: {}", e);
+                    return;
+                }
+            };
+
+            if contacts.is_empty() {
+                log::info!("No contacts to subscribe to for real-time updates");
+                return;
+            }
+
+            // Parse contact pubkeys
+            let authors: Vec<PublicKey> = contacts.iter()
+                .filter_map(|contact| PublicKey::parse(contact).ok())
+                .collect();
+
+            if authors.is_empty() {
+                return;
+            }
+
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => return,
+            };
+
+            // Subscribe to new posts from followed users
+            let filter = Filter::new()
+                .kind(Kind::TextNote)
+                .authors(authors)
+                .since(Timestamp::now())
+                .limit(0); // limit=0 means only new events
+
+            log::info!("Starting real-time subscription for {} followed users", contacts.len());
+
+            match client.subscribe(filter, None).await {
+                Ok(output) => {
+                    log::info!("Subscribed to home feed updates: {:?}", output.val);
+
+                    // Handle incoming events
+                    spawn(async move {
+                        let mut notifications = client.notifications();
+
+                        while let Ok(notification) = notifications.recv().await {
+                            if let nostr_sdk::RelayPoolNotification::Event {
+                                event,
+                                ..
+                            } = notification
+                            {
+                                // Check if this matches our feed type
+                                let should_add = match current_feed_type {
+                                    FeedType::Following => {
+                                        // Only top-level posts (no e tags)
+                                        !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                                    }
+                                    FeedType::FollowingWithReplies => {
+                                        // All posts including replies
+                                        true
+                                    }
+                                };
+
+                                if should_add {
+                                    log::info!("New post received in real-time!");
+
+                                    // Check if event already exists (avoid duplicates)
+                                    let exists = {
+                                        let current_events = events.read();
+                                        current_events.iter().any(|e| e.id == event.id)
+                                    };
+
+                                    if !exists {
+                                        // Prepend to feed
+                                        let current_events = events.read().clone();
+                                        let mut new_events = vec![(*event).clone()];
+                                        new_events.extend(current_events);
+                                        events.set(new_events);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    log::error!("Failed to subscribe to home feed: {}", e);
+                }
+            }
+        });
     });
 
     // Load more function for infinite scroll
@@ -308,27 +420,31 @@ pub fn Home() -> Element {
                 if !auth.is_authenticated {
                     // Show login section
                     LoginSection {}
+                } else if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial feed load (loading + no events, regardless of error state)
+                    // This prevents error flashing during the loading process
+                    ClientInitializing {}
                 } else {
-                    // Show feed
+                    // Show feed (only after loading is complete)
                     if let Some(err) = error.read().as_ref() {
-                        div {
-                            class: "p-6 text-center",
+                        // Only show error if we're not loading and have no events
+                        if !*loading.read() && events.read().is_empty() {
                             div {
-                                class: "max-w-md mx-auto",
+                                class: "p-6 text-center",
                                 div {
-                                    class: "text-4xl mb-2",
-                                    "⚠️"
-                                }
-                                p {
-                                    class: "text-red-600 dark:text-red-400",
-                                    "Error loading feed: {err}"
+                                    class: "max-w-md mx-auto",
+                                    div {
+                                        class: "text-4xl mb-2",
+                                        "⚠️"
+                                    }
+                                    p {
+                                        class: "text-red-600 dark:text-red-400",
+                                        "Error loading feed: {err}"
+                                    }
                                 }
                             }
-                        }
-                    } else if *loading.read() && events.read().is_empty() {
-                        // Loading skeletons (initial load only)
-                        for _ in 0..5 {
-                            NoteCardSkeleton {}
                         }
                     } else if events.read().is_empty() {
                         // Empty state
@@ -723,8 +839,6 @@ fn ProfileSection() -> Element {
 // Helper function to load following feed
 // Returns (events, raw_count_before_filtering) tuple
 async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -780,8 +894,8 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
 
     log::info!("Fetching events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database first, then relays)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let raw_count = events.len();
             log::info!("Loaded {} events from following feed", raw_count);
@@ -820,8 +934,6 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
 
 // Helper function to load following feed with replies
 async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -875,8 +987,8 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
 
     log::info!("Fetching all events (including replies) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events (including replies) from following feed", events.len());
 
@@ -901,8 +1013,6 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
 
 // Helper function to load global feed
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading global feed (until: {:?})...", until);
 
     // Create filter for recent text notes (kind 1)
@@ -920,8 +1030,8 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events from relays
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 

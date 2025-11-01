@@ -87,22 +87,19 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
         }
     }
 
-    log::info!("Fetching profile from relays for {}", pubkey);
-
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    log::info!("Fetching profile from database/relays for {}", pubkey);
 
     let public_key = PublicKey::from_bech32(&pubkey)
         .or_else(|_| PublicKey::from_hex(&pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Fetch Kind 0 metadata events
+    // Fetch Kind 0 metadata events using aggregated query
     let filter = Filter::new()
         .kind(Kind::Metadata)
         .author(public_key)
         .limit(1);
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 let profile = parse_profile_event(&event)?;
@@ -177,6 +174,69 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
 /// Get a profile from cache (if available)
 pub fn get_cached_profile(pubkey: &str) -> Option<Profile> {
     PROFILE_CACHE.read().get(pubkey).cloned()
+}
+
+/// Fetch multiple profiles in a single query (much more efficient than individual fetches)
+#[allow(dead_code)]
+pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String, Profile>, String> {
+    if pubkeys.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut results = HashMap::new();
+    let mut missing = Vec::new();
+
+    // Check cache first
+    for pk in &pubkeys {
+        if let Some(cached) = PROFILE_CACHE.read().get(pk) {
+            let age = Utc::now().signed_duration_since(cached.fetched_at);
+            if age.num_seconds() < CACHE_TTL_SECONDS {
+                results.insert(pk.clone(), cached.clone());
+                continue;
+            }
+        }
+        missing.push(pk.clone());
+    }
+
+    if missing.is_empty() {
+        return Ok(results);
+    }
+
+    log::info!("Batch fetching {} profiles", missing.len());
+
+    // Parse all missing pubkeys
+    let authors: Vec<PublicKey> = missing.iter()
+        .filter_map(|pk| {
+            PublicKey::from_bech32(pk)
+                .or_else(|_| PublicKey::from_hex(pk))
+                .ok()
+        })
+        .collect();
+
+    if authors.is_empty() {
+        return Ok(results);
+    }
+
+    // Single query for all profiles
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .authors(authors);
+
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+        Ok(events) => {
+            for event in events {
+                if let Ok(profile) = parse_profile_event(&event) {
+                    PROFILE_CACHE.write().insert(profile.pubkey.clone(), profile.clone());
+                    results.insert(profile.pubkey.clone(), profile);
+                }
+            }
+            Ok(results)
+        }
+        Err(e) => {
+            log::error!("Failed to batch fetch profiles: {}", e);
+            Err(format!("Failed to batch fetch profiles: {}", e))
+        }
+    }
 }
 
 /// Prefetch multiple profiles (useful for loading conversation lists)

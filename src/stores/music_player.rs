@@ -3,7 +3,8 @@ use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::{auth_store, nostr_client};
-use nostr_sdk::{EventBuilder, Tag, Kind, Timestamp};
+use nostr_sdk::{EventBuilder, Timestamp};
+use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 
 /// Music track for the player (simplified from WavlakeTrack)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -118,30 +119,25 @@ async fn publish_music_status(track: &MusicTrack) {
     // Format content: "Track Title - Artist Name"
     let content = format!("{} - {}", track.title, track.artist);
 
-    // Build tags
+    // Build track URL reference
     let track_url = format!("https://nostr.blue/music/track/{}", track.id);
 
-    let mut tags = vec![
-        // 'd' tag: identifier for the status type
-        Tag::custom(nostr_sdk::TagKind::Custom("d".into()), vec!["music".to_string()]),
-        // 'r' tag: reference URL to the track
-        Tag::custom(nostr_sdk::TagKind::Custom("r".into()), vec![track_url]),
-    ];
+    // Create LiveStatus with expiration based on track duration
+    let mut status = LiveStatus {
+        status_type: StatusType::Music,
+        expiration: None,
+        reference: Some(track_url),
+    };
 
-    // Add expiration tag based on track duration
+    // Set expiration if track has duration
     if let Some(duration) = track.duration {
         if duration > 0 {
-            let now = Timestamp::now().as_u64();
-            let expiration = now + duration as u64;
-            tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom("expiration".into()),
-                vec![expiration.to_string()],
-            ));
+            status.expiration = Some(Timestamp::now() + std::time::Duration::from_secs(duration as u64));
         }
     }
 
-    // Create Kind 30315 (User Status) event
-    let builder = EventBuilder::new(Kind::UserStatus, content).tags(tags);
+    // Create Kind 30315 (User Status) event using NIP-38 helper
+    let builder = EventBuilder::live_status(status, content);
 
     match client.send_event_builder(builder).await {
         Ok(event_id) => {
@@ -165,12 +161,9 @@ async fn clear_music_status() {
         None => return,
     };
 
-    // Create empty status to clear
-    let tags = vec![
-        Tag::custom(nostr_sdk::TagKind::Custom("d".into()), vec!["music".to_string()]),
-    ];
-
-    let builder = EventBuilder::new(Kind::UserStatus, "").tags(tags);
+    // Create empty status to clear (per NIP-38: empty content clears the status)
+    let status = LiveStatus::new(StatusType::Music);
+    let builder = EventBuilder::live_status(status, "");
 
     match client.send_event_builder(builder).await {
         Ok(_) => {

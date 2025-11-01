@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
+use crate::components::{ThreadedComment, CommentComposer, icons::MessageCircleIcon};
+use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, EventId};
 use std::time::Duration;
 
@@ -9,10 +11,23 @@ pub fn VideoDetail(video_id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut is_muted = use_signal(|| false);
+    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut loading_comments = use_signal(|| false);
+    let mut show_comment_composer = use_signal(|| false);
 
-    // Load video on mount
+    // Load video on mount - wait for client to be initialized
     use_effect(move || {
         let id = video_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            log::info!("Waiting for client initialization before loading video...");
+            return;
+        }
+
+        loading.set(true);
+        error.set(None);
 
         spawn(async move {
             match load_video_by_id(&id).await {
@@ -26,6 +41,38 @@ pub fn VideoDetail(video_id: String) -> Element {
                 }
             }
         });
+    });
+
+    // Fetch NIP-22 comments for the video
+    use_effect(move || {
+        let video_data = video_event.read();
+
+        if let Some(event) = video_data.as_ref() {
+            let event_id = event.id;
+
+            spawn(async move {
+                loading_comments.set(true);
+
+                // Fetch Kind 1111 (NIP-22 Comment) events that reference this video
+                let filter = Filter::new()
+                    .kind(Kind::Comment)
+                    .event(event_id)
+                    .limit(500);
+
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(mut comment_events) => {
+                        comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                        log::info!("Loaded {} NIP-22 comments for video", comment_events.len());
+                        comments.set(comment_events);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch video comments: {}", e);
+                    }
+                }
+
+                loading_comments.set(false);
+            });
+        }
     });
 
     rsx! {
@@ -86,13 +133,101 @@ pub fn VideoDetail(video_id: String) -> Element {
                             }
                         }
                     }
-                } else if let Some(event) = video_event.read().as_ref() {
+                } else if let Some(event) = video_event.read().as_ref().cloned() {
                     VideoContent {
                         event: event.clone(),
                         is_muted: *is_muted.read(),
                         on_mute_toggle: move |_| {
                             let current = *is_muted.read();
                             is_muted.set(!current);
+                        }
+                    }
+
+                    // Comments section
+                    div {
+                        class: "bg-card border border-border rounded-lg p-6 mt-4 max-w-[1200px] mx-auto",
+                        div {
+                            class: "flex items-center justify-between mb-4",
+                            h3 {
+                                class: "text-xl font-bold",
+                                "Comments"
+                            }
+                            button {
+                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2",
+                                onclick: move |_| show_comment_composer.set(true),
+                                MessageCircleIcon { class: "w-4 h-4".to_string(), filled: false }
+                                span { "Add Comment" }
+                            }
+                        }
+
+                        {
+                            let comment_vec = comments.read().clone();
+                            let thread_tree = build_thread_tree(comment_vec, &event.id);
+
+                            rsx! {
+                                if *loading_comments.read() {
+                                    div {
+                                        class: "flex items-center justify-center py-10",
+                                        div {
+                                            class: "text-center",
+                                            div {
+                                                class: "animate-spin text-4xl mb-2",
+                                                "⚡"
+                                            }
+                                            p {
+                                                class: "text-muted-foreground",
+                                                "Loading comments..."
+                                            }
+                                        }
+                                    }
+                                } else if thread_tree.is_empty() {
+                                    div {
+                                        class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                        p { "No comments yet" }
+                                        p {
+                                            class: "text-sm",
+                                            "Be the first to comment!"
+                                        }
+                                    }
+                                } else {
+                                    div {
+                                        class: "divide-y divide-border",
+                                        for node in thread_tree {
+                                            ThreadedComment {
+                                                node: node.clone(),
+                                                depth: 0
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Comment composer modal
+                    if *show_comment_composer.read() {
+                        CommentComposer {
+                            comment_on: event.clone(),
+                            parent_comment: None,
+                            on_close: move |_| show_comment_composer.set(false),
+                            on_success: move |_| {
+                                show_comment_composer.set(false);
+                                // Refresh comments
+                                let event_id = event.id;
+                                spawn(async move {
+                                    loading_comments.set(true);
+                                    let filter = Filter::new()
+                                        .kind(Kind::Comment)
+                                        .event(event_id)
+                                        .limit(500);
+
+                                    if let Ok(mut comment_events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                                        comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                        comments.set(comment_events);
+                                    }
+                                    loading_comments.set(false);
+                                });
+                            }
                         }
                     }
                 } else {
@@ -266,26 +401,12 @@ fn VideoContent(event: Event, is_muted: bool, on_mute_toggle: EventHandler<()>) 
                     }
                 }
             }
-
-            // Comments section (placeholder)
-            div {
-                class: "bg-card border border-border rounded-lg p-6 mt-4",
-                h3 {
-                    class: "text-xl font-bold mb-4",
-                    "Comments"
-                }
-                p {
-                    class: "text-muted-foreground text-center py-8",
-                    "Comments will be displayed here"
-                }
-            }
         }
     }
 }
 
 #[component]
 fn AuthorInfo(pubkey: String) -> Element {
-    use crate::stores::nostr_client::get_client;
     use nostr_sdk::{PublicKey, FromBech32};
 
     let pubkey_clone = pubkey.clone();
@@ -302,17 +423,12 @@ fn AuthorInfo(pubkey: String) -> Element {
                 Err(_) => return,
             };
 
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
             let filter = Filter::new()
                 .author(pubkey_parsed)
                 .kind(Kind::Metadata)
                 .limit(1);
 
-            if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+            if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
                 if let Some(event) = events.into_iter().next() {
                     if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
                         author_metadata.set(Some(metadata));
@@ -431,8 +547,6 @@ fn format_time_ago(timestamp: u64) -> String {
 
 // Helper function to load a video by ID
 async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading video by ID: {}", video_id);
 
     // Parse the video ID (could be event ID or naddr)
@@ -445,8 +559,7 @@ async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
         .kinds([Kind::Custom(21), Kind::Custom(22)]);
 
     // Fetch the event
-    let events = client
-        .fetch_events(filter, Duration::from_secs(5))
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch video: {}", e))?;
 

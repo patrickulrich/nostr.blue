@@ -1,15 +1,24 @@
 use dioxus::prelude::*;
 use nostr_sdk::Client;
+use nostr_sdk::prelude::*;
 use nostr::Url;
 use std::sync::Arc;
+use std::time::Duration;
+use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;
 
 /// Global Nostr client instance
 pub static NOSTR_CLIENT: GlobalSignal<Option<Arc<Client>>> = Signal::global(|| None);
 
+/// Whether the client has finished initializing
+pub static CLIENT_INITIALIZED: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Whether the client has a signer attached (can publish events)
 pub static HAS_SIGNER: GlobalSignal<bool> = Signal::global(|| false);
+
+/// The current signer type (if any)
+pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 
 /// Relay connection status
 #[derive(Clone, Debug, PartialEq)]
@@ -42,56 +51,72 @@ const DEFAULT_RELAYS: &[&str] = &[
 
 /// Initialize the Nostr client and connect to relays
 pub async fn initialize_client() -> Result<Arc<Client>, String> {
-    log::info!("Initializing Nostr client...");
+    log::info!("Initializing Nostr client with IndexedDB...");
 
-    // Create client
-    let client = Client::default();
+    // Open IndexedDB database
+    let database = WebDatabase::open("nostr-blue-db")
+        .await
+        .map_err(|e| {
+            log::error!("Failed to open IndexedDB: {}", e);
+            format!("Failed to open IndexedDB: {}", e)
+        })?;
+
+    log::info!("IndexedDB opened successfully");
+
+    // Configure relay options for better performance
+    let relay_opts = RelayOptions::new()
+        // Skip relays with average latency > 2 seconds
+        .max_avg_latency(Some(Duration::from_secs(2)))
+        // Verify that events match subscription filters
+        .verify_subscriptions(true)
+        // Ban relays that send mismatched events
+        .ban_relay_on_mismatch(true)
+        // Adjust retry interval based on success rate
+        .adjust_retry_interval(true)
+        // Initial retry interval: 10 seconds
+        .retry_interval(Duration::from_secs(10))
+        // Enable automatic reconnection
+        .reconnect(true);
+
+    // Create client with database
+    let client = Client::builder()
+        .database(database)
+        .build();
+
     let client = Arc::new(client);
 
-    // Add default relays
+    // Add default relays with options
     let mut relay_infos = Vec::new();
-
     for relay_url in DEFAULT_RELAYS {
-        match Url::parse(relay_url) {
-            Ok(url) => {
-                match client.add_relay(url).await {
-                    Ok(_) => {
-                        log::info!("Added relay: {}", relay_url);
-                        relay_infos.push(RelayInfo {
-                            url: relay_url.to_string(),
-                            status: RelayStatus::Connecting,
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to add relay {}: {}", relay_url, e);
-                        relay_infos.push(RelayInfo {
-                            url: relay_url.to_string(),
-                            status: RelayStatus::Error(e.to_string()),
-                        });
-                    }
+        if let Ok(url) = Url::parse(relay_url) {
+            match client.pool().add_relay(url.clone(), relay_opts.clone()).await {
+                Ok(_) => {
+                    relay_infos.push(RelayInfo {
+                        url: relay_url.to_string(),
+                        status: RelayStatus::Connected,
+                    });
+                    log::info!("Added relay with opts: {}", relay_url);
                 }
-            }
-            Err(e) => {
-                log::error!("Invalid relay URL {}: {}", relay_url, e);
-                relay_infos.push(RelayInfo {
-                    url: relay_url.to_string(),
-                    status: RelayStatus::Error(format!("Invalid URL: {}", e)),
-                });
+                Err(e) => {
+                    log::error!("Failed to add relay {}: {}", relay_url, e);
+                    relay_infos.push(RelayInfo {
+                        url: relay_url.to_string(),
+                        status: RelayStatus::Disconnected,
+                    });
+                }
             }
         }
     }
 
-    // Update global relay pool state
     RELAY_POOL.write().clone_from(&relay_infos);
 
-    // Connect to all relays
     log::info!("Connecting to relays...");
     client.connect().await;
 
-    // Store client globally
     *NOSTR_CLIENT.write() = Some(client.clone());
+    *CLIENT_INITIALIZED.write() = true;
 
-    log::info!("Nostr client initialized successfully");
+    log::info!("Nostr client with IndexedDB initialized successfully");
     Ok(client)
 }
 
@@ -108,33 +133,19 @@ pub fn has_signer() -> bool {
 
 /// Initialize client with a signer (enables publishing)
 pub async fn set_signer(signer: SignerType) -> Result<(), String> {
-    log::info!("Reinitializing client with signer: {}", signer.backend_name());
+    log::info!("Setting signer: {}", signer.backend_name());
 
-    // Create new client with signer
+    // Get existing client - don't recreate!
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Just update the signer, keep all relay connections
     let nostr_signer = signer.as_nostr_signer();
-    let client = Client::new(nostr_signer);
-    let client = Arc::new(client);
+    client.set_signer(nostr_signer).await;
 
-    // Get existing relays
-    let relay_urls: Vec<String> = RELAY_POOL.read().iter().map(|r| r.url.clone()).collect();
-
-    // Add all relays to new client
-    for relay_url in &relay_urls {
-        if let Ok(url) = Url::parse(relay_url) {
-            if let Err(e) = client.add_relay(url).await {
-                log::error!("Failed to add relay {} to new client: {}", relay_url, e);
-            }
-        }
-    }
-
-    // Connect to relays
-    client.connect().await;
-
-    // Update global state
-    *NOSTR_CLIENT.write() = Some(client);
     *HAS_SIGNER.write() = true;
+    *CURRENT_SIGNER.write() = Some(signer.clone());
 
-    log::info!("Client reinitialized with signer successfully");
+    log::info!("Signer updated successfully");
     Ok(())
 }
 
@@ -142,30 +153,16 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
 pub async fn set_read_only() -> Result<(), String> {
     log::info!("Switching to read-only mode");
 
-    // Create read-only client
-    let client = Client::default();
-    let client = Arc::new(client);
+    // Get existing client
+    let client = get_client().ok_or("Client not initialized")?;
 
-    // Get existing relays
-    let relay_urls: Vec<String> = RELAY_POOL.read().iter().map(|r| r.url.clone()).collect();
+    // Remove signer
+    client.unset_signer().await;
 
-    // Add all relays to new client
-    for relay_url in &relay_urls {
-        if let Ok(url) = Url::parse(relay_url) {
-            if let Err(e) = client.add_relay(url).await {
-                log::error!("Failed to add relay {} to new client: {}", relay_url, e);
-            }
-        }
-    }
-
-    // Connect to relays
-    client.connect().await;
-
-    // Update global state
-    *NOSTR_CLIENT.write() = Some(client);
     *HAS_SIGNER.write() = false;
+    *CURRENT_SIGNER.write() = None;
 
-    log::info!("Switched to read-only mode successfully");
+    log::info!("Switched to read-only mode");
     Ok(())
 }
 
@@ -218,6 +215,51 @@ pub async fn reconnect() {
         client.connect().await;
         log::info!("Reconnected to relays");
     }
+}
+
+/// Fetch events using aggregated pattern: database first, then relays
+///
+/// This function:
+/// 1. Queries local IndexedDB cache first (instant)
+/// 2. If cache hit, returns immediately and syncs in background
+/// 3. If cache miss, fetches from relays
+pub async fn fetch_events_aggregated(
+    filter: Filter,
+    timeout: Duration,
+) -> Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Try database first (fast)
+    match client.database().query(filter.clone()).await {
+        Ok(db_events) => {
+            let db_count = db_events.len();
+            if db_count > 0 {
+                log::info!("Loaded {} events from IndexedDB cache", db_count);
+
+                // Start background relay sync for updates
+                let client_clone = client.clone();
+                let filter_clone = filter.clone();
+                spawn(async move {
+                    if let Err(e) = client_clone.fetch_events(filter_clone, timeout).await {
+                        log::warn!("Background relay sync failed: {}", e);
+                    }
+                });
+
+                return Ok(db_events.into_iter().collect());
+            }
+        }
+        Err(e) => {
+            log::warn!("Database query failed: {}, falling back to relays", e);
+        }
+    }
+
+    // Fallback to relays if DB is empty or failed
+    log::info!("Fetching from relays (database empty or failed)");
+    client
+        .fetch_events(filter, timeout)
+        .await
+        .map(|events| events.into_iter().collect())
+        .map_err(|e| e.to_string())
 }
 
 /// Publish a text note (kind 1 event)
@@ -358,8 +400,6 @@ pub async fn publish_reaction(
 /// Fetch a user's contact list (kind 3 event)
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
 pub async fn fetch_contacts(pubkey_str: String) -> Result<Vec<String>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-
     log::info!("Fetching contacts for: {}", pubkey_str);
 
     // Parse pubkey
@@ -374,8 +414,8 @@ pub async fn fetch_contacts(pubkey_str: String) -> Result<Vec<String>, String> {
         .kind(Kind::ContactList)
         .limit(1);
 
-    // Fetch from relays
-    match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
+    // Fetch from database/relays using aggregated pattern
+    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Extract pubkeys from 'p' tags

@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
+use crate::components::{ThreadedComment, CommentComposer, icons::MessageCircleIcon};
+use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 
@@ -41,6 +43,12 @@ pub fn Videos() -> Element {
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);
@@ -518,16 +526,107 @@ fn VideoInfo(
     is_muted: bool,
     on_mute_toggle: EventHandler<()>,
 ) -> Element {
-    use crate::stores::nostr_client::get_client;
     use nostr_sdk::{PublicKey, FromBech32};
 
     let author_pubkey = event.pubkey.to_string();
+    let author_pubkey_for_fetch = author_pubkey.clone();
+    let event_id = event.id.to_string();
+    let event_id_counts = event_id.clone();
+    let event_id_for_comments = event_id.clone();
+    let event_id_parsed = event.id; // Store the already-parsed EventId
+
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Fetch author's profile metadata
-    use_effect(move || {
-        let pubkey_str = author_pubkey.clone();
+    // State for counts
+    let mut reply_count = use_signal(|| 0usize);
+    let mut like_count = use_signal(|| 0usize);
+    let mut zap_amount_sats = use_signal(|| 0u64);
 
+    // State for comments modal
+    let mut show_comments_modal = use_signal(|| false);
+    let mut show_comment_composer = use_signal(|| false);
+    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut loading_comments = use_signal(|| false);
+
+    // Fetch counts - consolidated into a single batched fetch
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
+        spawn(async move {
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => return,
+            };
+
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+
+            // Create a combined filter for all interaction kinds (replies, likes, zaps)
+            let combined_filter = Filter::new()
+                .kinds(vec![
+                    Kind::TextNote,      // kind 1 - replies
+                    Kind::Comment,       // kind 1111 - NIP-22 comments
+                    Kind::Reaction,      // kind 7 - likes
+                    Kind::from(9735),    // kind 9735 - zaps
+                ])
+                .event(event_id_parsed)
+                .limit(2000);
+
+            // Single fetch for all interaction types
+            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
+                // Partition events by kind
+                let mut replies = 0;
+                let mut likes = 0;
+                let mut total_sats = 0u64;
+
+                for event in events {
+                    match event.kind {
+                        Kind::TextNote | Kind::Comment => replies += 1,
+                        Kind::Reaction => likes += 1,
+                        kind if kind == Kind::from(9735) => {
+                            // Calculate zap amount
+                            if let Some(amount) = event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    // Parse the JSON zap request
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                        // Find the amount tag in the zap request
+                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
+                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
+                                                            // Amount is in millisats, convert to sats
+                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                                return Some(millisats / 1000);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                None
+                            }) {
+                                total_sats += amount;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Update all counts at once
+                reply_count.set(replies.min(500));
+                like_count.set(likes.min(500));
+                zap_amount_sats.set(total_sats);
+            }
+        });
+    }));
+
+    // Fetch author's profile metadata
+    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
                 .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
@@ -535,17 +634,12 @@ fn VideoInfo(
                 Err(_) => return,
             };
 
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
             let filter = Filter::new()
                 .author(pubkey)
                 .kind(Kind::Metadata)
                 .limit(1);
 
-            if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+            if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
                 if let Some(event) = events.into_iter().next() {
                     if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
                         author_metadata.set(Some(metadata));
@@ -553,7 +647,55 @@ fn VideoInfo(
                 }
             }
         });
-    });
+    }));
+
+    // Fetch comments when modal opens - reactive to modal state
+    use_effect(use_reactive((&*show_comments_modal.read(), &event_id_for_comments), move |(modal_open, event_id_str)| {
+        if !modal_open {
+            return;
+        }
+
+        let event_id_clone = event_id_str.to_string();
+
+        spawn(async move {
+            loading_comments.set(true);
+            log::info!("Fetching comments for video: {}", event_id_clone);
+
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_clone) {
+                Ok(id) => {
+                    log::info!("Successfully parsed event ID");
+                    id
+                }
+                Err(e) => {
+                    log::error!("Failed to parse event ID {}: {}", event_id_clone, e);
+                    loading_comments.set(false);
+                    return;
+                }
+            };
+
+            // Fetch Kind 1111 (NIP-22 Comment) events that reference this video
+            let filter = Filter::new()
+                .kind(Kind::Comment)
+                .event(event_id_parsed)
+                .limit(500);
+
+            log::info!("Fetching comments with filter: {:?}", filter);
+
+            match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                Ok(mut comment_events) => {
+                    comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                    log::info!("Loaded {} NIP-22 comments for video", comment_events.len());
+                    comments.set(comment_events);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch video comments: {}", e);
+                    comments.set(Vec::new()); // Set empty vec to show "no comments" state
+                }
+            }
+
+            loading_comments.set(false);
+        });
+    }));
 
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
@@ -629,21 +771,75 @@ fn VideoInfo(
                 div {
                     class: "flex flex-col items-center gap-4",
 
-                    // Like button (placeholder - would integrate with reactions system)
+                    // Like button with count
                     button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition",
+                        class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
                         crate::components::icons::HeartIcon {
                             class: "w-6 h-6".to_string(),
                             filled: false
                         }
+                        if *like_count.read() > 0 {
+                            span {
+                                class: "text-xs mt-1 font-semibold",
+                                {
+                                    let count = *like_count.read();
+                                    if count > 500 {
+                                        "500+".to_string()
+                                    } else {
+                                        format_count(count)
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    // Comment button
+                    // Comment button with count - opens modal
                     button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition",
+                        class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
+                        onclick: move |_| show_comments_modal.set(true),
                         crate::components::icons::MessageCircleIcon {
                             class: "w-6 h-6".to_string(),
                             filled: false
+                        }
+                        if *reply_count.read() > 0 {
+                            span {
+                                class: "text-xs mt-1 font-semibold",
+                                {
+                                    let count = *reply_count.read();
+                                    if count > 500 {
+                                        "500+".to_string()
+                                    } else {
+                                        format_count(count)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Zap button with amount (if author has lightning)
+                    {
+                        let has_lightning = author_metadata.read().as_ref()
+                            .and_then(|m| m.lud16.as_ref().or(m.lud06.as_ref()))
+                            .is_some();
+
+                        if has_lightning {
+                            rsx! {
+                                button {
+                                    class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
+                                    crate::components::icons::ZapIcon {
+                                        class: "w-6 h-6".to_string(),
+                                        filled: false
+                                    }
+                                    if *zap_amount_sats.read() > 0 {
+                                        span {
+                                            class: "text-xs mt-1 font-semibold text-yellow-400",
+                                            {format_sats(*zap_amount_sats.read())}
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
                         }
                     }
 
@@ -662,6 +858,110 @@ fn VideoInfo(
                         } else {
                             crate::components::icons::VolumeIcon { class: "w-6 h-6" }
                         }
+                    }
+                }
+            }
+
+            // Comments Modal
+            if *show_comments_modal.read() {
+                div {
+                    class: "fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4",
+                    onclick: move |_| show_comments_modal.set(false),
+
+                    // Modal content
+                    div {
+                        class: "bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto",
+                        onclick: move |e| e.stop_propagation(),
+
+                        // Header
+                        div {
+                            class: "sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between z-10",
+                            h3 {
+                                class: "text-lg font-semibold text-white",
+                                "Comments"
+                            }
+                            button {
+                                class: "text-muted-foreground hover:text-foreground transition text-white",
+                                onclick: move |_| show_comments_modal.set(false),
+                                "✕"
+                            }
+                        }
+
+                        // Comments body
+                        div {
+                            class: "p-6",
+                            {
+                                let comment_vec = comments.read().clone();
+                                let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
+
+                                rsx! {
+                                    if *loading_comments.read() {
+                                        div {
+                                            class: "flex items-center justify-center py-10",
+                                            div {
+                                                class: "text-center",
+                                                div {
+                                                    class: "animate-spin text-4xl mb-2",
+                                                    "⚡"
+                                                }
+                                                p {
+                                                    class: "text-muted-foreground",
+                                                    "Loading comments..."
+                                                }
+                                            }
+                                        }
+                                    } else if thread_tree.is_empty() {
+                                        div {
+                                            class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                            p { "No comments yet" }
+                                            p {
+                                                class: "text-sm",
+                                                "Be the first to comment!"
+                                            }
+                                        }
+                                    } else {
+                                        div {
+                                            class: "divide-y divide-border",
+                                            for node in thread_tree {
+                                                ThreadedComment {
+                                                    node: node.clone(),
+                                                    depth: 0
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Footer with Add Comment button
+                        div {
+                            class: "sticky bottom-0 bg-card border-t border-border px-6 py-4 flex items-center justify-end gap-3 z-10",
+                            button {
+                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2",
+                                onclick: move |_| {
+                                    show_comments_modal.set(false);
+                                    show_comment_composer.set(true);
+                                },
+                                MessageCircleIcon { class: "w-4 h-4".to_string(), filled: false }
+                                span { "Add Comment" }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Comment Composer Modal
+            if *show_comment_composer.read() {
+                CommentComposer {
+                    comment_on: event.clone(),
+                    parent_comment: None,
+                    on_close: move |_| show_comment_composer.set(false),
+                    on_success: move |_| {
+                        show_comment_composer.set(false);
+                        // Refresh comments
+                        comments.set(Vec::new());
+                        show_comments_modal.set(true);
                     }
                 }
             }
@@ -735,10 +1035,30 @@ fn format_time_ago(timestamp: u64) -> String {
     }
 }
 
+// Format count with k/M suffixes
+fn format_count(count: usize) -> String {
+    if count >= 1_000_000 {
+        format!("{}M", count / 1_000_000)
+    } else if count >= 1_000 {
+        format!("{}k", count / 1_000)
+    } else {
+        count.to_string()
+    }
+}
+
+// Format sats with k/M suffixes
+fn format_sats(sats: u64) -> String {
+    if sats >= 1_000_000 {
+        format!("{}M", sats / 1_000_000)
+    } else if sats >= 1_000 {
+        format!("{}k", sats / 1_000)
+    } else {
+        sats.to_string()
+    }
+}
+
 // Helper function to load following videos (Kind 21 & 22 from followed users)
 async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
@@ -785,7 +1105,7 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     log::info!("Fetching video events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} video events from following", events.len());
 
@@ -808,8 +1128,6 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
 
 // Helper function to load global videos (Kind 21 & 22 from everyone)
 async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let client = nostr_client::get_client().ok_or("Client not initialized")?;
-
     log::info!("Loading global videos feed (until: {:?})...", until);
 
     let mut filter = Filter::new()
@@ -825,7 +1143,7 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching global video events with filter: {:?}", filter);
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} global video events", events.len());
 

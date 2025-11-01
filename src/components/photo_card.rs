@@ -390,13 +390,27 @@ pub fn PhotoCard(event: Event) -> Element {
                     }
                 }
 
-                // Comment button (does nothing, just visual)
-                button {
+                // Comment button - navigate to photo detail
+                Link {
+                    to: Route::PhotoDetail { photo_id: event_id_link.clone() },
                     class: "flex items-center gap-1 hover:text-blue-500 transition",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     MessageCircleIcon {
                         class: "w-6 h-6".to_string(),
                         filled: false
+                    }
+                    if *reply_count.read() > 0 {
+                        span {
+                            class: "text-sm",
+                            {
+                                let count = *reply_count.read();
+                                if count > 0 {
+                                    count.to_string()
+                                } else {
+                                    "".to_string()
+                                }
+                            }
+                        }
                     }
                 }
 

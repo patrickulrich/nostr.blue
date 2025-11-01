@@ -42,7 +42,12 @@ fn App() -> Element {
                     // Restore signer from stored credentials
                     auth_store::restore_session_async().await;
                 }
-                Err(e) => log::error!("Failed to initialize client: {}", e),
+                Err(e) => {
+                    log::error!("Failed to initialize client: {}", e);
+                    // Still mark as initialized to prevent infinite loading
+                    // The app can work in read-only mode
+                    *nostr_client::CLIENT_INITIALIZED.write() = true;
+                }
             }
         });
     });
