@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, bookmarks};
-use crate::components::NoteCard;
+use crate::stores::{auth_store, bookmarks, nostr_client};
+use crate::components::{NoteCard, ClientInitializing};
 use nostr_sdk::Event as NostrEvent;
 
 #[component]
@@ -12,7 +12,14 @@ pub fn Bookmarks() -> Element {
 
     // Load bookmarks on mount
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
         if !auth_store::is_authenticated() {
+            return;
+        }
+
+        // Only load if client is initialized
+        if !client_initialized {
             return;
         }
 
@@ -87,56 +94,41 @@ pub fn Bookmarks() -> Element {
                 }
 
                 // Loading state
-                if *loading.read() {
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && bookmarked_events.read().is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial bookmarks load (loading + no bookmarks, regardless of error state)
+                    ClientInitializing {}
+                } else if bookmarked_events.read().is_empty() {
                     div {
-                        class: "flex items-center justify-center p-12",
+                        class: "text-center py-12",
                         div {
-                            class: "text-center",
-                            div {
-                                class: "animate-spin text-4xl mb-3",
-                                "🔖"
-                            }
-                            p {
-                                class: "text-muted-foreground",
-                                "Loading bookmarks..."
-                            }
+                            class: "text-6xl mb-4",
+                            "📭"
+                        }
+                        h3 {
+                            class: "text-xl font-semibold mb-2",
+                            "No bookmarks yet"
+                        }
+                        p {
+                            class: "text-muted-foreground mb-4",
+                            "Bookmark posts to save them for later"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "Tip: Click the bookmark button on any post to save it"
                         }
                     }
-                }
-
-                // Bookmarks list
-                if !*loading.read() {
-                    if bookmarked_events.read().is_empty() {
-                        div {
-                            class: "text-center py-12",
-                            div {
-                                class: "text-6xl mb-4",
-                                "📭"
-                            }
-                            h3 {
-                                class: "text-xl font-semibold mb-2",
-                                "No bookmarks yet"
-                            }
-                            p {
-                                class: "text-muted-foreground mb-4",
-                                "Bookmark posts to save them for later"
-                            }
-                            p {
-                                class: "text-sm text-muted-foreground",
-                                "Tip: Click the bookmark button on any post to save it"
-                            }
+                } else {
+                    div {
+                        class: "space-y-4 p-4",
+                        p {
+                            class: "text-sm text-muted-foreground mb-4",
+                            "You have {bookmarked_events.read().len()} bookmarked post(s)"
                         }
-                    } else {
-                        div {
-                            class: "space-y-4 p-4",
-                            p {
-                                class: "text-sm text-muted-foreground mb-4",
-                                "You have {bookmarked_events.read().len()} bookmarked post(s)"
-                            }
-                            for event in bookmarked_events.read().iter() {
-                                NoteCard {
-                                    event: event.clone()
-                                }
+                        for event in bookmarked_events.read().iter() {
+                            NoteCard {
+                                event: event.clone()
                             }
                         }
                     }

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
-use crate::components::{NoteCard, NoteCardSkeleton, ArticleCard};
+use crate::components::{NoteCard, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
@@ -137,13 +137,11 @@ pub fn Explore() -> Element {
             }
 
             // Loading state (initial)
-            if *loading.read() && events.read().is_empty() {
-                div {
-                    class: "divide-y divide-border",
-                    for _ in 0..5 {
-                        NoteCardSkeleton {}
-                    }
-                }
+            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
+                // Show client initializing animation during:
+                // 1. Client initialization
+                // 2. Initial feed load (loading + no events, regardless of error state)
+                ClientInitializing {}
             }
 
             // Events feed

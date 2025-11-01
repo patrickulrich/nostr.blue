@@ -1962,8 +1962,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "nostrbluerust"
-version = "0.2.2"
+name = "nostrblue"
+version = "0.2.3"
 dependencies = [
  "ammonia",
  "anyhow",

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
-use crate::components::NoteCard;
+use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
 use std::time::Duration;
@@ -268,21 +268,11 @@ pub fn Notifications() -> Element {
                 }
 
                 // Loading state
-                if *loading.read() {
-                    div {
-                        class: "flex items-center justify-center p-12",
-                        div {
-                            class: "text-center",
-                            div {
-                                class: "animate-spin text-4xl mb-3",
-                                "🔔"
-                            }
-                            p {
-                                class: "text-muted-foreground",
-                                "Loading notifications..."
-                            }
-                        }
-                    }
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && notifications.read().is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial notifications load (loading + no notifications, regardless of error state)
+                    ClientInitializing {}
                 }
 
                 // Notifications list

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
-use crate::components::{ArticleCard, ArticleCardSkeleton};
+use crate::components::{ArticleCard, ArticleCardSkeleton, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use crate::utils::article_meta::get_identifier;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
@@ -40,6 +40,12 @@ pub fn Articles() -> Element {
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);
@@ -237,13 +243,11 @@ pub fn Articles() -> Element {
                 class: "p-4",
 
                 // Initial loading state
-                if is_loading && article_list.is_empty() {
-                    div {
-                        class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
-                        for _ in 0..6 {
-                            ArticleCardSkeleton {}
-                        }
-                    }
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (is_loading && article_list.is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial articles load (loading + no articles, regardless of error state)
+                    ClientInitializing {}
                 } else if article_list.is_empty() {
                     // Empty state
                     div {

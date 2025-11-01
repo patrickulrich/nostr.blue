@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
-use crate::components::{PhotoCard, ThreadedComment, CommentComposer};
+use crate::components::{PhotoCard, ThreadedComment, CommentComposer, ClientInitializing};
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, EventId};
 use std::time::Duration;
@@ -128,26 +128,11 @@ pub fn PhotoDetail(photo_id: String) -> Element {
             div {
                 class: "max-w-[600px] mx-auto",
 
-                if *loading.read() {
-                    // Loading skeleton
-                    div {
-                        class: "border-b border-border bg-background pb-4",
-                        div {
-                            class: "p-3 flex items-center gap-3 mb-2",
-                            div {
-                                class: "w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 animate-pulse"
-                            }
-                            div {
-                                class: "flex-1",
-                                div {
-                                    class: "h-4 w-24 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"
-                                }
-                            }
-                        }
-                        div {
-                            class: "relative w-full pb-[100%] bg-gray-200 dark:bg-gray-800 animate-pulse"
-                        }
-                    }
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && photo_event.read().is_none()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial photo load (loading + no photo, regardless of error state)
+                    ClientInitializing {}
                 } else if let Some(err) = error.read().as_ref() {
                     // Error state
                     div {

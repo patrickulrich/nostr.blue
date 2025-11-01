@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store};
-use crate::components::{NoteCard, NoteCardSkeleton};
+use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
 use nostr_sdk::prelude::*;
@@ -65,6 +65,13 @@ pub fn Profile(pubkey: String) -> Element {
     // Fetch profile metadata
     use_effect(move || {
         let pubkey_str = pubkey_for_metadata.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
+
         spawn(async move {
             loading.set(true);
             error.set(None);
@@ -120,6 +127,12 @@ pub fn Profile(pubkey: String) -> Element {
     use_effect(move || {
         let tab = active_tab.read().clone();
         let pubkey_str = pubkey_for_events.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !client_initialized {
+            return;
+        }
 
         loading_events.set(true);
         oldest_timestamp.set(None);
@@ -549,13 +562,11 @@ pub fn Profile(pubkey: String) -> Element {
 
             // Content area
             div {
-                if *loading_events.read() && events.read().is_empty() {
-                    div {
-                        class: "divide-y divide-border",
-                        for _ in 0..5 {
-                            NoteCardSkeleton {}
-                        }
-                    }
+                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading_events.read() && events.read().is_empty()) {
+                    // Show client initializing animation during:
+                    // 1. Client initialization
+                    // 2. Initial events load (loading + no events, regardless of error state)
+                    ClientInitializing {}
                 } else if !events.read().is_empty() {
                     div {
                         class: "divide-y divide-border",

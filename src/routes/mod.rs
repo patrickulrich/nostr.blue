@@ -605,7 +605,7 @@ fn Layout() -> Element {
                             }
                             div {
                                 class: "w-full mt-1",
-                                "© 2024 nostr.blue"
+                                "2025 nostr.blue - {env!(\"CARGO_PKG_VERSION\")}"
                             }
                         }
                     }
