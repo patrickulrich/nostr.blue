@@ -160,6 +160,9 @@ pub async fn login_with_nsec(nsec: &str) -> Result<(), String> {
     // Start real-time notification subscription
     crate::stores::notifications::start_realtime_subscription().await;
 
+    // Fetch custom emojis
+    crate::stores::emoji_store::init_emoji_fetch();
+
     Ok(())
 }
 
@@ -228,6 +231,9 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
 
         // Start real-time notification subscription
         crate::stores::notifications::start_realtime_subscription().await;
+
+        // Fetch custom emojis
+        crate::stores::emoji_store::init_emoji_fetch();
 
         Ok(())
     }

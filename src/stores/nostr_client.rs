@@ -97,7 +97,7 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
                         url: relay_url.to_string(),
                         status: RelayStatus::Connected,
                     });
-                    log::info!("Added relay with opts: {}", relay_url);
+                    log::debug!("Added relay with opts: {}", relay_url);
                 }
                 Err(e) => {
                     log::error!("Failed to add relay {}: {}", relay_url, e);
@@ -112,7 +112,7 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
 
     RELAY_POOL.write().clone_from(&relay_infos);
 
-    log::info!("Connecting to relays...");
+    log::debug!("Connecting to relays...");
     client.connect().await;
 
     *NOSTR_CLIENT.write() = Some(client.clone());
@@ -131,6 +131,11 @@ pub fn get_client() -> Option<Arc<Client>> {
 #[allow(dead_code)]
 pub fn has_signer() -> bool {
     *HAS_SIGNER.read()
+}
+
+/// Get the current signer
+pub fn get_signer() -> Option<SignerType> {
+    CURRENT_SIGNER.read().clone()
 }
 
 /// Initialize client with a signer (enables publishing)
@@ -655,4 +660,90 @@ pub async fn fetch_article_by_coordinate(
             Err(format!("Failed to fetch article: {}", e))
         }
     }
+}
+
+/// Publish profile metadata (Kind 0)
+///
+/// Updates the user's Nostr profile with the provided metadata
+pub async fn publish_metadata(metadata: Metadata) -> Result<String, String> {
+    let client = NOSTR_CLIENT.read();
+    let client = client.as_ref().ok_or("Client not initialized")?;
+
+    let signer_type = get_signer().ok_or("No signer available")?;
+
+    log::info!("Publishing profile metadata");
+
+    // Build and sign event based on signer type
+    let event = match signer_type {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            EventBuilder::metadata(&metadata)
+                .sign(&keys)
+                .await
+                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(signer) => {
+            EventBuilder::metadata(&metadata)
+                .sign(signer.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
+        }
+    };
+
+    // Publish to relays
+    client.send_event(&event).await
+        .map_err(|e| format!("Failed to publish metadata: {}", e))?;
+
+    log::info!("Metadata published successfully");
+
+    // Return event ID
+    Ok(event.id.to_hex())
+}
+
+/// Update just the profile picture
+#[allow(dead_code)]
+pub async fn update_profile_picture(url: String) -> Result<(), String> {
+    // Fetch current metadata
+    let pubkey_str = crate::stores::auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+
+    let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+        .unwrap_or_default();
+
+    // Validate URL by parsing it, then convert back to String
+    let _validated_url = Url::parse(&url)
+        .map_err(|e| format!("Invalid picture URL: {}", e))?;
+
+    // Update picture field
+    let updated_metadata = Metadata {
+        picture: Some(url),
+        ..current_metadata
+    };
+
+    publish_metadata(updated_metadata).await?;
+    Ok(())
+}
+
+/// Update just the profile banner
+#[allow(dead_code)]
+pub async fn update_profile_banner(url: String) -> Result<(), String> {
+    // Fetch current metadata
+    let pubkey_str = crate::stores::auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+
+    let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+        .unwrap_or_default();
+
+    // Validate URL by parsing it, then convert back to String
+    let _validated_url = Url::parse(&url)
+        .map_err(|e| format!("Invalid banner URL: {}", e))?;
+
+    // Update banner field
+    let updated_metadata = Metadata {
+        banner: Some(url),
+        ..current_metadata
+    };
+
+    publish_metadata(updated_metadata).await?;
+    Ok(())
 }

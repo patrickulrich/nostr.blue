@@ -3,6 +3,7 @@ use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, ToBech
 use crate::routes::Route;
 use crate::stores::nostr_client::{publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
+use crate::stores::signer::SIGNER_INFO;
 use crate::components::{RichContent, ReplyComposer, ZapModal};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use std::time::Duration;
@@ -70,17 +71,38 @@ pub fn NoteCard(event: NostrEvent) -> Element {
 
             // Single fetch for all interaction types
             if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
+                // Get current user's pubkey to check if they've already reacted
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+
                 // Partition events by kind
                 let mut replies = 0;
                 let mut likes = 0;
                 let mut reposts = 0;
                 let mut total_sats = 0u64;
+                let mut user_has_liked = false;
+                let mut user_has_reposted = false;
 
                 for event in events {
                     match event.kind {
                         Kind::TextNote => replies += 1,
-                        Kind::Reaction => likes += 1,
-                        Kind::Repost => reposts += 1,
+                        Kind::Reaction => {
+                            likes += 1;
+                            // Check if this reaction is from the current user
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_liked = true;
+                                }
+                            }
+                        },
+                        Kind::Repost => {
+                            reposts += 1;
+                            // Check if this repost is from the current user
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if event.pubkey.to_string() == *user_pk {
+                                    user_has_reposted = true;
+                                }
+                            }
+                        },
                         kind if kind == Kind::from(9735) => {
                             // Calculate zap amount
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
@@ -115,11 +137,13 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                     }
                 }
 
-                // Update all counts at once
+                // Update all counts and states at once
                 reply_count.set(replies.min(500));
                 like_count.set(likes.min(500));
                 repost_count.set(reposts.min(500));
                 zap_amount_sats.set(total_sats);
+                is_liked.set(user_has_liked);
+                is_reposted.set(user_has_reposted);
             }
         });
     }));

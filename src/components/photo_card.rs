@@ -3,6 +3,7 @@ use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
 use crate::stores::nostr_client::{publish_reaction, publish_note, get_client, HAS_SIGNER};
 use crate::stores::bookmarks;
+use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{HeartIcon, MessageCircleIcon, BookmarkIcon, ZapIcon};
 use crate::components::ZapModal;
 use std::time::Duration;
@@ -183,7 +184,22 @@ pub fn PhotoCard(event: Event) -> Element {
                 .limit(500);
 
             if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
+                // Get current user's pubkey to check if they've already liked
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_liked = false;
+
+                // Check if current user has liked
+                if let Some(ref user_pk) = current_user_pubkey {
+                    for like in likes.iter() {
+                        if like.pubkey.to_string() == *user_pk {
+                            user_has_liked = true;
+                            break;
+                        }
+                    }
+                }
+
                 like_count.set(likes.len());
+                is_liked.set(user_has_liked);
             }
 
             // Fetch zap receipts (kind 9735) and calculate total

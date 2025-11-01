@@ -5,13 +5,15 @@ use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::stores::{auth_store, nostr_client, theme_store};
+use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
 
 /// App settings stored on Nostr via NIP-78
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     pub theme: String, // "light", "dark", or "system"
     pub relay_urls: Vec<String>,
+    #[serde(default)]
+    pub blossom_servers: Vec<String>, // Blossom media upload servers
     #[serde(default)]
     pub version: u32, // Settings schema version
 }
@@ -25,6 +27,7 @@ impl Default for AppSettings {
                 "wss://relay.nostr.band".to_string(),
                 "wss://nos.lol".to_string(),
             ],
+            blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
             version: 1,
         }
     }
@@ -92,6 +95,11 @@ pub async fn load_settings() -> Result<(), String> {
                         };
                         theme_store::set_theme_internal(theme);
 
+                        // Update Blossom servers
+                        if !settings.blossom_servers.is_empty() {
+                            *blossom_store::BLOSSOM_SERVERS.write() = settings.blossom_servers.clone();
+                        }
+
                         // Update global settings
                         SETTINGS.write().clone_from(&settings);
                         SETTINGS_LOADING.write().clone_from(&false);
@@ -132,8 +140,12 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
 
+    // Create settings with current blossom servers
+    let mut settings_to_save = settings.clone();
+    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().clone();
+
     // Serialize settings to JSON
-    let content = serde_json::to_string(settings)
+    let content = serde_json::to_string(&settings_to_save)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
     // Build NIP-78 event (kind 30078 with 'd' tag)
@@ -147,7 +159,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
     log::info!("Settings saved to Nostr successfully");
 
     // Update global settings
-    SETTINGS.write().clone_from(settings);
+    SETTINGS.write().clone_from(&settings_to_save);
 
     Ok(())
 }
