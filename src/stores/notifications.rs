@@ -55,14 +55,6 @@ pub async fn start_realtime_subscription() {
         }
     };
 
-    let pubkey = match nostr_sdk::PublicKey::parse(&my_pubkey) {
-        Ok(pk) => pk,
-        Err(e) => {
-            log::error!("Failed to parse pubkey: {}", e);
-            return;
-        }
-    };
-
     let client = match nostr_client::get_client() {
         Some(c) => c,
         None => {
@@ -72,6 +64,7 @@ pub async fn start_realtime_subscription() {
     };
 
     // Subscribe with limit 20 for real-time updates only
+    // Use #p tag to match events that mention/tag our pubkey
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,      // For mentions and replies
@@ -79,7 +72,10 @@ pub async fn start_realtime_subscription() {
             Kind::Reaction,      // Reactions (likes)
             Kind::ZapReceipt,    // Zap receipts
         ])
-        .pubkey(pubkey)          // Events where we're mentioned/tagged (#p tag)
+        .custom_tag(
+            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
+            my_pubkey
+        )
         .limit(20);              // Only recent events for real-time updates
 
     log::info!("Starting real-time notification subscription (limit: 20)");
