@@ -214,7 +214,10 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
     log::info!("Sent gift wrap to sender (copy): {:?}", sender_result.val);
 
     // Refresh conversations to include new message
-    let _ = init_dms().await;
+    if let Err(e) = init_dms().await {
+        log::error!("Failed to refresh DM conversations after sending message: {}", e);
+        // Continue despite refresh failure - message was sent successfully
+    }
 
     Ok(())
 }

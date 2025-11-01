@@ -4,6 +4,8 @@ use nostr_sdk::prelude::*;
 use nostr::Url;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(target_arch = "wasm32")]
 use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;

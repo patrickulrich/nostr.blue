@@ -157,7 +157,8 @@ pub fn Home() -> Element {
 
             match client.subscribe(filter, None).await {
                 Ok(output) => {
-                    log::info!("Subscribed to home feed updates: {:?}", output.val);
+                    let home_feed_sub_id = output.val.clone();
+                    log::info!("Subscribed to home feed updates: {:?}", home_feed_sub_id);
 
                     // Handle incoming events
                     spawn(async move {
@@ -165,10 +166,16 @@ pub fn Home() -> Element {
 
                         while let Ok(notification) = notifications.recv().await {
                             if let nostr_sdk::RelayPoolNotification::Event {
+                                subscription_id,
                                 event,
                                 ..
                             } = notification
                             {
+                                // Only process events from our home feed subscription
+                                if subscription_id != home_feed_sub_id {
+                                    continue;
+                                }
+
                                 // Check if this matches our feed type
                                 let should_add = match current_feed_type {
                                     FeedType::Following => {

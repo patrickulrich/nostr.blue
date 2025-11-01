@@ -673,11 +673,12 @@ fn VideoInfo(
                 }
             };
 
-            // Fetch Kind 1111 (NIP-22 Comment) events that reference this video
+            // Fetch both Kind 1 (TextNote) and Kind 1111 (NIP-22 Comment) events that reference this video
+            // This matches the counter logic which counts both kinds
             let filter = Filter::new()
-                .kind(Kind::Comment)
+                .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
-                .limit(500);
+                .limit(2000);
 
             log::info!("Fetching comments with filter: {:?}", filter);
 
