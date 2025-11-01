@@ -32,15 +32,21 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
         if is_shown {
             spawn(async move {
                 if let Some(pubkey) = auth_store::get_pubkey() {
-                    if let Some(metadata) = profiles::get_profile(&pubkey) {
-                        name.set(metadata.name.unwrap_or_default());
-                        display_name.set(metadata.display_name.unwrap_or_default());
-                        about.set(metadata.about.unwrap_or_default());
-                        picture.set(metadata.picture.map(|u| u.to_string()).unwrap_or_default());
-                        banner.set(metadata.banner.map(|u| u.to_string()).unwrap_or_default());
-                        website.set(metadata.website.map(|u| u.to_string()).unwrap_or_default());
-                        nip05.set(metadata.nip05.unwrap_or_default());
-                        lud16.set(metadata.lud16.unwrap_or_default());
+                    // Fetch profile from cache or relays
+                    match profiles::fetch_profile(pubkey.clone()).await {
+                        Ok(profile) => {
+                            name.set(profile.name.unwrap_or_default());
+                            display_name.set(profile.display_name.unwrap_or_default());
+                            about.set(profile.about.unwrap_or_default());
+                            picture.set(profile.picture.unwrap_or_default());
+                            banner.set(profile.banner.unwrap_or_default());
+                            website.set(profile.website.unwrap_or_default());
+                            nip05.set(profile.nip05.unwrap_or_default());
+                            lud16.set(profile.lud16.unwrap_or_default());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to load profile for editing: {}", e);
+                        }
                     }
                 }
             });
