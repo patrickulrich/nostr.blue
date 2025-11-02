@@ -49,7 +49,7 @@ pub fn Bookmarks() -> Element {
                             loaded_count.set(fetched_count);
 
                             // Check if there are more bookmarks to load
-                            has_more.set(fetched_count >= BATCH_SIZE && fetched_count < total_bookmarks);
+                            has_more.set(fetched_count < total_bookmarks);
                             log::info!("Loaded initial batch: {} / {} bookmarks", fetched_count, total_bookmarks);
                         }
                         Err(e) => {

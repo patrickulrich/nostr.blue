@@ -21,6 +21,7 @@ pub static GIF_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static GIF_OLDEST_TIMESTAMP: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
 pub static RECENT_GIFS: GlobalSignal<Vec<GifMetadata>> = Signal::global(Vec::new);
 pub static CURRENT_SEARCH_QUERY: GlobalSignal<String> = Signal::global(String::new);
+pub static GIF_SEARCH_SEQ: GlobalSignal<u64> = Signal::global(|| 0);
 
 const MAX_RECENT_GIFS: usize = 20;
 
@@ -224,6 +225,13 @@ pub async fn load_initial_gifs() {
 
 /// Search for GIFs with a specific query
 pub async fn search_gifs(query: String) {
+    // Increment sequence number to track this search request
+    let request_seq = {
+        let mut seq = GIF_SEARCH_SEQ.write();
+        *seq = seq.wrapping_add(1);
+        *seq
+    };
+
     *GIF_LOADING.write() = true;
     *CURRENT_SEARCH_QUERY.write() = query.clone();
 
@@ -231,6 +239,13 @@ pub async fn search_gifs(query: String) {
 
     match fetch_gifs(100, None, search_query).await {
         Ok(gifs) => {
+            // Only update state if this is still the latest search request
+            let current_seq = *GIF_SEARCH_SEQ.read();
+            if request_seq != current_seq {
+                log::debug!("Discarding stale search results (seq {} != {})", request_seq, current_seq);
+                return;
+            }
+
             // Update oldest timestamp for pagination
             if let Some(oldest) = gifs.last() {
                 *GIF_OLDEST_TIMESTAMP.write() = Some(oldest.created_at);
@@ -256,25 +271,46 @@ pub async fn load_more_gifs() {
 
     *GIF_LOADING.write() = true;
 
-    let search_query = CURRENT_SEARCH_QUERY.read().clone();
-    let query = if search_query.is_empty() { None } else { Some(search_query) };
+    // Capture the current search query to detect if it changes while we're loading
+    let captured_query = CURRENT_SEARCH_QUERY.read().clone();
+    let query = if captured_query.is_empty() { None } else { Some(captured_query.clone()) };
 
     match fetch_gifs(100, until, query).await {
         Ok(new_gifs) => {
+            // Bail if the search query changed while we were loading (prevents cross-contamination)
+            let current_query = CURRENT_SEARCH_QUERY.read().clone();
+            if captured_query != current_query {
+                log::debug!("Search query changed during pagination, discarding stale results");
+                *GIF_LOADING.write() = false;
+                return;
+            }
+
             if new_gifs.is_empty() {
                 log::info!("No more GIFs to load");
                 *GIF_LOADING.write() = false;
                 return;
             }
 
+            // Filter out duplicates (Filter::until is inclusive, so oldest event may be duplicated)
+            let oldest_timestamp = until;
+            let deduplicated_gifs: Vec<GifMetadata> = new_gifs.into_iter()
+                .filter(|gif| Some(gif.created_at) != oldest_timestamp)
+                .collect();
+
+            if deduplicated_gifs.is_empty() {
+                log::info!("No new GIFs after deduplication");
+                *GIF_LOADING.write() = false;
+                return;
+            }
+
             // Update oldest timestamp
-            if let Some(oldest) = new_gifs.last() {
+            if let Some(oldest) = deduplicated_gifs.last() {
                 *GIF_OLDEST_TIMESTAMP.write() = Some(oldest.created_at);
             }
 
             // Append to existing results
             let mut current = GIF_RESULTS.write();
-            current.extend(new_gifs);
+            current.extend(deduplicated_gifs);
         }
         Err(e) => {
             log::error!("Failed to load more GIFs: {}", e);
