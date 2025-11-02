@@ -15,6 +15,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub blossom_servers: Vec<String>, // Blossom media upload servers
     #[serde(default)]
+    pub sync_notifications: bool, // Sync notification read status across devices via NIP-78
+    #[serde(default)]
     pub version: u32, // Settings schema version
 }
 
@@ -28,6 +30,7 @@ impl Default for AppSettings {
                 "wss://nos.lol".to_string(),
             ],
             blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
+            sync_notifications: false, // Privacy-first: opt-in by default
             version: 1,
         }
     }
@@ -193,5 +196,16 @@ pub async fn update_relay_list(relay_urls: Vec<String>) {
     // Save to Nostr
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save relay list: {}", e);
+    }
+}
+
+/// Update notification sync setting and save to Nostr
+pub async fn update_notification_sync(enabled: bool) {
+    let mut settings = SETTINGS.read().clone();
+    settings.sync_notifications = enabled;
+
+    // Save to Nostr
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save notification sync setting: {}", e);
     }
 }
