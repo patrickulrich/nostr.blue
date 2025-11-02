@@ -31,6 +31,15 @@ struct TabData {
     loaded: bool,
 }
 
+// Result type for load_tab_events containing events and the proper pagination cursor
+#[derive(Clone, Debug)]
+struct LoadOutcome {
+    events: Vec<NostrEvent>,
+    // The cursor for pagination - for Likes this is the oldest reaction timestamp,
+    // for other tabs it's the oldest event.created_at
+    oldest_cursor: Option<u64>,
+}
+
 impl Default for TabData {
     fn default() -> Self {
         Self {
@@ -184,22 +193,22 @@ pub fn Profile(pubkey: String) -> Element {
 
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, None).await {
-                Ok(tab_events) => {
-                    // Subtract 1 from the oldest timestamp to avoid re-fetching the same last event
-                    let oldest_ts = tab_events.last().map(|e| e.created_at.as_u64().saturating_sub(1));
+                Ok(outcome) => {
+                    // Subtract 1 from the oldest cursor to avoid re-fetching the same last event
+                    let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
                     // Assume there's more content unless we got 0 events
                     // Infinite scroll will call load_more which will discover if there's truly no more
-                    let has_more = !tab_events.is_empty();
+                    let has_more = !outcome.events.is_empty();
 
                     // Count posts for header (only for Posts tab)
                     if matches!(tab, ProfileTab::Posts) {
-                        post_count.set(tab_events.len());
+                        post_count.set(outcome.events.len());
                     }
 
                     // Update the tab's data - clone the map, modify, and set to trigger reactivity
                     let mut data_map = tab_data.read().clone();
                     data_map.insert(tab.clone(), TabData {
-                        events: tab_events,
+                        events: outcome.events,
                         oldest_timestamp: oldest_ts,
                         has_more,
                         loaded: true,
@@ -361,24 +370,24 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_load_more.clone();
-        let post_count_clone = post_count.clone();
+        let mut post_count_clone = post_count.clone();
 
         loading_events.set(true);
 
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, until).await {
-                Ok(new_events) => {
-                    // Subtract 1 from the oldest timestamp to avoid re-fetching the same last event
-                    let oldest_ts = new_events.last().map(|e| e.created_at.as_u64().saturating_sub(1));
+                Ok(outcome) => {
+                    // Subtract 1 from the oldest cursor to avoid re-fetching the same last event
+                    let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
                     // If we got 0 events, we've hit the end
-                    let has_more_val = !new_events.is_empty();
+                    let has_more_val = !outcome.events.is_empty();
 
-                    log::info!("load_more: got {} new events, has_more={}", new_events.len(), has_more_val);
+                    log::info!("load_more: got {} new events, has_more={}", outcome.events.len(), has_more_val);
 
                     // Append new events to the current tab's data - clone, modify, set to trigger reactivity
                     let mut data_map = tab_data.read().clone();
                     if let Some(data) = data_map.get_mut(&tab) {
-                        data.events.extend(new_events);
+                        data.events.extend(outcome.events);
                         data.oldest_timestamp = oldest_ts;
                         data.has_more = has_more_val;
 
@@ -835,7 +844,7 @@ fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<Mou
 
 // Helper function to load events based on tab type
 // Fetches enough events to return approximately 50 items for the specific tab
-async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<Vec<NostrEvent>, String> {
+async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<LoadOutcome, String> {
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
@@ -900,7 +909,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             // Don't truncate - return all posts found
             log::info!("Loaded {} posts (fetched {} total events, hit_end={})", all_posts.len(), total_fetched, hit_end);
-            Ok(all_posts)
+
+            let oldest_cursor = all_posts.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: all_posts,
+                oldest_cursor,
+            })
         }
         ProfileTab::Replies => {
             // Fetch kind 1 events until we have 50 replies (with e-tags)
@@ -953,7 +967,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             all_replies.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} replies (fetched {} total events, hit_end={})", all_replies.len(), total_fetched, hit_end);
-            Ok(all_replies)
+
+            let oldest_cursor = all_replies.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: all_replies,
+                oldest_cursor,
+            })
         }
         ProfileTab::Articles => {
             // Kind 30023 (long-form content) - direct query
@@ -972,7 +991,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} articles", event_vec.len());
-            Ok(event_vec)
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
         }
         ProfileTab::Media(MediaSubTab::Photos) => {
             // Kind 20 (Picture Events - NIP-68) - direct query
@@ -991,7 +1015,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} photos", event_vec.len());
-            Ok(event_vec)
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
         }
         ProfileTab::Media(MediaSubTab::Videos) => {
             // Kind 21 & 22 (Video Events - NIP-71) - query both kinds
@@ -1010,7 +1039,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} videos", event_vec.len());
-            Ok(event_vec)
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
         }
         ProfileTab::Likes => {
             // Fetch Kind 7 (reactions) to get what was liked
@@ -1027,7 +1061,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
 
             if reactions.is_empty() {
-                return Ok(Vec::new());
+                return Ok(LoadOutcome {
+                    events: Vec::new(),
+                    oldest_cursor: None,
+                });
             }
 
             // Extract event IDs from reactions' e tags
@@ -1046,7 +1083,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             if liked_event_ids.is_empty() {
                 log::info!("No event IDs found in reactions");
-                return Ok(Vec::new());
+                return Ok(LoadOutcome {
+                    events: Vec::new(),
+                    oldest_cursor: None,
+                });
             }
 
             // Fetch the actual liked events
@@ -1082,7 +1122,15 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             });
 
             log::info!("Loaded {} liked events", event_vec.len());
-            Ok(event_vec)
+
+            // Get the oldest reaction timestamp (not event.created_at) for pagination
+            let oldest_cursor = event_vec.last()
+                .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
+
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
         }
     }
 }
