@@ -157,6 +157,12 @@ pub async fn login_with_nsec(nsec: &str) -> Result<(), String> {
 
     log::info!("Successfully logged in with pubkey: {}", pubkey);
 
+    // Load notification checked_at timestamp from localStorage
+    crate::stores::notifications::load_checked_at();
+
+    // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
+    crate::stores::notifications::fetch_and_merge_from_nip78().await;
+
     // Start real-time notification subscription
     crate::stores::notifications::start_realtime_subscription().await;
 
@@ -228,6 +234,12 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
 
         log::info!("Successfully logged in via browser extension with pubkey: {}", pubkey_str);
+
+        // Load notification checked_at timestamp from localStorage
+        crate::stores::notifications::load_checked_at();
+
+        // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
+        crate::stores::notifications::fetch_and_merge_from_nip78().await;
 
         // Start real-time notification subscription
         crate::stores::notifications::start_realtime_subscription().await;

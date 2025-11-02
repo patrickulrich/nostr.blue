@@ -212,6 +212,74 @@ pub fn Settings() -> Element {
                 }
             }
 
+            // Notification Sync section
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h3 {
+                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "🔔 Notification Sync"
+                    }
+                }
+                p {
+                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    if auth.is_authenticated {
+                        "Sync notification read status across devices using NIP-78. "
+                        span {
+                            class: "text-gray-500 dark:text-gray-500 italic",
+                            "Note: Sync data is public on Nostr relays."
+                        }
+                    } else {
+                        "Login to sync notification read status across devices"
+                    }
+                }
+                div {
+                    class: "flex items-center justify-between",
+                    div {
+                        class: "flex items-center gap-3",
+                        label {
+                            class: "relative inline-flex items-center cursor-pointer",
+                            input {
+                                r#type: "checkbox",
+                                class: "sr-only peer",
+                                checked: settings_store::SETTINGS.read().sync_notifications,
+                                disabled: !auth.is_authenticated,
+                                onchange: move |evt| {
+                                    let enabled = evt.checked();
+                                    spawn(async move {
+                                        settings_store::update_notification_sync(enabled).await;
+                                    });
+                                }
+                            }
+                            div {
+                                class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"
+                            }
+                        }
+                        span {
+                            class: "text-sm font-medium text-gray-900 dark:text-white",
+                            {
+                                let is_enabled = settings_store::SETTINGS.read().sync_notifications;
+                                if is_enabled { "Enabled" } else { "Disabled" }
+                            }
+                        }
+                    }
+                    {
+                        let sync_enabled = settings_store::SETTINGS.read().sync_notifications;
+                        if auth.is_authenticated && sync_enabled {
+                            rsx! {
+                                span {
+                                    class: "text-xs text-green-500",
+                                    "✓ Syncing"
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+                }
+            }
+
             // Blossom Servers section
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",

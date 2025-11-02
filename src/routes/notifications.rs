@@ -69,8 +69,9 @@ pub fn Notifications() -> Element {
             return;
         }
 
-        // Clear unread count when viewing notifications
-        notif_store::clear_unread_count();
+        // Mark notifications as checked at current time (updates localStorage and clears badge)
+        let now = Timestamp::now().as_u64() as i64;
+        notif_store::set_checked_at(now);
 
         loading.set(true);
         error.set(None);
