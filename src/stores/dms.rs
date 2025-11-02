@@ -1,14 +1,47 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 use std::collections::HashMap;
+
+/// Represents a message in a conversation, handling both NIP-04 and NIP-17
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConversationMessage {
+    /// NIP-04 legacy encrypted direct message
+    Nip04 {
+        event: Event,
+    },
+    /// NIP-17 gift wrap message with unwrapped data
+    Nip17 {
+        gift_wrap: Event,
+        rumor: UnsignedEvent,
+        sender: PublicKey,
+    },
+}
+
+impl ConversationMessage {
+    /// Get the actual message timestamp (uses rumor timestamp for NIP-17)
+    pub fn created_at(&self) -> Timestamp {
+        match self {
+            Self::Nip04 { event } => event.created_at,
+            Self::Nip17 { rumor, .. } => rumor.created_at,
+        }
+    }
+
+    /// Get the sender's public key
+    pub fn sender(&self) -> PublicKey {
+        match self {
+            Self::Nip04 { event } => event.pubkey,
+            Self::Nip17 { sender, .. } => *sender,
+        }
+    }
+}
 
 /// Represents a DM conversation with another user
 #[derive(Clone, Debug, PartialEq)]
 pub struct Conversation {
     pub pubkey: String,
-    pub messages: Vec<Event>,
+    pub messages: Vec<ConversationMessage>,
     pub unread_count: usize,
 }
 
@@ -111,14 +144,20 @@ pub async fn init_dms() -> Result<(), String> {
                             continue;
                         }
 
-                        // Store the original gift wrap event
+                        // Store as ConversationMessage::Nip17 with unwrapped data
+                        let conversation_msg = ConversationMessage::Nip17 {
+                            gift_wrap: msg,
+                            rumor: unwrapped.rumor,
+                            sender: unwrapped.sender,
+                        };
+
                         conversations.entry(other_pubkey.clone())
                             .or_insert_with(|| Conversation {
                                 pubkey: other_pubkey.clone(),
                                 messages: Vec::new(),
                                 unread_count: 0,
                             })
-                            .messages.push(msg);
+                            .messages.push(conversation_msg);
                     }
                 }
                 Err(e) => {
@@ -144,20 +183,22 @@ pub async fn init_dms() -> Result<(), String> {
                 continue;
             }
 
-            // Add message to conversation
+            // Store as ConversationMessage::Nip04
+            let conversation_msg = ConversationMessage::Nip04 { event: msg };
+
             conversations.entry(other_pubkey.clone())
                 .or_insert_with(|| Conversation {
                     pubkey: other_pubkey.clone(),
                     messages: Vec::new(),
                     unread_count: 0,
                 })
-                .messages.push(msg);
+                .messages.push(conversation_msg);
         }
     }
 
-    // Sort messages in each conversation by timestamp
+    // Sort messages in each conversation by timestamp (uses actual rumor timestamp for NIP-17)
     for conversation in conversations.values_mut() {
-        conversation.messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation.messages.sort_by(|a, b| a.created_at().cmp(&b.created_at()));
     }
 
     log::info!("Organized into {} conversations", conversations.len());
@@ -222,24 +263,21 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
     Ok(())
 }
 
-/// Decrypt a DM event (supports both NIP-04 and NIP-17)
-pub async fn decrypt_dm(event: &Event) -> Result<String, String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
-
-    // NIP-17: Try to unwrap gift wrap first (Kind 1059)
-    if event.kind == Kind::GiftWrap {
-        match client.unwrap_gift_wrap(&event).await {
-            Ok(unwrapped) => {
-                log::debug!("Successfully unwrapped NIP-17 gift wrap from {}", unwrapped.sender);
-                return Ok(unwrapped.rumor.content);
-            }
-            Err(e) => {
-                log::error!("Failed to unwrap gift wrap: {}", e);
-                return Err(format!("Failed to decrypt NIP-17 message: {}", e));
-            }
-        }
+/// Decrypt a DM message (supports both NIP-04 and NIP-17)
+pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
+    // NIP-17: Content is already available from the unwrapped rumor
+    if let ConversationMessage::Nip17 { rumor, .. } = msg {
+        log::debug!("Returning NIP-17 message content from rumor");
+        return Ok(rumor.content.clone());
     }
+
+    // NIP-04: Need to decrypt
+    let ConversationMessage::Nip04 { event } = msg else {
+        return Err("Invalid message type".to_string());
+    };
+
+    let _client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
 
     // NIP-04: For Kind 4 encrypted direct messages
     if event.kind == Kind::EncryptedDirectMessage {
@@ -307,10 +345,10 @@ pub fn get_conversation(pubkey: &str) -> Option<Conversation> {
 pub fn get_conversations_sorted() -> Vec<Conversation> {
     let mut convos: Vec<Conversation> = CONVERSATIONS.read().values().cloned().collect();
 
-    // Sort by most recent message
+    // Sort by most recent message (uses actual rumor timestamp for NIP-17)
     convos.sort_by(|a, b| {
-        let last_a = a.messages.last().map(|m| m.created_at).unwrap_or_default();
-        let last_b = b.messages.last().map(|m| m.created_at).unwrap_or_default();
+        let last_a = a.messages.last().map(|m| m.created_at()).unwrap_or_default();
+        let last_b = b.messages.last().map(|m| m.created_at()).unwrap_or_default();
         last_b.cmp(&last_a)
     });
 
