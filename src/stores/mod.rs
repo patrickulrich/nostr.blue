@@ -13,4 +13,5 @@ pub mod settings_store;
 pub mod blossom_store;
 pub mod music_player;
 pub mod emoji_store;
+pub mod gif_store;
 

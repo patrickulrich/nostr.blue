@@ -115,6 +115,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let mut selected_category = use_signal(|| EmojiCategory::Standard(0));
     let mut position_below = use_signal(|| false); // Whether to show popup below button
     let button_id = use_signal(|| format!("emoji-picker-{}", uuid::Uuid::new_v4()));
+    let mut picker_top = use_signal(|| 0.0);
+    let mut picker_bottom = use_signal(|| 0.0);
+    let mut picker_left = use_signal(|| 0.0);
 
     // Read custom emojis and sets from global state
     let custom_emojis = CUSTOM_EMOJIS.read();
@@ -150,8 +153,18 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         let button_center_y = rect.top() + (rect.height() / 2.0);
                                         let is_in_top_half = button_center_y < (viewport_height / 2.0);
 
-                                        // If button is in top half, show popup below; otherwise show above
-                                        position_below.set(is_in_top_half);
+                                        // Calculate fixed position coordinates
+                                        picker_left.set(rect.left());
+
+                                        if is_in_top_half {
+                                            // Position below button
+                                            picker_top.set(rect.bottom() + 8.0); // 8px margin (mt-2)
+                                            position_below.set(true);
+                                        } else {
+                                            // Position above button
+                                            picker_bottom.set(viewport_height - rect.top() + 8.0); // 8px margin (mb-2)
+                                            position_below.set(false);
+                                        }
                                     }
                                 }
                             }
@@ -164,10 +177,11 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             // Emoji picker popover
             if *show_picker.read() {
                 div {
-                    class: if *position_below.read() {
-                        "absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 w-80"
+                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[60] w-80",
+                    style: if *position_below.read() {
+                        format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read())
                     } else {
-                        "absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 w-80"
+                        format!("bottom: {}px; left: {}px;", *picker_bottom.read(), *picker_left.read())
                     },
                     onclick: move |e| e.stop_propagation(),
 

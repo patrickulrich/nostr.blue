@@ -558,7 +558,7 @@ fn Layout() -> Element {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
-                        class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4",
+                        class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
 
                         // Search Input
                         div {

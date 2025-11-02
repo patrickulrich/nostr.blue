@@ -130,11 +130,31 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
     }
 }
 
-/// Fetch all bookmarked events
-pub async fn fetch_bookmarked_events() -> Result<Vec<Event>, String> {
+/// Fetch bookmarked events with pagination support
+///
+/// # Arguments
+/// * `skip` - Number of bookmarks to skip (for pagination)
+/// * `limit` - Maximum number of bookmarks to fetch (None = fetch all remaining)
+pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>) -> Result<Vec<Event>, String> {
     let bookmarks = BOOKMARKED_EVENTS.read().clone();
 
     if bookmarks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Apply skip and limit to bookmark IDs
+    let bookmarks_slice = if skip >= bookmarks.len() {
+        Vec::new()
+    } else {
+        let end = if let Some(lim) = limit {
+            (skip + lim).min(bookmarks.len())
+        } else {
+            bookmarks.len()
+        };
+        bookmarks[skip..end].to_vec()
+    };
+
+    if bookmarks_slice.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -142,7 +162,7 @@ pub async fn fetch_bookmarked_events() -> Result<Vec<Event>, String> {
         .ok_or("Client not initialized")?.clone();
 
     // Create filter for bookmarked events
-    let event_ids: Result<Vec<nostr_sdk::EventId>, _> = bookmarks
+    let event_ids: Result<Vec<nostr_sdk::EventId>, _> = bookmarks_slice
         .iter()
         .map(|id| nostr_sdk::EventId::from_hex(id))
         .collect();
@@ -153,8 +173,10 @@ pub async fn fetch_bookmarked_events() -> Result<Vec<Event>, String> {
 
     match client.fetch_events(filter, Duration::from_secs(15)).await {
         Ok(events) => {
-            let event_vec: Vec<Event> = events.into_iter().collect();
-            log::info!("Fetched {} bookmarked events", event_vec.len());
+            let mut event_vec: Vec<Event> = events.into_iter().collect();
+            // Sort by created_at descending (newest first)
+            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Fetched {} bookmarked events (skip: {}, limit: {:?})", event_vec.len(), skip, limit);
             Ok(event_vec)
         }
         Err(e) => {
@@ -162,4 +184,9 @@ pub async fn fetch_bookmarked_events() -> Result<Vec<Event>, String> {
             Err(format!("Failed to fetch bookmarked events: {}", e))
         }
     }
+}
+
+/// Get the total number of bookmarks
+pub fn get_bookmarks_count() -> usize {
+    BOOKMARKED_EVENTS.read().len()
 }

@@ -29,7 +29,7 @@ pub fn Articles() -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
-    let mut feed_type = use_signal(|| FeedType::Global);
+    let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
 
     // Pagination state for infinite scroll

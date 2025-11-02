@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
-use crate::components::{MediaUploader, EmojiPicker};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker};
 use nostr_sdk::{Event as NostrEvent, EventBuilder};
 
 const MAX_LENGTH: usize = 5000;
@@ -71,6 +71,19 @@ pub fn CommentComposer(
         let mut current = content.read().clone();
         current.push_str(&emoji);
         content.set(current);
+    };
+
+    // Handler when GIF is selected
+    let handle_gif_selected = move |gif_url: String| {
+        // Insert GIF URL at the end of the current content
+        let mut current = content.read().clone();
+        if !current.is_empty() && !current.ends_with('\n') && !current.ends_with(' ') {
+            current.push(' ');
+        }
+        current.push_str(&gif_url);
+        content.set(current);
+
+        log::info!("GIF URL inserted: {}", gif_url);
     };
 
     let handle_publish = move |_| {
@@ -280,6 +293,11 @@ pub fn CommentComposer(
                             // Emoji picker
                             EmojiPicker {
                                 on_emoji_selected: handle_emoji_selected
+                            }
+
+                            // GIF picker
+                            GifPicker {
+                                on_gif_selected: handle_gif_selected
                             }
                         }
                     }
