@@ -36,7 +36,7 @@ pub fn Trending() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(format!("Failed to load trending posts: {}", e)));
+                    error.set(Some(format!("Nostr.band API currently down: {}", e)));
                     loading.set(false);
                 }
             }

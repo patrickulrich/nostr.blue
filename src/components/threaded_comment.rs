@@ -8,6 +8,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
 use nostr_sdk::{Metadata, Filter, Kind};
+use nostr_sdk::prelude::NostrDatabaseExt;
 use std::time::Duration;
 
 const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
@@ -52,20 +53,15 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     use_effect(move || {
         spawn(async move {
             if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                let metadata_filter = Filter::new()
-                    .author(author_pubkey)
-                    .kind(Kind::Metadata)
-                    .limit(1);
+                // Check database first (instant, no network)
+                if let Ok(Some(metadata)) = client.database().metadata(author_pubkey).await {
+                    author_metadata.set(Some(metadata));
+                    return;
+                }
 
-                if let Ok(metadata_events) = client.fetch_events(
-                    metadata_filter,
-                    std::time::Duration::from_secs(5)
-                ).await {
-                    if let Some(metadata_event) = metadata_events.into_iter().next() {
-                        if let Ok(metadata) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
+                // If not in database, fetch from relays (auto-caches to database)
+                if let Ok(Some(metadata)) = client.fetch_metadata(author_pubkey, std::time::Duration::from_secs(5)).await {
+                    author_metadata.set(Some(metadata));
                 }
             }
         });

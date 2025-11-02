@@ -64,8 +64,14 @@ pub fn Home() -> Element {
                                 // Determine if there are more events based on RAW count before filtering
                                 has_more.set(raw_count >= 100);
 
-                                events.set(feed_events);
+                                // Show feed immediately with database-cached metadata
+                                events.set(feed_events.clone());
                                 loading.set(false);
+
+                                // Spawn non-blocking background prefetch for missing metadata
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_events).await;
+                                });
                             }
                             Err(e) => {
                                 error.set(Some(e));
@@ -84,8 +90,14 @@ pub fn Home() -> Element {
                                 // Determine if there are more events to load
                                 has_more.set(feed_events.len() >= 150);
 
-                                events.set(feed_events);
+                                // Show feed immediately with database-cached metadata
+                                events.set(feed_events.clone());
                                 loading.set(false);
+
+                                // Spawn non-blocking background prefetch for missing metadata
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_events).await;
+                                });
                             }
                             Err(e) => {
                                 error.set(Some(e));
@@ -238,11 +250,17 @@ pub fn Home() -> Element {
                             // Determine if there are more events based on RAW count before filtering
                             has_more.set(raw_count >= 100);
 
-                            // Append new events to existing events
+                            // Append and show new events immediately
+                            let prefetch_events = new_events.clone();
                             let mut current = events.read().clone();
                             current.append(&mut new_events);
                             events.set(current);
                             loading.set(false);
+
+                            // Spawn non-blocking background prefetch for missing metadata
+                            spawn(async move {
+                                prefetch_author_metadata(&prefetch_events).await;
+                            });
                         }
                         Err(e) => {
                             log::error!("Failed to load more events: {}", e);
@@ -261,11 +279,17 @@ pub fn Home() -> Element {
                             // Determine if there are more events to load
                             has_more.set(new_events.len() >= 150);
 
-                            // Append new events to existing events
+                            // Append and show new events immediately
+                            let prefetch_events = new_events.clone();
                             let mut current = events.read().clone();
                             current.append(&mut new_events);
                             events.set(current);
                             loading.set(false);
+
+                            // Spawn non-blocking background prefetch for missing metadata
+                            spawn(async move {
+                                prefetch_author_metadata(&prefetch_events).await;
+                            });
                         }
                         Err(e) => {
                             log::error!("Failed to load more events: {}", e);
@@ -1018,6 +1042,75 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
             Err(format!("Failed to load feed: {}", e))
+        }
+    }
+}
+
+/// Batch prefetch author metadata for all events
+/// This checks the database first and only fetches missing metadata
+async fn prefetch_author_metadata(events: &[Event]) {
+    use std::collections::HashSet;
+    use nostr_sdk::prelude::NostrDatabaseExt;
+
+    // Collect unique author pubkeys
+    let authors: Vec<PublicKey> = events.iter()
+        .map(|e| e.pubkey)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if authors.is_empty() {
+        return;
+    }
+
+    log::info!("Checking database for metadata of {} unique authors", authors.len());
+
+    // Get client
+    let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
+        Some(c) => c.clone(),
+        None => {
+            log::warn!("Client not available for metadata prefetch");
+            return;
+        }
+    };
+
+    // Check which authors are missing from database
+    let mut missing_authors = Vec::new();
+    for author in &authors {
+        match client.database().metadata(*author).await {
+            Ok(Some(_)) => {
+                // Already in database, skip
+                continue;
+            }
+            Ok(None) | Err(_) => {
+                // Not in database or error, need to fetch
+                missing_authors.push(*author);
+            }
+        }
+    }
+
+    if missing_authors.is_empty() {
+        log::info!("All metadata already in database, no prefetch needed");
+        return;
+    }
+
+    log::info!("Batch fetching {} missing metadata entries (from {} total authors)",
+               missing_authors.len(), authors.len());
+
+    // Single batch query for missing author metadata
+    let filter = Filter::new()
+        .authors(missing_authors)
+        .kind(Kind::Metadata);
+
+    // Fetch and auto-save to database
+    match client.fetch_events(filter, Duration::from_secs(10)).await {
+        Ok(events) => {
+            log::info!("Successfully prefetched {} new metadata events", events.len());
+            // Events are automatically saved to IndexedDB by the SDK
+        }
+        Err(e) => {
+            log::warn!("Failed to prefetch metadata: {}", e);
+            // Non-fatal - individual components will fetch as needed
         }
     }
 }
