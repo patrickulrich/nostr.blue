@@ -361,6 +361,7 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_load_more.clone();
+        let post_count_clone = post_count.clone();
 
         loading_events.set(true);
 
@@ -380,6 +381,11 @@ pub fn Profile(pubkey: String) -> Element {
                         data.events.extend(new_events);
                         data.oldest_timestamp = oldest_ts;
                         data.has_more = has_more_val;
+
+                        // Update post count if we're on the Posts tab
+                        if tab == ProfileTab::Posts {
+                            post_count_clone.set(data.events.len());
+                        }
                     }
                     tab_data.set(data_map);
 
@@ -388,8 +394,15 @@ pub fn Profile(pubkey: String) -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
-                    // On error, disable further loading
+                    // On error, disable further loading in both reactive signal and persisted state
                     current_tab_has_more.set(false);
+
+                    // Update the persisted TabData.has_more as well
+                    let mut data_map = tab_data.read().clone();
+                    if let Some(data) = data_map.get_mut(&tab) {
+                        data.has_more = false;
+                    }
+                    tab_data.set(data_map);
                 }
             }
             loading_events.set(false);
