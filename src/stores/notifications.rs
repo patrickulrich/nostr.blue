@@ -117,7 +117,7 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
 
     match client.send_event_builder(builder).await {
         Ok(output) => {
-            log::info!("Published notification checked_at to NIP-78: {:?}", output.val);
+            log::info!("Published notification checked_at to NIP-78: {}", output.id().to_string());
             *LAST_PUBLISHED_AT.write() = timestamp;
         }
         Err(e) => {

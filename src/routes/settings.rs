@@ -247,7 +247,7 @@ pub fn Settings() -> Element {
                                 checked: settings.sync_notifications,
                                 disabled: !auth.is_authenticated,
                                 onchange: move |evt| {
-                                    let enabled = evt.value().parse::<bool>().unwrap_or(false);
+                                    let enabled = evt.checked();
                                     spawn(async move {
                                         settings_store::update_notification_sync(enabled).await;
                                     });
