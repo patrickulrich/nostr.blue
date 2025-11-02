@@ -121,6 +121,7 @@ pub fn VideoCard(event: Event) -> Element {
     // State for interactions
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
+    let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
@@ -198,7 +199,26 @@ pub fn VideoCard(event: Event) -> Element {
                 .limit(500);
 
             if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_zapped = false;
+
                 let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
+                    // Check if this zap is from the current user (P tag contains sender pubkey)
+                    if let Some(ref user_pk) = current_user_pubkey {
+                        if let Some(zap_sender) = zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "P" {
+                                tag_vec.get(1).map(|s| s.as_str().to_string())
+                            } else {
+                                None
+                            }
+                        }) {
+                            if zap_sender == *user_pk {
+                                user_has_zapped = true;
+                            }
+                        }
+                    }
+
                     zap_event.tags.iter().find_map(|tag| {
                         let tag_vec = tag.clone().to_vec();
                         if tag_vec.first()?.as_str() == "description" {
@@ -224,6 +244,7 @@ pub fn VideoCard(event: Event) -> Element {
                 }).sum();
 
                 zap_amount_sats.set(total_sats);
+                is_zapped.set(user_has_zapped);
             }
         });
     }));
@@ -444,10 +465,17 @@ pub fn VideoCard(event: Event) -> Element {
 
                 // Zap
                 button {
-                    class: "flex items-center gap-2 hover:text-yellow-500 transition",
+                    class: if *is_zapped.read() {
+                        "flex items-center gap-2 text-yellow-500 transition"
+                    } else {
+                        "flex items-center gap-2 hover:text-yellow-500 transition"
+                    },
                     disabled: !has_signer,
                     onclick: move |_| show_zap_modal.set(true),
-                    ZapIcon { class: "w-5 h-5" }
+                    ZapIcon {
+                        class: "w-5 h-5".to_string(),
+                        filled: *is_zapped.read()
+                    }
                     if *zap_amount_sats.read() > 0 {
                         span { class: "text-sm", "{zap_amount_sats.read()}" }
                     }

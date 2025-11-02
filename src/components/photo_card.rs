@@ -98,6 +98,7 @@ pub fn PhotoCard(event: Event) -> Element {
     // State for interactions
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
+    let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     // Read bookmark state reactively - will update when store changes
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
@@ -209,7 +210,26 @@ pub fn PhotoCard(event: Event) -> Element {
                 .limit(500);
 
             if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_zapped = false;
+
                 let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
+                    // Check if this zap is from the current user (P tag contains sender pubkey)
+                    if let Some(ref user_pk) = current_user_pubkey {
+                        if let Some(zap_sender) = zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "P" {
+                                tag_vec.get(1).map(|s| s.as_str().to_string())
+                            } else {
+                                None
+                            }
+                        }) {
+                            if zap_sender == *user_pk {
+                                user_has_zapped = true;
+                            }
+                        }
+                    }
+
                     // Look for the description tag which contains the zap request
                     zap_event.tags.iter().find_map(|tag| {
                         let tag_vec = tag.clone().to_vec();
@@ -239,6 +259,7 @@ pub fn PhotoCard(event: Event) -> Element {
                 }).sum();
 
                 zap_amount_sats.set(total_sats);
+                is_zapped.set(user_has_zapped);
             }
         });
     }));
@@ -465,14 +486,18 @@ pub fn PhotoCard(event: Event) -> Element {
                     if has_lightning {
                         rsx! {
                             button {
-                                class: "flex items-center gap-1 hover:text-yellow-500 transition",
+                                class: if *is_zapped.read() {
+                                    "flex items-center gap-1 text-yellow-500 transition"
+                                } else {
+                                    "flex items-center gap-1 hover:text-yellow-500 transition"
+                                },
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     show_zap_modal.set(true);
                                 },
                                 ZapIcon {
                                     class: "w-6 h-6".to_string(),
-                                    filled: false
+                                    filled: *is_zapped.read()
                                 }
                                 span {
                                     class: "text-sm",

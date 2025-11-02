@@ -30,6 +30,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     let mut is_liked = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
+    let mut is_zapped = use_signal(|| false);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
@@ -82,6 +83,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 let mut total_sats = 0u64;
                 let mut user_has_liked = false;
                 let mut user_has_reposted = false;
+                let mut user_has_zapped = false;
 
                 for event in events {
                     match event.kind {
@@ -105,6 +107,23 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                             }
                         },
                         kind if kind == Kind::from(9735) => {
+                            // Check if this zap is from the current user
+                            // The P tag contains the pubkey of the zap sender
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if let Some(zap_sender) = event.tags.iter().find_map(|tag| {
+                                    let tag_vec = tag.clone().to_vec();
+                                    if tag_vec.first()?.as_str() == "P" {
+                                        tag_vec.get(1).map(|s| s.as_str().to_string())
+                                    } else {
+                                        None
+                                    }
+                                }) {
+                                    if zap_sender == *user_pk {
+                                        user_has_zapped = true;
+                                    }
+                                }
+                            }
+
                             // Calculate zap amount
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
@@ -145,6 +164,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 zap_amount_sats.set(total_sats);
                 is_liked.set(user_has_liked);
                 is_reposted.set(user_has_reposted);
+                is_zapped.set(user_has_zapped);
             }
         });
     }));
@@ -231,6 +251,12 @@ pub fn NoteCard(event: NostrEvent) -> Element {
         "flex items-center text-green-500 transition"
     } else {
         "flex items-center text-muted-foreground hover:text-green-500 transition"
+    };
+
+    let zap_button_class = if *is_zapped.read() {
+        "flex items-center gap-1 text-yellow-500 transition px-2 py-1.5 rounded"
+    } else {
+        "flex items-center gap-1 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition px-2 py-1.5 rounded"
     };
 
     let bookmark_button_class = if is_bookmarked {
@@ -450,14 +476,14 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                             if has_lightning {
                                 rsx! {
                                     button {
-                                        class: "flex items-center gap-1 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition px-2 py-1.5 rounded",
+                                        class: "{zap_button_class}",
                                         onclick: move |e: MouseEvent| {
                                             e.stop_propagation();
                                             show_zap_modal.set(true);
                                         },
                                         ZapIcon {
                                             class: "h-4 w-4".to_string(),
-                                            filled: false
+                                            filled: *is_zapped.read()
                                         }
                                         span {
                                             class: "text-xs",
