@@ -1,18 +1,54 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store};
-use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal};
+use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, TagKind};
 use std::time::Duration;
+use std::collections::HashMap;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
+enum MediaSubTab {
+    Photos,
+    Videos,
+}
+
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum ProfileTab {
     Posts,
     Replies,
     Articles,
-    Media,
+    Media(MediaSubTab),
     Likes,
+}
+
+// Per-tab state to track events, pagination, and loading status
+#[derive(Clone, Debug)]
+struct TabData {
+    events: Vec<NostrEvent>,
+    oldest_timestamp: Option<u64>,
+    has_more: bool,
+    loaded: bool,
+}
+
+// Result type for load_tab_events containing events and the proper pagination cursor
+#[derive(Clone, Debug)]
+struct LoadOutcome {
+    events: Vec<NostrEvent>,
+    // The cursor for pagination - for Likes this is the oldest reaction timestamp,
+    // for other tabs it's the oldest event.created_at
+    oldest_cursor: Option<u64>,
+}
+
+impl Default for TabData {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            oldest_timestamp: None,
+            has_more: true,
+            loaded: false,
+        }
+    }
 }
 
 #[component]
@@ -24,10 +60,18 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Tab and events state
     let mut active_tab = use_signal(|| ProfileTab::Posts);
-    let mut events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut tab_data = use_signal(|| {
+        let mut map = HashMap::new();
+        map.insert(ProfileTab::Posts, TabData::default());
+        map.insert(ProfileTab::Replies, TabData::default());
+        map.insert(ProfileTab::Articles, TabData::default());
+        map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
+        map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
+        map.insert(ProfileTab::Likes, TabData::default());
+        map
+    });
     let mut loading_events = use_signal(|| false);
-    let mut has_more = use_signal(|| true);
-    let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut current_tab_has_more = use_signal(|| true);
 
     // Follow state
     let mut is_following = use_signal(|| false);
@@ -125,7 +169,7 @@ pub fn Profile(pubkey: String) -> Element {
         });
     });
 
-    // Fetch events based on active tab
+    // Fetch events based on active tab (only if not already loaded)
     use_effect(move || {
         let tab = active_tab.read().clone();
         let pubkey_str = pubkey_for_events.clone();
@@ -136,27 +180,59 @@ pub fn Profile(pubkey: String) -> Element {
             return;
         }
 
+        // Check if this tab is already loaded
+        let already_loaded = tab_data.read().get(&tab).map(|d| d.loaded).unwrap_or(false);
+        if already_loaded {
+            // Tab already loaded, just update has_more signal for infinite scroll
+            let has_more = tab_data.read().get(&tab).map(|d| d.has_more).unwrap_or(true);
+            current_tab_has_more.set(has_more);
+            return;
+        }
+
         loading_events.set(true);
-        oldest_timestamp.set(None);
 
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, None).await {
-                Ok(tab_events) => {
-                    if let Some(last) = tab_events.last() {
-                        oldest_timestamp.set(Some(last.created_at.as_u64()));
-                    }
-                    has_more.set(tab_events.len() >= 50);
+                Ok(outcome) => {
+                    // Subtract 1 from the oldest cursor to avoid re-fetching the same last event
+                    let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                    // Assume there's more content unless we got 0 events
+                    // Infinite scroll will call load_more which will discover if there's truly no more
+                    let has_more = !outcome.events.is_empty();
 
                     // Count posts for header (only for Posts tab)
                     if matches!(tab, ProfileTab::Posts) {
-                        post_count.set(tab_events.len());
+                        post_count.set(outcome.events.len());
                     }
 
-                    events.set(tab_events);
+                    // Update the tab's data - clone the map, modify, and set to trigger reactivity
+                    let mut data_map = tab_data.read().clone();
+                    data_map.insert(tab.clone(), TabData {
+                        events: outcome.events,
+                        oldest_timestamp: oldest_ts,
+                        has_more,
+                        loaded: true,
+                    });
+                    tab_data.set(data_map);
+
+                    // Update has_more signal for infinite scroll
+                    log::info!("Setting current_tab_has_more to {} after initial load", has_more);
+                    current_tab_has_more.set(has_more);
                 }
                 Err(e) => {
                     log::error!("Failed to load events: {}", e);
-                    events.set(Vec::new());
+                    // Mark as loaded even on error to prevent infinite retries
+                    let mut data_map = tab_data.read().clone();
+                    data_map.insert(tab.clone(), TabData {
+                        events: Vec::new(),
+                        oldest_timestamp: None,
+                        has_more: false,
+                        loaded: true,
+                    });
+                    tab_data.set(data_map);
+
+                    // Update has_more signal
+                    current_tab_has_more.set(false);
                 }
             }
             loading_events.set(false);
@@ -165,7 +241,9 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Check if following this user
     use_effect(move || {
-        if !auth_store::is_authenticated() {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
 
@@ -193,7 +271,9 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Check if this user follows you
     use_effect(move || {
-        if !auth_store::is_authenticated() {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
 
@@ -235,6 +315,12 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Fetch following/followers counts
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
         let pubkey_str = pubkey_for_stats.clone();
 
         spawn(async move {
@@ -265,31 +351,67 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Load more handler
     let load_more = move || {
-        if *loading_events.read() || !*has_more.read() {
+        let tab = active_tab.read().clone();
+
+        log::info!("load_more called for tab {:?}", tab);
+
+        // Get current tab's state
+        let (has_more, until) = {
+            let data = tab_data.read();
+            let tab_state = data.get(&tab).unwrap();
+            (tab_state.has_more, tab_state.oldest_timestamp)
+        };
+
+        log::info!("load_more: has_more={}, loading={}, until={:?}", has_more, *loading_events.read(), until);
+
+        if *loading_events.read() || !has_more {
+            log::info!("load_more: bailing early");
             return;
         }
 
-        let tab = active_tab.read().clone();
         let pubkey_str = pubkey_for_load_more.clone();
-        let until = *oldest_timestamp.read();
+        let mut post_count_clone = post_count.clone();
 
         loading_events.set(true);
 
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, until).await {
-                Ok(mut new_events) => {
-                    if let Some(last) = new_events.last() {
-                        oldest_timestamp.set(Some(last.created_at.as_u64()));
-                    }
-                    has_more.set(new_events.len() >= 50);
+                Ok(outcome) => {
+                    // Subtract 1 from the oldest cursor to avoid re-fetching the same last event
+                    let oldest_ts = outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                    // If we got 0 events, we've hit the end
+                    let has_more_val = !outcome.events.is_empty();
 
-                    // Append new events
-                    let mut current = events.read().clone();
-                    current.append(&mut new_events);
-                    events.set(current);
+                    log::info!("load_more: got {} new events, has_more={}", outcome.events.len(), has_more_val);
+
+                    // Append new events to the current tab's data - clone, modify, set to trigger reactivity
+                    let mut data_map = tab_data.read().clone();
+                    if let Some(data) = data_map.get_mut(&tab) {
+                        data.events.extend(outcome.events);
+                        data.oldest_timestamp = oldest_ts;
+                        data.has_more = has_more_val;
+
+                        // Update post count if we're on the Posts tab
+                        if tab == ProfileTab::Posts {
+                            post_count_clone.set(data.events.len());
+                        }
+                    }
+                    tab_data.set(data_map);
+
+                    // Update has_more signal for infinite scroll to continue working
+                    current_tab_has_more.set(has_more_val);
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
+                    // On error, disable further loading in both reactive signal and persisted state
+                    current_tab_has_more.set(false);
+
+                    // Update the persisted TabData.has_more as well
+                    let mut data_map = tab_data.read().clone();
+                    if let Some(data) = data_map.get_mut(&tab) {
+                        data.has_more = false;
+                    }
+                    tab_data.set(data_map);
                 }
             }
             loading_events.set(false);
@@ -299,7 +421,7 @@ pub fn Profile(pubkey: String) -> Element {
     // Set up infinite scroll
     let sentinel_id = use_infinite_scroll(
         load_more,
-        has_more,
+        current_tab_has_more,
         loading_events
     );
 
@@ -551,8 +673,8 @@ pub fn Profile(pubkey: String) -> Element {
                     }
                     ProfileTabButton {
                         label: "Media",
-                        active: matches!(*active_tab.read(), ProfileTab::Media),
-                        onclick: move |_| active_tab.set(ProfileTab::Media)
+                        active: matches!(*active_tab.read(), ProfileTab::Media(_)),
+                        onclick: move |_| active_tab.set(ProfileTab::Media(MediaSubTab::Photos))
                     }
                     ProfileTabButton {
                         label: "Likes",
@@ -560,57 +682,134 @@ pub fn Profile(pubkey: String) -> Element {
                         onclick: move |_| active_tab.set(ProfileTab::Likes)
                     }
                 }
+
+                // Media sub-tabs (only show when Media tab is active)
+                if matches!(*active_tab.read(), ProfileTab::Media(_)) {
+                    div {
+                        class: "flex gap-2 px-4 py-2 bg-accent/10",
+                        button {
+                            class: if matches!(*active_tab.read(), ProfileTab::Media(MediaSubTab::Photos)) {
+                                "px-4 py-2 rounded-full bg-primary text-primary-foreground font-medium"
+                            } else {
+                                "px-4 py-2 rounded-full hover:bg-accent font-medium"
+                            },
+                            onclick: move |_| active_tab.set(ProfileTab::Media(MediaSubTab::Photos)),
+                            "Photos"
+                        }
+                        button {
+                            class: if matches!(*active_tab.read(), ProfileTab::Media(MediaSubTab::Videos)) {
+                                "px-4 py-2 rounded-full bg-primary text-primary-foreground font-medium"
+                            } else {
+                                "px-4 py-2 rounded-full hover:bg-accent font-medium"
+                            },
+                            onclick: move |_| active_tab.set(ProfileTab::Media(MediaSubTab::Videos)),
+                            "Videos"
+                        }
+                    }
+                }
             }
 
             // Content area
             div {
-                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading_events.read() && events.read().is_empty()) {
-                    // Show client initializing animation during:
-                    // 1. Client initialization
-                    // 2. Initial events load (loading + no events, regardless of error state)
-                    ClientInitializing {}
-                } else if !events.read().is_empty() {
-                    div {
-                        class: "divide-y divide-border",
-                        for event in events.read().iter() {
-                            NoteCard {
-                                event: event.clone()
-                            }
-                        }
-                    }
+                {
+                    // Get current tab's events
+                    let tab = active_tab.read().clone();
+                    let current_events = tab_data.read().get(&tab).map(|d| d.events.clone()).unwrap_or_default();
+                    let current_has_more = tab_data.read().get(&tab).map(|d| d.has_more).unwrap_or(false);
 
-                    // Infinite scroll sentinel / loading indicator
-                    if *has_more.read() {
-                        div {
-                            id: "{sentinel_id}",
-                            class: "p-8 flex justify-center",
-                            if *loading_events.read() {
-                                span {
-                                    class: "flex items-center gap-2 text-muted-foreground",
-                                    span {
-                                        class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
+                    log::debug!("Rendering tab {:?}: {} events, has_more={}, sentinel_signal={}",
+                        tab, current_events.len(), current_has_more, *current_tab_has_more.read());
+
+                    rsx! {
+                        if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading_events.read() && current_events.is_empty()) {
+                            // Show client initializing animation during:
+                            // 1. Client initialization
+                            // 2. Initial events load (loading + no events, regardless of error state)
+                            ClientInitializing {}
+                        } else if !current_events.is_empty() {
+                            div {
+                                class: "divide-y divide-border",
+                                for event in current_events.iter() {
+                                    // Render the appropriate card based on tab type and event kind
+                                    match &tab {
+                                        ProfileTab::Media(MediaSubTab::Photos) => rsx! {
+                                            PhotoCard {
+                                                event: event.clone()
+                                            }
+                                        },
+                                        ProfileTab::Media(MediaSubTab::Videos) => rsx! {
+                                            VideoCard {
+                                                event: event.clone()
+                                            }
+                                        },
+                                        ProfileTab::Likes => {
+                                            // Render based on the kind of event that was liked
+                                            match event.kind.as_u16() {
+                                                20 => rsx! {
+                                                    PhotoCard {
+                                                        event: event.clone()
+                                                    }
+                                                },
+                                                21 | 22 => rsx! {
+                                                    VideoCard {
+                                                        event: event.clone()
+                                                    }
+                                                },
+                                                30023 => rsx! {
+                                                    ArticleCard {
+                                                        event: event.clone()
+                                                    }
+                                                },
+                                                _ => rsx! {
+                                                    NoteCard {
+                                                        event: event.clone()
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        _ => rsx! {
+                                            NoteCard {
+                                                event: event.clone()
+                                            }
+                                        }
                                     }
-                                    "Loading more..."
                                 }
                             }
-                        }
-                    } else if !events.read().is_empty() {
-                        div {
-                            class: "p-8 text-center text-muted-foreground",
-                            "You've reached the end"
-                        }
-                    }
-                } else {
-                    // Empty state
-                    div {
-                        class: "text-center py-12",
-                        div {
-                            class: "text-6xl mb-4",
-                            "{get_empty_state_icon(&active_tab.read())}"
-                        }
-                        p {
-                            class: "text-muted-foreground",
-                            "{get_empty_state_message(&active_tab.read())}"
+
+                            // Infinite scroll sentinel / loading indicator
+                            if current_has_more {
+                                div {
+                                    id: "{sentinel_id}",
+                                    class: "p-8 flex justify-center",
+                                    if *loading_events.read() {
+                                        span {
+                                            class: "flex items-center gap-2 text-muted-foreground",
+                                            span {
+                                                class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
+                                            }
+                                            "Loading more..."
+                                        }
+                                    }
+                                }
+                            } else if !current_events.is_empty() {
+                                div {
+                                    class: "p-8 text-center text-muted-foreground",
+                                    "You've reached the end"
+                                }
+                            }
+                        } else {
+                            // Empty state
+                            div {
+                                class: "text-center py-12",
+                                div {
+                                    class: "text-6xl mb-4",
+                                    "{get_empty_state_icon(&active_tab.read())}"
+                                }
+                                p {
+                                    class: "text-muted-foreground",
+                                    "{get_empty_state_message(&active_tab.read())}"
+                                }
+                            }
                         }
                     }
                 }
@@ -644,82 +843,294 @@ fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<Mou
 }
 
 // Helper function to load events based on tab type
-async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<Vec<NostrEvent>, String> {
+// Fetches enough events to return approximately 50 items for the specific tab
+async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<LoadOutcome, String> {
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    // Create filter based on tab type
-    let mut filter = Filter::new()
-        .author(public_key)
-        .limit(50);
+    const TARGET_COUNT: usize = 50;
+    const MAX_FETCH_LIMIT: usize = 500; // Safety limit to prevent infinite fetching
 
-    // Add until timestamp for pagination
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
-
-    // Modify filter based on tab
     match tab {
         ProfileTab::Posts => {
-            // Kind 1 (text notes) only - we'll filter out replies after fetching
-            filter = filter.kind(Kind::TextNote);
-        }
-        ProfileTab::Replies => {
-            // Kind 1 (text notes) only - we'll filter for replies after fetching
-            filter = filter.kind(Kind::TextNote);
-        }
-        ProfileTab::Articles => {
-            // Kind 30023 (long-form content)
-            filter = filter.kind(Kind::LongFormTextNote);
-        }
-        ProfileTab::Media => {
-            // Video kinds (not yet in nostr-sdk constants, use custom)
-            // For now, return empty
-            return Ok(Vec::new());
-        }
-        ProfileTab::Likes => {
-            // Kind 7 (reactions)
-            filter = filter.kind(Kind::Reaction);
-        }
-    }
+            // Fetch kind 1 events until we have 50 posts (without e-tags)
+            let mut all_posts = Vec::new();
+            let mut current_until = until;
+            let mut total_fetched = 0;
+            let mut hit_end = false;
 
-    log::info!("Fetching events with filter: {:?}", filter);
+            while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
+                let mut filter = Filter::new()
+                    .author(public_key.clone())
+                    .kind(Kind::TextNote)
+                    .limit(100); // Fetch more at once to reduce round trips
 
-    // Fetch events from relays
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-
-            // Filter based on tab type
-            match tab {
-                ProfileTab::Posts => {
-                    // Only events WITHOUT 'e' tags (not replies)
-                    event_vec.retain(|e| {
-                        !e.tags.iter().any(|t| t.kind() == TagKind::e())
-                    });
+                if let Some(until_ts) = current_until {
+                    filter = filter.until(Timestamp::from(until_ts));
                 }
-                ProfileTab::Replies => {
-                    // Only events WITH 'e' tags (replies)
-                    event_vec.retain(|e| {
-                        e.tags.iter().any(|t| t.kind() == TagKind::e())
-                    });
+
+                let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+                let events_len = events.len();
+                if events_len == 0 {
+                    hit_end = true;
+                    break; // No more events available
                 }
-                _ => {
-                    // Other tabs don't need additional filtering
+
+                total_fetched += events_len;
+
+                // Get the oldest event timestamp BEFORE filtering
+                let oldest_event_ts = events.last().map(|e| e.created_at.as_u64());
+
+                // Filter for posts only (no e-tags)
+                let posts: Vec<NostrEvent> = events.into_iter()
+                    .filter(|e| !e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                    .collect();
+
+                all_posts.extend(posts);
+
+                // Update until timestamp to the oldest event we saw (not just the oldest post)
+                // This ensures we continue pagination even if we filtered out all results
+                if let Some(ts) = oldest_event_ts {
+                    current_until = Some(ts - 1); // Subtract 1 to avoid fetching the same event
+                }
+
+                // Only mark as end if we got fewer events than requested
+                if events_len < 100 {
+                    hit_end = true;
+                    break;
                 }
             }
 
-            // Sort by created_at (newest first)
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            all_posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-            log::info!("Loaded {} events for tab {:?}", event_vec.len(), tab);
-            Ok(event_vec)
+            // Don't truncate - return all posts found
+            log::info!("Loaded {} posts (fetched {} total events, hit_end={})", all_posts.len(), total_fetched, hit_end);
+
+            let oldest_cursor = all_posts.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: all_posts,
+                oldest_cursor,
+            })
         }
-        Err(e) => {
-            log::error!("Failed to fetch events: {}", e);
-            Err(format!("Failed to fetch events: {}", e))
+        ProfileTab::Replies => {
+            // Fetch kind 1 events until we have 50 replies (with e-tags)
+            let mut all_replies = Vec::new();
+            let mut current_until = until;
+            let mut total_fetched = 0;
+            let mut hit_end = false;
+
+            while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
+                let mut filter = Filter::new()
+                    .author(public_key.clone())
+                    .kind(Kind::TextNote)
+                    .limit(100);
+
+                if let Some(until_ts) = current_until {
+                    filter = filter.until(Timestamp::from(until_ts));
+                }
+
+                let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+                let events_len = events.len();
+                if events_len == 0 {
+                    hit_end = true;
+                    break;
+                }
+
+                total_fetched += events_len;
+
+                // Get the oldest event timestamp BEFORE filtering
+                let oldest_event_ts = events.last().map(|e| e.created_at.as_u64());
+
+                // Filter for replies only (with e-tags)
+                let replies: Vec<NostrEvent> = events.into_iter()
+                    .filter(|e| e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                    .collect();
+
+                all_replies.extend(replies);
+
+                // Update until timestamp to the oldest event we saw
+                if let Some(ts) = oldest_event_ts {
+                    current_until = Some(ts - 1);
+                }
+
+                if events_len < 100 {
+                    hit_end = true;
+                    break;
+                }
+            }
+
+            all_replies.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} replies (fetched {} total events, hit_end={})", all_replies.len(), total_fetched, hit_end);
+
+            let oldest_cursor = all_replies.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: all_replies,
+                oldest_cursor,
+            })
+        }
+        ProfileTab::Articles => {
+            // Kind 30023 (long-form content) - direct query
+            let mut filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::LongFormTextNote)
+                .limit(TARGET_COUNT);
+
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            }
+
+            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} articles", event_vec.len());
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
+        }
+        ProfileTab::Media(MediaSubTab::Photos) => {
+            // Kind 20 (Picture Events - NIP-68) - direct query
+            let mut filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::Custom(20))
+                .limit(TARGET_COUNT);
+
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            }
+
+            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} photos", event_vec.len());
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
+        }
+        ProfileTab::Media(MediaSubTab::Videos) => {
+            // Kind 21 & 22 (Video Events - NIP-71) - query both kinds
+            let mut filter = Filter::new()
+                .author(public_key)
+                .kinds(vec![Kind::Custom(21), Kind::Custom(22)])
+                .limit(TARGET_COUNT);
+
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            }
+
+            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} videos", event_vec.len());
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
+        }
+        ProfileTab::Likes => {
+            // Fetch Kind 7 (reactions) to get what was liked
+            let mut filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::Reaction)
+                .limit(TARGET_COUNT);
+
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            }
+
+            let reactions = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
+
+            if reactions.is_empty() {
+                return Ok(LoadOutcome {
+                    events: Vec::new(),
+                    oldest_cursor: None,
+                });
+            }
+
+            // Extract event IDs from reactions' e tags
+            let mut liked_event_ids = Vec::new();
+            for reaction in reactions.iter() {
+                for tag in reaction.tags.iter() {
+                    if tag.kind() == TagKind::e() {
+                        if let Some(event_id_str) = tag.content() {
+                            if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
+                                liked_event_ids.push(event_id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if liked_event_ids.is_empty() {
+                log::info!("No event IDs found in reactions");
+                return Ok(LoadOutcome {
+                    events: Vec::new(),
+                    oldest_cursor: None,
+                });
+            }
+
+            // Fetch the actual liked events
+            let liked_filter = Filter::new()
+                .ids(liked_event_ids)
+                .limit(500);
+
+            let client = nostr_client::get_client()
+                .ok_or_else(|| "Nostr client not initialized".to_string())?;
+
+            let liked_events = client.fetch_events(liked_filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
+
+            // Sort by the reaction timestamp (when the user liked it), not the original event timestamp
+            // Create a map of event_id -> reaction_timestamp for sorting
+            let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            for reaction in reactions.iter() {
+                for tag in reaction.tags.iter() {
+                    if tag.kind() == TagKind::e() {
+                        if let Some(event_id_str) = tag.content() {
+                            reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_u64());
+                        }
+                    }
+                }
+            }
+
+            let mut event_vec: Vec<NostrEvent> = liked_events.into_iter().collect();
+            // Sort by when they were liked (reaction timestamp), most recent first
+            event_vec.sort_by(|a, b| {
+                let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+                let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+                time_b.cmp(&time_a)
+            });
+
+            log::info!("Loaded {} liked events", event_vec.len());
+
+            // Get the oldest reaction timestamp (not event.created_at) for pagination
+            let oldest_cursor = event_vec.last()
+                .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
+
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
         }
     }
 }
@@ -776,7 +1187,8 @@ fn get_empty_state_message(tab: &ProfileTab) -> &'static str {
         ProfileTab::Posts => "No posts yet",
         ProfileTab::Replies => "No replies yet",
         ProfileTab::Articles => "No articles yet",
-        ProfileTab::Media => "No media yet",
+        ProfileTab::Media(MediaSubTab::Photos) => "No photos yet",
+        ProfileTab::Media(MediaSubTab::Videos) => "No videos yet",
         ProfileTab::Likes => "No likes yet",
     }
 }
@@ -786,7 +1198,8 @@ fn get_empty_state_icon(tab: &ProfileTab) -> &'static str {
         ProfileTab::Posts => "📝",
         ProfileTab::Replies => "💬",
         ProfileTab::Articles => "📄",
-        ProfileTab::Media => "🎬",
+        ProfileTab::Media(MediaSubTab::Photos) => "🖼️",
+        ProfileTab::Media(MediaSubTab::Videos) => "🎬",
         ProfileTab::Likes => "❤️",
     }
 }
