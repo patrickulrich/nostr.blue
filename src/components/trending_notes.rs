@@ -58,7 +58,7 @@ pub fn TrendingNotes() -> Element {
                     // Error state
                     div {
                         class: "px-4 py-8 text-center text-sm text-muted-foreground",
-                        "Failed to load trending posts"
+                        "Nostr.band API currently down"
                     }
                 } else if trending_notes.read().is_empty() {
                     // Empty state

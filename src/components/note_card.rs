@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, ToBech32};
+use nostr_sdk::prelude::NostrDatabaseExt;
 use crate::routes::Route;
 use crate::stores::nostr_client::{publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
@@ -164,18 +165,15 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                 None => return,
             };
 
-            // Fetch metadata event (kind 0)
-            let filter = Filter::new()
-                .author(pubkey)
-                .kind(Kind::Metadata)
-                .limit(1);
+            // Check database first (instant, no network)
+            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
+                author_metadata.set(Some(metadata));
+                return;
+            }
 
-            if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
-                        author_metadata.set(Some(metadata));
-                    }
-                }
+            // If not in database, fetch from relays (auto-caches to database)
+            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                author_metadata.set(Some(metadata));
             }
         });
     }));

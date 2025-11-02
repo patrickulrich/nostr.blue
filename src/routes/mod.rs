@@ -4,7 +4,6 @@ pub mod home;
 pub mod profile;
 pub mod note;
 pub mod settings;
-pub mod search;
 pub mod notifications;
 pub mod bookmarks;
 pub mod dms;
@@ -31,7 +30,6 @@ use home::Home;
 use profile::Profile;
 use note::Note;
 use settings::Settings;
-use search::Search;
 use notifications::Notifications;
 use bookmarks::Bookmarks;
 use dms::DMs;
@@ -92,9 +90,6 @@ pub enum Route {
 
         #[route("/music/album/:album_id")]
         MusicAlbum { album_id: String },
-
-        #[route("/search")]
-        Search {},
 
         #[route("/notifications")]
         Notifications {},
