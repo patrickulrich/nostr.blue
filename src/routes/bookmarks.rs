@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use crate::components::{NoteCard, ClientInitializing};
+use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use nostr_sdk::Event as NostrEvent;
 
 #[component]
@@ -10,7 +11,12 @@ pub fn Bookmarks() -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
-    // Load bookmarks on mount
+    // Pagination state for infinite scroll
+    let mut has_more = use_signal(|| true);
+    let mut loaded_count = use_signal(|| 0usize);
+    const BATCH_SIZE: usize = 50;
+
+    // Load initial batch of bookmarks on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -25,15 +31,26 @@ pub fn Bookmarks() -> Element {
 
         loading.set(true);
         error.set(None);
+        loaded_count.set(0);
+        bookmarked_events.set(Vec::new());
+        has_more.set(true);
 
         spawn(async move {
             // Initialize bookmarks from relays
             match bookmarks::init_bookmarks().await {
                 Ok(_) => {
-                    // Fetch actual events
-                    match bookmarks::fetch_bookmarked_events().await {
+                    let total_bookmarks = bookmarks::get_bookmarks_count();
+
+                    // Fetch first batch of events
+                    match bookmarks::fetch_bookmarked_events_paginated(0, Some(BATCH_SIZE)).await {
                         Ok(events) => {
+                            let fetched_count = events.len();
                             bookmarked_events.set(events);
+                            loaded_count.set(fetched_count);
+
+                            // Check if there are more bookmarks to load
+                            has_more.set(fetched_count >= BATCH_SIZE && fetched_count < total_bookmarks);
+                            log::info!("Loaded initial batch: {} / {} bookmarks", fetched_count, total_bookmarks);
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -47,6 +64,53 @@ pub fn Bookmarks() -> Element {
             loading.set(false);
         });
     });
+
+    // Load more bookmarks function for infinite scroll
+    let load_more = move || {
+        if *loading.read() || !*has_more.read() {
+            return;
+        }
+
+        loading.set(true);
+
+        spawn(async move {
+            let current_loaded = *loaded_count.read();
+            let total_bookmarks = bookmarks::get_bookmarks_count();
+
+            log::info!("Loading more bookmarks: skip={}, limit={}", current_loaded, BATCH_SIZE);
+
+            match bookmarks::fetch_bookmarked_events_paginated(current_loaded, Some(BATCH_SIZE)).await {
+                Ok(new_events) => {
+                    if !new_events.is_empty() {
+                        // Append new events to existing ones
+                        let mut current_events = bookmarked_events.read().clone();
+                        current_events.extend(new_events.clone());
+                        bookmarked_events.set(current_events);
+
+                        let new_loaded_count = current_loaded + new_events.len();
+                        loaded_count.set(new_loaded_count);
+
+                        // Check if there are more bookmarks to load
+                        has_more.set(new_loaded_count < total_bookmarks);
+                        log::info!("Loaded more bookmarks: {} / {} total", new_loaded_count, total_bookmarks);
+                    } else {
+                        has_more.set(false);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to load more bookmarks: {}", e);
+                }
+            }
+            loading.set(false);
+        });
+    };
+
+    // Set up infinite scroll
+    let sentinel_id = use_infinite_scroll(
+        load_more,
+        has_more,
+        loading
+    );
 
     rsx! {
         div {
@@ -124,11 +188,34 @@ pub fn Bookmarks() -> Element {
                         class: "space-y-4 p-4",
                         p {
                             class: "text-sm text-muted-foreground mb-4",
-                            "You have {bookmarked_events.read().len()} bookmarked post(s)"
+                            "Showing {bookmarked_events.read().len()} of {bookmarks::get_bookmarks_count()} bookmarked post(s)"
                         }
                         for event in bookmarked_events.read().iter() {
                             NoteCard {
+                                key: "{event.id}",
                                 event: event.clone()
+                            }
+                        }
+
+                        // Infinite scroll sentinel / loading indicator
+                        if *has_more.read() {
+                            div {
+                                id: "{sentinel_id}",
+                                class: "p-8 flex justify-center",
+                                if *loading.read() {
+                                    span {
+                                        class: "flex items-center gap-2 text-muted-foreground",
+                                        span {
+                                            class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
+                                        }
+                                        "Loading more bookmarks..."
+                                    }
+                                }
+                            }
+                        } else if !bookmarked_events.read().is_empty() {
+                            div {
+                                class: "p-8 text-center text-muted-foreground",
+                                "You've reached the end"
                             }
                         }
                     }
