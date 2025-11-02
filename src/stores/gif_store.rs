@@ -203,11 +203,20 @@ fn parse_dimensions(dim_str: &str) -> Option<(u64, u64)> {
 pub async fn load_initial_gifs() {
     *GIF_LOADING.write() = true;
 
-    let search_query = CURRENT_SEARCH_QUERY.read().clone();
-    let query = if search_query.is_empty() { None } else { Some(search_query) };
+    // Capture the current search query to detect if it changes during fetch
+    let captured_query = CURRENT_SEARCH_QUERY.read().clone();
+    let query = if captured_query.is_empty() { None } else { Some(captured_query.clone()) };
 
     match fetch_gifs(100, None, query).await {
         Ok(gifs) => {
+            // Bail if the search query changed while we were fetching (prevents stale results)
+            let current_query = CURRENT_SEARCH_QUERY.read().clone();
+            if captured_query != current_query {
+                log::debug!("Search query changed during initial load, discarding stale results");
+                *GIF_LOADING.write() = false;
+                return;
+            }
+
             // Update oldest timestamp for pagination
             if let Some(oldest) = gifs.last() {
                 *GIF_OLDEST_TIMESTAMP.write() = Some(oldest.created_at);

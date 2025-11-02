@@ -99,6 +99,8 @@ pub fn Bookmarks() -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to load more bookmarks: {}", e);
+                    has_more.set(false); // Stop infinite scroll retries
+                    error.set(Some(format!("Failed to load more bookmarks: {}", e))); // Show error to user
                 }
             }
             loading.set(false);

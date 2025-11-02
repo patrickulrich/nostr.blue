@@ -9,10 +9,13 @@ pub struct GifPickerProps {
 #[component]
 pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
-    let mut position_below = use_signal(|| false);
+    let mut position_right = use_signal(|| true); // Whether to show popup to the right of button
     let button_id = use_signal(|| format!("gif-picker-{}", uuid::Uuid::new_v4()));
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(|| String::new());
+    let mut picker_top = use_signal(|| 0.0);
+    let mut picker_left = use_signal(|| 0.0);
+    let mut picker_right = use_signal(|| 0.0);
 
     // Read GIF state from global store
     let gif_results = GIF_RESULTS.read();
@@ -68,17 +71,41 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 if let Some(document) = window.document() {
                                     if let Some(element) = document.get_element_by_id(&btn_id) {
                                         let rect = element.get_bounding_client_rect();
+                                        let viewport_width = window
+                                            .inner_width()
+                                            .ok()
+                                            .and_then(|w| w.as_f64())
+                                            .unwrap_or(1024.0);
                                         let viewport_height = window
                                             .inner_height()
                                             .ok()
                                             .and_then(|h| h.as_f64())
                                             .unwrap_or(800.0);
 
-                                        let button_center_y = rect.top() + (rect.height() / 2.0);
-                                        let is_in_top_half = button_center_y < (viewport_height / 2.0);
+                                        let picker_width = 700.0;
+                                        let picker_height = 600.0; // Approximate height
+                                        let margin = 8.0;
 
-                                        // If button is in top half, show popup below; otherwise show above
-                                        position_below.set(is_in_top_half);
+                                        // Check if there's space on the right
+                                        let space_on_right = viewport_width - rect.right();
+                                        let has_space_right = space_on_right >= picker_width + margin;
+
+                                        // Calculate vertical position to center on button
+                                        let button_center_y = rect.top() + (rect.height() / 2.0);
+                                        let desired_top = button_center_y - (picker_height / 2.0);
+                                        // Clamp to viewport bounds
+                                        let final_top = desired_top.max(margin).min(viewport_height - picker_height - margin);
+                                        picker_top.set(final_top);
+
+                                        if has_space_right {
+                                            // Position to the right of button
+                                            picker_left.set(rect.right() + margin);
+                                            position_right.set(true);
+                                        } else {
+                                            // Position to the left of button
+                                            picker_right.set(viewport_width - rect.left() + margin);
+                                            position_right.set(false);
+                                        }
                                     }
                                 }
                             }
@@ -91,10 +118,11 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
             // GIF picker popover
             if *show_picker.read() {
                 div {
-                    class: if *position_below.read() {
-                        "absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-50 w-[700px]"
+                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[60] w-[700px]",
+                    style: if *position_right.read() {
+                        format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read())
                     } else {
-                        "absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-50 w-[700px]"
+                        format!("top: {}px; right: {}px;", *picker_top.read(), *picker_right.read())
                     },
                     onclick: move |e| e.stop_propagation(),
 
