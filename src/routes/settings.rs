@@ -7,7 +7,6 @@ pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
     let relays = nostr_client::RELAY_POOL.read();
     let blossom_servers = blossom_store::BLOSSOM_SERVERS.read();
-    let settings = settings_store::SETTINGS.read();
 
     let mut new_server_input = use_signal(|| String::new());
     let mut server_error = use_signal(|| None::<String>);
@@ -244,7 +243,7 @@ pub fn Settings() -> Element {
                             input {
                                 r#type: "checkbox",
                                 class: "sr-only peer",
-                                checked: settings.sync_notifications,
+                                checked: settings_store::SETTINGS.read().sync_notifications,
                                 disabled: !auth.is_authenticated,
                                 onchange: move |evt| {
                                     let enabled = evt.checked();
@@ -259,13 +258,23 @@ pub fn Settings() -> Element {
                         }
                         span {
                             class: "text-sm font-medium text-gray-900 dark:text-white",
-                            if settings.sync_notifications { "Enabled" } else { "Disabled" }
+                            {
+                                let is_enabled = settings_store::SETTINGS.read().sync_notifications;
+                                if is_enabled { "Enabled" } else { "Disabled" }
+                            }
                         }
                     }
-                    if auth.is_authenticated && settings.sync_notifications {
-                        span {
-                            class: "text-xs text-green-500",
-                            "✓ Syncing"
+                    {
+                        let sync_enabled = settings_store::SETTINGS.read().sync_notifications;
+                        if auth.is_authenticated && sync_enabled {
+                            rsx! {
+                                span {
+                                    class: "text-xs text-green-500",
+                                    "✓ Syncing"
+                                }
+                            }
+                        } else {
+                            rsx! {}
                         }
                     }
                 }
