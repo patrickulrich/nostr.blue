@@ -9,6 +9,7 @@ use std::time::Duration;
 use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;
+use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_tags};
 
 /// Global Nostr client instance
 pub static NOSTR_CLIENT: GlobalSignal<Option<Arc<Client>>> = Signal::global(|| None);
@@ -279,6 +280,11 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
 
     log::info!("Publishing note with {} characters", content.len());
 
+    // Extract mentions from content and create p tags
+    let mentioned_pubkeys = extract_mentioned_pubkeys(&content);
+    let mut mention_tags = create_mention_tags(&mentioned_pubkeys);
+    log::debug!("Extracted {} mentions from content", mentioned_pubkeys.len());
+
     // Convert tags to nostr Tag format
     use nostr::Tag;
     use nostr_sdk::nips::nip10::Marker;
@@ -344,8 +350,11 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
         })
         .collect();
 
+    // Combine mention tags with other tags
+    mention_tags.extend(nostr_tags);
+
     // Build and publish the event
-    let builder = nostr::EventBuilder::text_note(&content).tags(nostr_tags);
+    let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
 
     match client.send_event_builder(builder).await {
         Ok(output) => {

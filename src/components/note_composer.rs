@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client::publish_note, auth_store};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -108,16 +108,15 @@ pub fn NoteComposer() -> Element {
                 div {
                     class: "w-full",
 
-                        // Textarea
-                        textarea {
-                            class: "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none",
-                            placeholder: "What's happening?",
-                            rows: if *is_focused.read() { "4" } else { "2" },
-                            value: "{content}",
-                            disabled: *is_publishing.read(),
-                            oninput: move |evt| {
-                                content.set(evt.value().clone());
+                        // Mention Autocomplete Textarea
+                        MentionAutocomplete {
+                            content: content,
+                            on_input: move |new_value: String| {
+                                content.set(new_value);
                             },
+                            placeholder: "What's happening?".to_string(),
+                            rows: if *is_focused.read() { 4 } else { 2 },
+                            disabled: *is_publishing.read(),
                             onfocus: move |_| {
                                 is_focused.set(true);
                             }

@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
 use nostr_sdk::{Event as NostrEvent, EventBuilder};
+use nostr_sdk::prelude::*;
 
 const MAX_LENGTH: usize = 5000;
 
@@ -39,6 +40,35 @@ pub fn CommentComposer(
     let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
 
     let is_reply = parent_comment.is_some();
+
+    // Extract thread participants (author of commented event + anyone in parent comment)
+    let mut thread_participants = Vec::new();
+    thread_participants.push(comment_on.pubkey); // Add author of original content
+
+    // Add parent comment author if this is a reply to a comment
+    if let Some(parent) = &parent_comment {
+        if !thread_participants.contains(&parent.pubkey) {
+            thread_participants.push(parent.pubkey);
+        }
+
+        // Add anyone mentioned in parent comment's p tags
+        for tag in parent.tags.iter() {
+            if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+                if !thread_participants.contains(public_key) {
+                    thread_participants.push(*public_key);
+                }
+            }
+        }
+    }
+
+    // Add anyone mentioned in the original event's p tags
+    for tag in comment_on.tags.iter() {
+        if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+            if !thread_participants.contains(public_key) {
+                thread_participants.push(*public_key);
+            }
+        }
+    }
 
     // Determine counter color
     let counter_color = if is_over_limit {
@@ -182,17 +212,21 @@ pub fn CommentComposer(
                 div {
                     class: "p-6 space-y-4",
 
-                    // Textarea
-                    textarea {
-                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary",
-                        placeholder: if is_reply {
-                            "Write your reply..."
-                        } else {
-                            "Write your comment..."
+                    // Mention Autocomplete Textarea
+                    MentionAutocomplete {
+                        content: content,
+                        on_input: move |new_value: String| {
+                            content.set(new_value);
                         },
-                        value: "{content.read()}",
-                        oninput: move |e| content.set(e.value()),
+                        placeholder: if is_reply {
+                            "Write your reply...".to_string()
+                        } else {
+                            "Write your comment...".to_string()
+                        },
+                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary".to_string(),
+                        rows: 8,
                         disabled: !has_signer,
+                        thread_participants: thread_participants.clone()
                     }
 
                     // Character counter
