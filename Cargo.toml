@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.3.8"
+version = "0.4.0"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -17,6 +17,7 @@ nostr-database = { version = "0.43", default-features = false }
 nostr-indexeddb = { version = "0.43" }
 nostr-browser-signer = { version = "0.43" }
 nostr-blossom = { version = "0.43" }
+nostr-connect = { version = "0.43" }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

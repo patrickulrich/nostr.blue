@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store};
 use crate::routes::Route;
+use nostr_sdk::ToBech32;
+use gloo_storage::Storage;
 
 #[component]
 pub fn Settings() -> Element {
@@ -627,6 +629,81 @@ fn render_account_info() -> Element {
                 }
             }
 
+            // Remote Signer Info (only shown for RemoteSigner login method)
+            if matches!(auth.login_method, Some(auth_store::LoginMethod::RemoteSigner)) {
+                div {
+                    class: "p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg space-y-3",
+
+                    // Bunker URI
+                    div {
+                        div {
+                            class: "flex items-center justify-between mb-2",
+                            p {
+                                class: "text-sm font-medium text-blue-800 dark:text-blue-300",
+                                "🔐 Bunker URI"
+                            }
+                            button {
+                                class: "px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition",
+                                onclick: move |_| {
+                                    if let Ok(uri) = gloo_storage::LocalStorage::get::<String>("nostr_bunker_uri") {
+                                        copy_to_clipboard(uri, "Bunker URI");
+                                    }
+                                },
+                                "📋 Copy"
+                            }
+                        }
+                        if let Ok(uri) = gloo_storage::LocalStorage::get::<String>("nostr_bunker_uri") {
+                            p {
+                                class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                                {
+                                    if uri.len() > 60 {
+                                        format!("{}...{}", &uri[..30], &uri[uri.len()-25..])
+                                    } else {
+                                        uri
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // App Public Key
+                    div {
+                        div {
+                            class: "flex items-center justify-between mb-2",
+                            p {
+                                class: "text-sm font-medium text-blue-800 dark:text-blue-300",
+                                "🔑 App Public Key"
+                            }
+                            button {
+                                class: "px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition",
+                                onclick: move |_| {
+                                    if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<String>("nostr_app_keys") {
+                                        if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
+                                            let npub = keys.public_key().to_bech32().unwrap();
+                                            copy_to_clipboard(npub, "App public key");
+                                        }
+                                    }
+                                },
+                                "📋 Copy"
+                            }
+                        }
+                        if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<String>("nostr_app_keys") {
+                            if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
+                                p {
+                                    class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                                    "{keys.public_key().to_bech32().unwrap()}"
+                                }
+                            }
+                        }
+                    }
+
+                    p {
+                        class: "text-xs text-blue-700 dark:text-blue-400 mt-2",
+                        "ℹ️ Your keys are stored on your remote signing device. The app public key is used to authenticate this app to your signer."
+                    }
+                }
+            }
+
             // Login Method
             div {
                 class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
@@ -640,6 +717,7 @@ fn render_account_info() -> Element {
                         Some(auth_store::LoginMethod::PrivateKey) => "🔑 Private Key (nsec)",
                         Some(auth_store::LoginMethod::ReadOnly) => "👁️ Read-Only (npub)",
                         Some(auth_store::LoginMethod::BrowserExtension) => "🔌 Browser Extension (NIP-07)",
+                        Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer (NIP-46)",
                         None => "Unknown",
                     }
                 }

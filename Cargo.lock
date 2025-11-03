@@ -1973,6 +1973,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nostr-connect"
+version = "0.43.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3bcd44ea344d1cab3447615681cd3bb90134cafe4d157d3e714c23c31268cd8"
+dependencies = [
+ "async-utility",
+ "nostr",
+ "nostr-relay-pool",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nostr-database"
 version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2027,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.3.8"
+version = "0.4.0"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2047,6 +2060,7 @@ dependencies = [
  "nostr",
  "nostr-blossom",
  "nostr-browser-signer",
+ "nostr-connect",
  "nostr-database",
  "nostr-indexeddb",
  "nostr-sdk",

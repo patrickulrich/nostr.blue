@@ -688,6 +688,12 @@ pub async fn publish_metadata(metadata: Metadata) -> Result<String, String> {
                 .await
                 .map_err(|e| format!("Failed to sign metadata event: {}", e))?
         }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            EventBuilder::metadata(&metadata)
+                .sign(nostr_connect.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
+        }
     };
 
     // Publish to relays

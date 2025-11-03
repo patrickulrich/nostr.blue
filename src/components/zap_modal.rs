@@ -169,6 +169,18 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         }
                     }
                 }
+                signer::SignerType::NostrConnect(ref nostr_connect) => {
+                    #[allow(unused_imports)]
+                    use nostr::signer::NostrSigner;
+                    match builder.sign(nostr_connect.as_ref()).await {
+                        Ok(event) => event,
+                        Err(e) => {
+                            error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
+                            loading.set(false);
+                            return;
+                        }
+                    }
+                }
             };
 
             // Request invoice
