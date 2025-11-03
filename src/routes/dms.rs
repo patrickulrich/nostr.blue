@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, dms, profiles};
+use crate::stores::dms::ConversationMessage;
 use crate::routes::Route;
 use crate::utils::time;
-use nostr_sdk::Event as NostrEvent;
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -322,7 +322,7 @@ fn ConversationListItem(
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", conversation.pubkey));
 
     let time_ago = conversation.messages.last()
-        .map(|m| time::format_relative_time(m.created_at))
+        .map(|m| time::format_relative_time(m.created_at()))
         .unwrap_or_else(|| "".to_string());
 
     let bg_class = if selected {
@@ -384,7 +384,7 @@ fn ConversationListItem(
 fn ConversationView(pubkey: String) -> Element {
     let mut message_input = use_signal(|| String::new());
     let mut sending = use_signal(|| false);
-    let mut decrypted_messages = use_signal(|| Vec::<(NostrEvent, String)>::new());
+    let mut decrypted_messages = use_signal(|| Vec::<(ConversationMessage, String)>::new());
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
@@ -420,15 +420,15 @@ fn ConversationView(pubkey: String) -> Element {
                 log::info!("Found {} messages in conversation", conversation.messages.len());
                 let mut decrypted = Vec::new();
 
-                for event in conversation.messages {
-                    match dms::decrypt_dm(&event).await {
+                for msg in conversation.messages {
+                    match dms::decrypt_dm(&msg).await {
                         Ok(content) => {
                             log::debug!("Decrypted message: {}", &content[..content.len().min(50)]);
-                            decrypted.push((event, content));
+                            decrypted.push((msg, content));
                         }
                         Err(e) => {
                             log::error!("Failed to decrypt message: {}", e);
-                            decrypted.push((event, "[Failed to decrypt]".to_string()));
+                            decrypted.push((msg, "[Failed to decrypt]".to_string()));
                         }
                     }
                 }
@@ -557,17 +557,17 @@ fn ConversationView(pubkey: String) -> Element {
                         }
                     }
                 } else {
-                    for (event, content) in decrypted_messages.read().iter() {
+                    for (msg, content) in decrypted_messages.read().iter() {
                         {
                             let my_pubkey = auth_store::get_pubkey().unwrap_or_default();
-                            let is_mine = event.pubkey.to_string() == my_pubkey;
-                            let sender_pubkey = event.pubkey.to_string();
+                            let is_mine = msg.sender().to_string() == my_pubkey;
+                            let sender_pubkey = msg.sender().to_string();
 
                             rsx! {
                                 MessageBubble {
                                     content: content.clone(),
                                     is_mine: is_mine,
-                                    timestamp: event.created_at,
+                                    timestamp: msg.created_at(),
                                     sender_pubkey: sender_pubkey
                                 }
                             }
