@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -17,7 +17,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Profiles** - View and edit user profiles with follow/unfollow
 - ✅ **Post Composer** - Create text notes with rich content support
 - ✅ **Interactions** - Reactions, reposts, and threaded replies
-- ✅ **Search** - Find users, notes, and content by hashtags
+- ✅ **Search** - Find users, notes, and content by hashtags with NIP-50 relay search support
 - ✅ **Notifications** - Track mentions, replies, and interactions
 - ✅ **Explore** - Discover trending content and new users
 
@@ -41,11 +41,14 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Rich Content** - Embedded images, videos, and link previews with proper parsing
 - ✅ **NIP-19 Support** - Full support for npub, note, nprofile, nevent identifiers
 - ✅ **Browser Extension** - NIP-07 signing with Alby, nos2x, etc.
+- ✅ **Remote Signer (NIP-46)** - Secure signing with Amber, nsecBunker via bunker:// URIs
+- ✅ **Enhanced Login UI** - Educational sign-in experience with security best practices
 - ✅ **Real-Time Updates** - Live feed and notification updates
 - ✅ **Offline Support** - Browse cached content without internet
 - ✅ **Instant Loading** - Sub-100ms load times with IndexedDB cache
 - ✅ **Blossom Media Storage** - Decentralized image uploads with quality control
 - ✅ **Enhanced Emoji Picker** - 600+ emojis across 11 categories with NIP-51 custom emoji support
+- ✅ **GIF Search (NIP-50)** - Search and insert GIFs directly from the post composer using relay search
 
 ## 🛠 Technology Stack
 
@@ -61,6 +64,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - `nostr-database` - Database abstraction layer
   - `nostr-indexeddb` - IndexedDB persistent storage
   - `nostr-browser-signer` - NIP-07 browser extension integration
+  - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
 
 ### Styling & UI
 - **[TailwindCSS 3](https://tailwindcss.com/)** - Utility-first CSS framework
@@ -276,6 +280,8 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-30](https://github.com/nostr-protocol/nips/blob/master/30.md) | Custom emoji | ✅ |
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User status (music listening, etc.) | ✅ |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
+| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
+| [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (relay-based search, GIF search) | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |

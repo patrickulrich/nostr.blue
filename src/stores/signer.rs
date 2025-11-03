@@ -12,6 +12,8 @@ use std::sync::Arc;
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
 
+use nostr_connect::client::NostrConnect;
+
 /// Types of signers supported by the application
 #[derive(Debug, Clone)]
 pub enum SignerType {
@@ -20,6 +22,8 @@ pub enum SignerType {
     /// Browser extension signer (NIP-07)
     #[cfg(target_family = "wasm")]
     BrowserExtension(Arc<BrowserSigner>),
+    /// Remote signer (NIP-46)
+    NostrConnect(Arc<NostrConnect>),
 }
 
 impl SignerType {
@@ -35,6 +39,13 @@ impl SignerType {
                     .await
                     .map_err(|e| format!("Failed to get public key from browser extension: {}", e))
             }
+            SignerType::NostrConnect(nostr_connect) => {
+                use nostr::signer::NostrSigner;
+                nostr_connect
+                    .get_public_key()
+                    .await
+                    .map_err(|e| format!("Failed to get public key from remote signer: {}", e))
+            }
         }
     }
 
@@ -44,6 +55,7 @@ impl SignerType {
             SignerType::Keys(_) => "Keys",
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(_) => "Browser Extension",
+            SignerType::NostrConnect(_) => "Remote Signer",
         }
     }
 
@@ -54,6 +66,7 @@ impl SignerType {
             SignerType::Keys(keys) => Arc::new(keys),
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer,
+            SignerType::NostrConnect(nostr_connect) => nostr_connect,
         }
     }
 
@@ -63,6 +76,7 @@ impl SignerType {
             SignerType::Keys(keys) => Arc::new(keys.clone()),
             #[cfg(target_family = "wasm")]
             SignerType::BrowserExtension(signer) => signer.clone(),
+            SignerType::NostrConnect(nostr_connect) => nostr_connect.clone(),
         }
     }
 }
@@ -80,6 +94,7 @@ pub enum SignerBackend {
     Keys,
     #[cfg(target_family = "wasm")]
     BrowserExtension,
+    RemoteSigner,
 }
 
 impl SignerBackend {
@@ -89,6 +104,7 @@ impl SignerBackend {
             SignerBackend::Keys => "keys",
             #[cfg(target_family = "wasm")]
             SignerBackend::BrowserExtension => "browser_extension",
+            SignerBackend::RemoteSigner => "remote_signer",
         }
     }
 }
@@ -111,6 +127,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
         SignerType::Keys(_) => SignerBackend::Keys,
         #[cfg(target_family = "wasm")]
         SignerType::BrowserExtension(_) => SignerBackend::BrowserExtension,
+        SignerType::NostrConnect(_) => SignerBackend::RemoteSigner,
     };
 
     // Create signer info
@@ -189,6 +206,11 @@ pub async fn restore_session() -> Result<(), String> {
                 // Keys-based auth requires re-login (we don't persist private keys)
                 clear_signer();
                 return Err("Private key session requires re-login".to_string());
+            }
+            SignerBackend::RemoteSigner => {
+                // Remote signer session requires re-login (handled in auth_store)
+                clear_signer();
+                return Err("Remote signer session requires re-login".to_string());
             }
         }
     }

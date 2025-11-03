@@ -541,14 +541,177 @@ pub fn Home() -> Element {
 }
 
 #[component]
+fn HelpModal(on_close: EventHandler<()>) -> Element {
+    rsx! {
+        // Modal overlay
+        div {
+            class: "fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50",
+            onclick: move |_| on_close.call(()),
+
+            // Modal content
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto",
+                onclick: move |e| e.stop_propagation(),
+
+                // Header
+                div {
+                    class: "sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between",
+                    h3 {
+                        class: "text-xl font-bold text-gray-900 dark:text-white",
+                        "About Nostr Sign-In Methods"
+                    }
+                    button {
+                        class: "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-2xl",
+                        onclick: move |_| on_close.call(()),
+                        "×"
+                    }
+                }
+
+                // Content
+                div {
+                    class: "px-6 py-4 space-y-6",
+
+                    // What is Nostr
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2",
+                            "What is Nostr?"
+                        }
+                        p {
+                            class: "text-sm text-gray-600 dark:text-gray-400",
+                            "Nostr is a decentralized social protocol where you own your identity and data. Instead of relying on a company, your identity is based on cryptographic keys that only you control."
+                        }
+                    }
+
+                    // Browser Extension
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                            "🔌 Browser Extension (NIP-07)"
+                            span {
+                                class: "px-2 py-0.5 text-xs bg-green-600 text-white rounded-full",
+                                "RECOMMENDED"
+                            }
+                        }
+                        p {
+                            class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                            "Browser extensions like Alby, nos2x, and Flamingo store your keys securely and sign events on your behalf. Your private key never leaves the extension."
+                        }
+                        ul {
+                            class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                            li { "Keys stored securely in the extension" }
+                            li { "Websites can't access your private key" }
+                            li { "Works across all Nostr apps" }
+                            li { "You control which actions to approve" }
+                        }
+                    }
+
+                    // Remote Signer
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                            "🔐 Remote Signer (NIP-46)"
+                            span {
+                                class: "px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full",
+                                "RECOMMENDED"
+                            }
+                        }
+                        p {
+                            class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                            "Remote signers let you keep your keys on a separate device (like your phone with Amber) or a dedicated service (like nsecBunker). This app connects to your signer and requests signatures remotely."
+                        }
+                        ul {
+                            class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                            li { "Keys stay on your signing device" }
+                            li { "Approve each action on your phone" }
+                            li { "Compatible signers: Amber (Android), nsecBunker" }
+                            li { "Most secure for untrusted devices" }
+                        }
+                        p {
+                            class: "text-xs text-blue-600 dark:text-blue-400 mt-2",
+                            "To use: Get a bunker:// URI from your signing app and paste it above."
+                        }
+                    }
+
+                    // Private Key Warning
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                            "🔑 Private Key (nsec)"
+                            span {
+                                class: "px-2 py-0.5 text-xs bg-yellow-600 text-white rounded-full",
+                                "USE WITH CAUTION"
+                            }
+                        }
+                        p {
+                            class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                            "Entering your private key (nsec) directly gives this app full access to your account. Your key is stored in browser localStorage."
+                        }
+                        ul {
+                            class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                            li { "⚠️ Only use on devices you fully trust" }
+                            li { "⚠️ Never share your nsec with anyone" }
+                            li { "⚠️ Stored in browser (cleared if you clear data)" }
+                            li { "Can be compromised if device is compromised" }
+                        }
+                    }
+
+                    // Public Key
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2",
+                            "👁️ Public Key (npub) - Read Only"
+                        }
+                        p {
+                            class: "text-sm text-gray-600 dark:text-gray-400",
+                            "Using just your public key (npub) lets you browse and view content, but you cannot post, react, or send messages. Perfect for exploring Nostr without committing."
+                        }
+                    }
+
+                    // Security Best Practices
+                    div {
+                        h4 {
+                            class: "font-semibold text-gray-900 dark:text-white mb-2",
+                            "🛡️ Security Best Practices"
+                        }
+                        ul {
+                            class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                            li { "Always prefer browser extensions or remote signers" }
+                            li { "Never enter your nsec on untrusted websites" }
+                            li { "Backup your keys securely (offline)" }
+                            li { "Use different keys for testing and main account" }
+                        }
+                    }
+                }
+
+                // Footer
+                div {
+                    class: "sticky bottom-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 px-6 py-4",
+                    button {
+                        class: "w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                        onclick: move |_| on_close.call(()),
+                        "Got it!"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn LoginSection() -> Element {
     use nostr::ToBech32;
 
+    // State management
     let mut nsec_input = use_signal(|| String::new());
     let mut npub_input = use_signal(|| String::new());
+    let mut bunker_uri_input = use_signal(|| String::new());
     let mut error = use_signal(|| None::<String>);
-    let mut active_tab = use_signal(|| "nsec");
+    let mut show_advanced = use_signal(|| false);
+    let mut show_help_modal = use_signal(|| false);
+    let mut connecting_bunker = use_signal(|| false);
 
+    // Login handlers
     let login_with_nsec = move |_| {
         let nsec = nsec_input.read().clone();
         spawn(async move {
@@ -566,6 +729,22 @@ fn LoginSection() -> Element {
                 Ok(_) => error.set(None),
                 Err(e) => error.set(Some(e)),
             }
+        });
+    };
+
+    let login_with_bunker = move |_| {
+        let uri = bunker_uri_input.read().clone();
+        connecting_bunker.set(true);
+        error.set(None);
+        spawn(async move {
+            match auth_store::login_with_nostr_connect(&uri).await {
+                Ok(_) => {
+                    bunker_uri_input.set(String::new());
+                    error.set(None);
+                }
+                Err(e) => error.set(Some(e)),
+            }
+            connecting_bunker.set(false);
         });
     };
 
@@ -588,184 +767,249 @@ fn LoginSection() -> Element {
 
     rsx! {
         div {
-            class: "p-6 max-w-md mx-auto",
-            h3 {
-                class: "text-2xl font-bold mb-6 text-gray-900 dark:text-white text-center",
-                "Connect Your Account"
-            }
+            class: "p-6 max-w-lg mx-auto",
 
-            // NIP-07 Extension Login (Recommended)
-            if has_extension {
-                div {
-                    class: "mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-lg border-2 border-purple-200 dark:border-purple-700",
-                    div {
-                        class: "flex items-center gap-2 mb-2",
-                        span {
-                            class: "text-lg",
-                            "🔌"
-                        }
-                        span {
-                            class: "font-semibold text-gray-900 dark:text-white",
-                            "Browser Extension (Recommended)"
-                        }
-                        span {
-                            class: "px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full",
-                            "Most Secure"
-                        }
-                    }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400 mb-3",
-                        "Sign in securely with your Nostr extension (Alby, nos2x, Flamingo, etc.)"
-                    }
-                    button {
-                        class: "w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition shadow-lg",
-                        onclick: login_with_extension,
-                        "🔐 Connect Extension"
-                    }
-                }
-            } else {
-                div {
-                    class: "mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700",
-                    div {
-                        class: "flex items-center gap-2 mb-2",
-                        span {
-                            class: "text-lg",
-                            "ℹ️"
-                        }
-                        span {
-                            class: "font-semibold text-gray-900 dark:text-white",
-                            "No Extension Detected"
-                        }
-                    }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
-                        "For the best security, install a Nostr browser extension:"
-                    }
-                    ul {
-                        class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
-                        li {
-                            a {
-                                href: "https://getalby.com",
-                                target: "_blank",
-                                class: "text-blue-600 dark:text-blue-400 hover:underline",
-                                "Alby"
-                            }
-                            " - Bitcoin Lightning + Nostr"
-                        }
-                        li {
-                            a {
-                                href: "https://github.com/fiatjaf/nos2x",
-                                target: "_blank",
-                                class: "text-blue-600 dark:text-blue-400 hover:underline",
-                                "nos2x"
-                            }
-                            " - Simple Nostr extension"
-                        }
-                        li {
-                            a {
-                                href: "https://www.getflamingo.org",
-                                target: "_blank",
-                                class: "text-blue-600 dark:text-blue-400 hover:underline",
-                                "Flamingo"
-                            }
-                            " - Feature-rich Nostr wallet"
-                        }
-                    }
-                }
-            }
-
-            // Divider
+            // Header with Learn More button
             div {
-                class: "flex items-center gap-3 my-4",
-                div {
-                    class: "flex-1 border-t border-gray-300 dark:border-gray-600"
-                }
-                span {
-                    class: "text-sm text-gray-500 dark:text-gray-400",
-                    "Or use private/public key"
-                }
-                div {
-                    class: "flex-1 border-t border-gray-300 dark:border-gray-600"
-                }
-            }
-
-            div {
-                class: "flex gap-2 mb-4",
-                button {
-                    class: if *active_tab.read() == "nsec" {
-                        "px-4 py-2 bg-blue-600 text-white rounded-lg font-medium"
-                    } else {
-                        "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg"
-                    },
-                    onclick: move |_| active_tab.set("nsec"),
-                    "Private Key (nsec)"
+                class: "flex items-center justify-between mb-6",
+                h3 {
+                    class: "text-2xl font-bold text-gray-900 dark:text-white",
+                    "Welcome to Nostr"
                 }
                 button {
-                    class: if *active_tab.read() == "npub" {
-                        "px-4 py-2 bg-blue-600 text-white rounded-lg font-medium"
-                    } else {
-                        "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg"
-                    },
-                    onclick: move |_| active_tab.set("npub"),
-                    "Public Key (npub)"
+                    class: "px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 rounded-lg transition",
+                    onclick: move |_| show_help_modal.set(true),
+                    "Learn More"
                 }
             }
 
+            p {
+                class: "text-gray-600 dark:text-gray-400 mb-6",
+                "Choose a secure sign-in method to get started with the decentralized social network."
+            }
+
+            // Error display
             if let Some(err) = error.read().as_ref() {
                 div {
-                    class: "mb-4 p-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg",
+                    class: "mb-4 p-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
                     "❌ {err}"
                 }
             }
 
-            if *active_tab.read() == "nsec" {
+            // RECOMMENDED METHODS SECTION
+            div {
+                class: "mb-6",
+                h4 {
+                    class: "text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3",
+                    "Recommended (Secure)"
+                }
+
                 div {
                     class: "space-y-3",
-                    input {
-                        class: "w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                        r#type: "password",
-                        placeholder: "nsec1...",
-                        value: "{nsec_input}",
-                        oninput: move |evt| nsec_input.set(evt.value())
+
+                    // Browser Extension
+                    if has_extension {
+                        div {
+                            class: "p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-lg border-2 border-green-300 dark:border-green-700",
+                            div {
+                                class: "flex items-start gap-3 mb-3",
+                                div {
+                                    class: "text-2xl",
+                                    "🔌"
+                                }
+                                div {
+                                    class: "flex-1",
+                                    div {
+                                        class: "flex items-center gap-2 mb-1",
+                                        span {
+                                            class: "font-semibold text-gray-900 dark:text-white",
+                                            "Browser Extension"
+                                        }
+                                        span {
+                                            class: "px-2 py-0.5 text-xs bg-green-600 text-white rounded-full",
+                                            "RECOMMENDED"
+                                        }
+                                    }
+                                    p {
+                                        class: "text-sm text-gray-600 dark:text-gray-400",
+                                        "Your keys stay in the extension, never exposed to websites."
+                                    }
+                                }
+                            }
+                            button {
+                                class: "w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition shadow-sm",
+                                onclick: login_with_extension,
+                                "Connect Extension"
+                            }
+                        }
                     }
+
+                    // Remote Signer (NIP-46)
                     div {
-                        class: "flex gap-2",
-                        button {
-                            class: "flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
-                            onclick: login_with_nsec,
-                            "Login"
+                        class: "p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg border-2 border-blue-300 dark:border-blue-700",
+                        div {
+                            class: "flex items-start gap-3 mb-3",
+                            div {
+                                class: "text-2xl",
+                                "🔐"
+                            }
+                            div {
+                                class: "flex-1",
+                                div {
+                                    class: "flex items-center gap-2 mb-1",
+                                    span {
+                                        class: "font-semibold text-gray-900 dark:text-white",
+                                        "Remote Signer"
+                                    }
+                                    span {
+                                        class: "px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full",
+                                        "RECOMMENDED"
+                                    }
+                                }
+                                p {
+                                    class: "text-sm text-gray-600 dark:text-gray-400",
+                                    "Use Amber, nsecBunker, or other NIP-46 signers. Keys never leave your device."
+                                }
+                            }
                         }
-                        button {
-                            class: "px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition",
-                            onclick: generate_new,
-                            "Generate New"
+                        div {
+                            class: "space-y-2",
+                            input {
+                                class: "w-full px-3 py-2 text-sm border border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                r#type: "text",
+                                placeholder: "bunker://...",
+                                value: "{bunker_uri_input}",
+                                oninput: move |evt| bunker_uri_input.set(evt.value()),
+                                disabled: *connecting_bunker.read()
+                            }
+                            button {
+                                class: "w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                                onclick: login_with_bunker,
+                                disabled: bunker_uri_input.read().is_empty() || *connecting_bunker.read(),
+                                if *connecting_bunker.read() {
+                                    "Connecting..."
+                                } else {
+                                    "Connect Remote Signer"
+                                }
+                            }
+                            if *connecting_bunker.read() {
+                                p {
+                                    class: "text-xs text-blue-700 dark:text-blue-400 text-center",
+                                    "Waiting for approval on your signing device (up to 2 minutes)..."
+                                }
+                            }
                         }
-                    }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400",
-                        "⚠️ Stored in localStorage. Only use on trusted devices."
                     }
                 }
-            } else {
-                div {
-                    class: "space-y-3",
-                    input {
-                        class: "w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                        r#type: "text",
-                        placeholder: "npub1...",
-                        value: "{npub_input}",
-                        oninput: move |evt| npub_input.set(evt.value())
+            }
+
+            // ADVANCED OPTIONS SECTION (Collapsible)
+            div {
+                class: "border-t border-gray-200 dark:border-gray-700 pt-6",
+
+                button {
+                    class: "w-full flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition",
+                    onclick: move |_| {
+                        let current = *show_advanced.read();
+                        show_advanced.set(!current);
+                    },
+                    div {
+                        class: "flex items-center gap-2",
+                        span {
+                            class: "text-yellow-600 dark:text-yellow-400",
+                            "⚠️"
+                        }
+                        span {
+                            class: "font-medium text-gray-900 dark:text-white",
+                            "Advanced Options"
+                        }
                     }
-                    button {
-                        class: "w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
-                        onclick: login_with_npub,
-                        "Load Profile (Read-Only)"
-                    }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400",
-                        "ℹ️ Read-only: View content but cannot post."
+                    span {
+                        class: "text-gray-500",
+                        if *show_advanced.read() { "▼" } else { "▶" }
                     }
                 }
+
+                if *show_advanced.read() {
+                    div {
+                        class: "mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg space-y-4",
+
+                        div {
+                            class: "p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg",
+                            p {
+                                class: "text-sm text-yellow-800 dark:text-yellow-300 font-medium",
+                                "⚠️ Security Warning"
+                            }
+                            p {
+                                class: "text-xs text-yellow-700 dark:text-yellow-400 mt-1",
+                                "These methods store keys in your browser. Only use on devices you fully trust."
+                            }
+                        }
+
+                        // Private Key (nsec)
+                        div {
+                            h5 {
+                                class: "font-medium text-gray-900 dark:text-white mb-2 text-sm",
+                                "🔑 Private Key (nsec)"
+                            }
+                            div {
+                                class: "space-y-2",
+                                input {
+                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    r#type: "password",
+                                    placeholder: "nsec1...",
+                                    value: "{nsec_input}",
+                                    oninput: move |evt| nsec_input.set(evt.value())
+                                }
+                                div {
+                                    class: "flex gap-2",
+                                    button {
+                                        class: "flex-1 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition",
+                                        onclick: login_with_nsec,
+                                        "Login"
+                                    }
+                                    button {
+                                        class: "px-3 py-2 text-sm bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition",
+                                        onclick: generate_new,
+                                        "Generate"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Public Key (npub)
+                        div {
+                            h5 {
+                                class: "font-medium text-gray-900 dark:text-white mb-2 text-sm",
+                                "👁️ Public Key (npub) - Read Only"
+                            }
+                            div {
+                                class: "space-y-2",
+                                input {
+                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    r#type: "text",
+                                    placeholder: "npub1...",
+                                    value: "{npub_input}",
+                                    oninput: move |evt| npub_input.set(evt.value())
+                                }
+                                button {
+                                    class: "w-full px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition",
+                                    onclick: login_with_npub,
+                                    "View Profile (Read-Only)"
+                                }
+                                p {
+                                    class: "text-xs text-gray-600 dark:text-gray-400",
+                                    "ℹ️ You can browse but cannot post or interact."
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Help Modal
+            if *show_help_modal.read() {
+                HelpModal { on_close: move |_| show_help_modal.set(false) }
             }
         }
     }
@@ -825,6 +1069,7 @@ fn ProfileSection() -> Element {
                             Some(auth_store::LoginMethod::PrivateKey) => "🔑 Private Key",
                             Some(auth_store::LoginMethod::ReadOnly) => "👁️ Read-Only",
                             Some(auth_store::LoginMethod::BrowserExtension) => "🔌 Browser Extension",
+                            Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer",
                             None => "Unknown",
                         }
                     }

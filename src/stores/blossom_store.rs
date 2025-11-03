@@ -116,6 +116,12 @@ pub async fn upload_image(
                 .await
                 .map_err(|e| format!("Upload failed: {}", e))?
         }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            client
+                .upload_blob(final_data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
+                .await
+                .map_err(|e| format!("Upload failed: {}", e))?
+        }
     };
 
     UPLOAD_PROGRESS.write().replace(100.0);
