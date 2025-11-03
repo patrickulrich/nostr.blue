@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
 use nostr_sdk::{Event as NostrEvent, EventBuilder};
 
 const MAX_LENGTH: usize = 5000;
@@ -182,17 +182,20 @@ pub fn CommentComposer(
                 div {
                     class: "p-6 space-y-4",
 
-                    // Textarea
-                    textarea {
-                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary",
-                        placeholder: if is_reply {
-                            "Write your reply..."
-                        } else {
-                            "Write your comment..."
+                    // Mention Autocomplete Textarea
+                    MentionAutocomplete {
+                        content: content,
+                        on_input: move |new_value: String| {
+                            content.set(new_value);
                         },
-                        value: "{content.read()}",
-                        oninput: move |e| content.set(e.value()),
-                        disabled: !has_signer,
+                        placeholder: if is_reply {
+                            "Write your reply...".to_string()
+                        } else {
+                            "Write your comment...".to_string()
+                        },
+                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary".to_string(),
+                        rows: 8,
+                        disabled: !has_signer
                     }
 
                     // Character counter

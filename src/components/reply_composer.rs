@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete};
 use nostr_sdk::Event as NostrEvent;
 
 const MAX_LENGTH: usize = 5000;
@@ -236,17 +236,15 @@ pub fn ReplyComposer(
                     div {
                         class: "p-4",
 
-                        // Textarea
-                        textarea {
-                            class: "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none",
-                            placeholder: "Write your reply...",
-                            rows: "6",
-                            value: "{content}",
-                            disabled: *is_publishing.read(),
-                            autofocus: true,
-                            oninput: move |evt| {
-                                content.set(evt.value().clone());
-                            }
+                        // Mention Autocomplete Textarea
+                        MentionAutocomplete {
+                            content: content,
+                            on_input: move |new_value: String| {
+                                content.set(new_value);
+                            },
+                            placeholder: "Write your reply...".to_string(),
+                            rows: 6,
+                            disabled: *is_publishing.read()
                         }
 
                         // Character counter
