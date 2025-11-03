@@ -226,6 +226,9 @@ fn detect_mention(
                 task.cancel();
             }
 
+            // Capture query for stale result verification
+            let query_snapshot = query.clone();
+
             // Start new relay search task with debounce
             let new_task = spawn(async move {
                 // Debounce: wait 300ms
@@ -240,15 +243,24 @@ fn detect_mention(
                 }
 
                 // Perform relay search
-                let query_relays = query.len() >= 3; // Only query relays for 3+ chars
-                match search_profiles(&query, 10, query_relays).await {
+                let query_relays = query_snapshot.len() >= 3; // Only query relays for 3+ chars
+                match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
-                        search_results.set(results);
-                        is_searching.set(false);
+                        // Only update results if query hasn't changed (avoid stale results)
+                        if mention_query.read().as_str() == query_snapshot.as_str() {
+                            search_results.set(results);
+                            is_searching.set(false);
+                        } else {
+                            log::debug!("Ignoring stale search results for '{}' (current query: '{}')",
+                                query_snapshot, mention_query.read());
+                        }
                     }
                     Err(e) => {
                         log::error!("Profile search failed: {}", e);
-                        is_searching.set(false);
+                        // Only clear searching state if query hasn't changed
+                        if mention_query.read().as_str() == query_snapshot.as_str() {
+                            is_searching.set(false);
+                        }
                     }
                 }
             });
