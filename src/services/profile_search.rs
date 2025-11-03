@@ -15,6 +15,7 @@ pub struct ProfileSearchResult {
     #[allow(dead_code)]
     pub nip05: Option<String>,
     pub is_contact: bool,
+    pub is_thread_participant: bool,
     pub relevance: u32, // Higher = more relevant
 }
 
@@ -46,7 +47,8 @@ impl ProfileSearchResult {
 ///
 /// Searches through:
 /// 1. Cached profiles from PROFILE_CACHE
-/// 2. Prioritizes contacts if contact_pubkeys is provided
+/// 2. Prioritizes thread participants (highest priority)
+/// 3. Then prioritizes contacts if contact_pubkeys is provided
 ///
 /// Matches on `name` and `display_name` fields (case-insensitive)
 /// Returns up to `limit` results sorted by relevance
@@ -54,6 +56,7 @@ pub fn search_cached_profiles(
     query: &str,
     limit: usize,
     contact_pubkeys: &[PublicKey],
+    thread_pubkeys: &[PublicKey],
 ) -> Vec<ProfileSearchResult> {
     if query.is_empty() {
         return Vec::new();
@@ -86,10 +89,15 @@ pub fn search_cached_profiles(
 
         // Calculate relevance score
         let is_contact = contact_pubkeys.contains(&pubkey);
+        let is_thread_participant = thread_pubkeys.contains(&pubkey);
         let mut relevance = 0u32;
 
-        // Boost contacts
-        if is_contact {
+        // Boost thread participants (highest priority)
+        if is_thread_participant {
+            relevance += 2000;
+        }
+        // Boost contacts (second priority)
+        else if is_contact {
             relevance += 1000;
         }
 
@@ -121,6 +129,7 @@ pub fn search_cached_profiles(
             picture: profile.picture.clone(),
             nip05: profile.nip05.clone(),
             is_contact,
+            is_thread_participant,
             relevance,
         });
     }
@@ -174,8 +183,8 @@ pub async fn search_profiles(
         }
     };
 
-    // Search cached profiles first
-    let mut results = search_cached_profiles(query, limit, &contact_pubkeys);
+    // Search cached profiles first (no thread participants for general search)
+    let mut results = search_cached_profiles(query, limit, &contact_pubkeys, &[]);
 
     // Query relays for additional profiles if requested and query is long enough
     if query_relays && query.len() >= 3 && results.len() < limit {
@@ -216,6 +225,7 @@ pub async fn search_profiles(
                         }
 
                         let is_contact = contact_pubkeys.contains(&pubkey);
+                        let is_thread_participant = false; // Relay results won't know about thread context
                         let mut relevance = if is_contact { 1000 } else { 10 };
 
                         // Calculate relevance (lower than cached results)
@@ -236,6 +246,7 @@ pub async fn search_profiles(
                             picture: metadata.picture.clone(),
                             nip05: metadata.nip05.clone(),
                             is_contact,
+                            is_thread_participant,
                             relevance,
                         });
                     }

@@ -27,6 +27,9 @@ pub struct MentionAutocompleteProps {
     /// Focus handler
     #[props(default)]
     pub onfocus: Option<EventHandler>,
+    /// Optional thread participants (e.g., for reply composers)
+    #[props(default = Vec::new())]
+    pub thread_participants: Vec<PublicKey>,
 }
 
 #[component]
@@ -69,7 +72,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         props.on_input.call(new_value.clone());
 
         // Detect @ mentions
-        detect_mention(&new_value, cursor_pos, show_autocomplete, mention_query, mention_start_pos, is_searching, search_results, selected_index, relay_search_task, contact_pubkeys);
+        detect_mention(&new_value, cursor_pos, show_autocomplete, mention_query, mention_start_pos, is_searching, search_results, selected_index, relay_search_task, contact_pubkeys, &props.thread_participants);
 
         // Update dropdown position if showing
         if *show_autocomplete.read() {
@@ -181,9 +184,13 @@ fn detect_mention(
     mut selected_index: Signal<usize>,
     mut relay_search_task: Signal<Option<Task>>,
     contact_pubkeys: Signal<Vec<PublicKey>>,
+    thread_pubkeys: &[PublicKey],
 ) {
+    // Convert UTF-16 cursor position (from DOM) to UTF-8 byte index
+    let cursor_byte_index = utf16_to_utf8_index(text, cursor_pos);
+
     // Get text before cursor
-    let before_cursor = &text[..cursor_pos.min(text.len())];
+    let before_cursor = &text[..cursor_byte_index];
 
     // Find the last @ symbol before cursor
     if let Some(at_pos) = before_cursor.rfind('@') {
@@ -204,8 +211,11 @@ fn detect_mention(
 
         // Search cached profiles immediately (no debounce for instant results)
         let contacts = contact_pubkeys.read().clone();
-        let cached_results = search_cached_profiles(&query, 10, &contacts);
+        let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
         search_results.set(cached_results.clone());
+
+        log::debug!("Autocomplete search for '{}': found {} results ({} thread participants)",
+            query, cached_results.len(), thread_pubkeys.len());
 
         // Only query relays if we don't have enough results and query is long enough
         if query.len() >= 2 && cached_results.len() < 5 {
@@ -306,8 +316,11 @@ fn insert_mention(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
                         if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                            let new_cursor_pos = (before.len() + mention.len() + 1) as u32; // +1 for space
-                            let _ = textarea.set_selection_range(new_cursor_pos, new_cursor_pos);
+                            // Calculate UTF-8 byte position
+                            let new_cursor_byte_pos = before.len() + mention.len() + 1; // +1 for space
+                            // Convert to UTF-16 code unit index for DOM
+                            let new_cursor_utf16_pos = utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
+                            let _ = textarea.set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
                             let _ = textarea.focus();
                         }
                     }
@@ -315,6 +328,39 @@ fn insert_mention(
             }
         }
     });
+}
+
+/// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
+fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
+    let mut utf16_count = 0;
+    let mut utf8_byte_index = 0;
+
+    for ch in text.chars() {
+        if utf16_count >= utf16_index {
+            break;
+        }
+        utf16_count += ch.len_utf16();
+        utf8_byte_index += ch.len_utf8();
+    }
+
+    // Clamp to valid UTF-8 byte boundaries
+    utf8_byte_index.min(text.len())
+}
+
+/// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
+fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
+    let mut utf16_count = 0;
+    let mut utf8_byte_index = 0;
+
+    for ch in text.chars() {
+        if utf8_byte_index >= utf8_index {
+            break;
+        }
+        utf16_count += ch.len_utf16();
+        utf8_byte_index += ch.len_utf8();
+    }
+
+    utf16_count
 }
 
 /// Get cursor position from textarea
@@ -475,8 +521,13 @@ fn render_dropdown(
                                         }
                                     }
 
-                                    // Contact badge
-                                    if profile.is_contact {
+                                    // Thread/Contact badge
+                                    if profile.is_thread_participant {
+                                        div {
+                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
+                                            "Thread"
+                                        }
+                                    } else if profile.is_contact {
                                         div {
                                             class: "flex-shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
                                             "Contact"

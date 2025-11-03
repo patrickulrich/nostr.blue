@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete};
 use nostr_sdk::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 
 const MAX_LENGTH: usize = 5000;
 
@@ -53,6 +54,26 @@ pub fn ReplyComposer(
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_id = reply_to.id.to_hex();
+
+    // Extract thread participants (author + anyone mentioned in the note)
+    let mut thread_participants = Vec::new();
+    thread_participants.push(reply_to.pubkey); // Add author
+
+    // Add anyone mentioned in p tags
+    for tag in reply_to.tags.iter() {
+        if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+            if !thread_participants.contains(public_key) {
+                thread_participants.push(*public_key);
+            }
+        }
+    }
+
+    log::info!(
+        "Reply composer: Extracted {} thread participants: author={}, others={:?}",
+        thread_participants.len(),
+        reply_to.pubkey.to_hex(),
+        thread_participants.iter().skip(1).map(|pk| pk.to_hex()).collect::<Vec<_>>()
+    );
 
     // Handle media upload
     let handle_media_uploaded = move |url: String| {
@@ -244,7 +265,8 @@ pub fn ReplyComposer(
                             },
                             placeholder: "Write your reply...".to_string(),
                             rows: 6,
-                            disabled: *is_publishing.read()
+                            disabled: *is_publishing.read(),
+                            thread_participants: thread_participants.clone()
                         }
 
                         // Character counter
