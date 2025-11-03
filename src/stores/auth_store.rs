@@ -150,9 +150,16 @@ pub async fn restore_session_async() {
                             let signer_type = SignerType::NostrConnect(Arc::new(nostr_connect));
                             match store_signer(signer_type.clone()).await {
                                 Ok(_) => {
-                                    if let Err(e) = nostr_client::set_signer(signer_type).await {
-                                        log::error!("Failed to set remote signer on client: {}", e);
-                                        clear_auth();
+                                    match nostr_client::set_signer(signer_type).await {
+                                        Ok(_) => {
+                                            // Run post-login initialization
+                                            run_post_login_init().await;
+                                            log::info!("Successfully restored remote signer session");
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to set remote signer on client: {}", e);
+                                            clear_auth();
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -204,17 +211,8 @@ pub async fn login_with_nsec(nsec: &str) -> Result<(), String> {
 
     log::info!("Successfully logged in with pubkey: {}", pubkey);
 
-    // Load notification checked_at timestamp from localStorage
-    crate::stores::notifications::load_checked_at();
-
-    // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
-    crate::stores::notifications::fetch_and_merge_from_nip78().await;
-
-    // Start real-time notification subscription
-    crate::stores::notifications::start_realtime_subscription().await;
-
-    // Fetch custom emojis
-    crate::stores::emoji_store::init_emoji_fetch();
+    // Run post-login initialization
+    run_post_login_init().await;
 
     Ok(())
 }
@@ -282,17 +280,8 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
 
         log::info!("Successfully logged in via browser extension with pubkey: {}", pubkey_str);
 
-        // Load notification checked_at timestamp from localStorage
-        crate::stores::notifications::load_checked_at();
-
-        // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
-        crate::stores::notifications::fetch_and_merge_from_nip78().await;
-
-        // Start real-time notification subscription
-        crate::stores::notifications::start_realtime_subscription().await;
-
-        // Fetch custom emojis
-        crate::stores::emoji_store::init_emoji_fetch();
+        // Run post-login initialization
+        run_post_login_init().await;
 
         Ok(())
     }
@@ -363,6 +352,24 @@ async fn restore_nostr_connect(bunker_uri: &str, app_keys_str: &str) -> Result<N
     Ok(nostr_connect)
 }
 
+/// Run post-login initialization steps (notifications, subscriptions, emoji fetch)
+/// This should be called after any successful login or session restoration
+async fn run_post_login_init() {
+    log::info!("Running post-login initialization...");
+
+    // Load notification checked_at timestamp from localStorage
+    crate::stores::notifications::load_checked_at();
+
+    // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
+    crate::stores::notifications::fetch_and_merge_from_nip78().await;
+
+    // Start real-time notification subscription
+    crate::stores::notifications::start_realtime_subscription().await;
+
+    // Fetch custom emojis
+    crate::stores::emoji_store::init_emoji_fetch();
+}
+
 /// Login with NIP-46 remote signer (nostr-connect)
 pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     log::info!("Logging in with remote signer (NIP-46)...");
@@ -415,11 +422,8 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
 
     log::info!("Successfully logged in via remote signer with pubkey: {}", pubkey_str);
 
-    // 8. Start subscriptions and fetch data
-    crate::stores::notifications::load_checked_at();
-    crate::stores::notifications::fetch_and_merge_from_nip78().await;
-    crate::stores::notifications::start_realtime_subscription().await;
-    crate::stores::emoji_store::init_emoji_fetch();
+    // 8. Run post-login initialization
+    run_post_login_init().await;
 
     Ok(())
 }
