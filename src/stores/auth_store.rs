@@ -173,6 +173,15 @@ pub async fn restore_session_async() {
                             clear_auth();
                         }
                     }
+                } else {
+                    // Missing or invalid bunker URI or app keys
+                    log::error!("Cannot restore remote signer session: incomplete saved credentials (missing bunker URI or app keys)");
+                    clear_auth();
+                    // Clean up inconsistent localStorage entries
+                    LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
+                    LocalStorage::delete(STORAGE_KEY_APP_KEYS);
+                    LocalStorage::delete(STORAGE_KEY_METHOD);
+                    LocalStorage::delete(STORAGE_KEY_NPUB);
                 }
             }
             _ => {}
