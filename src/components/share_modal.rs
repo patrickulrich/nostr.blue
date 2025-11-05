@@ -29,6 +29,7 @@ pub fn ShareModal(
     let mut dm_recipient = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
     let mut dm_error = use_signal(|| Option::<String>::None);
+    let mut nostr_error = use_signal(|| Option::<String>::None);
 
     let has_signer = *HAS_SIGNER.read();
 
@@ -62,7 +63,10 @@ pub fn ShareModal(
     // Generate NIP-19 nevent identifier (note)
     let video_nip19 = {
         use nostr_sdk::ToBech32;
-        format!("nostr:{}", event.id.to_bech32().unwrap_or_default())
+        match event.id.to_bech32() {
+            Ok(bech32) if !bech32.is_empty() => format!("nostr:{}", bech32),
+            _ => format!("nostr:{}", event.id.to_hex()), // Fallback to hex
+        }
     };
 
     let handle_copy_link = {
@@ -105,6 +109,7 @@ pub fn ShareModal(
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
+                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
@@ -115,6 +120,7 @@ pub fn ShareModal(
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
+                    nostr_error.set(None);
                     nostr_text.set(String::new());
                     share_mode.set(ShareMode::Main);
                     is_publishing.set(false);
@@ -122,6 +128,7 @@ pub fn ShareModal(
                 }
                 Err(e) => {
                     log::error!("Failed to share to Nostr: {}", e);
+                    nostr_error.set(Some(format!("Failed to post to Nostr: {}", e)));
                     is_publishing.set(false);
                 }
             }
@@ -324,7 +331,17 @@ pub fn ShareModal(
                                 class: "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary",
                                 placeholder: "Share your thoughts about this video...",
                                 value: "{nostr_text}",
-                                oninput: move |e| nostr_text.set(e.value().clone()),
+                                oninput: move |e| {
+                                    nostr_text.set(e.value().clone());
+                                    nostr_error.set(None);
+                                },
+                            }
+                            // Error message display
+                            if let Some(error) = nostr_error.read().as_ref() {
+                                div {
+                                    class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
+                                    "{error}"
+                                }
                             }
 
                             // Link format buttons
@@ -360,6 +377,9 @@ pub fn ShareModal(
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: move |_| {
+                                        if video_nip19_for_button.is_empty() || video_nip19_for_button == "nostr:" {
+                                            return;
+                                        }
                                         let mut current = nostr_text.read().clone();
                                         if !current.is_empty() {
                                             current.push(' ');
@@ -367,6 +387,7 @@ pub fn ShareModal(
                                         current.push_str(&video_nip19_for_button);
                                         nostr_text.set(current);
                                     },
+                                    disabled: video_nip19.is_empty() || video_nip19 == "nostr:",
                                     HashIcon { class: "w-3 h-3" }
                                     "Nostr Event"
                                 }
