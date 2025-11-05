@@ -5,6 +5,8 @@ use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, Sh
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlVideoElement;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -470,9 +472,27 @@ fn VideoPlayer(
 ) -> Element {
     // Generate unique ID for this video element
     let video_id = format!("video-{}", event.id.to_hex()[..8].to_string());
+    let video_id_for_effect = video_id.clone();
 
     // Parse video metadata from NIP-71 imeta tags
     let video_meta = parse_video_meta(&event);
+
+    // Reactively update muted state
+    use_effect(use_reactive(&is_muted, move |muted| {
+        let id = video_id_for_effect.clone();
+
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<HtmlVideoElement>() {
+                            video.set_muted(muted);
+                        }
+                    }
+                }
+            }
+        });
+    }));
 
     rsx! {
         div {
