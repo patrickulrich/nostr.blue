@@ -146,10 +146,15 @@ fn Layout() -> Element {
     let mut sidebar_open = use_signal(|| false);
     let mut more_menu_open = use_signal(|| false);
     let current_route = use_route::<Route>();
+    let navigator = navigator();
 
     // Check if we're on the DMs or Videos pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. });
+
+    // Check if we're on home page for home button styling
+    let is_home_page = matches!(current_route, Route::Home {});
+    let home_font_weight = if is_home_page { "font-bold" } else { "" };
 
     rsx! {
         div {
@@ -172,9 +177,19 @@ fn Layout() -> Element {
                         class: "h-full flex flex-col p-4 overflow-y-auto",
 
                         // Logo
-                        Link {
-                            to: Route::Home {},
-                            class: "flex items-center gap-2 hover:opacity-80 transition mb-6",
+                        div {
+                            class: "flex items-center gap-2 hover:opacity-80 transition mb-6 cursor-pointer",
+                            onclick: move |_| {
+                                if is_home_page {
+                                    // Already on home page, scroll to top
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                    }
+                                } else {
+                                    // Navigate to home
+                                    navigator.push(Route::Home {});
+                                }
+                            },
                             div {
                                 class: "w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
                                 "N"
@@ -185,10 +200,24 @@ fn Layout() -> Element {
                         nav {
                             class: "flex flex-col gap-1",
 
-                            NavLink {
-                                to: Route::Home {},
-                                icon: rsx! { crate::components::icons::HomeIcon { class: "w-7 h-7" } },
-                                label: "Home"
+                            // Home button with scroll-to-top functionality
+                            div {
+                                class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                onclick: move |_| {
+                                    if is_home_page {
+                                        // Already on home page, scroll to top
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                        }
+                                    } else {
+                                        // Navigate to home
+                                        navigator.push(Route::Home {});
+                                    }
+                                },
+                                crate::components::icons::HomeIcon { class: "w-7 h-7" }
+                                span {
+                                    "Home"
+                                }
                             }
 
                             NavLink {
@@ -340,10 +369,20 @@ fn Layout() -> Element {
                                 }
 
                                 // Same navigation as desktop
-                                Link {
-                                    to: Route::Home {},
-                                    onclick: move |_| sidebar_open.set(false),
-                                    class: "flex items-center gap-2 hover:opacity-80 transition mb-8",
+                                div {
+                                    class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
+                                    onclick: move |_| {
+                                        sidebar_open.set(false);
+                                        if is_home_page {
+                                            // Already on home page, scroll to top
+                                            if let Some(window) = web_sys::window() {
+                                                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                            }
+                                        } else {
+                                            // Navigate to home
+                                            navigator.push(Route::Home {});
+                                        }
+                                    },
                                     div {
                                         class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
                                         "N"
@@ -356,12 +395,24 @@ fn Layout() -> Element {
 
                                 nav {
                                     class: "flex flex-col gap-2",
+                                    // Home button with scroll-to-top functionality
                                     div {
-                                        onclick: move |_| sidebar_open.set(false),
-                                        NavLink {
-                                            to: Route::Home {},
-                                            icon: rsx! { crate::components::icons::HomeIcon { class: "w-7 h-7" } },
-                                            label: "Home"
+                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                        onclick: move |_| {
+                                            sidebar_open.set(false);
+                                            if is_home_page {
+                                                // Already on home page, scroll to top
+                                                if let Some(window) = web_sys::window() {
+                                                    let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                }
+                                            } else {
+                                                // Navigate to home
+                                                navigator.push(Route::Home {});
+                                            }
+                                        },
+                                        crate::components::icons::HomeIcon { class: "w-7 h-7" }
+                                        span {
+                                            "Home"
                                         }
                                     }
 
