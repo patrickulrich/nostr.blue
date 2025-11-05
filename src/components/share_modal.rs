@@ -1,12 +1,11 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Filter, PublicKey, FromBech32};
-use crate::stores::{nostr_client, auth_store, dms};
+use nostr_sdk::{Event as NostrEvent, EventBuilder, PublicKey, FromBech32};
+use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
     ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    UsersIcon, SearchIcon, FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon
+    FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon
 };
-use std::time::Duration;
 use wasm_bindgen::JsValue;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -16,7 +15,7 @@ enum ShareMode {
     Dm,
 }
 
-/// Share modal for videos, articles, and other content
+/// Share modal for videos
 #[component]
 pub fn ShareModal(
     /// The event being shared
@@ -28,11 +27,7 @@ pub fn ShareModal(
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(|| String::new());
     let mut dm_recipient = use_signal(|| String::new());
-    let mut search_query = use_signal(|| String::new());
-    let mut selected_recipients = use_signal(|| Vec::<String>::new());
-    let mut following_list = use_signal(|| Vec::<(String, String, String)>::new()); // (pubkey, display_name, picture)
     let mut is_publishing = use_signal(|| false);
-    let mut is_loading_following = use_signal(|| false);
 
     let has_signer = *HAS_SIGNER.read();
 
@@ -68,86 +63,6 @@ pub fn ShareModal(
         use nostr_sdk::ToBech32;
         format!("nostr:{}", event.id.to_bech32().unwrap_or_default())
     };
-
-    // Load following list when entering DM mode
-    use_effect(move || {
-        if *share_mode.read() == ShareMode::Dm && following_list.read().is_empty() && !*is_loading_following.read() {
-            is_loading_following.set(true);
-            spawn(async move {
-                if let Some(user_pubkey_str) = auth_store::get_pubkey() {
-                    if let Ok(user_pubkey) = PublicKey::parse(&user_pubkey_str) {
-                        // Fetch contact list (kind 3)
-                        let filter = Filter::new()
-                            .kind(Kind::ContactList)
-                            .author(user_pubkey)
-                            .limit(1);
-
-                        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                            Ok(events) => {
-                                if let Some(contact_event) = events.first() {
-                                    let mut contacts = Vec::new();
-
-                                    // Extract p tags (contacts)
-                                    for tag in contact_event.tags.iter() {
-                                        if let Some(nostr_sdk::TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
-                                            // Fetch metadata for this contact
-                                            let metadata_filter = Filter::new()
-                                                .kind(Kind::Metadata)
-                                                .author(*public_key)
-                                                .limit(1);
-
-                                            if let Ok(meta_events) = nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(3)).await {
-                                                if let Some(meta_event) = meta_events.first() {
-                                                    if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&meta_event.content) {
-                                                        let display_name = metadata.get("display_name")
-                                                            .and_then(|v| v.as_str())
-                                                            .or_else(|| metadata.get("name").and_then(|v| v.as_str()))
-                                                            .unwrap_or("Unknown")
-                                                            .to_string();
-
-                                                        let picture = metadata.get("picture")
-                                                            .and_then(|v| v.as_str())
-                                                            .unwrap_or("")
-                                                            .to_string();
-
-                                                        contacts.push((
-                                                            public_key.to_hex(),
-                                                            display_name,
-                                                            picture
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    following_list.set(contacts);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Failed to fetch following list: {}", e);
-                            }
-                        }
-                    }
-                }
-                is_loading_following.set(false);
-            });
-        }
-    });
-
-    // Filter following list based on search
-    let filtered_following = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            following_list.read().clone()
-        } else {
-            following_list.read()
-                .iter()
-                .filter(|(_, name, _)| name.to_lowercase().contains(&query))
-                .cloned()
-                .collect()
-        }
-    });
 
     let handle_copy_link = {
         let video_url = video_url.clone();
@@ -215,10 +130,9 @@ pub fn ShareModal(
     let handle_send_dm = {
         let video_url = video_url.clone();
         move |_| {
-            let recipients = selected_recipients.read().clone();
             let manual_recipient = dm_recipient.read().trim().to_string();
 
-            if recipients.is_empty() && manual_recipient.is_empty() {
+            if manual_recipient.is_empty() {
                 return;
             }
 
@@ -227,51 +141,35 @@ pub fn ShareModal(
             let video_url_clone = video_url.clone();
 
             spawn(async move {
-            let mut all_recipients = recipients;
-
-            // Add manual recipient if provided
-            if !manual_recipient.is_empty() {
-                // Try to parse as npub or hex
-                if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
-                    all_recipients.push(pubkey.to_hex());
+                // Parse recipient as npub or hex
+                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
+                    pubkey.to_hex()
                 } else if let Ok(pubkey) = PublicKey::parse(&manual_recipient) {
-                    all_recipients.push(pubkey.to_hex());
-                }
-            }
+                    pubkey.to_hex()
+                } else {
+                    log::error!("Invalid recipient pubkey: {}", manual_recipient);
+                    is_publishing.set(false);
+                    return;
+                };
 
-            let message = format!("Check out this video on nostr.blue: {}", video_url_clone);
+                let message = format!("Check out this video on nostr.blue: {}", video_url_clone);
 
-            // Send DM to each recipient using NIP-17
-            for recipient_hex in &all_recipients {
-                match dms::send_dm(recipient_hex.clone(), message.clone()).await {
+                // Send DM using NIP-17
+                match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
                         log::info!("Sent DM to {}", recipient_hex);
+                        dm_recipient.set(String::new());
+                        share_mode.set(ShareMode::Main);
+                        is_publishing.set(false);
+                        on_close.call(());
                     }
                     Err(e) => {
                         log::error!("Failed to send DM to {}: {}", recipient_hex, e);
+                        is_publishing.set(false);
                     }
                 }
-            }
-
-            log::info!("Sent DMs to {} recipient(s)", all_recipients.len());
-            dm_recipient.set(String::new());
-            selected_recipients.set(Vec::new());
-            search_query.set(String::new());
-            share_mode.set(ShareMode::Main);
-            is_publishing.set(false);
-                on_close.call(());
             });
         }
-    };
-
-    let mut toggle_recipient = move |pubkey: String| {
-        let mut recipients = selected_recipients.read().clone();
-        if let Some(pos) = recipients.iter().position(|p| p == &pubkey) {
-            recipients.remove(pos);
-        } else {
-            recipients.push(pubkey);
-        }
-        selected_recipients.set(recipients);
     };
 
     rsx! {
@@ -507,104 +405,15 @@ pub fn ShareModal(
                                 }
                             }
 
-                            // Following list
-                            if !following_list.read().is_empty() {
-                                div {
-                                    div {
-                                        class: "flex items-center gap-2 mb-2",
-                                        UsersIcon { class: "w-4 h-4" }
-                                        label {
-                                            class: "text-sm font-medium",
-                                            "Or select from following"
-                                        }
-                                    }
-
-                                    // Search input
-                                    div {
-                                        class: "relative mb-2",
-                                        div {
-                                            class: "absolute left-3 top-1/2 transform -translate-y-1/2",
-                                            SearchIcon { class: "w-4 h-4 text-muted-foreground" }
-                                        }
-                                        input {
-                                            class: "w-full pl-9 pr-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
-                                            r#type: "text",
-                                            placeholder: "Search following...",
-                                            value: "{search_query}",
-                                            oninput: move |e| search_query.set(e.value().clone()),
-                                        }
-                                    }
-
-                                    // Following list scroll area
-                                    div {
-                                        class: "max-h-[200px] overflow-y-auto border border-border rounded-lg p-2 space-y-1",
-                                        for (pubkey, display_name, picture) in filtered_following() {
-                                            button {
-                                                key: "{pubkey}",
-                                                class: if selected_recipients.read().contains(&pubkey) {
-                                                    "w-full flex items-center gap-2 p-2 rounded-lg bg-primary text-primary-foreground"
-                                                } else {
-                                                    "w-full flex items-center gap-2 p-2 rounded-lg hover:bg-accent"
-                                                },
-                                                onclick: {
-                                                    let pubkey_clone = pubkey.clone();
-                                                    move |_| toggle_recipient(pubkey_clone.clone())
-                                                },
-
-                                                // Avatar
-                                                if !picture.is_empty() {
-                                                    img {
-                                                        class: "w-6 h-6 rounded-full",
-                                                        src: "{picture}",
-                                                        alt: "{display_name}",
-                                                    }
-                                                } else {
-                                                    div {
-                                                        class: "w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xs text-white",
-                                                        {display_name.chars().next().unwrap_or('?').to_uppercase().to_string()}
-                                                    }
-                                                }
-
-                                                span {
-                                                    class: "truncate flex-1 text-left",
-                                                    "{display_name}"
-                                                }
-
-                                                if selected_recipients.read().contains(&pubkey) {
-                                                    CheckIcon { class: "w-4 h-4 flex-shrink-0" }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if selected_recipients.read().len() > 0 {
-                                        p {
-                                            class: "text-sm text-muted-foreground mt-2",
-                                            {
-                                                let count = selected_recipients.read().len();
-                                                format!("{} recipient{} selected", count, if count > 1 { "s" } else { "" })
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if *is_loading_following.read() {
-                                p {
-                                    class: "text-sm text-muted-foreground text-center",
-                                    "Loading following list..."
-                                }
-                            }
-
                             // Send button
                             button {
-                                class: if (dm_recipient.read().trim().is_empty() && selected_recipients.read().is_empty()) || *is_publishing.read() {
+                                class: if dm_recipient.read().trim().is_empty() || *is_publishing.read() {
                                     "w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
                                 } else {
                                     "w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center justify-center gap-2"
                                 },
                                 onclick: handle_send_dm,
-                                disabled: (dm_recipient.read().trim().is_empty() && selected_recipients.read().is_empty()) || *is_publishing.read(),
+                                disabled: dm_recipient.read().trim().is_empty() || *is_publishing.read(),
                                 SendIcon { class: "w-4 h-4" }
                                 span {
                                     if *is_publishing.read() { "Sending..." } else { "Send Message" }
