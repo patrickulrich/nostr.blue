@@ -5,7 +5,8 @@ use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, Sh
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
-use js_sys::eval;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlVideoElement;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -481,20 +482,15 @@ fn VideoPlayer(
         let id = video_id_for_effect.clone();
 
         spawn(async move {
-            let video_id_json = serde_json::to_string(&id)
-                .unwrap_or_else(|_| format!("\"{}\"", id));
-
-            let script = format!(
-                r#"
-                (function() {{
-                    let video = document.getElementById({video_id});
-                    if (video) video.muted = {muted};
-                }})();
-                "#,
-                video_id = video_id_json,
-                muted = if muted { "true" } else { "false" }
-            );
-            let _ = eval(&script);
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<HtmlVideoElement>() {
+                            video.set_muted(muted);
+                        }
+                    }
+                }
+            }
         });
     }));
 
