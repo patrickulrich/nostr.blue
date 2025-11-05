@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
+use crate::routes::Route;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
 use std::time::Duration;
 
@@ -428,6 +429,7 @@ fn ReactionNotification(event: NostrEvent) -> Element {
     let reactor_pubkey_for_effect = reactor_pubkey.clone();
     let reactor_pubkey_for_display = reactor_pubkey.clone();
     let reactor_pubkey_for_avatar = reactor_pubkey.clone();
+    let reactor_pubkey_for_link = reactor_pubkey.clone();
 
     // Fetch profile and reacted post
     use_effect(move || {
@@ -478,10 +480,14 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                 class: "flex items-center gap-3 mb-2",
 
                 // Profile image
-                img {
-                    src: "{avatar_url}",
-                    alt: "{display_name}",
-                    class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                Link {
+                    to: Route::Profile { pubkey: reactor_pubkey_for_link.clone() },
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    img {
+                        src: "{avatar_url}",
+                        alt: "{display_name}",
+                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                    }
                 }
 
                 // Reaction text
@@ -500,8 +506,10 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                             "{reaction_emoji}"
                         }
                     }
-                    span {
-                        class: "font-semibold",
+                    Link {
+                        to: Route::Profile { pubkey: reactor_pubkey_for_link.clone() },
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        class: "font-semibold hover:underline",
                         "{display_name}"
                     }
                     span {
@@ -548,6 +556,7 @@ fn RepostNotification(event: NostrEvent) -> Element {
     let reposter_pubkey_for_effect = reposter_pubkey.clone();
     let reposter_pubkey_for_display = reposter_pubkey.clone();
     let reposter_pubkey_for_avatar = reposter_pubkey.clone();
+    let reposter_pubkey_for_link = reposter_pubkey.clone();
 
     // Fetch profile and reposted post
     use_effect(move || {
@@ -598,10 +607,14 @@ fn RepostNotification(event: NostrEvent) -> Element {
                 class: "flex items-center gap-3 mb-2",
 
                 // Profile image
-                img {
-                    src: "{avatar_url}",
-                    alt: "{display_name}",
-                    class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                Link {
+                    to: Route::Profile { pubkey: reposter_pubkey_for_link.clone() },
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    img {
+                        src: "{avatar_url}",
+                        alt: "{display_name}",
+                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                    }
                 }
 
                 // Repost text
@@ -611,8 +624,10 @@ fn RepostNotification(event: NostrEvent) -> Element {
                         class: "text-green-500 text-2xl",
                         "🔁"
                     }
-                    span {
-                        class: "font-semibold",
+                    Link {
+                        to: Route::Profile { pubkey: reposter_pubkey_for_link.clone() },
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        class: "font-semibold hover:underline",
                         "{display_name}"
                     }
                     span {
@@ -664,6 +679,7 @@ fn ZapNotification(event: NostrEvent) -> Element {
     let zapper_pubkey_for_effect = zapper_pubkey.clone();
     let zapper_pubkey_for_display = zapper_pubkey.clone();
     let zapper_pubkey_for_avatar = zapper_pubkey.clone();
+    let zapper_pubkey_for_link = zapper_pubkey.clone();
 
     // Fetch profile and zapped post
     use_effect(move || {
@@ -714,10 +730,14 @@ fn ZapNotification(event: NostrEvent) -> Element {
                 class: "flex items-center gap-3 mb-2",
 
                 // Profile image
-                img {
-                    src: "{avatar_url}",
-                    alt: "{display_name}",
-                    class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                Link {
+                    to: Route::Profile { pubkey: zapper_pubkey_for_link.clone() },
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    img {
+                        src: "{avatar_url}",
+                        alt: "{display_name}",
+                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                    }
                 }
 
                 // Zap text
@@ -727,8 +747,10 @@ fn ZapNotification(event: NostrEvent) -> Element {
                         class: "text-yellow-500 text-2xl",
                         "⚡"
                     }
-                    span {
-                        class: "font-semibold",
+                    Link {
+                        to: Route::Profile { pubkey: zapper_pubkey_for_link.clone() },
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        class: "font-semibold hover:underline",
                         "{display_name}"
                     }
                     span {
