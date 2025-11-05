@@ -169,6 +169,14 @@ pub fn truncate_content(content: &str, max_length: usize) -> String {
     if content.len() <= max_length {
         content.to_string()
     } else {
-        format!("{}...", content[..max_length].trim())
+        // Find the last valid UTF-8 character boundary before max_length
+        let truncate_at = content
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_length)
+            .last()
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .unwrap_or(0);
+
+        format!("{}...", content[..truncate_at].trim())
     }
 }
