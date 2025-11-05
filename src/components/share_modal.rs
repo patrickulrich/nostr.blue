@@ -28,6 +28,7 @@ pub fn ShareModal(
     let mut nostr_text = use_signal(|| String::new());
     let mut dm_recipient = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
+    let mut dm_error = use_signal(|| Option::<String>::None);
 
     let has_signer = *HAS_SIGNER.read();
 
@@ -148,6 +149,7 @@ pub fn ShareModal(
                     pubkey.to_hex()
                 } else {
                     log::error!("Invalid recipient pubkey: {}", manual_recipient);
+                    dm_error.set(Some("Invalid recipient. Please enter a valid npub or hex public key.".to_string()));
                     is_publishing.set(false);
                     return;
                 };
@@ -158,6 +160,7 @@ pub fn ShareModal(
                 match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
                         log::info!("Sent DM to {}", recipient_hex);
+                        dm_error.set(None);
                         dm_recipient.set(String::new());
                         share_mode.set(ShareMode::Main);
                         is_publishing.set(false);
@@ -165,6 +168,7 @@ pub fn ShareModal(
                     }
                     Err(e) => {
                         log::error!("Failed to send DM to {}: {}", recipient_hex, e);
+                        dm_error.set(Some(format!("Failed to send message: {}", e)));
                         is_publishing.set(false);
                     }
                 }
@@ -401,7 +405,17 @@ pub fn ShareModal(
                                     r#type: "text",
                                     placeholder: "npub1... or hex pubkey",
                                     value: "{dm_recipient}",
-                                    oninput: move |e| dm_recipient.set(e.value().clone()),
+                                    oninput: move |e| {
+                                        dm_recipient.set(e.value().clone());
+                                        dm_error.set(None);
+                                    },
+                                }
+                                // Error message display
+                                if let Some(error) = dm_error.read().as_ref() {
+                                    div {
+                                        class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
+                                        "{error}"
+                                    }
                                 }
                             }
 
