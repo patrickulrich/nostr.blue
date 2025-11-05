@@ -674,6 +674,136 @@ pub fn ArrowLeftIcon(props: IconProps) -> Element {
     }
 }
 
+// Copy icon
+#[component]
+pub fn CopyIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            rect { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }
+            path { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }
+        }
+    }
+}
+
+// Send icon
+#[component]
+pub fn SendIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            line { x1: "22", y1: "2", x2: "11", y2: "13" }
+            polygon { points: "22 2 15 22 11 13 2 9 22 2" }
+        }
+    }
+}
+
+// Search icon
+#[component]
+pub fn SearchIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "11", cy: "11", r: "8" }
+            path { d: "m21 21-4.3-4.3" }
+        }
+    }
+}
+
+// Link2 icon
+#[component]
+pub fn Link2Icon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M9 17H7A5 5 0 0 1 7 7h2" }
+            path { d: "M15 7h2a5 5 0 1 1 0 10h-2" }
+            line { x1: "8", y1: "12", x2: "16", y2: "12" }
+        }
+    }
+}
+
+// FileVideo icon
+#[component]
+pub fn FileVideoIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }
+            polyline { points: "14 2 14 8 20 8" }
+            path { d: "m10 15.5 4 2.5v-6l-4 2.5" }
+        }
+    }
+}
+
+// Hash icon
+#[component]
+pub fn HashIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            line { x1: "4", y1: "9", x2: "20", y2: "9" }
+            line { x1: "4", y1: "15", x2: "20", y2: "15" }
+            line { x1: "10", y1: "3", x2: "8", y2: "21" }
+            line { x1: "16", y1: "3", x2: "14", y2: "21" }
+        }
+    }
+}
+
 // SVG string constants for music player (used with dangerous_inner_html)
 pub const PLAY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>"#;
 

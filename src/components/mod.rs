@@ -25,6 +25,7 @@ pub mod profile_editor_modal;
 pub mod emoji_picker;
 pub mod gif_picker;
 pub mod mention_autocomplete;
+pub mod share_modal;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -49,3 +50,4 @@ pub use profile_editor_modal::ProfileEditorModal;
 pub use emoji_picker::EmojiPicker;
 pub use gif_picker::GifPicker;
 pub use mention_autocomplete::MentionAutocomplete;
+pub use share_modal::ShareModal;

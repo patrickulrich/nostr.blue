@@ -3,7 +3,6 @@ use nostr::{Keys, PublicKey};
 use nostr_sdk::ToBech32;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
-#[cfg(target_family = "wasm")]
 use std::sync::Arc;
 use std::time::Duration;
 

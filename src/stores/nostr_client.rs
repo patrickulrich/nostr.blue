@@ -56,16 +56,6 @@ const DEFAULT_RELAYS: &[&str] = &[
 pub async fn initialize_client() -> Result<Arc<Client>, String> {
     log::info!("Initializing Nostr client with IndexedDB...");
 
-    // Open IndexedDB database
-    let database = WebDatabase::open("nostr-blue-db")
-        .await
-        .map_err(|e| {
-            log::error!("Failed to open IndexedDB: {}", e);
-            format!("Failed to open IndexedDB: {}", e)
-        })?;
-
-    log::info!("IndexedDB opened successfully");
-
     // Configure relay options for better performance
     let relay_opts = RelayOptions::new()
         // Skip relays with average latency > 2 seconds
@@ -82,9 +72,25 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
         .reconnect(true);
 
     // Create client with database
-    let client = Client::builder()
-        .database(database)
-        .build();
+    #[cfg(target_arch = "wasm32")]
+    let client = {
+        // Open IndexedDB database
+        let database = WebDatabase::open("nostr-blue-db")
+            .await
+            .map_err(|e| {
+                log::error!("Failed to open IndexedDB: {}", e);
+                format!("Failed to open IndexedDB: {}", e)
+            })?;
+
+        log::info!("IndexedDB opened successfully");
+
+        Client::builder()
+            .database(database)
+            .build()
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let client = Client::builder().build();
 
     let client = Arc::new(client);
 
