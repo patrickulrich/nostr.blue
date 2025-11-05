@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, icons::MessageCircleIcon};
+use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, ShareModal, icons::MessageCircleIcon};
 use crate::utils::build_thread_tree;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
@@ -547,6 +547,9 @@ fn VideoInfo(
     let mut comments = use_signal(|| Vec::<Event>::new());
     let mut loading_comments = use_signal(|| false);
 
+    // State for share modal
+    let mut show_share_modal = use_signal(|| false);
+
     // Fetch counts - consolidated into a single batched fetch
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
         spawn(async move {
@@ -921,6 +924,7 @@ fn VideoInfo(
                     // Share button
                     button {
                         class: "text-white hover:bg-white/20 p-3 rounded-full transition",
+                        onclick: move |_| show_share_modal.set(true),
                         crate::components::icons::ShareIcon { class: "w-6 h-6" }
                     }
 
@@ -1038,6 +1042,14 @@ fn VideoInfo(
                         comments.set(Vec::new());
                         show_comments_modal.set(true);
                     }
+                }
+            }
+
+            // Share Modal
+            if *show_share_modal.read() {
+                ShareModal {
+                    event: event.clone(),
+                    on_close: move |_| show_share_modal.set(false)
                 }
             }
         }
