@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store};
 use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
 use crate::hooks::use_infinite_scroll;
+use crate::services::profile_stats;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, TagKind};
 use std::time::Duration;
@@ -343,9 +344,18 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
 
-            // Fetch followers count (would require indexing service - placeholder for now)
-            // TODO: Implement via relay or indexer
-            followers_count.set(0);
+            // Fetch followers count from nostr.band API
+            match profile_stats::fetch_profile_stats(&hex_pubkey).await {
+                Ok(stats) => {
+                    if let Some(count) = stats.followers_pubkey_count {
+                        followers_count.set(count as usize);
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Failed to fetch profile stats from nostr.band: {}", e);
+                    // Keep followers_count at 0 as fallback
+                }
+            }
         });
     });
 
