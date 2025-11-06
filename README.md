@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![Version](https://img.shields.io/badge/version-0.5.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -22,6 +22,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Explore** - Discover trending content and new users
 
 ### Advanced Features
+- ✅ **Outbox Model (NIP-65)** - Smart relay routing using author's preferred write relays for improved content discovery
 - ✅ **Communities (NIP-72)** - Moderated topic-based communities
 - ✅ **Lists (NIP-51)** - Create and manage custom lists and bookmarks
 - ✅ **Lightning Zaps (NIP-57)** - Send and receive Bitcoin micropayments
@@ -49,6 +50,11 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Blossom Media Storage** - Decentralized image uploads with quality control
 - ✅ **Enhanced Emoji Picker** - 600+ emojis across 11 categories with NIP-51 custom emoji support
 - ✅ **GIF Search (NIP-50)** - Search and insert GIFs directly from the post composer using relay search
+- ✅ **Username Autocomplete** - @ mention autocomplete in all composers with relay search
+- ✅ **Video Sharing Modal** - Share videos via link, Nostr post, or encrypted DM
+- ✅ **Followers Count** - Real-time follower statistics using nostr.band API
+- ✅ **Interactive Notifications** - Clickable avatars and usernames in notification feed
+- ✅ **Social Media Embeds** - Twitter/X and Twitch embeds with click-to-load for performance
 
 ## 🛠 Technology Stack
 
@@ -86,10 +92,12 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Database-First Pattern**: Check IndexedDB → Background relay sync
 - **Parallel Fetching**: `tokio::join!()` for simultaneous queries
 - **Smart Caching**: 5-minute TTL for profiles, persistent event storage
+- **Outbox Model (NIP-65)**: Fetches content from author's preferred write relays for reliable content discovery
 - **Relay Optimization**:
   - Max latency: 2 seconds (auto-skip slow relays)
   - Subscription verification (ban mismatched events)
   - Adaptive retry intervals based on success rate
+  - Automatic relay hints in nevent/nprofile identifiers
 - **Real-Time Subscriptions**: Live updates via `limit=0, since=now` filters
 
 ## 📦 Project Structure
@@ -109,6 +117,7 @@ nostrbluerust/
 │   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
 │   │   ├── zap_modal.rs    # Lightning zap interface
+│   │   ├── share_modal.rs  # Video sharing modal
 │   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
 │   │   ├── threaded_comment.rs # Comment threads
 │   │   ├── music_player.rs # Wavlake music player (NIP-38)
