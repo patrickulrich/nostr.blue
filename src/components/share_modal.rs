@@ -69,21 +69,21 @@ pub fn ShareModal(
         let mut video_nip19_clone = video_nip19.clone();
         use_effect(move || {
             spawn(async move {
-                let client = match nostr_client::get_client() {
-                    Some(c) => c,
-                    None => return,
-                };
-
-                // Get author's write relays for Outbox model
-                let relay_hints = match crate::stores::relay_metadata::get_user_write_relays(
-                    event_clone.pubkey,
-                    client.clone()
-                ).await {
-                    Ok(relays) if !relays.is_empty() => {
-                        // Take up to 3 relay hints
-                        relays.into_iter().take(3).collect::<Vec<_>>()
+                // Only attempt to fetch write relays when client exists
+                let relay_hints = if let Some(client) = nostr_client::get_client() {
+                    // Get author's write relays for Outbox model
+                    match crate::stores::relay_metadata::get_user_write_relays(
+                        event_clone.pubkey,
+                        client.clone()
+                    ).await {
+                        Ok(relays) if !relays.is_empty() => {
+                            // Take up to 3 relay hints
+                            relays.into_iter().take(3).collect::<Vec<_>>()
+                        }
+                        _ => Vec::new(),
                     }
-                    _ => Vec::new(),
+                } else {
+                    Vec::new()
                 };
 
                 // Create nevent with relay hints
@@ -103,6 +103,7 @@ pub fn ShareModal(
                     nip19_event.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex())
                 };
 
+                // Always set video_nip19 so the Nostr Event button remains enabled
                 video_nip19_clone.set(format!("nostr:{}", nevent));
             });
         });
