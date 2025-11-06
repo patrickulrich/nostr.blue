@@ -1243,9 +1243,6 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        let since = Timestamp::now() - Duration::from_secs(86400 * 7); // 7 days ago
-        filter = filter.since(since);
     }
 
     log::info!("Fetching global video events with filter: {:?}", filter);
