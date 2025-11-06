@@ -110,6 +110,22 @@ fn render_token(token: &ContentToken) -> Element {
         ContentToken::WavlakePlaylist(playlist_id) => rsx! {
             WavlakePlaylistRenderer { playlist_id: playlist_id.clone() }
         },
+
+        ContentToken::TwitterTweet(tweet_id) => rsx! {
+            TwitterTweetRenderer { tweet_id: tweet_id.clone() }
+        },
+
+        ContentToken::TwitchStream(channel) => rsx! {
+            TwitchStreamRenderer { channel: channel.clone() }
+        },
+
+        ContentToken::TwitchClip(clip_slug) => rsx! {
+            TwitchClipRenderer { clip_slug: clip_slug.clone() }
+        },
+
+        ContentToken::TwitchVod(vod_id) => rsx! {
+            TwitchVodRenderer { vod_id: vod_id.clone() }
+        },
     }
 }
 
@@ -418,6 +434,172 @@ fn extract_youtube_id(url: &str) -> Option<String> {
     }
 
     None
+}
+
+#[component]
+fn TwitterTweetRenderer(tweet_id: String) -> Element {
+    let tweet_url = format!("https://twitter.com/x/status/{}", tweet_id);
+
+    rsx! {
+        div {
+            class: "my-2 rounded-lg overflow-hidden border border-border bg-card p-4",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            "data-tweet-id": "{tweet_id}",
+
+            // Twitter embed using blockquote (widgets.js will transform it automatically)
+            blockquote {
+                class: "twitter-tweet",
+                "data-theme": "dark",
+                "data-dnt": "true", // Do not track
+                p { "Loading tweet..." }
+                a {
+                    href: "{tweet_url}",
+                    "View tweet"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TwitchStreamRenderer(channel: String) -> Element {
+    let mut is_visible = use_signal(|| false);
+    let parent_domain = if cfg!(debug_assertions) {
+        "localhost"
+    } else {
+        "nostr.blue"
+    };
+    let embed_url = format!("https://player.twitch.tv/?channel={}&parent={}", channel, parent_domain);
+
+    rsx! {
+        div {
+            class: "my-2 rounded-lg overflow-hidden border border-border",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            "data-twitch-visible": "{is_visible}",
+
+            if *is_visible.read() {
+                iframe {
+                    src: "{embed_url}",
+                    class: "w-full aspect-video",
+                    allowfullscreen: true,
+                }
+            } else {
+                div {
+                    class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    onclick: move |_| is_visible.set(true),
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-purple-500 text-4xl mb-2",
+                            "▶"
+                        }
+                        div {
+                            class: "text-lg font-medium",
+                            "Watch {channel} on Twitch"
+                        }
+                        div {
+                            class: "text-sm text-muted-foreground mt-1",
+                            "Click to load stream"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TwitchClipRenderer(clip_slug: String) -> Element {
+    let mut is_visible = use_signal(|| false);
+    let parent_domain = if cfg!(debug_assertions) {
+        "localhost"
+    } else {
+        "nostr.blue"
+    };
+    let embed_url = format!("https://clips.twitch.tv/embed?clip={}&parent={}", clip_slug, parent_domain);
+
+    rsx! {
+        div {
+            class: "my-2 rounded-lg overflow-hidden border border-border",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            "data-twitch-visible": "{is_visible}",
+
+            if *is_visible.read() {
+                iframe {
+                    src: "{embed_url}",
+                    class: "w-full aspect-video",
+                    allowfullscreen: true,
+                }
+            } else {
+                div {
+                    class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    onclick: move |_| is_visible.set(true),
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-purple-500 text-4xl mb-2",
+                            "▶"
+                        }
+                        div {
+                            class: "text-lg font-medium",
+                            "Watch Twitch Clip"
+                        }
+                        div {
+                            class: "text-sm text-muted-foreground mt-1",
+                            "Click to load clip"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TwitchVodRenderer(vod_id: String) -> Element {
+    let mut is_visible = use_signal(|| false);
+    let parent_domain = if cfg!(debug_assertions) {
+        "localhost"
+    } else {
+        "nostr.blue"
+    };
+    let embed_url = format!("https://player.twitch.tv/?video={}&parent={}", vod_id, parent_domain);
+
+    rsx! {
+        div {
+            class: "my-2 rounded-lg overflow-hidden border border-border",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            "data-twitch-visible": "{is_visible}",
+
+            if *is_visible.read() {
+                iframe {
+                    src: "{embed_url}",
+                    class: "w-full aspect-video",
+                    allowfullscreen: true,
+                }
+            } else {
+                div {
+                    class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    onclick: move |_| is_visible.set(true),
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-purple-500 text-4xl mb-2",
+                            "▶"
+                        }
+                        div {
+                            class: "text-lg font-medium",
+                            "Watch Twitch VOD"
+                        }
+                        div {
+                            class: "text-sm text-muted-foreground mt-1",
+                            "Click to load video"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[component]

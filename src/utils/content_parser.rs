@@ -12,6 +12,10 @@ pub enum ContentToken {
     WavlakeAlbum(String),    // Album ID from wavlake.com/album/{id}
     WavlakeArtist(String),   // Artist ID from wavlake.com/artist/{id}
     WavlakePlaylist(String), // Playlist ID from wavlake.com/playlist/{id}
+    TwitterTweet(String),    // Tweet ID from twitter.com/*/status/{id}
+    TwitchStream(String),    // Channel name from twitch.tv/{channel}
+    TwitchClip(String),      // Clip slug from clips.twitch.tv/{slug}
+    TwitchVod(String),       // Video ID from twitch.tv/videos/{id}
     Mention(String),         // npub/nprofile
     EventMention(String),    // note/nevent
     Hashtag(String),
@@ -44,6 +48,14 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             ContentToken::WavlakeArtist(artist_id)
         } else if let Some(playlist_id) = extract_wavlake_playlist_id(&url) {
             ContentToken::WavlakePlaylist(playlist_id)
+        } else if let Some(tweet_id) = extract_twitter_tweet_id(&url) {
+            ContentToken::TwitterTweet(tweet_id)
+        } else if let Some(clip_slug) = extract_twitch_clip(&url) {
+            ContentToken::TwitchClip(clip_slug)
+        } else if let Some(vod_id) = extract_twitch_vod(&url) {
+            ContentToken::TwitchVod(vod_id)
+        } else if let Some(channel) = extract_twitch_channel(&url) {
+            ContentToken::TwitchStream(channel)
         } else {
             ContentToken::Link(url)
         };
@@ -239,6 +251,125 @@ pub fn extract_mention_name(mention: &str, _tags: &[Tag]) -> Option<String> {
     }
 
     // TODO: Look up profile metadata and return actual name
+    None
+}
+
+/// Extract tweet ID from Twitter/X URLs
+/// Supports: twitter.com/*/status/{id}, x.com/*/status/{id}, mobile.twitter.com/*/status/{id}
+fn extract_twitter_tweet_id(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    // Match twitter.com, x.com, or mobile.twitter.com with /status/
+    if (lower.contains("twitter.com/") || lower.contains("x.com/")) && lower.contains("/status/") {
+        if let Some(status_part) = url.split("/status/").nth(1) {
+            // Extract just the ID (remove query params, trailing slashes, and additional path segments)
+            let tweet_id = status_part
+                .split('?').next()
+                .unwrap_or(status_part)
+                .split('/').next()
+                .unwrap_or(status_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !tweet_id.is_empty() && tweet_id.chars().all(|c| c.is_numeric()) {
+                return Some(tweet_id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract channel name from Twitch stream URLs
+/// Supports: twitch.tv/{channel}
+fn extract_twitch_channel(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    // Match twitch.tv/{channel} but not /videos/, /clip/, or other paths
+    if lower.contains("twitch.tv/") &&
+       !lower.contains("/videos/") &&
+       !lower.contains("/clip/") &&
+       !lower.contains("clips.twitch.tv") {
+        if let Some(channel_part) = url.split("twitch.tv/").nth(1) {
+            let channel = channel_part
+                .split('?').next()
+                .unwrap_or(channel_part)
+                .split('/').next()
+                .unwrap_or(channel_part)
+                .trim_end_matches('/')
+                .to_string();
+            // Channel names should be alphanumeric + underscores, 4-25 chars
+            if !channel.is_empty() &&
+               channel.len() >= 4 &&
+               channel.len() <= 25 &&
+               channel.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return Some(channel);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract clip slug from Twitch clip URLs
+/// Supports: clips.twitch.tv/{slug}, twitch.tv/*/clip/{slug}
+fn extract_twitch_clip(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    // Match clips.twitch.tv/{slug}
+    if lower.contains("clips.twitch.tv/") {
+        if let Some(clip_part) = url.split("clips.twitch.tv/").nth(1) {
+            let clip_slug = clip_part
+                .split('?').next()
+                .unwrap_or(clip_part)
+                .split('/').next()
+                .unwrap_or(clip_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !clip_slug.is_empty() {
+                return Some(clip_slug);
+            }
+        }
+    }
+
+    // Match twitch.tv/*/clip/{slug}
+    if lower.contains("twitch.tv/") && lower.contains("/clip/") {
+        if let Some(clip_part) = url.split("/clip/").nth(1) {
+            let clip_slug = clip_part
+                .split('?').next()
+                .unwrap_or(clip_part)
+                .split('/').next()
+                .unwrap_or(clip_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !clip_slug.is_empty() {
+                return Some(clip_slug);
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract video ID from Twitch VOD URLs
+/// Supports: twitch.tv/videos/{id}
+fn extract_twitch_vod(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+
+    if lower.contains("twitch.tv/videos/") {
+        if let Some(vod_part) = url.split("/videos/").nth(1) {
+            let vod_id = vod_part
+                .split('?').next()
+                .unwrap_or(vod_part)
+                .split('/').next()
+                .unwrap_or(vod_part)
+                .trim_end_matches('/')
+                .to_string();
+            if !vod_id.is_empty() && vod_id.chars().all(|c| c.is_numeric()) {
+                return Some(vod_id);
+            }
+        }
+    }
+
     None
 }
 
