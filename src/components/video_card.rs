@@ -203,16 +203,37 @@ pub fn VideoCard(event: Event) -> Element {
                 let mut user_has_zapped = false;
 
                 let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Check if this zap is from the current user (P tag contains sender pubkey)
+                    // Check if this zap is from the current user
+                    // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
                     if let Some(ref user_pk) = current_user_pubkey {
-                        if let Some(zap_sender) = zap_event.tags.iter().find_map(|tag| {
+                        // Method 1: Try to get sender from uppercase "P" tag (most common)
+                        let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
                             let tag_vec = tag.clone().to_vec();
-                            if tag_vec.first()?.as_str() == "P" {
-                                tag_vec.get(1).map(|s| s.as_str().to_string())
+                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                Some(tag_vec.get(1)?.as_str().to_string())
                             } else {
                                 None
                             }
-                        }) {
+                        });
+
+                        // Method 2: Fallback - parse description tag (contains zap request JSON)
+                        if zap_sender_pubkey.is_none() {
+                            zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                        // The pubkey field in the zap request is the sender
+                                        return zap_request.get("pubkey")
+                                            .and_then(|p| p.as_str())
+                                            .map(|s| s.to_string());
+                                    }
+                                }
+                                None
+                            });
+                        }
+
+                        if let Some(zap_sender) = zap_sender_pubkey {
                             if zap_sender == *user_pk {
                                 user_has_zapped = true;
                             }
