@@ -148,17 +148,37 @@ pub fn Videos() -> Element {
             };
 
             match result {
-                Ok(mut new_events) => {
-                    if let Some(last_event) = new_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                Ok(new_events) => {
+                    // Filter out duplicates by checking existing event IDs
+                    let existing_ids: std::collections::HashSet<_> = {
+                        let current = feed_events.read();
+                        current.iter().map(|e| e.id).collect()
+                    };
+
+                    let unique_events: Vec<_> = new_events.into_iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .collect();
+
+                    if unique_events.is_empty() {
+                        // No new unique events, stop pagination
+                        has_more.set(false);
+                        loading_feed.set(false);
+                        log::info!("No new unique videos found, stopping pagination");
+                    } else {
+                        // Update timestamp from last unique event
+                        if let Some(last_event) = unique_events.last() {
+                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        }
+
+                        // Set has_more based on number of unique events
+                        has_more.set(unique_events.len() >= 50);
+
+                        // Append only unique events
+                        let mut current = feed_events.read().clone();
+                        current.extend(unique_events);
+                        feed_events.set(current);
+                        loading_feed.set(false);
                     }
-
-                    has_more.set(new_events.len() >= 50);
-
-                    let mut current = feed_events.read().clone();
-                    current.append(&mut new_events);
-                    feed_events.set(current);
-                    loading_feed.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to load more videos: {}", e);

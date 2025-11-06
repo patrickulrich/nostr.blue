@@ -474,19 +474,41 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType) -> Element {
                 };
 
                 match result {
-                    Ok(mut new_events) => {
-                        if let Some(last_event) = new_events.last() {
-                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                    Ok(new_events) => {
+                        // Filter out duplicates by checking existing event IDs
+                        let existing_ids: std::collections::HashSet<_> = {
+                            let current = events.read();
+                            current.iter().map(|e| e.id).collect()
+                        };
+
+                        let unique_events: Vec<_> = new_events.into_iter()
+                            .filter(|e| !existing_ids.contains(&e.id))
+                            .collect();
+
+                        if unique_events.is_empty() {
+                            // No new unique events, stop pagination
+                            has_more.set(false);
+                            loading.set(false);
+                            log::info!("No new unique shorts found, stopping pagination");
+                        } else {
+                            // Update timestamp from last unique event
+                            if let Some(last_event) = unique_events.last() {
+                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                            }
+
+                            // Set has_more based on number of unique events
+                            has_more.set(unique_events.len() >= 50);
+
+                            // Append only unique events
+                            let current_idx = *current_video_index.read();
+                            let mut current = events.read().clone();
+                            current.extend(unique_events);
+                            events.set(current);
+
+                            // Increment index only after successful append
+                            current_video_index.set(current_idx + 1);
+                            loading.set(false);
                         }
-
-                        has_more.set(new_events.len() >= 50);
-
-                        let current_idx = *current_video_index.read();
-                        let mut current = events.read().clone();
-                        current.append(&mut new_events);
-                        events.set(current);
-                        current_video_index.set(current_idx + 1);
-                        loading.set(false);
                     }
                     Err(e) => {
                         log::error!("Failed to load more shorts: {}", e);
