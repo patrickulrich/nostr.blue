@@ -199,7 +199,7 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     }));
 
     // Format timestamp
-    let timestamp = format_timestamp(created_at.as_u64());
+    let timestamp = format_timestamp(created_at.as_secs());
 
     // Get display name and picture from metadata or fallback
     let display_name = author_metadata.read().as_ref()

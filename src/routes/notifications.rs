@@ -71,7 +71,7 @@ pub fn Notifications() -> Element {
         }
 
         // Mark notifications as checked at current time (updates localStorage and clears badge)
-        let now = Timestamp::now().as_u64() as i64;
+        let now = Timestamp::now().as_secs() as i64;
         notif_store::set_checked_at(now);
 
         loading.set(true);
@@ -451,12 +451,9 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    // Use Outbox model to fetch from author's relays
-                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
-                        filter,
-                        Duration::from_secs(5),
-                        client.clone()
-                    ).await {
+                    // Use gossip for automatic relay routing
+                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
+                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
                         if let Some(original_event) = events.into_iter().next() {
                             reacted_post.set(Some(original_event));
                         }
@@ -583,12 +580,9 @@ fn RepostNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    // Use Outbox model to fetch from author's relays
-                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
-                        filter,
-                        Duration::from_secs(5),
-                        client.clone()
-                    ).await {
+                    // Use gossip for automatic relay routing
+                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
+                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
                         if let Some(original_event) = events.into_iter().next() {
                             reposted_post.set(Some(original_event));
                         }
@@ -711,12 +705,9 @@ fn ZapNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    // Use Outbox model to fetch from author's relays
-                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
-                        filter,
-                        Duration::from_secs(5),
-                        client.clone()
-                    ).await {
+                    // Use gossip for automatic relay routing
+                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
+                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
                         if let Some(original_event) = events.into_iter().next() {
                             zapped_post.set(Some(original_event));
                         }
@@ -908,7 +899,7 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
     match notification {
         NotificationType::Mention(e) | NotificationType::Reply(e) |
         NotificationType::Reaction(e) | NotificationType::Repost(e) |
-        NotificationType::Zap(e) => e.created_at.as_u64(),
+        NotificationType::Zap(e) => e.created_at.as_secs(),
     }
 }
 
@@ -944,12 +935,9 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    // Use Outbox model to fetch from authors' relays
-    match crate::stores::relay_metadata::fetch_events_outbox(
-        filter,
-        Duration::from_secs(10),
-        client.clone()
-    ).await {
+    // Use gossip for automatic relay routing
+    match client.fetch_events(filter, Duration::from_secs(10)).await
+        .map(|e| e.into_iter().collect::<Vec<_>>()) {
         Ok(events) => {
             for event in events {
                 // Skip our own events

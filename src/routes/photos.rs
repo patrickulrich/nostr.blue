@@ -61,7 +61,7 @@ pub fn Photos() -> Element {
                 Ok(photo_events) => {
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = photo_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load
@@ -99,7 +99,7 @@ pub fn Photos() -> Element {
                 Ok(mut new_events) => {
                     // Track oldest timestamp from new events
                     if let Some(last_event) = new_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load

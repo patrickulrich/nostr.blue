@@ -33,7 +33,7 @@ pub fn Explore() -> Element {
             match load_global_feed(None).await {
                 Ok(feed_events) => {
                     if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     has_more.set(feed_events.len() >= 50);
                     events.set(feed_events);
@@ -60,7 +60,7 @@ pub fn Explore() -> Element {
             match load_global_feed(until).await {
                 Ok(mut new_events) => {
                     if let Some(last_event) = new_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     has_more.set(new_events.len() >= 50);
 

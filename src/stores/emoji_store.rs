@@ -186,7 +186,7 @@ pub fn init_emoji_fetch() {
 pub fn should_refresh_emojis() -> bool {
     if let Some(last_fetch) = *EMOJI_FETCH_TIME.read() {
         let now = Timestamp::now();
-        let diff = now.as_u64() - last_fetch.as_u64();
+        let diff = now.as_secs() - last_fetch.as_secs();
         diff > 300 // 5 minutes
     } else {
         true

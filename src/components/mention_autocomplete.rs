@@ -286,21 +286,8 @@ fn insert_mention(
     mut show_autocomplete: Signal<bool>,
 ) {
     spawn(async move {
-        // Get mentioned user's write relays for Outbox model relay hints
-        let relay_hints = match crate::stores::nostr_client::get_client() {
-            Some(client) => {
-                match crate::stores::relay_metadata::get_user_write_relays(profile.pubkey, client).await {
-                    Ok(relays) if !relays.is_empty() => {
-                        // Take up to 3 relay hints
-                        relays.into_iter().take(3).collect::<Vec<_>>()
-                    }
-                    _ => Vec::new(),
-                }
-            }
-            None => Vec::new(),
-        };
-
-        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
+        // With gossip, relay hints are not needed - the client handles routing automatically
+        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, vec![]);
 
         // Encode to bech32
         let mention = match nprofile.to_bech32() {

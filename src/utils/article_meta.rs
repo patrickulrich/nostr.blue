@@ -41,7 +41,7 @@ pub fn get_published_at(event: &Event) -> u64 {
         .find(|tag| tag.kind().to_string() == "published_at")
         .and_then(|tag| tag.content())
         .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or_else(|| event.created_at.as_u64())
+        .unwrap_or_else(|| event.created_at.as_secs())
 }
 
 /// Extract hashtags (t tags) from the event

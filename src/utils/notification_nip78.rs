@@ -62,7 +62,7 @@ pub fn parse_checked_at_event(event: &Event) -> Option<i64> {
     }
 
     // Return the timestamp from created_at
-    Some(event.created_at.as_u64() as i64)
+    Some(event.created_at.as_secs() as i64)
 }
 
 #[cfg(test)]

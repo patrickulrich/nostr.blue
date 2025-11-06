@@ -85,8 +85,12 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
 
         log::info!("IndexedDB opened successfully");
 
+        // Enable gossip with in-memory storage
+        // NostrGossipMemory is WASM-compatible and provides automatic relay routing
+        let gossip = nostr_gossip_memory::store::NostrGossipMemory::unbounded();
         Client::builder()
             .database(database)
+            .gossip(gossip)
             .build()
     };
 
@@ -348,16 +352,17 @@ pub async fn fetch_events_aggregated(
         .map_err(|e| e.to_string())
 }
 
-/// Fetch events using Outbox model with aggregated pattern (database first, then author-specific relays)
-/// This pattern reduces latency and bandwidth by querying only relevant relays
+/// Fetch events using gossip (automatic relay routing)
 pub async fn fetch_events_aggregated_outbox(
     filter: Filter,
     timeout: Duration,
 ) -> Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
-    // Use the relay_metadata version which handles caching and outbox routing
-    relay_metadata::fetch_events_aggregated_outbox(filter, timeout, client).await
+    // Use gossip for automatic relay routing
+    client.fetch_events(filter, timeout).await
+        .map(|events| events.into_iter().collect())
+        .map_err(|e| format!("Failed to fetch events: {}", e))
 }
 
 /// Publish a text note (kind 1 event)
@@ -455,11 +460,12 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
     // Build the event
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
 
-    // Publish using Outbox model - sends to user's write relays + tagged users' read relays
-    let event_id = relay_metadata::publish_event_outbox(builder, _tagged_pubkeys, client).await
-        .map_err(|e| format!("Failed to publish via Outbox: {}", e))?;
+    // Publish using gossip - automatic relay routing
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish: {}", e))?;
 
-    log::info!("Note published successfully via Outbox: {}", event_id);
+    let event_id = output.id().to_hex();
+    log::info!("Note published successfully: {}", event_id);
     Ok(event_id)
 }
 
@@ -485,7 +491,9 @@ pub async fn publish_reaction(
     let target_pubkey = PublicKey::from_hex(&event_author)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Build reaction event (kind 7) manually
+    // TODO: Consider using EventBuilder::reaction() with ReactionTarget for better tag support
+    // This would require passing the event kind to automatically include 'a' and 'k' tags
+    // Build reaction event (kind 7) manually for now
     // NIP-25: Must include 'e' tag for event, should include 'p' tag for author
     let tags = vec![
         Tag::event(target_event_id),
@@ -494,11 +502,12 @@ pub async fn publish_reaction(
 
     let builder = nostr::EventBuilder::new(Kind::Reaction, content).tags(tags);
 
-    // Publish using Outbox - send to author's read relays so they see it
-    let reaction_id = relay_metadata::publish_event_outbox(builder, vec![target_pubkey], client).await
-        .map_err(|e| format!("Failed to publish reaction via Outbox: {}", e))?;
+    // Publish using gossip - automatic relay routing
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish reaction: {}", e))?;
 
-    log::info!("Reaction published successfully via Outbox: {}", reaction_id);
+    let reaction_id = output.id().to_hex();
+    log::info!("Reaction published successfully: {}", reaction_id);
     Ok(reaction_id)
 }
 
@@ -681,11 +690,12 @@ pub async fn publish_repost(
 
     let builder = nostr::EventBuilder::new(Kind::Repost, "").tags(tags);
 
-    // Publish using Outbox - send to author's read relays so they see it
-    let repost_id = relay_metadata::publish_event_outbox(builder, vec![target_pubkey], client).await
-        .map_err(|e| format!("Failed to publish repost via Outbox: {}", e))?;
+    // Publish using gossip - automatic relay routing
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish repost: {}", e))?;
 
-    log::info!("Repost published successfully via Outbox: {}", repost_id);
+    let repost_id = output.id().to_hex();
+    log::info!("Repost published successfully: {}", repost_id);
     Ok(repost_id)
 }
 
