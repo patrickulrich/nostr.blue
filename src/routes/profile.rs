@@ -141,7 +141,7 @@ pub fn Profile(pubkey: String) -> Element {
                 .limit(1);
 
             // Query relays
-            match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+            match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
                 Ok(events) => {
                     if let Some(event) = events.into_iter().next() {
                         match nostr_sdk::Metadata::from_json(&event.content) {
@@ -1104,10 +1104,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 .ids(liked_event_ids)
                 .limit(500);
 
-            let client = nostr_client::get_client()
-                .ok_or_else(|| "Nostr client not initialized".to_string())?;
-
-            let liked_events = client.fetch_events(liked_filter, Duration::from_secs(10)).await
+            let liked_events = nostr_client::fetch_events_aggregated(liked_filter, Duration::from_secs(10)).await
                 .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
 
             // Sort by the reaction timestamp (when the user liked it), not the original event timestamp

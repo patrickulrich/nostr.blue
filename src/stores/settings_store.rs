@@ -8,10 +8,11 @@ use std::time::Duration;
 use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
 
 /// App settings stored on Nostr via NIP-78
+/// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     pub theme: String, // "light", "dark", or "system"
-    pub relay_urls: Vec<String>,
+    // relay_urls removed - now using kind 10002/10050 (NIP-65/NIP-17)
     #[serde(default)]
     pub blossom_servers: Vec<String>, // Blossom media upload servers
     #[serde(default)]
@@ -24,14 +25,10 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: "system".to_string(),
-            relay_urls: vec![
-                "wss://relay.damus.io".to_string(),
-                "wss://relay.nostr.band".to_string(),
-                "wss://nos.lol".to_string(),
-            ],
+            // relay_urls removed - now using kind 10002/10050 (NIP-65/NIP-17)
             blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
             sync_notifications: false, // Privacy-first: opt-in by default
-            version: 1,
+            version: 2, // Incremented for breaking change (removed relay_urls)
         }
     }
 }
@@ -184,18 +181,6 @@ pub async fn update_theme(theme: theme_store::Theme) {
     // Save to Nostr
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save theme setting: {}", e);
-    }
-}
-
-/// Update relay list and save to Nostr
-#[allow(dead_code)]
-pub async fn update_relay_list(relay_urls: Vec<String>) {
-    let mut settings = SETTINGS.read().clone();
-    settings.relay_urls = relay_urls;
-
-    // Save to Nostr
-    if let Err(e) = save_settings(&settings).await {
-        log::error!("Failed to save relay list: {}", e);
     }
 }
 

@@ -134,20 +134,18 @@ fn MentionRenderer(mention: String) -> Element {
         // Fetch profile metadata
         use_effect(move || {
             spawn(async move {
-                if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                    let metadata_filter = Filter::new()
-                        .author(pubkey)
-                        .kind(Kind::Metadata)
-                        .limit(1);
+                let metadata_filter = Filter::new()
+                    .author(pubkey)
+                    .kind(Kind::Metadata)
+                    .limit(1);
 
-                    if let Ok(metadata_events) = client.fetch_events(
-                        metadata_filter,
-                        std::time::Duration::from_secs(5)
-                    ).await {
-                        if let Some(metadata_event) = metadata_events.into_iter().next() {
-                            if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                                metadata.set(Some(meta));
-                            }
+                if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
+                    metadata_filter,
+                    std::time::Duration::from_secs(5)
+                ).await {
+                    if let Some(metadata_event) = metadata_events.into_iter().next() {
+                        if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
+                            metadata.set(Some(meta));
                         }
                     }
                 }
@@ -226,33 +224,31 @@ fn EventMentionRenderer(mention: String) -> Element {
         // Fetch the referenced event
         use_effect(move || {
             spawn(async move {
-                if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                    let event_filter = Filter::new()
-                        .id(event_id)
-                        .limit(1);
+                let event_filter = Filter::new()
+                    .id(event_id)
+                    .limit(1);
 
-                    if let Ok(events) = client.fetch_events(
-                        event_filter,
-                        std::time::Duration::from_secs(5)
-                    ).await {
-                        if let Some(event) = events.into_iter().next() {
-                            let author_pubkey = event.pubkey;
-                            embedded_event.set(Some(event));
+                if let Ok(events) = nostr_client::fetch_events_aggregated(
+                    event_filter,
+                    std::time::Duration::from_secs(5)
+                ).await {
+                    if let Some(event) = events.into_iter().next() {
+                        let author_pubkey = event.pubkey;
+                        embedded_event.set(Some(event));
 
-                            // Fetch author metadata
-                            let metadata_filter = Filter::new()
-                                .author(author_pubkey)
-                                .kind(Kind::Metadata)
-                                .limit(1);
+                        // Fetch author metadata using Outbox
+                        let metadata_filter = Filter::new()
+                            .author(author_pubkey)
+                            .kind(Kind::Metadata)
+                            .limit(1);
 
-                            if let Ok(metadata_events) = client.fetch_events(
-                                metadata_filter,
-                                std::time::Duration::from_secs(5)
-                            ).await {
-                                if let Some(metadata_event) = metadata_events.into_iter().next() {
-                                    if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                                        author_metadata.set(Some(meta));
-                                    }
+                        if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
+                            metadata_filter,
+                            std::time::Duration::from_secs(5)
+                        ).await {
+                            if let Some(metadata_event) = metadata_events.into_iter().next() {
+                                if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
+                                    author_metadata.set(Some(meta));
                                 }
                             }
                         }
@@ -447,9 +443,8 @@ fn ArticleMentionRenderer(mention: String) -> Element {
             spawn(async move {
                 loading.set(true);
 
-                if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                    // Fetch article by coordinate
-                    match crate::stores::nostr_client::fetch_article_by_coordinate(
+                // Fetch article by coordinate
+                match crate::stores::nostr_client::fetch_article_by_coordinate(
                         pubkey.clone(),
                         ident
                     ).await {
@@ -457,13 +452,13 @@ fn ArticleMentionRenderer(mention: String) -> Element {
                             let author_pubkey = event.pubkey;
                             article_event.set(Some(event));
 
-                            // Fetch author metadata
+                            // Fetch author metadata using Outbox
                             let metadata_filter = Filter::new()
                                 .author(author_pubkey)
                                 .kind(Kind::Metadata)
                                 .limit(1);
 
-                            if let Ok(metadata_events) = client.fetch_events(
+                            if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
                                 metadata_filter,
                                 std::time::Duration::from_secs(5)
                             ).await {
@@ -481,7 +476,6 @@ fn ArticleMentionRenderer(mention: String) -> Element {
                             log::error!("Failed to fetch article: {}", e);
                         }
                     }
-                }
 
                 loading.set(false);
             });

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store};
+use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata};
 use crate::routes::Route;
 use nostr_sdk::ToBech32;
 use gloo_storage::Storage;
@@ -10,13 +10,48 @@ pub fn Settings() -> Element {
     let relays = nostr_client::RELAY_POOL.read();
     let blossom_servers = blossom_store::BLOSSOM_SERVERS.read();
 
+    // Relay management state - initialize from USER_RELAY_METADATA using peek()
+    let mut general_relays = use_signal(|| {
+        // Use peek() to avoid reactive tracking during initialization
+        relay_metadata::USER_RELAY_METADATA.peek().as_ref()
+            .map(|m| m.relays.clone())
+            .unwrap_or_else(|| relay_metadata::default_relays())
+    });
+
+    let mut dm_relays = use_signal(|| {
+        // Use peek() to avoid reactive tracking during initialization
+        relay_metadata::USER_RELAY_METADATA.peek().as_ref()
+            .map(|m| m.dm_relays.clone())
+            .unwrap_or_else(|| vec!["wss://relay.damus.io".to_string()])
+    });
+
+    // Watch for changes to USER_RELAY_METADATA and update signals reactively
+    use_effect(move || {
+        // Use peek() to avoid holding borrows during signal updates
+        if let Some(metadata) = relay_metadata::USER_RELAY_METADATA.peek().as_ref() {
+            log::info!("Updating with {} general relays and {} DM relays from metadata",
+                metadata.relays.len(), metadata.dm_relays.len());
+            general_relays.set(metadata.relays.clone());
+            dm_relays.set(metadata.dm_relays.clone());
+        }
+    });
+
+    let mut new_relay_url = use_signal(|| String::new());
+    let mut new_dm_relay_url = use_signal(|| String::new());
+    let mut relay_error = use_signal(|| None::<String>);
+    let mut dm_relay_error = use_signal(|| None::<String>);
+    let mut save_status = use_signal(|| None::<String>);
+
     let mut new_server_input = use_signal(|| String::new());
     let mut server_error = use_signal(|| None::<String>);
 
     // Load settings from Nostr on mount
     use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        if is_authenticated {
+        // Use peek() to avoid holding borrows during async operations
+        let is_authenticated = auth_store::AUTH_STATE.peek().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.peek();
+
+        if is_authenticated && client_initialized {
             spawn(async move {
                 log::info!("Loading settings from Nostr (NIP-78)...");
                 if let Err(e) = settings_store::load_settings().await {
@@ -28,37 +63,178 @@ pub fn Settings() -> Element {
 
     let auth = auth_store::AUTH_STATE.read();
 
-    let mut new_relay_url = use_signal(|| String::new());
-    let mut relay_error = use_signal(|| None::<String>);
-
-    let add_relay = move |_| {
-        let url = new_relay_url.read().clone();
-        if url.is_empty() {
-            relay_error.set(Some("Please enter a relay URL".to_string()));
-            return;
+    // Normalize relay URL (add wss:// if needed)
+    let normalize_relay_url = |input: &str| -> Result<String, String> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("URL cannot be empty".to_string());
         }
 
-        if !url.starts_with("wss://") && !url.starts_with("ws://") {
-            relay_error.set(Some("Relay URL must start with wss:// or ws://".to_string()));
-            return;
+        // Try parsing as-is
+        if let Ok(url) = nostr::Url::parse(trimmed) {
+            return Ok(url.to_string());
         }
 
-        spawn(async move {
-            match nostr_client::add_relay(&url).await {
-                Ok(_) => {
-                    relay_error.set(None);
-                    new_relay_url.set(String::new());
-                }
-                Err(e) => {
-                    relay_error.set(Some(e));
-                }
-            }
-        });
+        // Try adding wss:// prefix
+        if let Ok(url) = nostr::Url::parse(&format!("wss://{}", trimmed)) {
+            return Ok(url.to_string());
+        }
+
+        Err("Invalid relay URL".to_string())
     };
 
-    let remove_relay = move |url: String| {
+    // Strip protocol for display
+    let display_relay_url = |url: &str| -> String {
+        if let Ok(parsed) = nostr::Url::parse(url) {
+            if parsed.scheme() == "wss" && parsed.path() == "/" {
+                parsed.host_str().unwrap_or(url).to_string()
+            } else {
+                format!("{}{}", parsed.host_str().unwrap_or(""), parsed.path())
+            }
+        } else {
+            url.to_string()
+        }
+    };
+
+    // Add general relay
+    let add_general_relay = move |_| {
+        let url = new_relay_url.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                // Check for duplicates
+                if general_relays.read().iter().any(|r| r.url == normalized) {
+                    relay_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+
+                general_relays.write().push(relay_metadata::RelayConfig {
+                    url: normalized,
+                    read: true,
+                    write: true,
+                });
+                new_relay_url.set(String::new());
+                relay_error.set(None);
+            }
+            Err(e) => {
+                relay_error.set(Some(e));
+            }
+        }
+    };
+
+    // Remove general relay
+    let mut remove_general_relay = move |index: usize| {
+        let mut relays = general_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+
+    // Toggle relay read/write
+    let mut toggle_relay_read = move |index: usize| {
+        let mut relays = general_relays.write();
+        if let Some(relay) = relays.get_mut(index) {
+            relay.read = !relay.read;
+        }
+    };
+
+    let mut toggle_relay_write = move |index: usize| {
+        let mut relays = general_relays.write();
+        if let Some(relay) = relays.get_mut(index) {
+            relay.write = !relay.write;
+        }
+    };
+
+    // Add DM relay
+    let add_dm_relay = move |_| {
+        let url = new_dm_relay_url.read().clone();
+        match normalize_relay_url(&url) {
+            Ok(normalized) => {
+                // Check for duplicates
+                if dm_relays.read().contains(&normalized) {
+                    dm_relay_error.set(Some("Relay already exists".to_string()));
+                    return;
+                }
+
+                dm_relays.write().push(normalized);
+                new_dm_relay_url.set(String::new());
+                dm_relay_error.set(None);
+            }
+            Err(e) => {
+                dm_relay_error.set(Some(e));
+            }
+        }
+    };
+
+    // Remove DM relay
+    let mut remove_dm_relay = move |index: usize| {
+        let mut relays = dm_relays.write();
+        if index < relays.len() {
+            relays.remove(index);
+        }
+    };
+
+    // Save relay lists to Nostr
+    let save_relay_lists = move |_| {
+        let general = general_relays.read().clone();
+        let dm = dm_relays.read().clone();
+
         spawn(async move {
-            nostr_client::remove_relay(&url).await.ok();
+            save_status.set(Some("Saving...".to_string()));
+
+            // Get client
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => {
+                    save_status.set(Some("❌ Client not initialized".to_string()));
+                    return;
+                }
+            };
+
+            // Publish kind 10002 (general relays)
+            match relay_metadata::publish_relay_list(general.clone(), client.clone()).await {
+                Ok(_) => {
+                    log::info!("General relay list published");
+                }
+                Err(e) => {
+                    save_status.set(Some(format!("❌ Failed to publish relay list: {}", e)));
+                    return;
+                }
+            }
+
+            // Publish kind 10050 (DM relays)
+            match relay_metadata::publish_dm_relay_list(dm.clone(), client.clone()).await {
+                Ok(_) => {
+                    log::info!("DM relay list published");
+                }
+                Err(e) => {
+                    save_status.set(Some(format!("❌ Failed to publish DM list: {}", e)));
+                    return;
+                }
+            }
+
+            // Update local state
+            let mut metadata = relay_metadata::USER_RELAY_METADATA.write();
+
+            // Use JS timestamp for WASM compatibility
+            #[cfg(target_arch = "wasm32")]
+            let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+            #[cfg(not(target_arch = "wasm32"))]
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            *metadata = Some(relay_metadata::RelayListMetadata {
+                relays: general,
+                dm_relays: dm,
+                updated_at: now_secs,
+            });
+
+            save_status.set(Some("✅ Relay lists published successfully!".to_string()));
+
+            // Clear message after 3 seconds
+            gloo_timers::future::TimeoutFuture::new(3000).await;
+            save_status.set(None);
         });
     };
 
@@ -128,7 +304,7 @@ pub fn Settings() -> Element {
                 }
 
                 if auth.is_authenticated {
-                    {render_account_info()}
+                    render_account_info {}
                 } else {
                     div {
                         class: "text-center p-6 text-gray-500 dark:text-gray-400",
@@ -282,6 +458,279 @@ pub fn Settings() -> Element {
                 }
             }
 
+            // Relay Management (NIP-65/NIP-17)
+            if auth.is_authenticated {
+                div {
+                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div {
+                        class: "flex items-center justify-between mb-4",
+                        h3 {
+                            class: "text-xl font-semibold text-gray-900 dark:text-white",
+                            "📡 Relay Management"
+                        }
+                        span {
+                            class: "text-xs text-gray-500 dark:text-gray-400",
+                            "NIP-65 & NIP-17"
+                        }
+                    }
+                    p {
+                        class: "text-sm text-gray-600 dark:text-gray-400 mb-6",
+                        "Configure relay lists for posts and direct messages. "
+                        "Changes are published to Nostr and synced across all your devices."
+                    }
+
+                    // General Relays
+                    div {
+                        class: "mb-6",
+                        h4 {
+                            class: "text-lg font-medium text-gray-900 dark:text-white mb-3",
+                            "General Relays (for posts, profiles)"
+                        }
+                        p {
+                            class: "text-xs text-gray-500 dark:text-gray-400 mb-3",
+                            "Read: fetch content from this relay • Write: publish content to this relay"
+                        }
+
+                        // Relay list
+                        div {
+                            class: "space-y-2 mb-4",
+                            for (index, relay) in general_relays.read().iter().enumerate() {
+                                div {
+                                    key: "{relay.url}",
+                                    class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                    div {
+                                        class: "flex items-center gap-3 flex-1",
+                                        span {
+                                            class: "text-gray-900 dark:text-white font-mono text-sm",
+                                            {display_relay_url(&relay.url)}
+                                        }
+                                    }
+                                    div {
+                                        class: "flex items-center gap-2",
+                                        // Read toggle
+                                        button {
+                                            class: if relay.read {
+                                                "px-3 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded text-xs font-medium"
+                                            } else {
+                                                "px-3 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium"
+                                            },
+                                            onclick: move |_| toggle_relay_read(index),
+                                            if relay.read { "📖 Read" } else { "Read" }
+                                        }
+                                        // Write toggle
+                                        button {
+                                            class: if relay.write {
+                                                "px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-medium"
+                                            } else {
+                                                "px-3 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium"
+                                            },
+                                            onclick: move |_| toggle_relay_write(index),
+                                            if relay.write { "✏️ Write" } else { "Write" }
+                                        }
+                                        // Remove button
+                                        button {
+                                            class: "px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                            onclick: move |_| remove_general_relay(index),
+                                            "❌"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add relay form
+                        div {
+                            class: "space-y-2",
+                            div {
+                                class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    r#type: "text",
+                                    placeholder: "relay.example.com or wss://relay.example.com",
+                                    value: "{new_relay_url}",
+                                    oninput: move |evt| new_relay_url.set(evt.value())
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                                    onclick: add_general_relay,
+                                    "+ Add Relay"
+                                }
+                            }
+                            if let Some(err) = relay_error.read().as_ref() {
+                                div {
+                                    class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                                    "❌ {err}"
+                                }
+                            }
+                        }
+                    }
+
+                    // DM Inbox Relays
+                    div {
+                        class: "mb-6",
+                        h4 {
+                            class: "text-lg font-medium text-gray-900 dark:text-white mb-3",
+                            "DM Inbox Relays (for private messages)"
+                        }
+                        p {
+                            class: "text-xs text-gray-500 dark:text-gray-400 mb-3",
+                            "Your inbox relays tell others where to send you direct messages (NIP-17)"
+                        }
+
+                        // DM relay list
+                        div {
+                            class: "space-y-2 mb-4",
+                            for (index, url) in dm_relays.read().iter().enumerate() {
+                                div {
+                                    key: "{url}",
+                                    class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                    div {
+                                        class: "flex items-center gap-3 flex-1",
+                                        span {
+                                            class: "text-gray-900 dark:text-white font-mono text-sm",
+                                            "📨 {display_relay_url(url)}"
+                                        }
+                                    }
+                                    button {
+                                        class: "px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
+                                        onclick: move |_| remove_dm_relay(index),
+                                        "❌"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add DM relay form
+                        div {
+                            class: "space-y-2",
+                            div {
+                                class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    r#type: "text",
+                                    placeholder: "relay.example.com or wss://relay.example.com",
+                                    value: "{new_dm_relay_url}",
+                                    oninput: move |evt| new_dm_relay_url.set(evt.value())
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                                    onclick: add_dm_relay,
+                                    "+ Add DM Relay"
+                                }
+                            }
+                            if let Some(err) = dm_relay_error.read().as_ref() {
+                                div {
+                                    class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                                    "❌ {err}"
+                                }
+                            }
+                        }
+                    }
+
+                    // Save button
+                    div {
+                        class: "pt-4 border-t border-gray-200 dark:border-gray-700",
+                        button {
+                            class: "w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition text-lg",
+                            onclick: save_relay_lists,
+                            "📤 Publish Relay Lists to Nostr"
+                        }
+                        if let Some(status) = save_status.read().as_ref() {
+                            div {
+                                class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
+                                "{status}"
+                            }
+                        }
+                        p {
+                            class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
+                            "Last synced: "
+                            {
+                                // Use read() to create reactive dependency on USER_RELAY_METADATA
+                                if let Some(metadata) = relay_metadata::USER_RELAY_METADATA.read().as_ref() {
+                                    // Use JS timestamp for WASM compatibility
+                                    #[cfg(target_arch = "wasm32")]
+                                    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    let now_secs = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs();
+
+                                    let age = now_secs - metadata.updated_at;
+                                    if age < 60 {
+                                        "Just now".to_string()
+                                    } else if age < 3600 {
+                                        format!("{} minutes ago", age / 60)
+                                    } else {
+                                        format!("{} hours ago", age / 3600)
+                                    }
+                                } else {
+                                    "Never".to_string()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Current relay connections
+                div {
+                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    h3 {
+                        class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
+                        "🔌 Current Relay Connections"
+                    }
+                    p {
+                        class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                        "Connected to {relays.len()} relay(s)"
+                    }
+
+                    // Relay list
+                    div {
+                        class: "space-y-2",
+                        if relays.is_empty() {
+                            div {
+                                class: "text-center p-8 text-gray-500 dark:text-gray-400",
+                                "No relays connected"
+                            }
+                        } else {
+                            for relay in relays.iter() {
+                                div {
+                                    key: "{relay.url}",
+                                    class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                    div {
+                                        class: "flex items-center gap-3 flex-1",
+                                        span {
+                                            class: match relay.status {
+                                                nostr_client::RelayStatus::Connected => "w-3 h-3 rounded-full bg-green-500",
+                                                nostr_client::RelayStatus::Connecting => "w-3 h-3 rounded-full bg-yellow-500 animate-pulse",
+                                                nostr_client::RelayStatus::Disconnected => "w-3 h-3 rounded-full bg-gray-400",
+                                                nostr_client::RelayStatus::Error(_) => "w-3 h-3 rounded-full bg-red-500",
+                                            }
+                                        }
+                                        div {
+                                            class: "flex-1",
+                                            p {
+                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                                "{relay.url}"
+                                            }
+                                            p {
+                                                class: "text-xs text-gray-500 dark:text-gray-400",
+                                                match &relay.status {
+                                                    nostr_client::RelayStatus::Connected => "Connected",
+                                                    nostr_client::RelayStatus::Connecting => "Connecting...",
+                                                    nostr_client::RelayStatus::Disconnected => "Disconnected",
+                                                    nostr_client::RelayStatus::Error(e) => e,
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Blossom Servers section
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
@@ -362,124 +811,6 @@ pub fn Settings() -> Element {
                 }
             }
 
-            // Relay management
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                h3 {
-                    class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
-                    "📡 Relay Management"
-                }
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
-                    "Connected to {relays.len()} relay(s)"
-                }
-
-                // Add relay form
-                div {
-                    class: "mb-6 space-y-2",
-                    div {
-                        class: "flex gap-2",
-                        input {
-                            class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                            r#type: "text",
-                            placeholder: "wss://relay.example.com",
-                            value: "{new_relay_url}",
-                            oninput: move |evt| new_relay_url.set(evt.value())
-                        }
-                        button {
-                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
-                            onclick: add_relay,
-                            "Add Relay"
-                        }
-                    }
-                    if let Some(err) = relay_error.read().as_ref() {
-                        div {
-                            class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
-                            "❌ {err}"
-                        }
-                    }
-                }
-
-                // Relay list
-                div {
-                    class: "space-y-2",
-                    if relays.is_empty() {
-                        div {
-                            class: "text-center p-8 text-gray-500 dark:text-gray-400",
-                            "No relays connected"
-                        }
-                    } else {
-                        for relay in relays.iter() {
-                            div {
-                                key: "{relay.url}",
-                                class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                div {
-                                    class: "flex items-center gap-3 flex-1",
-                                    span {
-                                        class: match relay.status {
-                                            nostr_client::RelayStatus::Connected => "w-3 h-3 rounded-full bg-green-500",
-                                            nostr_client::RelayStatus::Connecting => "w-3 h-3 rounded-full bg-yellow-500 animate-pulse",
-                                            nostr_client::RelayStatus::Disconnected => "w-3 h-3 rounded-full bg-gray-400",
-                                            nostr_client::RelayStatus::Error(_) => "w-3 h-3 rounded-full bg-red-500",
-                                        }
-                                    }
-                                    div {
-                                        class: "flex-1",
-                                        p {
-                                            class: "font-mono text-sm text-gray-900 dark:text-white",
-                                            "{relay.url}"
-                                        }
-                                        p {
-                                            class: "text-xs text-gray-500 dark:text-gray-400",
-                                            match &relay.status {
-                                                nostr_client::RelayStatus::Connected => "Connected",
-                                                nostr_client::RelayStatus::Connecting => "Connecting...",
-                                                nostr_client::RelayStatus::Disconnected => "Disconnected",
-                                                nostr_client::RelayStatus::Error(e) => e,
-                                            }
-                                        }
-                                    }
-                                }
-                                div {
-                                    class: "flex gap-2",
-                                    // Connect/Disconnect button
-                                    if matches!(relay.status, nostr_client::RelayStatus::Connected) {
-                                        button {
-                                            class: "px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded transition",
-                                            onclick: move |_| {
-                                                spawn(async move {
-                                                    nostr_client::disconnect().await;
-                                                });
-                                            },
-                                            "Disconnect All"
-                                        }
-                                    } else if matches!(relay.status, nostr_client::RelayStatus::Disconnected) {
-                                        button {
-                                            class: "px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition",
-                                            onclick: move |_| {
-                                                spawn(async move {
-                                                    nostr_client::reconnect().await;
-                                                });
-                                            },
-                                            "Reconnect All"
-                                        }
-                                    }
-                                    // Remove button
-                                    button {
-                                        class: "px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition",
-                                        onclick: {
-                                            let url = relay.url.clone();
-                                            move |_| remove_relay(url.clone())
-                                        },
-                                        "Remove"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // About section
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
@@ -490,7 +821,7 @@ pub fn Settings() -> Element {
                 div {
                     class: "space-y-2 text-sm text-gray-600 dark:text-gray-400",
                     p {
-                        "nostr.blue (Rust Edition)"
+                        "nostr.blue (Rust Edition) with NIP-65 Outbox Model"
                     }
                     p {
                         "Built with ❤️ using Rust, Dioxus, and rust-nostr"

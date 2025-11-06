@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use dioxus::prelude::Event as DioxusEvent;
 use nostr_sdk::prelude::*;
-use wasm_bindgen::JsCast;
 use std::rc::Rc;
+use wasm_bindgen::JsCast;
 
-use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult, get_user_relays};
+use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MentionAutocompleteProps {
@@ -286,16 +286,21 @@ fn insert_mention(
     mut show_autocomplete: Signal<bool>,
 ) {
     spawn(async move {
-        // Get relay URLs
-        let relay_urls = get_user_relays().await;
+        // Get mentioned user's write relays for Outbox model relay hints
+        let relay_hints = match crate::stores::nostr_client::get_client() {
+            Some(client) => {
+                match crate::stores::relay_metadata::get_user_write_relays(profile.pubkey, client).await {
+                    Ok(relays) if !relays.is_empty() => {
+                        // Take up to 3 relay hints
+                        relays.into_iter().take(3).collect::<Vec<_>>()
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            None => Vec::new(),
+        };
 
-        // Create nprofile with relay hints
-        let relay_urls_parsed: Vec<RelayUrl> = relay_urls
-            .iter()
-            .filter_map(|url| RelayUrl::parse(url).ok())
-            .collect();
-
-        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_urls_parsed);
+        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
 
         // Encode to bech32
         let mention = match nprofile.to_bech32() {
@@ -360,6 +365,7 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
 }
 
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
+#[allow(dead_code)]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
@@ -376,6 +382,7 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 }
 
 /// Get cursor position from textarea
+#[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str) -> usize {
     #[cfg(target_family = "wasm")]
     {
@@ -393,6 +400,7 @@ fn get_cursor_position(textarea_id: &str) -> usize {
 }
 
 /// Update dropdown position based on cursor
+#[allow(unused_variables)]
 fn update_dropdown_position(
     textarea_id: &str,
     dropdown_top: &mut Signal<f64>,
