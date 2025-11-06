@@ -1,12 +1,9 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
-use crate::stores::signer::SIGNER_INFO;
-use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, ShareModal, icons::MessageCircleIcon};
-use crate::utils::build_thread_tree;
+use crate::components::ClientInitializing;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
-use web_sys::HtmlVideoElement;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -25,35 +22,86 @@ impl FeedType {
 
 #[component]
 pub fn Videos() -> Element {
-    // State for feed events
-    let mut events = use_signal(|| Vec::<Event>::new());
-    let mut loading = use_signal(|| false);
-    let mut error = use_signal(|| None::<String>);
-    let mut refresh_trigger = use_signal(|| 0);
+    // State for featured landscape videos
+    let mut featured_landscape = use_signal(|| Vec::<Event>::new());
+    let mut loading_featured = use_signal(|| false);
+
+    // State for recent shorts section
+    let mut recent_shorts = use_signal(|| Vec::<Event>::new());
+    let mut loading_recent_shorts = use_signal(|| false);
+
+    // State for combined feed
+    let mut feed_events = use_signal(|| Vec::<Event>::new());
+    let mut loading_feed = use_signal(|| false);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
-    let mut sidebar_open = use_signal(|| false);
-
-    // Vertical scroll state
-    let mut current_video_index = use_signal(|| 0usize);
-    let mut is_muted = use_signal(|| false);
+    let mut refresh_trigger = use_signal(|| 0);
 
     // Pagination state
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
-    // Load feed on mount and when refresh is triggered or feed type changes
+    let mut error = use_signal(|| None::<String>);
+
+    // Load featured landscape videos on mount
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        loading_featured.set(true);
+
+        spawn(async move {
+            match load_featured_content().await {
+                Ok(landscape) => {
+                    featured_landscape.set(landscape);
+                    loading_featured.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load featured landscape videos: {}", e);
+                    loading_featured.set(false);
+                }
+            }
+        });
+    });
+
+    // Load recent shorts on mount
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        loading_recent_shorts.set(true);
+
+        spawn(async move {
+            match load_recent_shorts().await {
+                Ok(shorts) => {
+                    recent_shorts.set(shorts);
+                    loading_recent_shorts.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load recent shorts: {}", e);
+                    loading_recent_shorts.set(false);
+                }
+            }
+        });
+    });
+
+    // Load combined feed when feed type changes or refresh is triggered
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        // Only load if client is initialized
         if !client_initialized {
             return;
         }
 
-        loading.set(true);
+        loading_feed.set(true);
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
@@ -71,292 +119,102 @@ pub fn Videos() -> Element {
                     }
 
                     has_more.set(video_events.len() >= 50);
-                    events.set(video_events);
-                    current_video_index.set(0);
-                    loading.set(false);
+                    feed_events.set(video_events);
+                    loading_feed.set(false);
                 }
                 Err(e) => {
                     error.set(Some(e));
-                    loading.set(false);
+                    loading_feed.set(false);
                 }
             }
         });
     });
 
-    // Navigation functions
-    let mut next_video = move || {
-        let current = *current_video_index.read();
-        let total = events.read().len();
+    // Load more function for infinite scroll
+    let mut load_more = move || {
+        if *loading_feed.read() || !*has_more.read() {
+            return;
+        }
 
-        if current + 1 < total {
-            current_video_index.set(current + 1);
-        } else if *has_more.read() && !*loading.read() {
-            // Load more videos
-            let until = *oldest_timestamp.read();
-            let current_feed_type = *feed_type.read();
+        let until = *oldest_timestamp.read();
+        let current_feed_type = *feed_type.read();
 
-            loading.set(true);
+        loading_feed.set(true);
 
-            spawn(async move {
-                let result = match current_feed_type {
-                    FeedType::Following => load_following_videos(until).await,
-                    FeedType::Global => load_global_videos(until).await,
-                };
+        spawn(async move {
+            let result = match current_feed_type {
+                FeedType::Following => load_following_videos(until).await,
+                FeedType::Global => load_global_videos(until).await,
+            };
 
-                match result {
-                    Ok(mut new_events) => {
-                        if let Some(last_event) = new_events.last() {
+            match result {
+                Ok(new_events) => {
+                    // Filter out duplicates by checking existing event IDs
+                    let existing_ids: std::collections::HashSet<_> = {
+                        let current = feed_events.read();
+                        current.iter().map(|e| e.id).collect()
+                    };
+
+                    let unique_events: Vec<_> = new_events.into_iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .collect();
+
+                    if unique_events.is_empty() {
+                        // No new unique events, stop pagination
+                        has_more.set(false);
+                        loading_feed.set(false);
+                        log::info!("No new unique videos found, stopping pagination");
+                    } else {
+                        // Update timestamp from last unique event
+                        if let Some(last_event) = unique_events.last() {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
 
-                        has_more.set(new_events.len() >= 50);
+                        // Set has_more based on number of unique events
+                        has_more.set(unique_events.len() >= 50);
 
-                        let current_idx = *current_video_index.read();
-                        let mut current = events.read().clone();
-                        current.append(&mut new_events);
-                        events.set(current);
-                        current_video_index.set(current_idx + 1);
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to load more videos: {}", e);
-                        loading.set(false);
+                        // Append only unique events
+                        let mut current = feed_events.read().clone();
+                        current.extend(unique_events);
+                        feed_events.set(current);
+                        loading_feed.set(false);
                     }
                 }
-            });
-        }
+                Err(e) => {
+                    log::error!("Failed to load more videos: {}", e);
+                    loading_feed.set(false);
+                }
+            }
+        });
     };
-
-    let mut prev_video = move || {
-        let current = *current_video_index.read();
-        if current > 0 {
-            current_video_index.set(current - 1);
-        }
-    };
-
-    // Note: Keyboard navigation would be added via onkeydown event on the div
 
     rsx! {
         div {
-            class: "fixed inset-0 bg-black overflow-hidden",
+            class: "min-h-screen bg-background",
 
-            // Slide-out Sidebar Overlay
-            if *sidebar_open.read() {
-                div {
-                    class: "fixed inset-0 bg-black/50 z-50",
-                    onclick: move |_| sidebar_open.set(false),
-
-                    aside {
-                        class: "w-[275px] bg-gray-900 h-full border-r border-gray-700",
-                        style: "margin-top: 64px; height: calc(100vh - 64px);",
-                        onclick: move |e| e.stop_propagation(),
-                        div {
-                            class: "h-full flex flex-col p-4 overflow-y-auto",
-
-                            // Navigation Menu (matches main sidebar)
-                            nav {
-                                class: "flex flex-col gap-1",
-
-                                Link {
-                                    to: crate::routes::Route::Home {},
-                                    onclick: move |_| sidebar_open.set(false),
-                                    class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                    crate::components::icons::HomeIcon { class: "w-7 h-7" }
-                                    span { "Home" }
-                                }
-
-                                Link {
-                                    to: crate::routes::Route::Explore {},
-                                    onclick: move |_| sidebar_open.set(false),
-                                    class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                    crate::components::icons::CompassIcon { class: "w-7 h-7" }
-                                    span { "Explore" }
-                                }
-
-                                Link {
-                                    to: crate::routes::Route::Articles {},
-                                    onclick: move |_| sidebar_open.set(false),
-                                    class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                    crate::components::icons::BookOpenIcon { class: "w-7 h-7" }
-                                    span { "Articles" }
-                                }
-
-                                // Check if user is authenticated
-                                if crate::stores::auth_store::AUTH_STATE.read().is_authenticated {
-                                    Link {
-                                        to: crate::routes::Route::Photos {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::CameraIcon { class: "w-7 h-7" }
-                                        span { "Photos" }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::Videos {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white font-bold",
-                                        crate::components::icons::VideoIcon { class: "w-7 h-7" }
-                                        span { "Videos" }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::Notifications {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::BellIcon { class: "w-7 h-7" }
-                                        span { "Notifications" }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::DMs {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::MailIcon { class: "w-7 h-7" }
-                                        span { "Messages" }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::Lists {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::ListIcon { class: "w-7 h-7" }
-                                        span { "Lists" }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::Bookmarks {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::BookmarkIcon { class: "w-7 h-7" }
-                                        span { "Bookmarks" }
-                                    }
-
-                                    // Profile link with pubkey
-                                    if let Some(pubkey) = &crate::stores::auth_store::AUTH_STATE.read().pubkey {
-                                        Link {
-                                            to: crate::routes::Route::Profile { pubkey: pubkey.clone() },
-                                            onclick: move |_| sidebar_open.set(false),
-                                            class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                            crate::components::icons::UserIcon { class: "w-7 h-7" }
-                                            span { "Profile" }
-                                        }
-                                    }
-
-                                    Link {
-                                        to: crate::routes::Route::Settings {},
-                                        onclick: move |_| sidebar_open.set(false),
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-gray-800 transition text-xl w-full text-white",
-                                        crate::components::icons::SettingsIcon { class: "w-7 h-7" }
-                                        span { "Settings" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Header overlay
+            // Header
             div {
-                class: "absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/60 to-transparent",
+                class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
                 div {
-                    class: "px-4 py-3 flex items-center justify-between",
+                    class: "px-6 py-4 flex items-center justify-between max-w-[1600px] mx-auto",
 
-                    // Left side: N logo button + Feed type selector
-                    div {
-                        class: "flex items-center gap-3",
-
-                        // N Logo button to open sidebar
-                        button {
-                            class: "w-10 h-10 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
-                            onclick: move |_| sidebar_open.set(true),
-                            "N"
-                        }
-
-                        // Feed type selector
-                        div {
-                            class: "relative",
-                            button {
-                                class: "text-white font-bold flex items-center gap-2 hover:bg-white/20 px-3 py-2 rounded-lg transition",
-                                onclick: move |_| {
-                                    let current = *show_dropdown.read();
-                                    show_dropdown.set(!current);
-                                },
-                                crate::components::icons::VideoIcon { class: "w-5 h-5" }
-                                span { "{feed_type.read().label()}" }
-                                if *show_dropdown.read() {
-                                    crate::components::icons::ChevronUpIcon { class: "w-4 h-4" }
-                                } else {
-                                    crate::components::icons::ChevronDownIcon { class: "w-4 h-4" }
-                                }
-                            }
-
-                            if *show_dropdown.read() {
-                                div {
-                                    class: "absolute top-full left-0 mt-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg min-w-[200px] overflow-hidden z-50",
-
-                                    button {
-                                        class: "w-full px-4 py-3 text-left text-white hover:bg-gray-800 transition flex items-center justify-between",
-                                        onclick: move |_| {
-                                            feed_type.set(FeedType::Following);
-                                            show_dropdown.set(false);
-                                        },
-                                        div {
-                                            div {
-                                                class: "font-medium",
-                                                "Following"
-                                            }
-                                            div {
-                                                class: "text-xs text-gray-400",
-                                                "Videos from people you follow"
-                                            }
-                                        }
-                                        if *feed_type.read() == FeedType::Following {
-                                            crate::components::icons::CheckIcon { class: "w-5 h-5" }
-                                        }
-                                    }
-
-                                    div {
-                                        class: "border-t border-gray-700"
-                                    }
-
-                                    button {
-                                        class: "w-full px-4 py-3 text-left text-white hover:bg-gray-800 transition flex items-center justify-between",
-                                        onclick: move |_| {
-                                            feed_type.set(FeedType::Global);
-                                            show_dropdown.set(false);
-                                        },
-                                        div {
-                                            div {
-                                                class: "font-medium",
-                                                "Global"
-                                            }
-                                            div {
-                                                class: "text-xs text-gray-400",
-                                                "Videos from everyone"
-                                            }
-                                        }
-                                        if *feed_type.read() == FeedType::Global {
-                                            crate::components::icons::CheckIcon { class: "w-5 h-5" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    h1 {
+                        class: "text-2xl font-bold flex items-center gap-3",
+                        crate::components::icons::VideoIcon { class: "w-7 h-7" }
+                        "Videos"
                     }
 
-                    // Right side: Refresh button
                     button {
-                        class: "p-2 hover:bg-white/20 rounded-full transition disabled:opacity-50 text-white",
-                        disabled: *loading.read(),
+                        class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
+                        disabled: *loading_featured.read() || *loading_recent_shorts.read() || *loading_feed.read(),
                         onclick: move |_| {
                             let current = *refresh_trigger.read();
                             refresh_trigger.set(current + 1);
                         },
-                        title: "Refresh feed",
-                        if *loading.read() {
+                        title: "Refresh",
+                        if *loading_featured.read() || *loading_recent_shorts.read() || *loading_feed.read() {
                             span {
-                                class: "inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+                                class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin"
                             }
                         } else {
                             crate::components::icons::RefreshIcon { class: "w-5 h-5" }
@@ -365,399 +223,260 @@ pub fn Videos() -> Element {
                 }
             }
 
-            // Video player area
-            if let Some(err) = error.read().as_ref() {
-                div {
-                    class: "flex items-center justify-center h-full text-white",
-                    div {
-                        class: "text-center",
+            // Content
+            div {
+                class: "max-w-[1600px] mx-auto px-6 py-6",
+
+                if !*nostr_client::CLIENT_INITIALIZED.read() {
+                    ClientInitializing {}
+                } else {
+                    // Featured Landscape Videos Section
+                    if !featured_landscape.read().is_empty() {
                         div {
-                            class: "mb-4 flex justify-center",
-                            crate::components::icons::AlertTriangleIcon { class: "w-24 h-24 text-red-400" }
-                        }
-                        p {
-                            class: "text-red-400",
-                            "Error loading videos: {err}"
-                        }
-                    }
-                }
-            } else if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
-                // Show client initializing animation during:
-                // 1. Client initialization
-                // 2. Initial video load (loading + no videos, regardless of error state)
-                ClientInitializing {}
-            } else if events.read().is_empty() {
-                div {
-                    class: "flex items-center justify-center h-full text-white",
-                    div {
-                        class: "text-center space-y-4",
-                        div {
-                            class: "mb-4 flex justify-center",
-                            crate::components::icons::VideoIcon { class: "w-24 h-24 text-gray-500" }
-                        }
-                        h3 {
-                            class: "text-2xl font-semibold",
-                            "No videos yet"
-                        }
-                        p {
-                            class: "text-gray-400",
-                            "Video posts from the network will appear here."
-                        }
-                        p {
-                            class: "text-sm text-gray-500",
-                            "NIP-71 video events (Kind 21 & 22)"
-                        }
-                    }
-                }
-            } else {
-                // Display current video
-                if let Some(event) = events.read().get(*current_video_index.read()) {
-                    VideoPlayer {
-                        key: "{event.id}",
-                        event: event.clone(),
-                        is_active: true,
-                        is_muted: *is_muted.read(),
-                        on_mute_toggle: move |_| {
-                            let current = *is_muted.read();
-                            is_muted.set(!current);
-                        }
-                    }
-                }
-
-                // Navigation buttons
-                div {
-                    class: "absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-40",
-
-                    // Up button
-                    if *current_video_index.read() > 0 {
-                        button {
-                            class: "w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white transition",
-                            onclick: move |_| prev_video(),
-                            crate::components::icons::ChevronUpIcon { class: "w-6 h-6" }
-                        }
-                    }
-
-                    // Down button
-                    if *current_video_index.read() < events.read().len() - 1 || *has_more.read() {
-                        button {
-                            class: "w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white transition",
-                            onclick: move |_| next_video(),
-                            if *loading.read() {
-                                span {
-                                    class: "inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-                                }
-                            } else {
-                                crate::components::icons::ChevronDownIcon { class: "w-6 h-6" }
+                            class: "mb-8",
+                            h2 {
+                                class: "text-xl font-semibold mb-4",
+                                "Recommended Videos"
                             }
-                        }
-                    }
-                }
-
-                // Video counter
-                div {
-                    class: "absolute bottom-4 left-4 text-white text-sm font-medium bg-black/50 px-3 py-2 rounded-full backdrop-blur-sm",
-                    "{*current_video_index.read() + 1} / {events.read().len()}"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn VideoPlayer(
-    event: Event,
-    is_active: bool,
-    is_muted: bool,
-    on_mute_toggle: EventHandler<()>,
-) -> Element {
-    // Generate unique ID for this video element
-    let video_id = format!("video-{}", event.id.to_hex()[..8].to_string());
-    let video_id_for_effect = video_id.clone();
-
-    // Parse video metadata from NIP-71 imeta tags
-    let video_meta = parse_video_meta(&event);
-
-    // Reactively update muted state
-    use_effect(use_reactive(&is_muted, move |muted| {
-        let id = video_id_for_effect.clone();
-
-        spawn(async move {
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<HtmlVideoElement>() {
-                            video.set_muted(muted);
-                        }
-                    }
-                }
-            }
-        });
-    }));
-
-    rsx! {
-        div {
-            class: "relative w-full h-full flex items-center justify-center bg-black",
-
-            if let Some(url) = video_meta.url.clone() {
-                video {
-                    id: "{video_id}",
-                    class: "max-w-full max-h-full object-contain",
-                    src: "{url}",
-                    poster: "{video_meta.thumbnail.clone().unwrap_or_default()}",
-                    loop: true,
-                    muted: is_muted,
-                    autoplay: is_active,
-                    playsinline: true,
-                    controls: true,
-                }
-            } else {
-                div {
-                    class: "flex flex-col items-center justify-center text-white",
-                    div {
-                        class: "text-6xl mb-4",
-                        "▶"
-                    }
-                    p {
-                        "Video unavailable"
-                    }
-                }
-            }
-
-            // Video info overlay
-            VideoInfo {
-                event: event.clone(),
-                video_meta: video_meta,
-                is_muted: is_muted,
-                on_mute_toggle: on_mute_toggle
-            }
-        }
-    }
-}
-
-#[component]
-fn VideoInfo(
-    event: Event,
-    video_meta: VideoMeta,
-    is_muted: bool,
-    on_mute_toggle: EventHandler<()>,
-) -> Element {
-    use nostr_sdk::{PublicKey, FromBech32};
-
-    let author_pubkey = event.pubkey.to_string();
-    let author_pubkey_for_fetch = author_pubkey.clone();
-    let event_id = event.id.to_string();
-    let event_id_counts = event_id.clone();
-    let event_id_for_comments = event_id.clone();
-    let event_id_parsed = event.id; // Store the already-parsed EventId
-
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // State for counts
-    let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
-    let mut zap_amount_sats = use_signal(|| 0u64);
-
-    // State for interactions
-    let mut is_liked = use_signal(|| false);
-    let mut is_liking = use_signal(|| false);
-
-    // State for comments modal
-    let mut show_comments_modal = use_signal(|| false);
-    let mut show_comment_composer = use_signal(|| false);
-    let mut comments = use_signal(|| Vec::<Event>::new());
-    let mut loading_comments = use_signal(|| false);
-
-    // State for share modal
-    let mut show_share_modal = use_signal(|| false);
-
-    // Fetch counts - consolidated into a single batched fetch
-    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        spawn(async move {
-            let client = match nostr_client::get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
-                Ok(id) => id,
-                Err(_) => return,
-            };
-
-            // Create a combined filter for all interaction kinds (replies, likes, zaps)
-            let combined_filter = Filter::new()
-                .kinds(vec![
-                    Kind::TextNote,      // kind 1 - replies
-                    Kind::Comment,       // kind 1111 - NIP-22 comments
-                    Kind::Reaction,      // kind 7 - likes
-                    Kind::from(9735),    // kind 9735 - zaps
-                ])
-                .event(event_id_parsed)
-                .limit(2000);
-
-            // Single fetch for all interaction types
-            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
-                // Get current user's pubkey to check if they've already reacted
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-
-                // Partition events by kind
-                let mut replies = 0;
-                let mut likes = 0;
-                let mut total_sats = 0u64;
-                let mut user_has_liked = false;
-
-                for event in events {
-                    match event.kind {
-                        Kind::TextNote | Kind::Comment => replies += 1,
-                        Kind::Reaction => {
-                            likes += 1;
-                            // Check if this reaction is from the current user
-                            if let Some(ref user_pk) = current_user_pubkey {
-                                if event.pubkey.to_string() == *user_pk {
-                                    user_has_liked = true;
+                            div {
+                                class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                                for event in featured_landscape.read().iter().take(3) {
+                                    LandscapeVideoCard {
+                                        key: "{event.id}",
+                                        event: event.clone(),
+                                        feed_type: *feed_type.read()
+                                    }
                                 }
                             }
-                        },
-                        kind if kind == Kind::from(9735) => {
-                            // Calculate zap amount
-                            if let Some(amount) = event.tags.iter().find_map(|tag| {
-                                let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
-                                    // Parse the JSON zap request
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                        // Find the amount tag in the zap request
-                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                            for tag_array in tags {
-                                                if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                            // Amount is in millisats, convert to sats
-                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                return Some(millisats / 1000);
-                                                            }
-                                                        }
-                                                    }
+                        }
+                    }
+
+                    // Recent Shorts Section
+                    if !recent_shorts.read().is_empty() {
+                        div {
+                            class: "mb-8",
+                            h2 {
+                                class: "text-xl font-semibold mb-4",
+                                "Recent Shorts"
+                            }
+                            div {
+                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
+                                for event in recent_shorts.read().iter().take(5) {
+                                    ShortsVideoCard {
+                                        key: "{event.id}",
+                                        event: event.clone(),
+                                        feed_type: FeedType::Following
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Combined Feed Section
+                    div {
+                        class: "mt-8",
+
+                        // Feed selector
+                        div {
+                            class: "flex items-center justify-between mb-4",
+                            h2 {
+                                class: "text-xl font-semibold",
+                                "All Videos"
+                            }
+
+                            div {
+                                class: "relative",
+                                button {
+                                    class: "flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg transition",
+                                    onclick: move |_| {
+                                        let current = *show_dropdown.read();
+                                        show_dropdown.set(!current);
+                                    },
+                                    span { "{feed_type.read().label()}" }
+                                    if *show_dropdown.read() {
+                                        crate::components::icons::ChevronUpIcon { class: "w-4 h-4" }
+                                    } else {
+                                        crate::components::icons::ChevronDownIcon { class: "w-4 h-4" }
+                                    }
+                                }
+
+                                if *show_dropdown.read() {
+                                    div {
+                                        class: "absolute top-full right-0 mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[200px] overflow-hidden z-50",
+
+                                        button {
+                                            class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                            onclick: move |_| {
+                                                feed_type.set(FeedType::Following);
+                                                show_dropdown.set(false);
+                                            },
+                                            div {
+                                                div {
+                                                    class: "font-medium",
+                                                    "Following"
                                                 }
+                                                div {
+                                                    class: "text-xs text-muted-foreground",
+                                                    "Videos from people you follow"
+                                                }
+                                            }
+                                            if *feed_type.read() == FeedType::Following {
+                                                crate::components::icons::CheckIcon { class: "w-5 h-5" }
+                                            }
+                                        }
+
+                                        div {
+                                            class: "border-t border-border"
+                                        }
+
+                                        button {
+                                            class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                            onclick: move |_| {
+                                                feed_type.set(FeedType::Global);
+                                                show_dropdown.set(false);
+                                            },
+                                            div {
+                                                div {
+                                                    class: "font-medium",
+                                                    "Global"
+                                                }
+                                                div {
+                                                    class: "text-xs text-muted-foreground",
+                                                    "Videos from everyone"
+                                                }
+                                            }
+                                            if *feed_type.read() == FeedType::Global {
+                                                crate::components::icons::CheckIcon { class: "w-5 h-5" }
                                             }
                                         }
                                     }
                                 }
-                                None
-                            }) {
-                                total_sats += amount;
                             }
                         }
-                        _ => {}
+
+                        // Combined feed grid
+                        if let Some(err) = error.read().as_ref() {
+                            div {
+                                class: "text-center py-12",
+                                div {
+                                    class: "text-destructive mb-2",
+                                    "Error: {err}"
+                                }
+                            }
+                        } else if feed_events.read().is_empty() && !*loading_feed.read() {
+                            div {
+                                class: "text-center py-12",
+                                div {
+                                    class: "mb-4 flex justify-center",
+                                    crate::components::icons::VideoIcon { class: "w-24 h-24 text-muted-foreground" }
+                                }
+                                h3 {
+                                    class: "text-xl font-semibold mb-2",
+                                    "No videos yet"
+                                }
+                                p {
+                                    class: "text-muted-foreground",
+                                    "Videos will appear here"
+                                }
+                            }
+                        } else {
+                            // Unified feed with both landscape and shorts mixed together
+                            div {
+                                class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
+                                for event in feed_events.read().iter() {
+                                    // Each video type uses its own card component with appropriate styling
+                                    if event.kind == Kind::Custom(22) {
+                                        // Shorts use vertical card
+                                        ShortsVideoCard {
+                                            key: "{event.id}",
+                                            event: event.clone(),
+                                            feed_type: *feed_type.read()
+                                        }
+                                    } else {
+                                        // Landscape videos use horizontal card
+                                        LandscapeVideoCard {
+                                            key: "{event.id}",
+                                            event: event.clone(),
+                                            feed_type: *feed_type.read()
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Load more button
+                            if *has_more.read() {
+                                div {
+                                    class: "flex justify-center mt-8",
+                                    button {
+                                        class: "px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
+                                        disabled: *loading_feed.read(),
+                                        onclick: move |_| load_more(),
+                                        if *loading_feed.read() {
+                                            span {
+                                                class: "inline-block w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin mr-2"
+                                            }
+                                            "Loading..."
+                                        } else {
+                                            "Load More"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-
-                // Update all counts and states at once
-                reply_count.set(replies.min(500));
-                like_count.set(likes.min(500));
-                zap_amount_sats.set(total_sats);
-                is_liked.set(user_has_liked);
             }
-        });
-    }));
-
-    // Fetch author's profile metadata
-    use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let filter = Filter::new()
-                .author(pubkey)
-                .kind(Kind::Metadata)
-                .limit(1);
-
-            if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
-                        author_metadata.set(Some(metadata));
-                    }
-                }
-            }
-        });
-    }));
-
-    // Fetch comments when modal opens - reactive to modal state
-    use_effect(use_reactive((&*show_comments_modal.read(), &event_id_for_comments), move |(modal_open, event_id_str)| {
-        if !modal_open {
-            return;
         }
+    }
+}
 
-        let event_id_clone = event_id_str.to_string();
+#[component]
+fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
+    let video_meta = parse_video_meta(&event);
+    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    let author_pubkey = event.pubkey.to_string();
+    let mut is_hovering = use_signal(|| false);
+    let video_element_id = format!("preview-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id_for_effect = video_element_id.clone();
 
+    // Fetch author metadata
+    use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
         spawn(async move {
-            loading_comments.set(true);
-            log::info!("Fetching comments for video: {}", event_id_clone);
+            if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
+                let filter = Filter::new()
+                    .author(pubkey)
+                    .kind(Kind::Metadata)
+                    .limit(1);
 
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_clone) {
-                Ok(id) => {
-                    log::info!("Successfully parsed event ID");
-                    id
+                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.into_iter().next() {
+                        if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
+                            author_metadata.set(Some(metadata));
+                        }
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to parse event ID {}: {}", event_id_clone, e);
-                    loading_comments.set(false);
-                    return;
+            }
+        });
+    }));
+
+    // Play/pause video on hover (only if no thumbnail)
+    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
+                            }
+                        }
+                    }
                 }
-            };
-
-            // Fetch comments for this video
-            // NIP-22 comments use uppercase E tags for root reference
-            // We need to use custom_tag() to filter for uppercase 'E' tags
-            // Also include lowercase 'e' tags for standard kind 1 replies
-            let event_id_hex = event_id_parsed.to_hex();
-
-            // Create filter for uppercase E tags (NIP-22 comments)
-            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
-            let filter_upper = Filter::new()
-                .kind(Kind::Comment)
-                .custom_tag(upper_e_tag, event_id_hex.clone())
-                .limit(500);
-
-            // Create filter for lowercase e tags (standard replies)
-            let filter_lower = Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment])
-                .event(event_id_parsed)
-                .limit(500);
-
-            log::info!("Fetching comments with uppercase E and lowercase e tag filters");
-
-            // Fetch both filters and combine results
-            let mut all_comments = Vec::new();
-
-            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
-                log::info!("Loaded {} comments with uppercase E tags", upper_comments.len());
-                all_comments.extend(upper_comments.into_iter());
-            } else {
-                log::warn!("Failed to fetch comments with uppercase E tags");
             }
-
-            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
-                log::info!("Loaded {} comments with lowercase e tags", lower_comments.len());
-                all_comments.extend(lower_comments.into_iter());
-            } else {
-                log::warn!("Failed to fetch comments with lowercase e tags");
-            }
-
-            // Deduplicate by event ID
-            let mut seen_ids = std::collections::HashSet::new();
-            let unique_comments: Vec<Event> = all_comments.into_iter()
-                .filter(|event| seen_ids.insert(event.id))
-                .collect();
-
-            let mut sorted_comments = unique_comments;
-            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-            log::info!("Total unique comments: {}", sorted_comments.len());
-            comments.set(sorted_comments);
-
-            loading_comments.set(false);
         });
     }));
 
@@ -772,304 +491,165 @@ fn VideoInfo(
             }
         });
 
-    let profile_image = author_metadata.read().as_ref()
-        .and_then(|m| m.picture.clone());
+    let video_id = event.id.to_hex();
+    let feed_param = match feed_type {
+        FeedType::Following => "following",
+        FeedType::Global => "global",
+    };
 
     rsx! {
         div {
-            class: "absolute bottom-0 left-0 right-0 p-6 pb-20 bg-gradient-to-t from-black/80 to-transparent",
+            class: "group cursor-pointer",
+            onmouseenter: move |_| is_hovering.set(true),
+            onmouseleave: move |_| is_hovering.set(false),
 
-            div {
-                class: "flex items-end justify-between",
+            Link {
+                to: crate::routes::Route::VideoDetail { video_id: format!("{}?feed={}", video_id, feed_param) },
 
-                // Left side: Video info
                 div {
-                    class: "flex-1 mr-4",
+                    class: "relative aspect-video bg-muted rounded-lg overflow-hidden mb-3",
 
-                    // Author info
-                    Link {
-                        to: crate::routes::Route::Profile { pubkey: event.pubkey.to_string() },
-                        class: "flex items-center mb-3",
-                        div {
-                            class: "w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white font-bold mr-3 ring-2 ring-white overflow-hidden",
-                            if let Some(img_url) = profile_image {
-                                img {
-                                    src: "{img_url}",
-                                    alt: "{display_name}",
-                                    class: "w-full h-full object-cover"
-                                }
-                            } else {
-                                "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
-                            }
+                    // Show thumbnail if available, otherwise show video (first frame until hover)
+                    if let Some(thumbnail) = &video_meta.thumbnail {
+                        img {
+                            src: "{thumbnail}",
+                            alt: "{video_meta.title.as_deref().unwrap_or(\"Video\")}",
+                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                         }
-                        span {
-                            class: "text-white font-semibold",
-                            "{display_name}"
+                    } else if let Some(url) = &video_meta.url {
+                        video {
+                            id: "{video_element_id}",
+                            class: "w-full h-full object-cover",
+                            src: "{url}",
+                            muted: true,
+                            loop: true,
+                            playsinline: true,
+                            preload: "metadata",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-muted",
+                            crate::components::icons::VideoIcon { class: "w-12 h-12 text-muted-foreground" }
                         }
                     }
 
-                    // Video title
-                    if let Some(title) = video_meta.title {
+                    // Duration badge
+                    if let Some(duration) = &video_meta.duration {
+                        div {
+                            class: "absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded",
+                            "{duration}"
+                        }
+                    }
+                }
+
+                // Video info
+                div {
+                    if let Some(title) = &video_meta.title {
                         h3 {
-                            class: "text-white font-semibold text-lg mb-2",
+                            class: "font-semibold line-clamp-2 mb-1 group-hover:text-primary transition",
                             "{title}"
                         }
                     }
 
-                    // Video description
-                    if !event.content.is_empty() {
-                        p {
-                            class: "text-white/90 text-sm line-clamp-2",
-                            "{event.content}"
-                        }
+                    p {
+                        class: "text-sm text-muted-foreground mb-1",
+                        "{display_name}"
                     }
 
-                    // Timestamp
                     p {
-                        class: "text-white/60 text-xs mt-2",
+                        class: "text-xs text-muted-foreground",
                         "{format_time_ago(event.created_at.as_secs())}"
                     }
                 }
+            }
+        }
+    }
+}
 
-                // Right side: Action buttons
-                div {
-                    class: "flex flex-col items-center gap-4",
+#[component]
+fn ShortsVideoCard(event: Event, feed_type: FeedType) -> Element {
+    let video_meta = parse_video_meta(&event);
+    let mut is_hovering = use_signal(|| false);
+    let video_element_id = format!("preview-short-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id_for_effect = video_element_id.clone();
 
-                    // Like button with count
-                    button {
-                        class: if *is_liked.read() {
-                            "text-red-500 hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center"
-                        } else {
-                            "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center"
-                        },
-                        disabled: *is_liking.read(),
-                        onclick: move |_| {
-                            if *is_liking.read() {
-                                return;
+    // Play/pause video on hover (only if no thumbnail)
+    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
                             }
-
-                            let event_id_clone = event_id.clone();
-                            let author_pk_clone = event.pubkey.to_string();
-
-                            is_liking.set(true);
-
-                            spawn(async move {
-                                match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string()).await {
-                                    Ok(_) => {
-                                        is_liked.set(true);
-                                        let current_count = *like_count.read();
-                                        like_count.set(current_count.saturating_add(1));
-                                        is_liking.set(false);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to like video: {}", e);
-                                        is_liking.set(false);
-                                    }
-                                }
-                            });
-                        },
-                        crate::components::icons::HeartIcon {
-                            class: "w-6 h-6".to_string(),
-                            filled: *is_liked.read()
-                        }
-                        if *like_count.read() > 0 {
-                            span {
-                                class: if *is_liked.read() {
-                                    "text-xs mt-1 font-semibold text-red-500"
-                                } else {
-                                    "text-xs mt-1 font-semibold"
-                                },
-                                {
-                                    let count = *like_count.read();
-                                    if count > 500 {
-                                        "500+".to_string()
-                                    } else {
-                                        format_count(count)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Comment button with count - opens modal
-                    button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
-                        onclick: move |_| show_comments_modal.set(true),
-                        crate::components::icons::MessageCircleIcon {
-                            class: "w-6 h-6".to_string(),
-                            filled: false
-                        }
-                        if *reply_count.read() > 0 {
-                            span {
-                                class: "text-xs mt-1 font-semibold",
-                                {
-                                    let count = *reply_count.read();
-                                    if count > 500 {
-                                        "500+".to_string()
-                                    } else {
-                                        format_count(count)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Zap button with amount (if author has lightning)
-                    {
-                        let has_lightning = author_metadata.read().as_ref()
-                            .and_then(|m| m.lud16.as_ref().or(m.lud06.as_ref()))
-                            .is_some();
-
-                        if has_lightning {
-                            rsx! {
-                                button {
-                                    class: "text-white hover:bg-white/20 p-3 rounded-full transition flex flex-col items-center",
-                                    crate::components::icons::ZapIcon {
-                                        class: "w-6 h-6".to_string(),
-                                        filled: false
-                                    }
-                                    if *zap_amount_sats.read() > 0 {
-                                        span {
-                                            class: "text-xs mt-1 font-semibold text-yellow-400",
-                                            {format_sats(*zap_amount_sats.read())}
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            rsx! {}
-                        }
-                    }
-
-                    // Share button
-                    button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition",
-                        onclick: move |_| show_share_modal.set(true),
-                        crate::components::icons::ShareIcon { class: "w-6 h-6" }
-                    }
-
-                    // Mute button
-                    button {
-                        class: "text-white hover:bg-white/20 p-3 rounded-full transition",
-                        onclick: move |_| on_mute_toggle.call(()),
-                        if is_muted {
-                            crate::components::icons::VolumeXIcon { class: "w-6 h-6" }
-                        } else {
-                            crate::components::icons::VolumeIcon { class: "w-6 h-6" }
                         }
                     }
                 }
             }
+        });
+    }));
 
-            // Comments Modal
-            if *show_comments_modal.read() {
+    let video_id = event.id.to_hex();
+    let feed_param = match feed_type {
+        FeedType::Following => "following",
+        FeedType::Global => "global",
+    };
+
+    rsx! {
+        div {
+            class: "group cursor-pointer",
+            onmouseenter: move |_| is_hovering.set(true),
+            onmouseleave: move |_| is_hovering.set(false),
+
+            Link {
+                to: crate::routes::Route::VideoDetail { video_id: format!("{}?feed={}", video_id, feed_param) },
+
                 div {
-                    class: "fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4",
-                    onclick: move |_| show_comments_modal.set(false),
+                    class: "relative aspect-[9/16] bg-muted rounded-lg overflow-hidden mb-2",
 
-                    // Modal content
+                    // Show thumbnail if available, otherwise show video (first frame until hover)
+                    if let Some(thumbnail) = &video_meta.thumbnail {
+                        img {
+                            src: "{thumbnail}",
+                            alt: "{video_meta.title.as_deref().unwrap_or(\"Short\")}",
+                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        }
+                    } else if let Some(url) = &video_meta.url {
+                        video {
+                            id: "{video_element_id}",
+                            class: "w-full h-full object-cover",
+                            src: "{url}",
+                            muted: true,
+                            loop: true,
+                            playsinline: true,
+                            preload: "metadata",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-muted",
+                            crate::components::icons::VideoIcon { class: "w-8 h-8 text-muted-foreground" }
+                        }
+                    }
+
+                    // Shorts indicator
                     div {
-                        class: "bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto",
-                        onclick: move |e| e.stop_propagation(),
-
-                        // Header
-                        div {
-                            class: "sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between z-10",
-                            h3 {
-                                class: "text-lg font-semibold text-white",
-                                "Comments"
-                            }
-                            button {
-                                class: "text-muted-foreground hover:text-foreground transition text-white",
-                                onclick: move |_| show_comments_modal.set(false),
-                                "✕"
-                            }
-                        }
-
-                        // Comments body
-                        div {
-                            class: "p-6",
-                            {
-                                let comment_vec = comments.read().clone();
-                                let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
-
-                                rsx! {
-                                    if *loading_comments.read() {
-                                        div {
-                                            class: "flex items-center justify-center py-10",
-                                            div {
-                                                class: "text-center",
-                                                div {
-                                                    class: "animate-spin text-4xl mb-2",
-                                                    "⚡"
-                                                }
-                                                p {
-                                                    class: "text-muted-foreground",
-                                                    "Loading comments..."
-                                                }
-                                            }
-                                        }
-                                    } else if thread_tree.is_empty() {
-                                        div {
-                                            class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                            p { "No comments yet" }
-                                            p {
-                                                class: "text-sm",
-                                                "Be the first to comment!"
-                                            }
-                                        }
-                                    } else {
-                                        div {
-                                            class: "divide-y divide-border",
-                                            for node in thread_tree {
-                                                ThreadedComment {
-                                                    node: node.clone(),
-                                                    depth: 0
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Footer with Add Comment button
-                        div {
-                            class: "sticky bottom-0 bg-card border-t border-border px-6 py-4 flex items-center justify-end gap-3 z-10",
-                            button {
-                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2",
-                                onclick: move |_| {
-                                    show_comments_modal.set(false);
-                                    show_comment_composer.set(true);
-                                },
-                                MessageCircleIcon { class: "w-4 h-4".to_string(), filled: false }
-                                span { "Add Comment" }
-                            }
-                        }
+                        class: "absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1",
+                        crate::components::icons::VideoIcon { class: "w-3 h-3" }
+                        "Short"
                     }
                 }
-            }
 
-            // Comment Composer Modal
-            if *show_comment_composer.read() {
-                CommentComposer {
-                    comment_on: event.clone(),
-                    parent_comment: None,
-                    on_close: move |_| show_comment_composer.set(false),
-                    on_success: move |_| {
-                        show_comment_composer.set(false);
-                        // Refresh comments
-                        comments.set(Vec::new());
-                        show_comments_modal.set(true);
+                // Title only for shorts
+                if let Some(title) = &video_meta.title {
+                    p {
+                        class: "text-sm font-medium line-clamp-2 group-hover:text-primary transition",
+                        "{title}"
                     }
-                }
-            }
-
-            // Share Modal
-            if *show_share_modal.read() {
-                ShareModal {
-                    event: event.clone(),
-                    on_close: move |_| show_share_modal.set(false)
                 }
             }
         }
@@ -1128,9 +708,7 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
 
 // Format timestamp as "X ago"
 fn format_time_ago(timestamp: u64) -> String {
-    // Use js_sys::Date::now() for WASM compatibility
     let now = (js_sys::Date::now() / 1000.0) as u64;
-
     let diff = now.saturating_sub(timestamp);
 
     match diff {
@@ -1142,26 +720,116 @@ fn format_time_ago(timestamp: u64) -> String {
     }
 }
 
-// Format count with k/M suffixes
-fn format_count(count: usize) -> String {
-    if count >= 1_000_000 {
-        format!("{}M", count / 1_000_000)
-    } else if count >= 1_000 {
-        format!("{}k", count / 1_000)
-    } else {
-        count.to_string()
-    }
+// Load featured landscape videos (3 landscape videos from Following, fallback to Global)
+async fn load_featured_content() -> Result<Vec<Event>, String> {
+    log::info!("Loading featured landscape videos...");
+
+    // Try Following feed first
+    let _result = if let Some(pubkey_str) = auth_store::get_pubkey() {
+        match nostr_client::fetch_contacts(pubkey_str).await {
+            Ok(contacts) if !contacts.is_empty() => {
+                let mut authors = Vec::new();
+                for contact in contacts.iter() {
+                    if let Ok(pk) = PublicKey::parse(contact) {
+                        authors.push(pk);
+                    }
+                }
+
+                if !authors.is_empty() {
+                    // Fetch only landscape videos (Kind 21)
+                    let filter = Filter::new()
+                        .kinds([Kind::Custom(21)])
+                        .authors(authors)
+                        .limit(20);
+
+                    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                        .await
+                        .unwrap_or_default();
+
+                    let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
+                    all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+                    // Take first 3 landscape videos
+                    let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
+
+                    if !landscape_vec.is_empty() {
+                        return Ok(landscape_vec);
+                    }
+                }
+            }
+            _ => {}
+        }
+    };
+
+    // Fallback to Global if Following is empty or not authenticated
+    log::info!("Falling back to global feed for featured landscape videos");
+
+    // Fetch only landscape videos (Kind 21)
+    let filter = Filter::new()
+        .kinds([Kind::Custom(21)])
+        .limit(20);
+
+    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
+        .unwrap_or_default();
+
+    let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
+    all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    // Take first 3 landscape videos
+    let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
+
+    Ok(landscape_vec)
 }
 
-// Format sats with k/M suffixes
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{}M", sats / 1_000_000)
-    } else if sats >= 1_000 {
-        format!("{}k", sats / 1_000)
-    } else {
-        sats.to_string()
+// Load recent shorts videos (5 shorts from Following feed only)
+async fn load_recent_shorts() -> Result<Vec<Event>, String> {
+    log::info!("Loading recent shorts videos from Following feed...");
+
+    // Only fetch from Following feed
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+
+    match nostr_client::fetch_contacts(pubkey_str).await {
+        Ok(contacts) if !contacts.is_empty() => {
+            let mut authors = Vec::new();
+            for contact in contacts.iter() {
+                if let Ok(pk) = PublicKey::parse(contact) {
+                    authors.push(pk);
+                }
+            }
+
+            if !authors.is_empty() {
+                // Fetch only shorts videos (Kind 22)
+                let filter = Filter::new()
+                    .kinds([Kind::Custom(22)])
+                    .authors(authors)
+                    .limit(20);
+
+                let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                    .await
+                    .unwrap_or_default();
+
+                let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
+                all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+                // Take first 5 shorts videos
+                let shorts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
+
+                return Ok(shorts_vec);
+            }
+        }
+        Ok(_) => {
+            log::info!("User doesn't follow anyone, returning empty shorts");
+            return Ok(Vec::new());
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch contacts: {}", e);
+            return Ok(Vec::new());
+        }
     }
+
+    Ok(Vec::new())
 }
 
 // Helper function to load following videos (Kind 21 & 22 from followed users)
