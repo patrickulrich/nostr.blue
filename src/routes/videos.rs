@@ -67,7 +67,7 @@ pub fn Videos() -> Element {
             match result {
                 Ok(video_events) => {
                     if let Some(last_event) = video_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     has_more.set(video_events.len() >= 50);
@@ -106,7 +106,7 @@ pub fn Videos() -> Element {
                 match result {
                     Ok(mut new_events) => {
                         if let Some(last_event) = new_events.last() {
-                            oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
 
                         has_more.set(new_events.len() >= 50);
@@ -827,7 +827,7 @@ fn VideoInfo(
                     // Timestamp
                     p {
                         class: "text-white/60 text-xs mt-2",
-                        "{format_time_ago(event.created_at.as_u64())}"
+                        "{format_time_ago(event.created_at.as_secs())}"
                     }
                 }
 
@@ -1243,9 +1243,6 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
-    } else {
-        let since = Timestamp::now() - Duration::from_secs(86400 * 7); // 7 days ago
-        filter = filter.since(since);
     }
 
     log::info!("Fetching global video events with filter: {:?}", filter);

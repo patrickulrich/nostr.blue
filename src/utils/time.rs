@@ -13,7 +13,7 @@ use nostr_sdk::Timestamp;
 /// - `format_relative_time(ts, true, true)` returns "5m ago", "2h ago", "3mo ago", "2y ago"
 pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long_format: bool) -> String {
     let now = Utc::now().timestamp() as u64;
-    let ts = timestamp.as_u64();
+    let ts = timestamp.as_secs();
 
     if now < ts {
         return "just now".to_string();
@@ -66,7 +66,7 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 /// Format a timestamp as a human-readable date and time
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
-    let dt = DateTime::from_timestamp(timestamp.as_u64() as i64, 0)
+    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
         .unwrap_or_else(|| Utc::now());
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }

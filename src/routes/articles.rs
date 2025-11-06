@@ -62,7 +62,7 @@ pub fn Articles() -> Element {
                 Ok(feed_events) => {
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load
@@ -100,7 +100,7 @@ pub fn Articles() -> Element {
                 Ok(mut new_articles) => {
                     // Track oldest timestamp from new events
                     if let Some(last_event) = new_articles.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load

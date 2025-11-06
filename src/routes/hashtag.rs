@@ -37,7 +37,7 @@ pub fn Hashtag(tag: String) -> Element {
             match load_hashtag_feed(&hashtag, None).await {
                 Ok(feed_events) => {
                     if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     // Only disable has_more if we got 0 results
                     // Getting less than limit doesn't mean there's no more, could be relay limits
@@ -67,7 +67,7 @@ pub fn Hashtag(tag: String) -> Element {
             match load_hashtag_feed(&hashtag, until).await {
                 Ok(mut new_events) => {
                     if let Some(last_event) = new_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     // Stop pagination only when we get 0 new events
                     has_more.set(!new_events.is_empty());

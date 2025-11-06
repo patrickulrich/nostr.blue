@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -11,13 +11,14 @@ license = "MIT"
 dioxus = { version = "0.6", features = ["web", "router"] }
 
 # Nostr protocol
-nostr = { version = "0.43", default-features = false, features = ["nip57"] }
-nostr-sdk = { version = "0.43", default-features = false, features = ["nip59", "nip57"] }
-nostr-database = { version = "0.43", default-features = false }
-nostr-indexeddb = { version = "0.43" }
-nostr-browser-signer = { version = "0.43" }
-nostr-blossom = { version = "0.43" }
-nostr-connect = { version = "0.43" }
+nostr = { version = "0.44", default-features = false, features = ["nip57"] }
+nostr-sdk = { version = "0.44", default-features = false, features = ["nip59", "nip57"] }
+nostr-database = { version = "0.44", default-features = false }
+nostr-indexeddb = { version = "0.44" }
+nostr-browser-signer = { version = "0.44" }
+nostr-blossom = { version = "0.44" }
+nostr-connect = { version = "0.44" }
+nostr-gossip-memory = { version = "0.44" }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

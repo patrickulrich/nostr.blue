@@ -55,7 +55,7 @@ pub fn CommunityPage(a_tag: String) -> Element {
             match fetch_community_posts(&a_tag_str, None).await {
                 Ok(community_posts) => {
                     if let Some(last) = community_posts.last() {
-                        oldest_timestamp.set(Some(last.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last.created_at.as_secs()));
                     }
                     has_more.set(community_posts.len() >= 50);
                     posts.set(community_posts);
@@ -83,7 +83,7 @@ pub fn CommunityPage(a_tag: String) -> Element {
             match fetch_community_posts(&a_tag_str, until).await {
                 Ok(mut new_posts) => {
                     if let Some(last) = new_posts.last() {
-                        oldest_timestamp.set(Some(last.created_at.as_u64()));
+                        oldest_timestamp.set(Some(last.created_at.as_secs()));
                     }
                     has_more.set(new_posts.len() >= 50);
 

@@ -58,7 +58,7 @@ pub fn Home() -> Element {
                             Ok((feed_events, raw_count)) => {
                                 // Track oldest timestamp for pagination
                                 if let Some(last_event) = feed_events.last() {
-                                    oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                                    oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                                 }
 
                                 // Determine if there are more events based on RAW count before filtering
@@ -84,7 +84,7 @@ pub fn Home() -> Element {
                             Ok(feed_events) => {
                                 // Track oldest timestamp for pagination
                                 if let Some(last_event) = feed_events.last() {
-                                    oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                                    oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                                 }
 
                                 // Determine if there are more events to load
@@ -163,11 +163,11 @@ pub fn Home() -> Element {
                 .since(Timestamp::now())
                 .limit(0); // limit=0 means only new events
 
-            log::info!("Starting real-time subscription for {} followed users using Outbox model", contacts.len());
+            log::info!("Starting real-time subscription for {} followed users using gossip", contacts.len());
 
-            match crate::stores::relay_metadata::subscribe_outbox(filter, client.clone()).await {
+            match client.subscribe(filter, None).await {
                 Ok(output) => {
-                    let home_feed_sub_id = output.val.clone();
+                    let home_feed_sub_id = output.val;
                     log::info!("Subscribed to home feed updates: {:?}", home_feed_sub_id);
 
                     // Handle incoming events
@@ -244,7 +244,7 @@ pub fn Home() -> Element {
                         Ok((mut new_events, raw_count)) => {
                             // Track oldest timestamp from new events
                             if let Some(last_event) = new_events.last() {
-                                oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
 
                             // Determine if there are more events based on RAW count before filtering
@@ -273,7 +273,7 @@ pub fn Home() -> Element {
                         Ok(mut new_events) => {
                             // Track oldest timestamp from new events
                             if let Some(last_event) = new_events.last() {
-                                oldest_timestamp.set(Some(last_event.created_at.as_u64()));
+                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
 
                             // Determine if there are more events to load
@@ -1082,6 +1082,9 @@ fn ProfileSection() -> Element {
 // Helper function to load following feed
 // Returns (events, raw_count_before_filtering) tuple
 async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), String> {
+    // TODO: Consider implementing progressive loading with client.stream_events() for better UX
+    // This would display events as they arrive instead of waiting for all results
+
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;

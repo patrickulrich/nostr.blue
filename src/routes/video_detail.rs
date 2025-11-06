@@ -343,7 +343,7 @@ fn VideoContent(event: Event, is_muted: bool, on_mute_toggle: EventHandler<()>) 
                         class: "flex items-center gap-2",
                         "📅"
                         span {
-                            "{format_time_ago(event.created_at.as_u64())}"
+                            "{format_time_ago(event.created_at.as_secs())}"
                         }
                     }
                 }

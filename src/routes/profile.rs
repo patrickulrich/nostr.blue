@@ -134,33 +134,40 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             };
 
-            // Create filter for kind 0 (metadata) events
-            let filter = Filter::new()
-                .author(public_key)
-                .kind(Kind::Metadata)
-                .limit(1);
+            // Get client for metadata fetching
+            let client = match nostr_client::get_client() {
+                Some(c) => c,
+                None => {
+                    error.set(Some("Client not initialized".to_string()));
+                    loading.set(false);
+                    return;
+                }
+            };
 
-            // Query relays
-            match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
-                Ok(events) => {
-                    if let Some(event) = events.into_iter().next() {
-                        match nostr_sdk::Metadata::from_json(&event.content) {
-                            Ok(metadata) => {
-                                profile_data.set(Some(metadata));
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to parse metadata: {}", e);
-                                // Set empty metadata so we can still show the profile
-                                profile_data.set(Some(nostr_sdk::Metadata::new()));
-                            }
-                        }
-                    } else {
-                        // No metadata event found, use empty metadata
-                        profile_data.set(Some(nostr_sdk::Metadata::new()));
-                    }
+            // 2-tier fetch: Check database first (instant), then fetch from relays if needed
+            // This matches the SDK-recommended pattern used in note_card.rs
+
+            // Tier 1: Check database cache first (instant, no network)
+            if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
+                log::debug!("Loaded profile metadata from database cache");
+                profile_data.set(Some(metadata));
+                loading.set(false);
+                return;
+            }
+
+            // Tier 2: Not in cache, fetch from relays (with gossip routing)
+            match client.fetch_metadata(public_key, Duration::from_secs(5)).await {
+                Ok(Some(metadata)) => {
+                    log::debug!("Fetched profile metadata from relays");
+                    profile_data.set(Some(metadata));
+                }
+                Ok(None) => {
+                    log::debug!("No metadata found, using empty profile");
+                    // No metadata event found, use empty metadata
+                    profile_data.set(Some(nostr_sdk::Metadata::new()));
                 }
                 Err(e) => {
-                    log::error!("Failed to fetch profile: {}", e);
+                    log::error!("Failed to fetch profile metadata: {}", e);
                     // Still set empty metadata so profile can be viewed
                     profile_data.set(Some(nostr_sdk::Metadata::new()));
                 }
@@ -893,7 +900,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 total_fetched += events_len;
 
                 // Get the oldest event timestamp BEFORE filtering
-                let oldest_event_ts = events.last().map(|e| e.created_at.as_u64());
+                let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
                 // Filter for posts only (no e-tags)
                 let posts: Vec<NostrEvent> = events.into_iter()
@@ -920,7 +927,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             // Don't truncate - return all posts found
             log::info!("Loaded {} posts (fetched {} total events, hit_end={})", all_posts.len(), total_fetched, hit_end);
 
-            let oldest_cursor = all_posts.last().map(|e| e.created_at.as_u64());
+            let oldest_cursor = all_posts.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
                 events: all_posts,
                 oldest_cursor,
@@ -955,7 +962,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 total_fetched += events_len;
 
                 // Get the oldest event timestamp BEFORE filtering
-                let oldest_event_ts = events.last().map(|e| e.created_at.as_u64());
+                let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
                 // Filter for replies only (with e-tags)
                 let replies: Vec<NostrEvent> = events.into_iter()
@@ -978,7 +985,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             all_replies.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} replies (fetched {} total events, hit_end={})", all_replies.len(), total_fetched, hit_end);
 
-            let oldest_cursor = all_replies.last().map(|e| e.created_at.as_u64());
+            let oldest_cursor = all_replies.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
                 events: all_replies,
                 oldest_cursor,
@@ -1002,7 +1009,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} articles", event_vec.len());
 
-            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
                 events: event_vec,
                 oldest_cursor,
@@ -1026,7 +1033,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} photos", event_vec.len());
 
-            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
                 events: event_vec,
                 oldest_cursor,
@@ -1050,7 +1057,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} videos", event_vec.len());
 
-            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_u64());
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
                 events: event_vec,
                 oldest_cursor,
@@ -1114,7 +1121,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 for tag in reaction.tags.iter() {
                     if tag.kind() == TagKind::e() {
                         if let Some(event_id_str) = tag.content() {
-                            reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_u64());
+                            reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_secs());
                         }
                     }
                 }

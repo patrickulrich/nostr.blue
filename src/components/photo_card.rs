@@ -294,7 +294,7 @@ pub fn PhotoCard(event: Event) -> Element {
     }));
 
     // Format timestamp
-    let timestamp = format_timestamp(created_at.as_u64());
+    let timestamp = format_timestamp(created_at.as_secs());
 
     // Get display name and picture from metadata
     let display_name = author_metadata.read().as_ref()
@@ -742,7 +742,7 @@ fn format_sats(sats: u64) -> String {
 fn format_timestamp(timestamp: u64) -> String {
     use nostr_sdk::Timestamp;
 
-    let now = Timestamp::now().as_u64();
+    let now = Timestamp::now().as_secs();
     let diff = now.saturating_sub(timestamp);
 
     match diff {

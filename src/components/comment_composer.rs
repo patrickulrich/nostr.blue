@@ -161,7 +161,21 @@ pub fn CommentComposer(
                 (&target_event, None)
             };
 
-            let builder = EventBuilder::comment(content_value, comment_to, root, None);
+            // Build comment using the new CommentTarget API
+            // CommentTarget::event takes (id, kind, relay_hint, marker)
+            let comment_target = CommentTarget::event(
+                comment_to.id,
+                comment_to.kind,
+                None,  // relay hint
+                None   // marker
+            );
+            let root_target = root.map(|r| CommentTarget::event(
+                r.id,
+                r.kind,
+                None,
+                None
+            ));
+            let builder = EventBuilder::comment(content_value, comment_target, root_target);
 
             match client.send_event_builder(builder).await {
                 Ok(event_id) => {

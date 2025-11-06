@@ -56,7 +56,7 @@ impl UserList {
             description,
             identifier,
             tags: event.tags.clone().to_vec(),
-            created_at: event.created_at.as_u64(),
+            created_at: event.created_at.as_secs(),
             author: event.pubkey.to_string(),
             event,
         })

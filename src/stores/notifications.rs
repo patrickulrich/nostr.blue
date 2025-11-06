@@ -275,24 +275,14 @@ pub async fn start_realtime_subscription() {
         )
         .limit(20);              // Only recent events for real-time updates
 
-    log::info!("Starting real-time notification subscription using user's read relays (limit: 20)");
+    log::info!("Starting real-time notification subscription using gossip (limit: 20)");
 
-    // For notifications (events that mention/tag the user), subscribe to user's READ relays
-    // Per NIP-65, when someone mentions you, they should send to YOUR read relays
-    let subscription_result = match crate::stores::relay_metadata::get_user_read_relays(my_pubkey, client.clone()).await {
-        Ok(read_relays) if !read_relays.is_empty() => {
-            log::info!("Subscribing to {} user read relays for notifications", read_relays.len());
-            client.subscribe_to(read_relays, filter.clone(), None).await
-        }
-        _ => {
-            log::warn!("No read relays found, falling back to all relays for notifications");
-            client.subscribe(filter.clone(), None).await
-        }
-    };
+    // With gossip, the client automatically routes to appropriate relays
+    let subscription_result = client.subscribe(filter.clone(), None).await
+        .map(|output| output.val);
 
     match subscription_result {
-        Ok(output) => {
-            let sub_id = output.val.clone();
+        Ok(sub_id) => {
             SUBSCRIPTION_ID.write().replace(sub_id.clone());
             log::info!("Real-time notification subscription started: {:?}", sub_id);
 
@@ -320,7 +310,7 @@ pub async fn start_realtime_subscription() {
 
                         // Check if this event is newer than when we last checked
                         let checked_at = get_checked_at();
-                        let event_timestamp = event.created_at.as_u64() as i64;
+                        let event_timestamp = event.created_at.as_secs() as i64;
 
                         if event_timestamp > checked_at {
                             log::debug!(

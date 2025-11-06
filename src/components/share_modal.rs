@@ -63,47 +63,17 @@ pub fn ShareModal(
     // Generate NIP-19 nevent identifier with relay hints from author's write relays
     let video_nip19 = use_signal(|| String::new());
 
-    // Fetch author's write relays for relay hints in nevent
+    // Generate nevent (with gossip, relay hints are not needed)
     {
         let event_clone = event.clone();
         let mut video_nip19_clone = video_nip19.clone();
         use_effect(move || {
             spawn(async move {
-                // Only attempt to fetch write relays when client exists
-                let relay_hints = if let Some(client) = nostr_client::get_client() {
-                    // Get author's write relays for Outbox model
-                    match crate::stores::relay_metadata::get_user_write_relays(
-                        event_clone.pubkey,
-                        client.clone()
-                    ).await {
-                        Ok(relays) if !relays.is_empty() => {
-                            // Take up to 3 relay hints
-                            relays.into_iter().take(3).collect::<Vec<_>>()
-                        }
-                        _ => Vec::new(),
-                    }
-                } else {
-                    Vec::new()
-                };
-
-                // Create nevent with relay hints
-                use nostr_sdk::nips::nip19::Nip19Event;
+                // With gossip, relay hints are not needed - just use simple note encoding
                 use nostr_sdk::ToBech32;
-                let nevent = if relay_hints.is_empty() {
-                    // No relay hints - use simple note encoding
-                    event_clone.id.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex())
-                } else {
-                    // Create nevent with relay hints using struct fields
-                    let nip19_event = Nip19Event {
-                        event_id: event_clone.id,
-                        author: Some(event_clone.pubkey),
-                        kind: None,
-                        relays: relay_hints,
-                    };
-                    nip19_event.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex())
-                };
+                let nevent = event_clone.id.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex());
 
-                // Always set video_nip19 so the Nostr Event button remains enabled
+                // Set video_nip19 so the Nostr Event button remains enabled
                 video_nip19_clone.set(format!("nostr:{}", nevent));
             });
         });
