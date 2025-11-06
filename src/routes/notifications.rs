@@ -451,7 +451,12 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                    // Use Outbox model to fetch from author's relays
+                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
+                        filter,
+                        Duration::from_secs(5),
+                        client.clone()
+                    ).await {
                         if let Some(original_event) = events.into_iter().next() {
                             reacted_post.set(Some(original_event));
                         }
@@ -578,7 +583,12 @@ fn RepostNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                    // Use Outbox model to fetch from author's relays
+                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
+                        filter,
+                        Duration::from_secs(5),
+                        client.clone()
+                    ).await {
                         if let Some(original_event) = events.into_iter().next() {
                             reposted_post.set(Some(original_event));
                         }
@@ -701,7 +711,12 @@ fn ZapNotification(event: NostrEvent) -> Element {
                         .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
                         .limit(1);
 
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
+                    // Use Outbox model to fetch from author's relays
+                    if let Ok(events) = crate::stores::relay_metadata::fetch_events_outbox(
+                        filter,
+                        Duration::from_secs(5),
+                        client.clone()
+                    ).await {
                         if let Some(original_event) = events.into_iter().next() {
                             zapped_post.set(Some(original_event));
                         }
@@ -929,7 +944,12 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
+    // Use Outbox model to fetch from authors' relays
+    match crate::stores::relay_metadata::fetch_events_outbox(
+        filter,
+        Duration::from_secs(10),
+        client.clone()
+    ).await {
         Ok(events) => {
             for event in events {
                 // Skip our own events

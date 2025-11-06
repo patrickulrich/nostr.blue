@@ -286,6 +286,7 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
 }
 
 /// Get the user's relay URLs for creating nprofile mentions
+#[allow(dead_code)]
 pub async fn get_user_relays() -> Vec<String> {
     let client_opt = (*NOSTR_CLIENT.read()).clone();
     let client = match client_opt {
@@ -309,6 +310,7 @@ pub async fn get_user_relays() -> Vec<String> {
 }
 
 /// Get default relay URLs
+#[allow(dead_code)]
 fn get_default_relays() -> Vec<String> {
     vec![
         "wss://relay.damus.io".to_string(),

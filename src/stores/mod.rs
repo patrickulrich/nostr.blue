@@ -14,4 +14,5 @@ pub mod blossom_store;
 pub mod music_player;
 pub mod emoji_store;
 pub mod gif_store;
+pub mod relay_metadata;
 

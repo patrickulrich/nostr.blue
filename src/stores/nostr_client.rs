@@ -9,6 +9,7 @@ use std::time::Duration;
 use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;
+use crate::stores::relay_metadata;
 use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_tags};
 
 /// Global Nostr client instance
@@ -94,7 +95,7 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
 
     let client = Arc::new(client);
 
-    // Add default relays with options
+    // Add default relays with options (will be replaced if user has kind 10002)
     let mut relay_infos = Vec::new();
     for relay_url in DEFAULT_RELAYS {
         if let Ok(url) = Url::parse(relay_url) {
@@ -159,7 +160,74 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
     *HAS_SIGNER.write() = true;
     *CURRENT_SIGNER.write() = Some(signer.clone());
 
+    // Load user's relay lists (kind 10002/10050) in background
+    let client_clone = client.clone();
+    spawn(async move {
+        if let Err(e) = relay_metadata::init_user_relay_lists(client_clone.clone()).await {
+            log::warn!("Failed to load user relay lists: {}", e);
+        } else {
+            // Apply relay lists to client
+            if let Err(e) = apply_relay_lists_to_client(client_clone).await {
+                log::error!("Failed to apply relay lists: {}", e);
+            }
+        }
+    });
+
     log::info!("Signer updated successfully");
+    Ok(())
+}
+
+/// Apply user's relay lists to the client connections
+async fn apply_relay_lists_to_client(client: Arc<Client>) -> Result<(), String> {
+    let metadata = relay_metadata::USER_RELAY_METADATA
+        .read()
+        .clone()
+        .ok_or("No relay metadata available")?;
+
+    log::info!("Applying {} relays from kind 10002 to client", metadata.relays.len());
+
+    // Add user's configured relays with read/write flags
+    for relay in &metadata.relays {
+        if let Ok(url) = RelayUrl::parse(&relay.url) {
+            let result = match (relay.read, relay.write) {
+                (true, true) => {
+                    client.add_relay(url.clone()).await.map_err(|e| e.to_string())
+                }
+                (true, false) => {
+                    client.add_read_relay(url.clone()).await.map_err(|e| e.to_string())
+                }
+                (false, true) => {
+                    client.add_write_relay(url.clone()).await.map_err(|e| e.to_string())
+                }
+                _ => continue, // Skip invalid configurations
+            };
+
+            match result {
+                Ok(_) => log::info!("Added relay from kind 10002: {} (read: {}, write: {})",
+                    relay.url, relay.read, relay.write),
+                Err(e) => log::warn!("Failed to add relay {}: {}", relay.url, e),
+            }
+        }
+    }
+
+    // Wait for newly added relays to connect
+    log::info!("Waiting for user's relays to connect...");
+    client.connect().await;
+
+    // Update RELAY_POOL to reflect ALL connected relays (defaults + user's relays)
+    let pool_relays = client.pool().relays().await;
+    let mut relay_infos = Vec::new();
+    for (url, _relay) in pool_relays {
+        relay_infos.push(RelayInfo {
+            url: url.to_string(),
+            status: RelayStatus::Connected,
+        });
+    }
+
+    log::info!("Updating RELAY_POOL with {} total connected relays", relay_infos.len());
+    RELAY_POOL.write().clone_from(&relay_infos);
+
+    log::info!("Relay lists applied successfully");
     Ok(())
 }
 
@@ -181,6 +249,7 @@ pub async fn set_read_only() -> Result<(), String> {
 }
 
 /// Add a custom relay
+#[allow(dead_code)]
 pub async fn add_relay(relay_url: &str) -> Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -200,6 +269,7 @@ pub async fn add_relay(relay_url: &str) -> Result<(), String> {
 }
 
 /// Remove a relay
+#[allow(dead_code)]
 pub async fn remove_relay(relay_url: &str) -> Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -216,6 +286,7 @@ pub async fn remove_relay(relay_url: &str) -> Result<(), String> {
 }
 
 /// Disconnect from all relays
+#[allow(dead_code)]
 pub async fn disconnect() {
     if let Some(client) = get_client() {
         client.disconnect().await;
@@ -224,6 +295,7 @@ pub async fn disconnect() {
 }
 
 /// Reconnect to all relays
+#[allow(dead_code)]
 pub async fn reconnect() {
     if let Some(client) = get_client() {
         client.connect().await;
@@ -276,6 +348,18 @@ pub async fn fetch_events_aggregated(
         .map_err(|e| e.to_string())
 }
 
+/// Fetch events using Outbox model with aggregated pattern (database first, then author-specific relays)
+/// This pattern reduces latency and bandwidth by querying only relevant relays
+pub async fn fetch_events_aggregated_outbox(
+    filter: Filter,
+    timeout: Duration,
+) -> Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Use the relay_metadata version which handles caching and outbox routing
+    relay_metadata::fetch_events_aggregated_outbox(filter, timeout, client).await
+}
+
 /// Publish a text note (kind 1 event)
 pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -290,6 +374,9 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
     let mentioned_pubkeys = extract_mentioned_pubkeys(&content);
     let mut mention_tags = create_mention_tags(&mentioned_pubkeys);
     log::debug!("Extracted {} mentions from content", mentioned_pubkeys.len());
+
+    // Track tagged pubkeys for Outbox routing (currently unused but prepared for future outbox implementation)
+    let mut _tagged_pubkeys: Vec<PublicKey> = mentioned_pubkeys.clone();
 
     // Convert tags to nostr Tag format
     use nostr::Tag;
@@ -342,9 +429,15 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
                         nostr::EventId::from_hex(&tag_vec[1]).ok()?
                     ))
                 },
-                "p" if tag_vec.len() >= 2 => Some(Tag::public_key(
-                    nostr::PublicKey::from_hex(&tag_vec[1]).ok()?
-                )),
+                "p" if tag_vec.len() >= 2 => {
+                    // Extract pubkey for Outbox routing (currently unused but prepared for future)
+                    if let Ok(pubkey) = nostr::PublicKey::from_hex(&tag_vec[1]) {
+                        _tagged_pubkeys.push(pubkey);
+                        Some(Tag::public_key(pubkey))
+                    } else {
+                        None
+                    }
+                },
                 _ => {
                     // Generic tag
                     Some(Tag::custom(
@@ -359,20 +452,15 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<Str
     // Combine mention tags with other tags
     mention_tags.extend(nostr_tags);
 
-    // Build and publish the event
+    // Build the event
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
 
-    match client.send_event_builder(builder).await {
-        Ok(output) => {
-            let event_id = output.id().to_string();
-            log::info!("Note published successfully: {}", event_id);
-            Ok(event_id)
-        }
-        Err(e) => {
-            log::error!("Failed to publish note: {}", e);
-            Err(format!("Failed to publish: {}", e))
-        }
-    }
+    // Publish using Outbox model - sends to user's write relays + tagged users' read relays
+    let event_id = relay_metadata::publish_event_outbox(builder, _tagged_pubkeys, client).await
+        .map_err(|e| format!("Failed to publish via Outbox: {}", e))?;
+
+    log::info!("Note published successfully via Outbox: {}", event_id);
+    Ok(event_id)
 }
 
 /// Publish a reaction (kind 7 event) to another event
@@ -406,17 +494,12 @@ pub async fn publish_reaction(
 
     let builder = nostr::EventBuilder::new(Kind::Reaction, content).tags(tags);
 
-    match client.send_event_builder(builder).await {
-        Ok(output) => {
-            let reaction_id = output.id().to_string();
-            log::info!("Reaction published successfully: {}", reaction_id);
-            Ok(reaction_id)
-        }
-        Err(e) => {
-            log::error!("Failed to publish reaction: {}", e);
-            Err(format!("Failed to publish reaction: {}", e))
-        }
-    }
+    // Publish using Outbox - send to author's read relays so they see it
+    let reaction_id = relay_metadata::publish_event_outbox(builder, vec![target_pubkey], client).await
+        .map_err(|e| format!("Failed to publish reaction via Outbox: {}", e))?;
+
+    log::info!("Reaction published successfully via Outbox: {}", reaction_id);
+    Ok(reaction_id)
 }
 
 /// Fetch a user's contact list (kind 3 event)
@@ -598,17 +681,12 @@ pub async fn publish_repost(
 
     let builder = nostr::EventBuilder::new(Kind::Repost, "").tags(tags);
 
-    match client.send_event_builder(builder).await {
-        Ok(output) => {
-            let repost_id = output.id().to_string();
-            log::info!("Repost published successfully: {}", repost_id);
-            Ok(repost_id)
-        }
-        Err(e) => {
-            log::error!("Failed to publish repost: {}", e);
-            Err(format!("Failed to publish repost: {}", e))
-        }
-    }
+    // Publish using Outbox - send to author's read relays so they see it
+    let repost_id = relay_metadata::publish_event_outbox(builder, vec![target_pubkey], client).await
+        .map_err(|e| format!("Failed to publish repost via Outbox: {}", e))?;
+
+    log::info!("Repost published successfully via Outbox: {}", repost_id);
+    Ok(repost_id)
 }
 
 /// Fetch articles (kind 30023 - NIP-23 long-form content)

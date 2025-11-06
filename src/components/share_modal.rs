@@ -60,14 +60,53 @@ pub fn ShareModal(
     // Generate nostr.blue URL
     let video_url = format!("https://nostr.blue/videos/{}", event.id.to_hex());
 
-    // Generate NIP-19 nevent identifier (note)
-    let video_nip19 = {
-        use nostr_sdk::ToBech32;
-        match event.id.to_bech32() {
-            Ok(bech32) if !bech32.is_empty() => format!("nostr:{}", bech32),
-            _ => format!("nostr:{}", event.id.to_hex()), // Fallback to hex
-        }
-    };
+    // Generate NIP-19 nevent identifier with relay hints from author's write relays
+    let video_nip19 = use_signal(|| String::new());
+
+    // Fetch author's write relays for relay hints in nevent
+    {
+        let event_clone = event.clone();
+        let mut video_nip19_clone = video_nip19.clone();
+        use_effect(move || {
+            spawn(async move {
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => return,
+                };
+
+                // Get author's write relays for Outbox model
+                let relay_hints = match crate::stores::relay_metadata::get_user_write_relays(
+                    event_clone.pubkey,
+                    client.clone()
+                ).await {
+                    Ok(relays) if !relays.is_empty() => {
+                        // Take up to 3 relay hints
+                        relays.into_iter().take(3).collect::<Vec<_>>()
+                    }
+                    _ => Vec::new(),
+                };
+
+                // Create nevent with relay hints
+                use nostr_sdk::nips::nip19::Nip19Event;
+                use nostr_sdk::ToBech32;
+                let nevent = if relay_hints.is_empty() {
+                    // No relay hints - use simple note encoding
+                    event_clone.id.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex())
+                } else {
+                    // Create nevent with relay hints using struct fields
+                    let nip19_event = Nip19Event {
+                        event_id: event_clone.id,
+                        author: Some(event_clone.pubkey),
+                        kind: None,
+                        relays: relay_hints,
+                    };
+                    nip19_event.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex())
+                };
+
+                video_nip19_clone.set(format!("nostr:{}", nevent));
+            });
+        });
+    }
 
     let handle_copy_link = {
         let video_url = video_url.clone();
@@ -94,7 +133,6 @@ pub fn ShareModal(
     // Clone URLs for button handlers
     let video_url_for_button1 = video_url.clone();
     let video_mp4_url_for_button = video_mp4_url.clone();
-    let video_nip19_for_button = video_nip19.clone();
 
     let handle_share_to_nostr = move |_| {
         let text = nostr_text.read().trim().to_string();
@@ -377,17 +415,18 @@ pub fn ShareModal(
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: move |_| {
-                                        if video_nip19_for_button.is_empty() || video_nip19_for_button == "nostr:" {
+                                        let nip19_value = video_nip19.read().clone();
+                                        if nip19_value.is_empty() || nip19_value == "nostr:" {
                                             return;
                                         }
                                         let mut current = nostr_text.read().clone();
                                         if !current.is_empty() {
                                             current.push(' ');
                                         }
-                                        current.push_str(&video_nip19_for_button);
+                                        current.push_str(&nip19_value);
                                         nostr_text.set(current);
                                     },
-                                    disabled: video_nip19.is_empty() || video_nip19 == "nostr:",
+                                    disabled: video_nip19.read().is_empty() || *video_nip19.read() == "nostr:",
                                     HashIcon { class: "w-3 h-3" }
                                     "Nostr Event"
                                 }

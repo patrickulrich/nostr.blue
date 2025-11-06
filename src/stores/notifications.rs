@@ -275,9 +275,22 @@ pub async fn start_realtime_subscription() {
         )
         .limit(20);              // Only recent events for real-time updates
 
-    log::info!("Starting real-time notification subscription (limit: 20)");
+    log::info!("Starting real-time notification subscription using user's read relays (limit: 20)");
 
-    match client.subscribe(filter, None).await {
+    // For notifications (events that mention/tag the user), subscribe to user's READ relays
+    // Per NIP-65, when someone mentions you, they should send to YOUR read relays
+    let subscription_result = match crate::stores::relay_metadata::get_user_read_relays(my_pubkey, client.clone()).await {
+        Ok(read_relays) if !read_relays.is_empty() => {
+            log::info!("Subscribing to {} user read relays for notifications", read_relays.len());
+            client.subscribe_to(read_relays, filter.clone(), None).await
+        }
+        _ => {
+            log::warn!("No read relays found, falling back to all relays for notifications");
+            client.subscribe(filter.clone(), None).await
+        }
+    };
+
+    match subscription_result {
         Ok(output) => {
             let sub_id = output.val.clone();
             SUBSCRIPTION_ID.write().replace(sub_id.clone());

@@ -243,14 +243,49 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
 
-    // Send both gift wraps
-    let receiver_result = client.send_event(&receiver_gift_wrap).await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+    // Get recipient's DM inbox relays (kind 10050) with fallback to kind 10002
+    log::debug!("Fetching recipient's DM inbox relays...");
+    let recipient_dm_relays = match crate::stores::relay_metadata::get_user_dm_relays(recipient_pk, client.clone()).await {
+        Ok(relays) if !relays.is_empty() => {
+            log::info!("Sending DM to {} of recipient's inbox relays", relays.len());
+            Some(relays)
+        }
+        Ok(_) | Err(_) => {
+            log::warn!("No DM inbox relays found for recipient, falling back to all relays");
+            None
+        }
+    };
+
+    // Get sender's DM inbox relays for the sender copy
+    log::debug!("Fetching sender's DM inbox relays...");
+    let sender_dm_relays = match crate::stores::relay_metadata::get_user_dm_relays(sender_pk, client.clone()).await {
+        Ok(relays) if !relays.is_empty() => {
+            log::info!("Sending DM copy to {} of sender's inbox relays", relays.len());
+            Some(relays)
+        }
+        Ok(_) | Err(_) => {
+            log::warn!("No DM inbox relays found for sender, falling back to all relays");
+            None
+        }
+    };
+
+    // Send gift wrap to receiver's inbox relays (NIP-17 compliant)
+    let receiver_result = if let Some(relays) = recipient_dm_relays {
+        client.send_event_to(relays, &receiver_gift_wrap).await
+    } else {
+        client.send_event(&receiver_gift_wrap).await
+    }
+    .map_err(|e| format!("Failed to send to receiver: {}", e))?;
 
     log::info!("Sent gift wrap to receiver: {:?}", receiver_result.val);
 
-    let sender_result = client.send_event(&sender_gift_wrap).await
-        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+    // Send gift wrap to sender's inbox relays for their own copy
+    let sender_result = if let Some(relays) = sender_dm_relays {
+        client.send_event_to(relays, &sender_gift_wrap).await
+    } else {
+        client.send_event(&sender_gift_wrap).await
+    }
+    .map_err(|e| format!("Failed to send sender copy: {}", e))?;
 
     log::info!("Sent gift wrap to sender (copy): {:?}", sender_result.val);
 

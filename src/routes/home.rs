@@ -163,9 +163,9 @@ pub fn Home() -> Element {
                 .since(Timestamp::now())
                 .limit(0); // limit=0 means only new events
 
-            log::info!("Starting real-time subscription for {} followed users", contacts.len());
+            log::info!("Starting real-time subscription for {} followed users using Outbox model", contacts.len());
 
-            match client.subscribe(filter, None).await {
+            match crate::stores::relay_metadata::subscribe_outbox(filter, client.clone()).await {
                 Ok(output) => {
                     let home_feed_sub_id = output.val.clone();
                     log::info!("Subscribed to home feed updates: {:?}", home_feed_sub_id);
@@ -1137,8 +1137,8 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
 
     log::info!("Fetching events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database first, then relays)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using Outbox model (database first, then author-specific relays)
+    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let raw_count = events.len();
             log::info!("Loaded {} events from following feed", raw_count);
@@ -1230,8 +1230,8 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
 
     log::info!("Fetching all events (including replies) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using Outbox model
+    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events (including replies) from following feed", events.len());
 
@@ -1273,8 +1273,8 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events using aggregated pattern
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using Outbox model
+    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 
