@@ -369,13 +369,30 @@ pub async fn publish_event_outbox(
 
     log::info!("Publishing to {} relays using Outbox model", target_relays.len());
 
-    // Publish to target relays, fallback to broadcast if no relays
+    // Get currently connected relays in the pool
+    let pool_relays = client.pool().relays().await;
+    let pool_urls: Vec<RelayUrl> = pool_relays.keys().cloned().collect();
+
+    // Filter target relays to only include ones that are in the pool
+    let connected_relays: Vec<RelayUrl> = target_relays
+        .iter()
+        .filter(|url| pool_urls.contains(url))
+        .cloned()
+        .collect();
+
+    log::info!(
+        "Filtered to {} connected relays (out of {} total target relays)",
+        connected_relays.len(),
+        target_relays.len()
+    );
+
+    // Publish to connected relays, fallback to broadcast if none are connected
     let client_for_publish = client.clone();
-    let output = if target_relays.is_empty() {
-        log::warn!("No target relays found, falling back to broadcast");
+    let output = if connected_relays.is_empty() {
+        log::warn!("No connected target relays found, falling back to broadcast");
         client_for_publish.send_event_builder(builder).await
     } else {
-        client_for_publish.send_event_builder_to(target_relays, builder).await
+        client_for_publish.send_event_builder_to(connected_relays, builder).await
     }
     .map_err(|e| format!("Failed to publish event: {}", e))?;
 

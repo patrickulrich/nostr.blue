@@ -203,7 +203,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Calculate indentation (left margin)
     let indent_level = depth.min(MAX_DEPTH);
-    let margin_left = indent_level * 16; // 16px per level
+    let margin_left = indent_level * 4; // 4px per level
 
     rsx! {
         div {
