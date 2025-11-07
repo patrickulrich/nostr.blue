@@ -84,7 +84,8 @@ pub fn VideoDetail(video_id: String) -> Element {
                     // Short video - use vertical scroll player
                     ShortsPlayer {
                         initial_video_id: clean_video_id_for_shorts.clone(),
-                        feed_type: feed_type
+                        feed_type: feed_type,
+                        initial_event: Some(event.clone())
                     }
                 } else {
                     // Landscape video - use single video player
@@ -409,7 +410,7 @@ fn LandscapePlayer(event: Event) -> Element {
 }
 
 #[component]
-fn ShortsPlayer(initial_video_id: String, feed_type: FeedType) -> Element {
+fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Option<Event>) -> Element {
     let mut events = use_signal(|| Vec::<Event>::new());
     let mut loading = use_signal(|| false);
     let mut current_video_index = use_signal(|| 0usize);
@@ -420,6 +421,8 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType) -> Element {
     // Load shorts feed on mount
     use_effect(move || {
         let id = initial_video_id.clone();
+        let initial_evt = initial_event.clone();
+        let has_initial = initial_evt.is_some();
         loading.set(true);
 
         spawn(async move {
@@ -430,17 +433,32 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType) -> Element {
             };
 
             match result {
-                Ok(video_events) => {
+                Ok(mut video_events) => {
+                    // If we have an initial event, insert it at position 0 and deduplicate
+                    if let Some(evt) = initial_evt {
+                        // Remove the event from the feed if it already exists (deduplicate)
+                        video_events.retain(|e| e.id != evt.id);
+
+                        // Insert the initial event at position 0
+                        video_events.insert(0, evt);
+
+                        log::info!("Inserted initial video at position 0, total videos: {}", video_events.len());
+                    }
+
                     if let Some(last_event) = video_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     has_more.set(video_events.len() >= 50);
 
-                    // Find the initial video index
-                    let initial_index = video_events.iter()
-                        .position(|e| e.id.to_hex() == id)
-                        .unwrap_or(0);
+                    // The initial video is now always at index 0 if provided, otherwise find it
+                    let initial_index = if has_initial {
+                        0
+                    } else {
+                        video_events.iter()
+                            .position(|e| e.id.to_hex() == id)
+                            .unwrap_or(0)
+                    };
 
                     events.set(video_events);
                     current_video_index.set(initial_index);
