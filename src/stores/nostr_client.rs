@@ -856,3 +856,270 @@ pub async fn update_profile_banner(url: String) -> Result<(), String> {
     publish_metadata(updated_metadata).await?;
     Ok(())
 }
+
+/// Publish a long-form article (Kind 30023)
+/// NIP-23: https://github.com/nostr-protocol/nips/blob/master/23.md
+pub async fn publish_article(
+    title: String,
+    summary: String,
+    content: String,
+    identifier: String,
+    cover_image: String,
+    hashtags: Vec<String>,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate required fields
+    if identifier.trim().is_empty() {
+        return Err("Identifier cannot be empty".to_string());
+    }
+
+    if title.trim().is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+
+    // Get signer pubkey for the 'a' tag
+    let signer = get_signer().ok_or("No signer available")?;
+    let pubkey = signer.public_key().await?;
+
+    log::info!("Publishing article: {}", title);
+
+    // Build tags
+    use nostr::Tag;
+    use nostr_sdk::nips::nip01::Coordinate;
+
+    let mut tags = vec![
+        Tag::identifier(identifier.clone()),
+        Tag::title(title),
+        // Add 'a' tag for addressable event: <kind>:<pubkey>:<d-identifier>
+        Tag::coordinate(
+            Coordinate::new(
+                nostr::Kind::from(30023),
+                pubkey,
+            ).identifier(identifier),
+            None, // relay_url
+        ),
+    ];
+
+    // Add optional summary
+    if !summary.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("summary".into()),
+            vec![summary]
+        ));
+    }
+
+    // Add optional cover image
+    if !cover_image.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("image".into()),
+            vec![cover_image]
+        ));
+    }
+
+    // Add published_at timestamp
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|e| {
+            log::error!("Failed to get system time: {}", e);
+            "0".to_string()
+        });
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("published_at".into()),
+        vec![timestamp]
+    ));
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Build the event (Kind 30023 - LongFormTextNote)
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(30023), content)
+        .tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish article: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Article published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Detect MIME type from URL file extension
+fn detect_mime_type(url: &str) -> Option<String> {
+    let url_lower = url.to_lowercase();
+
+    // Extract extension from URL (handles query params)
+    let path = url_lower.split('?').next()?;
+    let extension = path.split('.').last()?;
+
+    match extension {
+        "jpg" | "jpeg" => Some("image/jpeg".to_string()),
+        "png" => Some("image/png".to_string()),
+        "gif" => Some("image/gif".to_string()),
+        "webp" => Some("image/webp".to_string()),
+        "svg" => Some("image/svg+xml".to_string()),
+        "bmp" => Some("image/bmp".to_string()),
+        "ico" => Some("image/x-icon".to_string()),
+        "tiff" | "tif" => Some("image/tiff".to_string()),
+        "avif" => Some("image/avif".to_string()),
+        "heic" | "heif" => Some("image/heic".to_string()),
+        _ => None,
+    }
+}
+
+/// Publish a picture post (Kind 20)
+/// NIP-68: https://github.com/nostr-protocol/nips/blob/master/68.md
+pub async fn publish_picture(
+    title: String,
+    caption: String,
+    image_urls: Vec<String>,
+    hashtags: Vec<String>,
+    location: String,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    if image_urls.is_empty() {
+        return Err("At least one image is required".to_string());
+    }
+
+    log::info!("Publishing picture post: {}", title);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = vec![
+        Tag::title(title),
+    ];
+
+    // Add imeta tags for each image
+    // Detect MIME type from extension or omit if unknown
+    for url in &image_urls {
+        let mut imeta_fields = vec![format!("url {}", url)];
+
+        // Add MIME type if we can detect it from the extension
+        if let Some(mime_type) = detect_mime_type(url) {
+            imeta_fields.push(format!("m {}", mime_type));
+        }
+
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("imeta".into()),
+            imeta_fields
+        ));
+    }
+
+    // Add location if provided
+    if !location.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("location".into()),
+            vec![location]
+        ));
+    }
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Build the event (Kind 20 - Picture)
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption)
+        .tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish picture: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Picture published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait)
+/// NIP-71: https://github.com/nostr-protocol/nips/blob/master/71.md
+pub async fn publish_video(
+    title: String,
+    description: String,
+    video_url: String,
+    thumbnail_url: String,
+    hashtags: Vec<String>,
+    is_portrait: bool,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate required fields
+    if video_url.trim().is_empty() {
+        return Err("Video URL is required".to_string());
+    }
+
+    if title.trim().is_empty() {
+        return Err("Title is required".to_string());
+    }
+
+    let kind = if is_portrait { 22 } else { 21 };
+    log::info!("Publishing video (kind {}): {}", kind, title);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = vec![
+        Tag::title(title.clone()),
+        Tag::custom(
+            nostr::TagKind::Custom("url".into()),
+            vec![video_url.clone()]
+        ),
+    ];
+
+    // Add thumbnail if provided
+    if !thumbnail_url.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("thumb".into()),
+            vec![thumbnail_url]
+        ));
+    }
+
+    // Add summary (description)
+    if !description.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("summary".into()),
+            vec![description.clone()]
+        ));
+    }
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Content includes title and video URL
+    let content = if description.is_empty() {
+        format!("{}\n\n{}", title, video_url)
+    } else {
+        format!("{}\n\n{}\n\n{}", title, description, video_url)
+    };
+
+    // Build the event
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content)
+        .tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish video: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Video published successfully: {}", event_id);
+    Ok(event_id)
+}

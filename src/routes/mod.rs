@@ -16,6 +16,11 @@ pub mod video_detail;
 pub mod articles;
 pub mod article_detail;
 pub mod music;
+pub mod note_new;
+pub mod article_new;
+pub mod photo_new;
+pub mod video_new_landscape;
+pub mod video_new_portrait;
 
 // Placeholder modules for missing routes
 mod lists;
@@ -44,6 +49,11 @@ use article_detail::ArticleDetail;
 use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
 use photos::Photos;
 use photo_detail::PhotoDetail;
+use note_new::NoteNew;
+use article_new::ArticleNew;
+use photo_new::PhotoNew;
+use video_new_landscape::VideoNewLandscape;
+use video_new_portrait::VideoNewPortrait;
 use lists::Lists;
 use terms::Terms;
 use privacy::Privacy;
@@ -106,6 +116,21 @@ pub enum Route {
         #[route("/photos/:photo_id")]
         PhotoDetail { photo_id: String },
 
+        #[route("/notes/new")]
+        NoteNew {},
+
+        #[route("/articles/new")]
+        ArticleNew {},
+
+        #[route("/photos/new")]
+        PhotoNew {},
+
+        #[route("/videos/new/landscape")]
+        VideoNewLandscape {},
+
+        #[route("/videos/new/portrait")]
+        VideoNewPortrait {},
+
         #[route("/lists")]
         Lists {},
 
@@ -145,12 +170,23 @@ fn Layout() -> Element {
     let notif_count = use_memo(move || notif_store::get_unread_count());
     let mut sidebar_open = use_signal(|| false);
     let mut more_menu_open = use_signal(|| false);
+    let mut radial_menu_open = use_signal(|| false);
     let current_route = use_route::<Route>();
     let navigator = navigator();
 
     // Check if we're on the DMs or Videos pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. });
+
+    // Check if we're on any creation pages (hide right sidebar for better editor space)
+    let is_creation_page = matches!(
+        current_route,
+        Route::NoteNew {}
+        | Route::ArticleNew {}
+        | Route::PhotoNew {}
+        | Route::VideoNewLandscape {}
+        | Route::VideoNewPortrait {}
+    );
 
     // Check if we're on home page for home button styling
     let is_home_page = matches!(current_route, Route::Home {});
@@ -340,10 +376,44 @@ fn Layout() -> Element {
 
                         // Post Button (if authenticated)
                         if auth.is_authenticated {
-                            button {
-                                class: "w-full mt-4 py-6 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition text-lg flex items-center justify-center gap-2",
-                                crate::components::icons::PenSquareIcon { class: "w-6 h-6" }
-                                span { "Post" }
+                            div {
+                                class: "relative w-full mt-4",
+
+                                button {
+                                    class: "w-full py-6 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
+                                    onclick: move |_| {
+                                        let is_open = *radial_menu_open.read();
+                                        radial_menu_open.set(!is_open);
+                                    },
+                                    crate::components::icons::PenSquareIcon { class: "w-6 h-6" }
+                                    span { "Post" }
+                                }
+
+                                // Radial Menu
+                                crate::components::RadialMenu {
+                                    is_open: *radial_menu_open.read(),
+                                    on_close: move |_| radial_menu_open.set(false),
+                                    on_note_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::NoteNew {});
+                                    },
+                                    on_article_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::ArticleNew {});
+                                    },
+                                    on_photo_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::PhotoNew {});
+                                    },
+                                    on_video_landscape_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::VideoNewLandscape {});
+                                    },
+                                    on_video_portrait_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::VideoNewPortrait {});
+                                    },
+                                }
                             }
                         }
                     }
@@ -574,7 +644,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page {
+                    class: if is_dms_page || is_videos_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -605,7 +675,7 @@ fn Layout() -> Element {
                 }
 
                 // Right Sidebar (Trending & Search) - Hidden on DMs and Videos pages
-                if !is_dms_page && !is_videos_page {
+                if !is_dms_page && !is_videos_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
