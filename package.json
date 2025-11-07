@@ -1,6 +1,6 @@
 {
-  "name": "nostrbluerust",
-  "version": "0.5.3",
+  "name": "nostrblue",
+  "version": "0.5.7",
   "description": "Nostr.blue Rust client",
   "scripts": {
     "tailwind:watch": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --watch",
