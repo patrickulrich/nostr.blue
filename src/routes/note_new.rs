@@ -91,11 +91,15 @@ pub fn NoteNew() -> Element {
         show_gif_picker.set(false);
     };
 
-    // Redirect if not authenticated
-    if !is_authenticated() {
-        use_effect(move || {
+    // Redirect if not authenticated - effect must be called unconditionally
+    use_effect(move || {
+        if !*is_authenticated.read() {
             navigator.push(crate::routes::Route::Home {});
-        });
+        }
+    });
+
+    // Return early with redirect message if not authenticated
+    if !*is_authenticated.read() {
         return rsx! {
             div { class: "flex items-center justify-center h-screen",
                 "Redirecting..."

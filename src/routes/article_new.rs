@@ -96,7 +96,7 @@ pub fn ArticleNew() -> Element {
     });
 
     // Redirect if not authenticated
-    if !is_authenticated() {
+    if !*is_authenticated.read() {
         use_effect(move || {
             navigator.push(crate::routes::Route::Home {});
         });

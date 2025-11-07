@@ -1004,6 +1004,15 @@ pub async fn publish_video(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
+    // Validate required fields
+    if video_url.trim().is_empty() {
+        return Err("Video URL is required".to_string());
+    }
+
+    if title.trim().is_empty() {
+        return Err("Title is required".to_string());
+    }
+
     let kind = if is_portrait { 22 } else { 21 };
     log::info!("Publishing video (kind {}): {}", kind, title);
 
