@@ -873,13 +873,27 @@ pub async fn publish_article(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
+    // Get signer pubkey for the 'a' tag
+    let signer = get_signer().ok_or("No signer available")?;
+    let pubkey = signer.public_key().await?;
+
     log::info!("Publishing article: {}", title);
 
     // Build tags
     use nostr::Tag;
+    use nostr_sdk::nips::nip01::Coordinate;
+
     let mut tags = vec![
-        Tag::identifier(identifier),
+        Tag::identifier(identifier.clone()),
         Tag::title(title),
+        // Add 'a' tag for addressable event: <kind>:<pubkey>:<d-identifier>
+        Tag::coordinate(
+            Coordinate::new(
+                nostr::Kind::from(30023),
+                pubkey,
+            ).identifier(identifier),
+            None, // relay_url
+        ),
     ];
 
     // Add optional summary
@@ -925,6 +939,29 @@ pub async fn publish_article(
     Ok(event_id)
 }
 
+/// Detect MIME type from URL file extension
+fn detect_mime_type(url: &str) -> Option<String> {
+    let url_lower = url.to_lowercase();
+
+    // Extract extension from URL (handles query params)
+    let path = url_lower.split('?').next()?;
+    let extension = path.split('.').last()?;
+
+    match extension {
+        "jpg" | "jpeg" => Some("image/jpeg".to_string()),
+        "png" => Some("image/png".to_string()),
+        "gif" => Some("image/gif".to_string()),
+        "webp" => Some("image/webp".to_string()),
+        "svg" => Some("image/svg+xml".to_string()),
+        "bmp" => Some("image/bmp".to_string()),
+        "ico" => Some("image/x-icon".to_string()),
+        "tiff" | "tif" => Some("image/tiff".to_string()),
+        "avif" => Some("image/avif".to_string()),
+        "heic" | "heif" => Some("image/heic".to_string()),
+        _ => None,
+    }
+}
+
 /// Publish a picture post (Kind 20)
 /// NIP-68: https://github.com/nostr-protocol/nips/blob/master/68.md
 pub async fn publish_picture(
@@ -953,12 +990,18 @@ pub async fn publish_picture(
     ];
 
     // Add imeta tags for each image
-    // For now, we'll use basic URL-only imeta tags
-    // In the future, we can extract dimensions, blurhash, etc.
+    // Detect MIME type from extension or omit if unknown
     for url in &image_urls {
+        let mut imeta_fields = vec![format!("url {}", url)];
+
+        // Add MIME type if we can detect it from the extension
+        if let Some(mime_type) = detect_mime_type(url) {
+            imeta_fields.push(format!("m {}", mime_type));
+        }
+
         tags.push(Tag::custom(
             nostr::TagKind::Custom("imeta".into()),
-            vec![format!("url {}", url), format!("m image/jpeg")]
+            imeta_fields
         ));
     }
 
