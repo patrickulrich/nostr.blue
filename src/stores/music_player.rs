@@ -396,3 +396,47 @@ pub fn hide_zap_dialog() {
     state.show_zap_dialog = false;
     state.zap_track = None;
 }
+
+/// Vote for a track using NIP-51 Kind 30003 (Bookmark Sets)
+pub async fn vote_for_track(track_id: &str, title: &str, artist: &str) {
+    // Check if user is authenticated
+    if !auth_store::is_authenticated() {
+        log::error!("User must be logged in to vote");
+        // TODO: Show toast notification
+        return;
+    }
+
+    let client = match nostr_client::get_client() {
+        Some(c) => c,
+        None => {
+            log::error!("Nostr client not initialized");
+            return;
+        }
+    };
+
+    let track_url = format!("https://wavlake.com/track/{}", track_id);
+
+    // Create Kind 30003 event with proper tags
+    let tags = vec![
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("d".into()), vec!["peachy-song-vote".to_string()]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("title".into()), vec!["Weekly Song Vote".to_string()]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("description".into()), vec!["My vote for the best song of the week".to_string()]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("r".into()), vec![track_url]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_title".into()), vec![title.to_string()]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_artist".into()), vec![artist.to_string()]),
+        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_id".into()), vec![track_id.to_string()]),
+    ];
+
+    let builder = EventBuilder::new(nostr_sdk::Kind::Custom(30003), "").tags(tags);
+
+    match client.send_event_builder(builder).await {
+        Ok(event_id) => {
+            log::info!("Vote submitted for track: {} by {} (event: {})", title, artist, event_id.to_hex());
+            // TODO: Show success toast
+        }
+        Err(e) => {
+            log::error!("Failed to publish vote: {}", e);
+            // TODO: Show error toast
+        }
+    }
+}

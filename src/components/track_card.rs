@@ -128,17 +128,38 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
             div {
                 class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
 
-                // Vote button placeholder
+                // Vote button
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Vote for this track",
+                    onclick: {
+                        let track_id = track.id.clone();
+                        let track_title = track.title.clone();
+                        let track_artist = track.artist.clone();
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            let id = track_id.clone();
+                            let title = track_title.clone();
+                            let artist = track_artist.clone();
+                            spawn(async move {
+                                music_player::vote_for_track(&id, &title, &artist).await;
+                            });
+                        }
+                    },
                     dangerous_inner_html: icons::HEART
                 }
 
-                // Zap button placeholder
+                // Zap button
                 button {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Zap this artist",
+                    onclick: {
+                        let zap_track: MusicTrack = track.clone().into();
+                        move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            music_player::show_zap_dialog_for_track(Some(zap_track.clone()));
+                        }
+                    },
                     dangerous_inner_html: icons::ZAP
                 }
             }
