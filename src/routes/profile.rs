@@ -7,11 +7,13 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, TagKind};
 use std::time::Duration;
 use std::collections::HashMap;
+use wasm_bindgen::JsCast;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 enum MediaSubTab {
     Photos,
     Videos,
+    Verts,
 }
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -68,6 +70,7 @@ pub fn Profile(pubkey: String) -> Element {
         map.insert(ProfileTab::Articles, TabData::default());
         map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
         map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
+        map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
         map.insert(ProfileTab::Likes, TabData::default());
         map
     });
@@ -722,6 +725,15 @@ pub fn Profile(pubkey: String) -> Element {
                             onclick: move |_| active_tab.set(ProfileTab::Media(MediaSubTab::Videos)),
                             "Videos"
                         }
+                        button {
+                            class: if matches!(*active_tab.read(), ProfileTab::Media(MediaSubTab::Verts)) {
+                                "px-4 py-2 rounded-full bg-primary text-primary-foreground font-medium"
+                            } else {
+                                "px-4 py-2 rounded-full hover:bg-accent font-medium"
+                            },
+                            onclick: move |_| active_tab.set(ProfileTab::Media(MediaSubTab::Verts)),
+                            "Verts"
+                        }
                     }
                 }
             }
@@ -744,11 +756,21 @@ pub fn Profile(pubkey: String) -> Element {
                             // 2. Initial events load (loading + no events, regardless of error state)
                             ClientInitializing {}
                         } else if !current_events.is_empty() {
+                            // Use grid layout for Articles and Verts, list layout for others
                             div {
-                                class: "divide-y divide-border",
+                                class: match &tab {
+                                    ProfileTab::Articles => "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-4",
+                                    ProfileTab::Media(MediaSubTab::Verts) => "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-4",
+                                    _ => "divide-y divide-border"
+                                },
                                 for event in current_events.iter() {
                                     // Render the appropriate card based on tab type and event kind
                                     match &tab {
+                                        ProfileTab::Articles => rsx! {
+                                            ArticleCard {
+                                                event: event.clone()
+                                            }
+                                        },
                                         ProfileTab::Media(MediaSubTab::Photos) => rsx! {
                                             PhotoCard {
                                                 event: event.clone()
@@ -756,6 +778,11 @@ pub fn Profile(pubkey: String) -> Element {
                                         },
                                         ProfileTab::Media(MediaSubTab::Videos) => rsx! {
                                             VideoCard {
+                                                event: event.clone()
+                                            }
+                                        },
+                                        ProfileTab::Media(MediaSubTab::Verts) => rsx! {
+                                            VertsVideoCard {
                                                 event: event.clone()
                                             }
                                         },
@@ -853,6 +880,137 @@ fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<Mou
             if active {
                 div {
                     class: "absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t"
+                }
+            }
+        }
+    }
+}
+
+// Video metadata structure for verts
+#[derive(Clone, Debug, PartialEq)]
+struct VideoMeta {
+    url: Option<String>,
+    thumbnail: Option<String>,
+    title: Option<String>,
+}
+
+// Parse NIP-71 video metadata from event tags
+fn parse_video_meta(event: &NostrEvent) -> VideoMeta {
+    let mut meta = VideoMeta {
+        url: None,
+        thumbnail: None,
+        title: None,
+    };
+
+    // Parse title tag
+    for tag in event.tags.iter() {
+        let tag_vec = (*tag).clone().to_vec();
+        if tag_vec.first().map(|s| s.as_str()) == Some("title") && tag_vec.len() > 1 {
+            meta.title = Some(tag_vec[1].clone());
+            break;
+        }
+    }
+
+    // Parse imeta tags
+    for tag in event.tags.iter() {
+        let tag_vec = (*tag).clone().to_vec();
+        if tag_vec.first().map(|s| s.as_str()) == Some("imeta") {
+            for field in tag_vec.iter().skip(1) {
+                if let Some((key, value)) = field.split_once(' ') {
+                    match key {
+                        "url" => meta.url = Some(value.to_string()),
+                        "image" => meta.thumbnail = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    meta
+}
+
+// Vertical video card component for verts
+#[component]
+fn VertsVideoCard(event: NostrEvent) -> Element {
+    let video_meta = parse_video_meta(&event);
+    let mut is_hovering = use_signal(|| false);
+    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id_for_effect = video_element_id.clone();
+
+    // Play/pause video on hover (only if no thumbnail)
+    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }));
+
+    let video_id = event.id.to_hex();
+
+    rsx! {
+        div {
+            class: "group cursor-pointer",
+            onmouseenter: move |_| is_hovering.set(true),
+            onmouseleave: move |_| is_hovering.set(false),
+
+            Link {
+                to: crate::routes::Route::VideoDetail { video_id: video_id.clone() },
+
+                div {
+                    class: "relative aspect-[9/16] bg-muted rounded-lg overflow-hidden mb-2",
+
+                    // Show thumbnail if available, otherwise show video (first frame until hover)
+                    if let Some(thumbnail) = &video_meta.thumbnail {
+                        img {
+                            src: "{thumbnail}",
+                            alt: "{video_meta.title.as_deref().unwrap_or(\"Vert\")}",
+                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        }
+                    } else if let Some(url) = &video_meta.url {
+                        video {
+                            id: "{video_element_id}",
+                            class: "w-full h-full object-cover",
+                            src: "{url}",
+                            muted: true,
+                            loop: true,
+                            playsinline: true,
+                            preload: "metadata",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-muted",
+                            crate::components::icons::VideoIcon { class: "w-8 h-8 text-muted-foreground" }
+                        }
+                    }
+
+                    // Verts indicator
+                    div {
+                        class: "absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1",
+                        crate::components::icons::VideoIcon { class: "w-3 h-3" }
+                        "Vert"
+                    }
+                }
+
+                // Title
+                if let Some(title) = &video_meta.title {
+                    p {
+                        class: "text-sm font-medium line-clamp-2 group-hover:text-primary transition",
+                        "{title}"
+                    }
                 }
             }
         }
@@ -1040,10 +1198,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             })
         }
         ProfileTab::Media(MediaSubTab::Videos) => {
-            // Kind 21 & 22 (Video Events - NIP-71) - query both kinds
+            // Kind 21 (Landscape Video Events - NIP-71)
             let mut filter = Filter::new()
                 .author(public_key)
-                .kinds(vec![Kind::Custom(21), Kind::Custom(22)])
+                .kind(Kind::Custom(21))
                 .limit(TARGET_COUNT);
 
             if let Some(until_ts) = until {
@@ -1056,6 +1214,30 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Loaded {} videos", event_vec.len());
+
+            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
+            Ok(LoadOutcome {
+                events: event_vec,
+                oldest_cursor,
+            })
+        }
+        ProfileTab::Media(MediaSubTab::Verts) => {
+            // Kind 22 (Vertical/Short Video Events - NIP-71)
+            let mut filter = Filter::new()
+                .author(public_key)
+                .kind(Kind::Custom(22))
+                .limit(TARGET_COUNT);
+
+            if let Some(until_ts) = until {
+                filter = filter.until(Timestamp::from(until_ts));
+            }
+
+            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
+            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} verts", event_vec.len());
 
             let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -1203,6 +1385,7 @@ fn get_empty_state_message(tab: &ProfileTab) -> &'static str {
         ProfileTab::Articles => "No articles yet",
         ProfileTab::Media(MediaSubTab::Photos) => "No photos yet",
         ProfileTab::Media(MediaSubTab::Videos) => "No videos yet",
+        ProfileTab::Media(MediaSubTab::Verts) => "No verts yet",
         ProfileTab::Likes => "No likes yet",
     }
 }
@@ -1214,6 +1397,7 @@ fn get_empty_state_icon(tab: &ProfileTab) -> &'static str {
         ProfileTab::Articles => "📄",
         ProfileTab::Media(MediaSubTab::Photos) => "🖼️",
         ProfileTab::Media(MediaSubTab::Videos) => "🎬",
+        ProfileTab::Media(MediaSubTab::Verts) => "📱",
         ProfileTab::Likes => "❤️",
     }
 }

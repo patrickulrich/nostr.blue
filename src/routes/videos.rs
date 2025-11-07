@@ -26,9 +26,9 @@ pub fn Videos() -> Element {
     let mut featured_landscape = use_signal(|| Vec::<Event>::new());
     let mut loading_featured = use_signal(|| false);
 
-    // State for recent shorts section
-    let mut recent_shorts = use_signal(|| Vec::<Event>::new());
-    let mut loading_recent_shorts = use_signal(|| false);
+    // State for recent verts section
+    let mut recent_verts = use_signal(|| Vec::<Event>::new());
+    let mut loading_recent_verts = use_signal(|| false);
 
     // State for combined feed
     let mut feed_events = use_signal(|| Vec::<Event>::new());
@@ -67,7 +67,7 @@ pub fn Videos() -> Element {
         });
     });
 
-    // Load recent shorts on mount
+    // Load recent verts on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -75,17 +75,17 @@ pub fn Videos() -> Element {
             return;
         }
 
-        loading_recent_shorts.set(true);
+        loading_recent_verts.set(true);
 
         spawn(async move {
-            match load_recent_shorts().await {
-                Ok(shorts) => {
-                    recent_shorts.set(shorts);
-                    loading_recent_shorts.set(false);
+            match load_recent_verts().await {
+                Ok(verts) => {
+                    recent_verts.set(verts);
+                    loading_recent_verts.set(false);
                 }
                 Err(e) => {
-                    log::error!("Failed to load recent shorts: {}", e);
-                    loading_recent_shorts.set(false);
+                    log::error!("Failed to load recent verts: {}", e);
+                    loading_recent_verts.set(false);
                 }
             }
         });
@@ -206,13 +206,13 @@ pub fn Videos() -> Element {
 
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
-                        disabled: *loading_featured.read() || *loading_recent_shorts.read() || *loading_feed.read(),
+                        disabled: *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read(),
                         onclick: move |_| {
                             let current = *refresh_trigger.read();
                             refresh_trigger.set(current + 1);
                         },
                         title: "Refresh",
-                        if *loading_featured.read() || *loading_recent_shorts.read() || *loading_feed.read() {
+                        if *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read() {
                             span {
                                 class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin"
                             }
@@ -251,18 +251,18 @@ pub fn Videos() -> Element {
                         }
                     }
 
-                    // Recent Shorts Section
-                    if !recent_shorts.read().is_empty() {
+                    // Recent Verts Section
+                    if !recent_verts.read().is_empty() {
                         div {
                             class: "mb-8",
                             h2 {
                                 class: "text-xl font-semibold mb-4",
-                                "Recent Shorts"
+                                "Recent Verts"
                             }
                             div {
                                 class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
-                                for event in recent_shorts.read().iter().take(5) {
-                                    ShortsVideoCard {
+                                for event in recent_verts.read().iter().take(5) {
+                                    VertsVideoCard {
                                         key: "{event.id}",
                                         event: event.clone(),
                                         feed_type: FeedType::Following
@@ -380,14 +380,14 @@ pub fn Videos() -> Element {
                                 }
                             }
                         } else {
-                            // Unified feed with both landscape and shorts mixed together
+                            // Unified feed with both landscape and verts mixed together
                             div {
                                 class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in feed_events.read().iter() {
                                     // Each video type uses its own card component with appropriate styling
                                     if event.kind == Kind::Custom(22) {
-                                        // Shorts use vertical card
-                                        ShortsVideoCard {
+                                        // Verts use vertical card
+                                        VertsVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
                                             feed_type: *feed_type.read()
@@ -567,10 +567,10 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 }
 
 #[component]
-fn ShortsVideoCard(event: Event, feed_type: FeedType) -> Element {
+fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-short-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
     let video_element_id_for_effect = video_element_id.clone();
 
     // Play/pause video on hover (only if no thumbnail)
@@ -616,7 +616,7 @@ fn ShortsVideoCard(event: Event, feed_type: FeedType) -> Element {
                     if let Some(thumbnail) = &video_meta.thumbnail {
                         img {
                             src: "{thumbnail}",
-                            alt: "{video_meta.title.as_deref().unwrap_or(\"Short\")}",
+                            alt: "{video_meta.title.as_deref().unwrap_or(\"Vert\")}",
                             class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                         }
                     } else if let Some(url) = &video_meta.url {
@@ -636,15 +636,15 @@ fn ShortsVideoCard(event: Event, feed_type: FeedType) -> Element {
                         }
                     }
 
-                    // Shorts indicator
+                    // Verts indicator
                     div {
                         class: "absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1",
                         crate::components::icons::VideoIcon { class: "w-3 h-3" }
-                        "Short"
+                        "Vert"
                     }
                 }
 
-                // Title only for shorts
+                // Title only for verts
                 if let Some(title) = &video_meta.title {
                     p {
                         class: "text-sm font-medium line-clamp-2 group-hover:text-primary transition",
@@ -782,9 +782,9 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
     Ok(landscape_vec)
 }
 
-// Load recent shorts videos (5 shorts from Following feed only)
-async fn load_recent_shorts() -> Result<Vec<Event>, String> {
-    log::info!("Loading recent shorts videos from Following feed...");
+// Load recent verts videos (5 verts from Following feed only)
+async fn load_recent_verts() -> Result<Vec<Event>, String> {
+    log::info!("Loading recent verts videos from Following feed...");
 
     // Only fetch from Following feed
     let pubkey_str = auth_store::get_pubkey()
@@ -800,7 +800,7 @@ async fn load_recent_shorts() -> Result<Vec<Event>, String> {
             }
 
             if !authors.is_empty() {
-                // Fetch only shorts videos (Kind 22)
+                // Fetch only verts videos (Kind 22)
                 let filter = Filter::new()
                     .kinds([Kind::Custom(22)])
                     .authors(authors)
@@ -813,14 +813,14 @@ async fn load_recent_shorts() -> Result<Vec<Event>, String> {
                 let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
                 all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-                // Take first 5 shorts videos
-                let shorts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
+                // Take first 5 verts videos
+                let verts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
 
-                return Ok(shorts_vec);
+                return Ok(verts_vec);
             }
         }
         Ok(_) => {
-            log::info!("User doesn't follow anyone, returning empty shorts");
+            log::info!("User doesn't follow anyone, returning empty verts");
             return Ok(Vec::new());
         }
         Err(e) => {
