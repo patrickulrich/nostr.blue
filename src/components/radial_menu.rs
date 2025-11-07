@@ -43,28 +43,18 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
             }
         }
 
-        // Radial button container
-        div {
-            class: "absolute inset-0 pointer-events-none",
+        // Radial button container - only render when open
+        if props.is_open {
+            div {
+                class: "absolute inset-0 pointer-events-none",
 
             // Note button (left)
             {
                 let (x, y) = calculate_position(positions[0].0);
                 rsx! {
                     button {
-                        class: format!(
-                            "absolute w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto {}",
-                            if props.is_open {
-                                "opacity-100 scale-100"
-                            } else {
-                                "opacity-0 scale-0 pointer-events-none"
-                            }
-                        ),
-                        style: if props.is_open {
-                            format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y)
-                        } else {
-                            "left: 50%; top: 50%; transform: translate(-50%, -50%);".to_string()
-                        },
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
                         onclick: move |e| {
                             e.stop_propagation();
                             props.on_note_click.call(());
@@ -81,19 +71,8 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                 let (x, y) = calculate_position(positions[1].0);
                 rsx! {
                     button {
-                        class: format!(
-                            "absolute w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto {}",
-                            if props.is_open {
-                                "opacity-100 scale-100"
-                            } else {
-                                "opacity-0 scale-0 pointer-events-none"
-                            }
-                        ),
-                        style: if props.is_open {
-                            format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y)
-                        } else {
-                            "left: 50%; top: 50%; transform: translate(-50%, -50%);".to_string()
-                        },
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
                         onclick: move |e| {
                             e.stop_propagation();
                             props.on_article_click.call(());
@@ -110,19 +89,8 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                 let (x, y) = calculate_position(positions[2].0);
                 rsx! {
                     button {
-                        class: format!(
-                            "absolute w-14 h-14 rounded-full bg-gradient-to-br from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto {}",
-                            if props.is_open {
-                                "opacity-100 scale-100"
-                            } else {
-                                "opacity-0 scale-0 pointer-events-none"
-                            }
-                        ),
-                        style: if props.is_open {
-                            format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y)
-                        } else {
-                            "left: 50%; top: 50%; transform: translate(-50%, -50%);".to_string()
-                        },
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
                         onclick: move |e| {
                             e.stop_propagation();
                             props.on_photo_click.call(());
@@ -139,19 +107,8 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                 let (x, y) = calculate_position(positions[3].0);
                 rsx! {
                     button {
-                        class: format!(
-                            "absolute w-14 h-14 rounded-full bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto {}",
-                            if props.is_open {
-                                "opacity-100 scale-100"
-                            } else {
-                                "opacity-0 scale-0 pointer-events-none"
-                            }
-                        ),
-                        style: if props.is_open {
-                            format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y)
-                        } else {
-                            "left: 50%; top: 50%; transform: translate(-50%, -50%);".to_string()
-                        },
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
                         onclick: move |e| {
                             e.stop_propagation();
                             props.on_video_landscape_click.call(());
@@ -168,19 +125,8 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                 let (x, y) = calculate_position(positions[4].0);
                 rsx! {
                     button {
-                        class: format!(
-                            "absolute w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto {}",
-                            if props.is_open {
-                                "opacity-100 scale-100"
-                            } else {
-                                "opacity-0 scale-0 pointer-events-none"
-                            }
-                        ),
-                        style: if props.is_open {
-                            format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y)
-                        } else {
-                            "left: 50%; top: 50%; transform: translate(-50%, -50%);".to_string()
-                        },
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
                         onclick: move |e| {
                             e.stop_propagation();
                             props.on_video_portrait_click.call(());
@@ -190,6 +136,7 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                         FileVideoIcon { class: "w-6 h-6".to_string() }
                     }
                 }
+            }
             }
         }
     }
