@@ -873,6 +873,15 @@ pub async fn publish_article(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
+    // Validate required fields
+    if identifier.trim().is_empty() {
+        return Err("Identifier cannot be empty".to_string());
+    }
+
+    if title.trim().is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+
     // Get signer pubkey for the 'a' tag
     let signer = get_signer().ok_or("No signer available")?;
     let pubkey = signer.public_key().await?;
@@ -913,12 +922,17 @@ pub async fn publish_article(
     }
 
     // Add published_at timestamp
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|e| {
+            log::error!("Failed to get system time: {}", e);
+            "0".to_string()
+        });
+
     tags.push(Tag::custom(
         nostr::TagKind::Custom("published_at".into()),
-        vec![format!("{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs())]
+        vec![timestamp]
     ));
 
     // Add hashtags
