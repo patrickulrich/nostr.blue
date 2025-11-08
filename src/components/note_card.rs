@@ -5,7 +5,7 @@ use crate::routes::Route;
 use crate::stores::nostr_client::{publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::{RichContent, ReplyComposer, ZapModal};
+use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use std::time::Duration;
 
@@ -325,24 +325,32 @@ pub fn NoteCard(event: NostrEvent) -> Element {
 
                     // Header
                     div {
-                        class: "flex items-center gap-2 mb-1 flex-wrap",
-                        Link {
-                            to: Route::Profile { pubkey: author_pubkey.clone() },
-                            onclick: move |e: MouseEvent| e.stop_propagation(),
-                            class: "font-bold hover:underline",
-                            "{display_name}"
+                        class: "flex items-start justify-between gap-2 mb-1",
+                        div {
+                            class: "flex items-center gap-2 flex-wrap",
+                            Link {
+                                to: Route::Profile { pubkey: author_pubkey.clone() },
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                class: "font-bold hover:underline",
+                                "{display_name}"
+                            }
+                            span {
+                                class: "text-muted-foreground text-sm",
+                                "@{username}"
+                            }
+                            span {
+                                class: "text-muted-foreground text-sm",
+                                "·"
+                            }
+                            span {
+                                class: "text-muted-foreground text-sm",
+                                "{timestamp}"
+                            }
                         }
-                        span {
-                            class: "text-muted-foreground text-sm",
-                            "@{username}"
-                        }
-                        span {
-                            class: "text-muted-foreground text-sm",
-                            "·"
-                        }
-                        span {
-                            class: "text-muted-foreground text-sm",
-                            "{timestamp}"
+                        // Menu button
+                        NoteMenu {
+                            author_pubkey: author_pubkey.clone(),
+                            event_id: event_id.clone()
                         }
                     }
 
