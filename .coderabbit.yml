@@ -1,0 +1,161 @@
+# CodeRabbit configuration for nostr.blue
+# A Nostr protocol client built with Rust and Dioxus
+# Save this as .coderabbit.yml in the root of your repository
+
+language: "en"
+early_access: false
+
+reviews:
+  # Disables the workflow where CodeRabbit requests changes.
+  request_changes_workflow: false
+
+  # Enables a high-level summary on pull requests.
+  high_level_summary: true
+
+  # Generates a poem about the changes.
+  poem: true
+
+  # Adds a review status comment.
+  review_status: true
+
+  # Keeps the detailed file-by-file walkthrough expanded.
+  collapse_walkthrough: false
+
+  # Abort review if PR is closed during review
+  abort_on_close: true
+
+  # Filters to exclude files from review.
+  path_filters:
+    # Build artifacts and dependencies
+    - "!**/target/**"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!**/package-lock.json"
+    - "!**/Cargo.lock"
+
+    # Configuration files that rarely need review
+    - "!**/*.toml"
+    - "!**/*.md"
+    - "!.gitignore"
+    - "!LICENSE"
+    - "!**/.env*"
+    - "!**/tailwind.config.js"
+
+    # C bindings (if any) and build scripts
+    - "!**/*.c"
+    - "!**/CMakeLists.txt"
+    - "!**/build.rs"
+
+    # Generated files
+    - "!**/public/tailwind.css"
+
+  # Provides specific instructions for matching paths.
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        You are @coderabbitai, a language model trained by OpenAI.
+        Your purpose is to function as a very experienced **Rust software engineer** with deep expertise in:
+        - **Nostr Protocol**: NIPs (Nostr Implementation Possibilities), event types, relay communication, and cryptographic signatures
+        - **WebAssembly (WASM)**: Browser-based Rust applications, WASM-bindgen patterns, and performance considerations
+        - **Dioxus Framework**: Component patterns, reactive state management, hooks, and routing
+        - **Async Rust**: Tokio runtime, async/await patterns, futures, and concurrency primitives
+
+        Thoroughly review the code snippets and suggest improvements for these key areas:
+          - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
+          - **Security**: Vulnerabilities, especially:
+            - Nostr event validation and signature verification
+            - XSS risks in user-generated content rendering
+            - Relay communication and untrusted data handling
+            - Cryptographic operations and key management
+            - LocalStorage/IndexedDB data exposure
+          - **Performance**: Bottlenecks, inefficient algorithms, or unnecessary allocations, especially:
+            - WASM binary size optimizations
+            - Unnecessary clones or allocations
+            - Database query efficiency (nostr-indexeddb)
+            - Rendering performance in Dioxus components
+          - **Concurrency**: Potential data races, deadlocks, improper use of async/await, or channel misuse.
+          - **Nostr Protocol Compliance**: Correct implementation of NIPs, event structure, and relay communication patterns.
+          - **WASM Best Practices**: Efficient JavaScript interop, memory management, and avoiding panics.
+          - **Dioxus Patterns**: Proper use of hooks, memo, signals, and component lifecycle.
+          - **Error Handling**: Proper use of Result/Option, error propagation, and user-facing error messages.
+          - **Maintainability & Modularity**: Code that is overly complex, monolithic, or violates separation of concerns.
+          - **Best Practices**: Adherence to Rust idioms (ownership, lifetimes, zero-cost abstractions) and SOLID/KISS principles.
+
+        Please **do not** comment on:
+          - Trivial code style issues or formatting (handled by rustfmt)
+          - Missing comments unless they obscure critical logic
+          - Naming conventions unless they're misleading
+
+        Focus on identifying and solving significant problems that improve code quality, security, and performance.
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Review dependency versions, feature flags, and configurations:
+          - Check for outdated or vulnerable dependencies
+          - Verify feature flags are minimal and necessary
+          - Ensure profile settings (release/dev) are optimal
+          - Flag any suspicious or unnecessary dependencies
+        Only comment on significant issues, not minor version updates.
+
+    - path: "**/*.js"
+      instructions: |
+        Review JavaScript configuration files (like tailwind.config.js):
+          - Check for security issues in build configurations
+          - Verify paths and settings are correct
+          - Flag any unnecessary complexity
+        Keep comments minimal and focus on actual issues.
+
+    - path: "**/index.html"
+      instructions: |
+        Review HTML entry point for:
+          - Security: CSP headers, script integrity, XSS prevention
+          - Performance: Resource loading strategy, critical CSS
+          - Accessibility: Semantic HTML, ARIA attributes
+          - SEO: Meta tags, Open Graph, structured data
+
+auto_review:
+  # Enable auto-review for pull requests.
+  enabled: true
+
+  # Do not review PRs with these keywords in the title.
+  ignore_title_keywords:
+    - "WIP"
+    - "DO NOT MERGE"
+    - "DRAFT"
+    - "POC"
+
+  # Do not review draft pull requests.
+  drafts: false
+
+  # Auto-review PRs targeting these base branches.
+  base_branches:
+    - "main"
+    - "master"
+    - "develop"
+    - "feature/**"
+    - "up/**"
+    - "release/**"
+
+  # Only review if certain labels are present (optional - comment out if not needed)
+  # labels:
+  #   - "ready-for-review"
+  #   - "needs-review"
+
+chat:
+  # Allow CodeRabbit to auto-reply in chat.
+  auto_reply: true
+
+# Optional: Configure knowledge base for project-specific context
+# knowledge_base:
+#   # Learnings that CodeRabbit should remember about this project
+#   learnings:
+#     - "This project uses nostr-sdk 0.44 with specific NIPs enabled"
+#     - "Performance is critical - watch for WASM binary size increases"
+#     - "All user content must be sanitized with ammonia before rendering"
+
+# Optional: Configure tools and integrations
+# tools:
+#   # Enable GitHub Actions integration
+#   github_actions: true
+#   # Enable AST-based analysis
+#   ast_analysis: true
