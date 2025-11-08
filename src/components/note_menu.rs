@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
-use crate::stores::nostr_client;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NoteMenuProps {
@@ -78,9 +78,15 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                     // Follow/Unfollow user
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
-                        disabled: *is_loading_follow_state.read() || *is_updating_follow.read(),
+                        disabled: *is_loading_follow_state.read() || *is_updating_follow.read() || !*HAS_SIGNER.read(),
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
+
+                            // Early return if no signer is connected
+                            if !*HAS_SIGNER.read() {
+                                log::warn!("Cannot follow/unfollow user: No signer connected");
+                                return;
+                            }
 
                             let pubkey = author_pubkey_follow_action.clone();
                             let currently_following = *is_following.read();
