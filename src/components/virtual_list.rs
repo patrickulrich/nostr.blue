@@ -19,6 +19,24 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use js_sys::eval;
 
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// Track if a scroll update is pending (prevents flooding with rAF callbacks)
+    static SCROLL_UPDATE_PENDING: RefCell<bool> = RefCell::new(false);
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = requestAnimationFrame)]
+    fn request_animation_frame(closure: &js_sys::Function);
+}
+
 /// Configuration for virtual scrolling behavior
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VirtualScrollConfig {
@@ -270,29 +288,100 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
             onscroll: move |_evt| {
-                // Update scroll position via JS interop
-                let mut state = virtual_state.clone();
-                let container_class = container_class_for_scroll.clone();
-                spawn(async move {
-                    let js_code = format!(
-                        r#"
-                        (function() {{
-                            const container = document.querySelector('.{}');
-                            if (container) {{
-                                return container.scrollTop;
-                            }}
-                            return 0;
-                        }})()
-                        "#,
-                        container_class
-                    );
+                // Throttle scroll updates using requestAnimationFrame to prevent flooding
+                // Only schedules one update per frame (~16ms) instead of hundreds per scroll
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let already_pending = SCROLL_UPDATE_PENDING.with(|pending| {
+                        let was_pending = *pending.borrow();
+                        if !was_pending {
+                            *pending.borrow_mut() = true;
+                        }
+                        was_pending
+                    });
 
-                    if let Ok(result) = eval(&js_code) {
-                        let scroll_top = result.as_f64().unwrap_or(0.0);
-                        state.write().scroll_top = scroll_top;
-                        log::trace!("Updated scroll_top to {}px", scroll_top);
+                    // If an update is already scheduled, skip this event
+                    if already_pending {
+                        return;
                     }
-                });
+
+                    let mut state = virtual_state.clone();
+                    let container_class = container_class_for_scroll.clone();
+
+                    // Schedule update on next animation frame
+                    let closure = wasm_bindgen::closure::Closure::once(move || {
+                        spawn(async move {
+                            let js_code = format!(
+                                r#"
+                                (function() {{
+                                    const container = document.querySelector('.{}');
+                                    if (container) {{
+                                        return container.scrollTop;
+                                    }}
+                                    return 0;
+                                }})()
+                                "#,
+                                container_class
+                            );
+
+                            if let Ok(result) = eval(&js_code) {
+                                let scroll_top = result.as_f64().unwrap_or(0.0);
+                                state.write().scroll_top = scroll_top;
+                                log::trace!("Updated scroll_top to {}px", scroll_top);
+                            }
+
+                            // Reset pending flag after update completes
+                            SCROLL_UPDATE_PENDING.with(|pending| {
+                                *pending.borrow_mut() = false;
+                            });
+                        });
+                    });
+
+                    request_animation_frame(closure.as_ref().unchecked_ref());
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Non-WASM: Use simple throttle with last update time
+                    use std::sync::atomic::{AtomicU64, Ordering};
+                    static LAST_SCROLL_UPDATE: AtomicU64 = AtomicU64::new(0);
+
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    let last = LAST_SCROLL_UPDATE.load(Ordering::Relaxed);
+
+                    // Throttle to ~60fps (16ms)
+                    if now - last < 16 {
+                        return;
+                    }
+
+                    LAST_SCROLL_UPDATE.store(now, Ordering::Relaxed);
+
+                    let mut state = virtual_state.clone();
+                    let container_class = container_class_for_scroll.clone();
+                    spawn(async move {
+                        let js_code = format!(
+                            r#"
+                            (function() {{
+                                const container = document.querySelector('.{}');
+                                if (container) {{
+                                    return container.scrollTop;
+                                }}
+                                return 0;
+                            }})()
+                            "#,
+                            container_class
+                        );
+
+                        if let Ok(result) = eval(&js_code) {
+                            let scroll_top = result.as_f64().unwrap_or(0.0);
+                            state.write().scroll_top = scroll_top;
+                            log::trace!("Updated scroll_top to {}px", scroll_top);
+                        }
+                    });
+                }
             },
 
             // Spacer div for total height (creates scrollbar)
