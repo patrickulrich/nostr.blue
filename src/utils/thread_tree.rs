@@ -1,9 +1,8 @@
-use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{Event, EventId, TagKind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use instant::{Duration, Instant};
 
 /// Represents a node in a threaded conversation tree
@@ -155,12 +154,17 @@ impl ThreadTreeCache {
 /// Cache configuration:
 /// - Capacity: 200 threads (enough for typical browsing session)
 /// - TTL: 10 minutes (threads don't change as frequently as counts)
-static THREAD_TREE_CACHE: GlobalSignal<Mutex<ThreadTreeCache>> = Signal::global(|| {
-    Mutex::new(ThreadTreeCache::new(
-        200,
-        Duration::from_secs(600), // 10 minutes
-    ))
-});
+static THREAD_TREE_CACHE: OnceLock<Mutex<ThreadTreeCache>> = OnceLock::new();
+
+/// Get or initialize the thread tree cache
+fn get_thread_tree_cache() -> &'static Mutex<ThreadTreeCache> {
+    THREAD_TREE_CACHE.get_or_init(|| {
+        Mutex::new(ThreadTreeCache::new(
+            200,
+            Duration::from_secs(600), // 10 minutes
+        ))
+    })
+}
 
 /// Build a threaded conversation tree from a flat list of reply events
 ///
@@ -186,8 +190,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
     // Phase 3.5: Check L2 cache first
     {
-        let cache_signal = THREAD_TREE_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap();
         if let Some(cached_tree) = cache.get(&root_id_hex) {
             log::debug!("Thread tree cache HIT for {}", root_id_hex);
             return cached_tree;
@@ -319,8 +322,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
     // Phase 3.5: Cache the result for future calls
     {
-        let cache_signal = THREAD_TREE_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap();
         cache.insert(root_id_hex, root_replies.clone());
     }
 
@@ -352,8 +354,7 @@ pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
 pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
     let root_id_hex = root_event_id.to_hex();
     {
-        let cache_signal = THREAD_TREE_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap();
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
@@ -362,8 +363,7 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 /// Invalidate cached thread trees for multiple root events at once
 pub fn invalidate_thread_tree_cache_batch(root_event_ids: &[EventId]) {
     {
-        let cache_signal = THREAD_TREE_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap();
         for event_id in root_event_ids {
             let root_id_hex = event_id.to_hex();
             cache.invalidate(&root_id_hex);

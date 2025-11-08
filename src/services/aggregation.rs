@@ -16,13 +16,12 @@
 /// - Automatic eviction of stale/excess entries
 /// - Reduces redundant database queries for recently-viewed events
 
-use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagKind, SingleLetterTag, Alphabet};
 use crate::stores::nostr_client::get_client;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use instant::{Duration, Instant};
 
 /// Aggregated interaction counts for a single event
@@ -123,12 +122,17 @@ impl CountsCache {
 /// Cache configuration:
 /// - Capacity: 1000 events (enough for ~10 full feeds)
 /// - TTL: 5 minutes (balance freshness vs performance)
-static COUNTS_CACHE: GlobalSignal<Mutex<CountsCache>> = Signal::global(|| {
-    Mutex::new(CountsCache::new(
-        1000,
-        Duration::from_secs(300), // 5 minutes
-    ))
-});
+static COUNTS_CACHE: OnceLock<Mutex<CountsCache>> = OnceLock::new();
+
+/// Get or initialize the counts cache
+fn get_counts_cache() -> &'static Mutex<CountsCache> {
+    COUNTS_CACHE.get_or_init(|| {
+        Mutex::new(CountsCache::new(
+            1000,
+            Duration::from_secs(300), // 5 minutes
+        ))
+    })
+}
 
 /// Batch fetch interaction counts for multiple events
 ///
@@ -157,8 +161,7 @@ pub async fn fetch_interaction_counts_batch(
 
     // Phase 3.5: Check L2 cache first
     let (cached_counts, cache_hits, uncached_ids) = {
-        let cache_signal = COUNTS_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap();
         let cached_counts = cache.get_batch(&event_ids);
         let cache_hits = cached_counts.len();
 
@@ -170,7 +173,7 @@ pub async fn fetch_interaction_counts_batch(
             .collect();
 
         (cached_counts, cache_hits, uncached_ids)
-        // Both cache and cache_signal are dropped here
+        // Cache lock is dropped here
     };
 
     log::info!(
@@ -246,10 +249,9 @@ pub async fn fetch_interaction_counts_batch(
 
     // Update L2 cache with freshly fetched counts
     {
-        let cache_signal = COUNTS_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap();
         cache.insert_batch(freshly_fetched.clone());
-        // Both cache and cache_signal are dropped here
+        // Cache lock is dropped here
     }
 
     // Combine cached and freshly fetched results
@@ -279,8 +281,7 @@ pub async fn fetch_interaction_counts_batch(
 /// ```
 pub fn invalidate_interaction_counts(event_id: &str) {
     {
-        let cache_signal = COUNTS_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap();
         cache.invalidate(event_id);
     }
     log::debug!("Invalidated interaction counts cache for {}", event_id);
@@ -289,8 +290,7 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 /// Invalidate cached counts for multiple events at once
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
-        let cache_signal = COUNTS_CACHE.write();
-        let mut cache = cache_signal.lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap();
         for event_id in event_ids {
             cache.invalidate(event_id);
         }
