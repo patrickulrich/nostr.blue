@@ -128,14 +128,14 @@ reviews:
     # Do not review draft pull requests.
     drafts: false
 
-    # Auto-review PRs targeting these base branches.
+    # Auto-review PRs targeting these base branches (regex patterns).
     base_branches:
       - "main"
       - "master"
       - "develop"
-      - "feature/**"
-      - "up/**"
-      - "release/**"
+      - "^feature/.*"
+      - "^up/.*"
+      - "^release/.*"
 
     # Only review if certain labels are present (optional - comment out if not needed)
     # labels:
