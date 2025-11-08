@@ -12,6 +12,9 @@ use crate::stores::signer::SignerType;
 use crate::stores::relay_metadata;
 use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_tags};
 
+#[cfg(target_arch = "wasm32")]
+use crate::services::admission_policy::NostrBlueAdmissionPolicy;
+
 /// Global Nostr client instance
 pub static NOSTR_CLIENT: GlobalSignal<Option<Arc<Client>>> = Signal::global(|| None);
 
@@ -91,6 +94,7 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
         Client::builder()
             .database(database)
             .gossip(gossip)
+            .admit_policy(NostrBlueAdmissionPolicy::default())
             .build()
     };
 
