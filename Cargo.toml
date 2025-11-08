@@ -19,6 +19,7 @@ nostr-browser-signer = { version = "0.44" }
 nostr-blossom = { version = "0.44" }
 nostr-connect = { version = "0.44" }
 nostr-gossip-memory = { version = "0.44" }
+nostr-relay-pool = { version = "0.44" }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

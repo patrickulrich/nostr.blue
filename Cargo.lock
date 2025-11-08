@@ -2146,6 +2146,7 @@ dependencies = [
  "nostr-database",
  "nostr-gossip-memory",
  "nostr-indexeddb",
+ "nostr-relay-pool",
  "nostr-sdk",
  "pulldown-cmark",
  "qrcode",
