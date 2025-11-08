@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.5.10"
+version = "0.6.0"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -63,6 +63,10 @@ web-sys = { version = "0.3", features = [
     "FileReader",
     "Event",
     "EventTarget",
+    # Intersection Observer for infinite scroll
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -84,6 +88,7 @@ bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
 hex = "0.4"
+lru = "0.12"
 
 # Markdown rendering
 pulldown-cmark = "0.12"

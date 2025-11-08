@@ -198,7 +198,8 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                     img {
                                                         src: "{thumb_url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-24 h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-sm hover:shadow-md"
+                                                        class: "w-24 h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-sm hover:shadow-md",
+                                                        loading: "lazy"
                                                     }
                                                 }
                                             }
@@ -278,7 +279,8 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                     img {
                                                         src: "{thumb_url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
+                                                        class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-200",
+                                                        loading: "lazy"
                                                     }
                                                     // Hover overlay
                                                     div {

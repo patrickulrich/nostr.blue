@@ -3,6 +3,8 @@ use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
 use std::time::Duration;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use lru::LruCache;
 use chrono::{DateTime, Utc};
 
 /// User profile metadata from Kind 0 events
@@ -70,15 +72,16 @@ impl Profile {
 }
 
 /// Global signal to cache profiles (pubkey -> Profile)
-pub static PROFILE_CACHE: GlobalSignal<HashMap<String, Profile>> =
-    Signal::global(|| HashMap::new());
+/// LRU cache with max capacity of 1000 profiles to prevent unbounded memory growth
+pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(1000).unwrap()));
 
 /// Cache TTL in seconds (5 minutes)
 const CACHE_TTL_SECONDS: i64 = 300;
 
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
-    PROFILE_CACHE.read().get(pubkey).map(|profile| {
+    PROFILE_CACHE.read().peek(pubkey).map(|profile| {
         let mut metadata = nostr_sdk::Metadata::new();
         if let Some(name) = &profile.name {
             metadata = metadata.name(name);
@@ -117,7 +120,7 @@ pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
 /// Fetch a profile from relays by pubkey
 pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     // Check cache first
-    if let Some(cached_profile) = PROFILE_CACHE.read().get(&pubkey) {
+    if let Some(cached_profile) = PROFILE_CACHE.read().peek(&pubkey) {
         let age = Utc::now().signed_duration_since(cached_profile.fetched_at);
         if age.num_seconds() < CACHE_TTL_SECONDS {
             log::debug!("Using cached profile for {}", pubkey);
@@ -143,7 +146,7 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 let profile = parse_profile_event(&event)?;
 
                 // Cache the profile
-                PROFILE_CACHE.write().insert(pubkey.clone(), profile.clone());
+                PROFILE_CACHE.write().put(pubkey.clone(), profile.clone());
 
                 Ok(profile)
             } else {
@@ -162,7 +165,7 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 };
 
                 // Cache the empty profile to avoid re-fetching
-                PROFILE_CACHE.write().insert(pubkey, profile.clone());
+                PROFILE_CACHE.write().put(pubkey, profile.clone());
 
                 Ok(profile)
             }
@@ -211,7 +214,7 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
 
 /// Get a profile from cache (if available)
 pub fn get_cached_profile(pubkey: &str) -> Option<Profile> {
-    PROFILE_CACHE.read().get(pubkey).cloned()
+    PROFILE_CACHE.read().peek(pubkey).cloned()
 }
 
 /// Fetch multiple profiles in a single query (much more efficient than individual fetches)
@@ -226,7 +229,7 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
 
     // Check cache first
     for pk in &pubkeys {
-        if let Some(cached) = PROFILE_CACHE.read().get(pk) {
+        if let Some(cached) = PROFILE_CACHE.read().peek(pk) {
             let age = Utc::now().signed_duration_since(cached.fetched_at);
             if age.num_seconds() < CACHE_TTL_SECONDS {
                 results.insert(pk.clone(), cached.clone());
@@ -264,7 +267,7 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
         Ok(events) => {
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {
-                    PROFILE_CACHE.write().insert(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
                     results.insert(profile.pubkey.clone(), profile);
                 }
             }

@@ -98,7 +98,8 @@ pub fn TrendingNotes() -> Element {
                                         img {
                                             src: "{picture}",
                                             alt: "{author_name}",
-                                            class: "w-10 h-10 rounded-full flex-shrink-0"
+                                            class: "w-10 h-10 rounded-full flex-shrink-0",
+                                            loading: "lazy"
                                         }
 
                                         // Content

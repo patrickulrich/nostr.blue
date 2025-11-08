@@ -1298,66 +1298,29 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
 /// This checks the database first and only fetches missing metadata
 async fn prefetch_author_metadata(events: &[Event]) {
     use std::collections::HashSet;
-    use nostr_sdk::prelude::NostrDatabaseExt;
+    use crate::stores::profiles;
 
-    // Collect unique author pubkeys
-    let authors: Vec<PublicKey> = events.iter()
-        .map(|e| e.pubkey)
+    // Collect unique author pubkeys as hex strings
+    let pubkeys: Vec<String> = events.iter()
+        .map(|e| e.pubkey.to_hex())
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
 
-    if authors.is_empty() {
+    if pubkeys.is_empty() {
         return;
     }
 
-    log::info!("Checking database for metadata of {} unique authors", authors.len());
+    log::info!("Batch fetching profiles for {} unique authors", pubkeys.len());
 
-    // Get client
-    let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
-        Some(c) => c.clone(),
-        None => {
-            log::warn!("Client not available for metadata prefetch");
-            return;
-        }
-    };
-
-    // Check which authors are missing from database
-    let mut missing_authors = Vec::new();
-    for author in &authors {
-        match client.database().metadata(*author).await {
-            Ok(Some(_)) => {
-                // Already in database, skip
-                continue;
-            }
-            Ok(None) | Err(_) => {
-                // Not in database or error, need to fetch
-                missing_authors.push(*author);
-            }
-        }
-    }
-
-    if missing_authors.is_empty() {
-        log::info!("All metadata already in database, no prefetch needed");
-        return;
-    }
-
-    log::info!("Batch fetching {} missing metadata entries (from {} total authors)",
-               missing_authors.len(), authors.len());
-
-    // Single batch query for missing author metadata
-    let filter = Filter::new()
-        .authors(missing_authors)
-        .kind(Kind::Metadata);
-
-    // Fetch and auto-save to database
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            log::info!("Successfully prefetched {} new metadata events", events.len());
-            // Events are automatically saved to IndexedDB by the SDK
+    // Use the batch fetch function which populates PROFILE_CACHE
+    match profiles::fetch_profiles_batch(pubkeys).await {
+        Ok(profiles_map) => {
+            log::info!("Successfully batch fetched {} profiles into cache", profiles_map.len());
+            // Profiles are now cached in PROFILE_CACHE with LRU eviction
         }
         Err(e) => {
-            log::warn!("Failed to prefetch metadata: {}", e);
+            log::warn!("Failed to batch fetch profiles: {}", e);
             // Non-fatal - individual components will fetch as needed
         }
     }

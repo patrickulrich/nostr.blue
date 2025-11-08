@@ -33,8 +33,8 @@ where
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
 
-    #[cfg_attr(not(target_family = "wasm"), allow(unused_mut, unused_variables))]
-    let mut last_check = use_signal(|| 0u64);
+    #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
+    let last_check = use_signal(|| 0u64);
 
     // Store callback in hook so it persists across renders
     #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
@@ -53,70 +53,93 @@ where
             return;
         }
 
-        log::debug!("Infinite scroll enabled, starting polling loop");
+        log::debug!("Infinite scroll enabled, setting up IntersectionObserver");
 
         #[cfg(target_family = "wasm")]
         {
+            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::JsCast;
+
             let id = id_for_effect.clone();
             let cb_clone = cb.clone();
 
             spawn(async move {
-                loop {
-                    // Sleep for 300ms between checks
-                    gloo_timers::future::TimeoutFuture::new(300).await;
+                // Wait a bit for the DOM to be ready
+                gloo_timers::future::TimeoutFuture::new(100).await;
 
-                    // Check if element is in viewport
-                    let should_load = {
-                        use wasm_bindgen::JsCast;
+                let window = match web_sys::window() {
+                    Some(w) => w,
+                    None => {
+                        log::warn!("Failed to get window for IntersectionObserver");
+                        return;
+                    }
+                };
 
-                        if let Some(window) = web_sys::window() {
-                            if let Some(document) = window.document() {
-                                if let Some(element) = document.get_element_by_id(&id) {
-                                    if let Ok(html_element) = element.dyn_into::<web_sys::HtmlElement>() {
-                                        let rect = html_element.get_bounding_client_rect();
-                                        let window_height = window.inner_height()
-                                            .ok()
-                                            .and_then(|h| h.as_f64())
-                                            .unwrap_or(0.0);
+                let document = match window.document() {
+                    Some(d) => d,
+                    None => {
+                        log::warn!("Failed to get document for IntersectionObserver");
+                        return;
+                    }
+                };
 
-                                        // Check if element is in viewport (with 300px threshold)
-                                        let is_visible = rect.top() < window_height + 300.0 && rect.bottom() >= 0.0;
+                let element = match document.get_element_by_id(&id) {
+                    Some(e) => e,
+                    None => {
+                        log::debug!("Sentinel element not found yet, will retry");
+                        return;
+                    }
+                };
 
-                                        if is_visible {
-                                            log::debug!("Sentinel visible: top={}, window_height={}", rect.top(), window_height);
-                                        }
+                // Create IntersectionObserver callback
+                let callback_ref = cb_clone.clone();
+                let mut last_check_for_callback = last_check.clone();
 
-                                        is_visible
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    // Element not found - might be removed because has_more became false
-                                    // Break the loop so effect can restart if conditions change
-                                    log::debug!("Sentinel element not found, stopping loop");
-                                    return;
+                let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
+                    // Check if any entry is intersecting
+                    for i in 0..entries.length() {
+                        if let Some(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>().ok() {
+                            if entry.is_intersecting() {
+                                // Debounce - only trigger once per second
+                                let now = js_sys::Date::now() as u64;
+                                let last = *last_check_for_callback.read();
+
+                                if now - last > 1000 {
+                                    log::info!("IntersectionObserver triggered - calling load_more callback");
+                                    last_check_for_callback.set(now);
+                                    callback_ref.borrow_mut()();
                                 }
-                            } else {
-                                false
+                                break;
                             }
-                        } else {
-                            false
-                        }
-                    };
-
-                    if should_load {
-                        // Debounce - only trigger once per second
-                        let now = js_sys::Date::now() as u64;
-                        let last = *last_check.read();
-
-                        if now - last > 1000 {
-                            log::info!("Infinite scroll triggered - calling load_more callback");
-                            last_check.set(now);
-                            cb_clone.borrow_mut()();
-                            // Continue polling to detect when more content should load
                         }
                     }
-                }
+                }) as Box<dyn FnMut(js_sys::Array)>);
+
+                // Create IntersectionObserver with root margin for early triggering
+                let mut options = web_sys::IntersectionObserverInit::new();
+                options.set_root_margin("300px"); // Trigger 300px before element enters viewport
+
+                let observer = match web_sys::IntersectionObserver::new_with_options(
+                    callback.as_ref().unchecked_ref(),
+                    &options
+                ) {
+                    Ok(obs) => obs,
+                    Err(e) => {
+                        log::error!("Failed to create IntersectionObserver: {:?}", e);
+                        return;
+                    }
+                };
+
+                // Start observing the sentinel element
+                observer.observe(&element);
+                log::debug!("IntersectionObserver now watching sentinel element");
+
+                // Keep callback alive
+                callback.forget();
+
+                // Note: In a production app, you'd want to properly clean up the observer
+                // when the component unmounts. For now, the observer will be garbage collected
+                // when the effect re-runs or component unmounts.
             });
         }
     });

@@ -299,7 +299,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     img {
                                                         src: "{url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-8 h-8 object-contain"
+                                                        class: "w-8 h-8 object-contain",
+                                                        loading: "lazy"
                                                     }
                                                 }
                                             }
@@ -333,7 +334,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             img {
                                                                 src: "{url}",
                                                                 alt: "{alt_text}",
-                                                                class: "w-8 h-8 object-contain"
+                                                                class: "w-8 h-8 object-contain",
+                                                                loading: "lazy"
                                                             }
                                                         }
                                                     }

@@ -353,7 +353,8 @@ pub fn PhotoCard(event: Event) -> Element {
                         img {
                             class: "w-8 h-8 rounded-full object-cover",
                             src: "{pic}",
-                            alt: "Profile"
+                            alt: "Profile",
+                            loading: "lazy"
                         }
                     } else {
                         div {
@@ -383,7 +384,8 @@ pub fn PhotoCard(event: Event) -> Element {
                 img {
                     class: "w-full max-h-[600px] object-contain",
                     src: "{images[*current_image_index.read()].url}",
-                    alt: "{images[*current_image_index.read()].alt.as_deref().unwrap_or(\"Photo\")}"
+                    alt: "{images[*current_image_index.read()].alt.as_deref().unwrap_or(\"Photo\")}",
+                    loading: "lazy"
                 }
 
                 // Multiple images carousel indicators

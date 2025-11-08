@@ -226,7 +226,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 img {
                                     class: "w-8 h-8 rounded-full flex-shrink-0",
                                     src: "{picture}",
-                                    alt: "Avatar"
+                                    alt: "Avatar",
+                                    loading: "lazy"
                                 }
                             } else {
                                 div {

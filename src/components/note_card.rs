@@ -308,7 +308,8 @@ pub fn NoteCard(event: NostrEvent) -> Element {
                             img {
                                 class: "w-12 h-12 rounded-full object-cover",
                                 src: "{picture_url}",
-                                alt: "Profile picture"
+                                alt: "Profile picture",
+                                loading: "lazy"
                             }
                         } else {
                             div {

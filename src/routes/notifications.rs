@@ -84,8 +84,13 @@ pub fn Notifications() -> Element {
                         let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
-                        notifications.set(notifs);
+                        notifications.set(notifs.clone());
                         has_more.set(len >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&notifs).await;
+                        });
                     } else {
                         has_more.set(false);
                     }
@@ -114,8 +119,13 @@ pub fn Notifications() -> Element {
                         let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
-                        notifications.set(notifs);
+                        notifications.set(notifs.clone());
                         has_more.set(len >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&notifs).await;
+                        });
                     }
                 }
                 Err(e) => {
@@ -147,6 +157,11 @@ pub fn Notifications() -> Element {
                         notifications.set(current);
 
                         has_more.set(new_notifs.len() >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&new_notifs).await;
+                        });
                     } else {
                         has_more.set(false);
                     }
@@ -986,4 +1001,40 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
 
     log::info!("Loaded {} notifications", all_notifications.len());
     Ok(all_notifications)
+}
+
+/// Batch prefetch author metadata for notification authors
+async fn prefetch_notification_authors(notifications: &[NotificationType]) {
+    use std::collections::HashSet;
+
+    // Collect unique author pubkeys from notification events
+    let pubkeys: Vec<String> = notifications.iter()
+        .filter_map(|notif| {
+            match notif {
+                NotificationType::Mention(e) => Some(e.pubkey.to_hex()),
+                NotificationType::Reply(e) => Some(e.pubkey.to_hex()),
+                NotificationType::Reaction(e) => Some(e.pubkey.to_hex()),
+                NotificationType::Repost(e) => Some(e.pubkey.to_hex()),
+                NotificationType::Zap(e) => Some(e.pubkey.to_hex()),
+            }
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if pubkeys.is_empty() {
+        return;
+    }
+
+    log::info!("Batch fetching profiles for {} notification authors", pubkeys.len());
+
+    // Use the batch fetch function which populates PROFILE_CACHE
+    match profiles::fetch_profiles_batch(pubkeys).await {
+        Ok(profiles_map) => {
+            log::info!("Successfully batch fetched {} notification author profiles", profiles_map.len());
+        }
+        Err(e) => {
+            log::warn!("Failed to batch fetch notification author profiles: {}", e);
+        }
+    }
 }

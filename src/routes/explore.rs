@@ -36,8 +36,13 @@ pub fn Explore() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     has_more.set(feed_events.len() >= 50);
-                    events.set(feed_events);
+                    events.set(feed_events.clone());
                     loading.set(false);
+
+                    // Spawn non-blocking background prefetch for missing metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&feed_events).await;
+                    });
                 }
                 Err(e) => {
                     error.set(Some(e));
@@ -58,7 +63,7 @@ pub fn Explore() -> Element {
 
         spawn(async move {
             match load_global_feed(until).await {
-                Ok(mut new_events) => {
+                Ok(new_events) => {
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
@@ -66,9 +71,14 @@ pub fn Explore() -> Element {
 
                     // Append new events
                     let mut current = events.read().clone();
-                    current.append(&mut new_events);
+                    current.extend(new_events.clone());
                     events.set(current);
                     loading.set(false);
+
+                    // Spawn non-blocking background prefetch for missing metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&new_events).await;
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
@@ -238,6 +248,35 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
             Err(format!("Failed to fetch events: {}", e))
+        }
+    }
+}
+
+/// Batch prefetch author metadata for all events
+async fn prefetch_author_metadata(events: &[Event]) {
+    use std::collections::HashSet;
+    use crate::stores::profiles;
+
+    // Collect unique author pubkeys as hex strings
+    let pubkeys: Vec<String> = events.iter()
+        .map(|e| e.pubkey.to_hex())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if pubkeys.is_empty() {
+        return;
+    }
+
+    log::info!("Batch fetching profiles for {} unique authors", pubkeys.len());
+
+    // Use the batch fetch function which populates PROFILE_CACHE
+    match profiles::fetch_profiles_batch(pubkeys).await {
+        Ok(profiles_map) => {
+            log::info!("Successfully batch fetched {} profiles into cache", profiles_map.len());
+        }
+        Err(e) => {
+            log::warn!("Failed to batch fetch profiles: {}", e);
         }
     }
 }
