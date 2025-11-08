@@ -3,8 +3,21 @@ use nostr_sdk::{Event, Filter, Kind, EventBuilder, Tag, PublicKey};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::callback::Timeout;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
+
 /// Global signal to track bookmarked event IDs
 pub static BOOKMARKED_EVENTS: GlobalSignal<Vec<String>> = Signal::global(|| Vec::new());
+
+/// Pending bookmark publish timeout (for debouncing)
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BOOKMARK_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = RefCell::new(None);
+}
 
 /// Initialize bookmarks by fetching from relays
 pub async fn init_bookmarks() -> Result<(), String> {
@@ -67,11 +80,34 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 
     bookmarks.push(event_id);
 
-    // Publish updated bookmark list
-    publish_bookmarks(bookmarks.clone()).await?;
+    // Update local state immediately for UI responsiveness
+    *BOOKMARKED_EVENTS.write() = bookmarks.clone();
 
-    // Update local state
-    *BOOKMARKED_EVENTS.write() = bookmarks;
+    // Debounce relay publish (batches rapid bookmarks into one publish)
+    #[cfg(target_arch = "wasm32")]
+    {
+        BOOKMARK_PUBLISH_TIMEOUT.with(|timeout| {
+            // Cancel any existing timeout
+            *timeout.borrow_mut() = None;
+
+            // Schedule new publish after 1 second
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn(async move {
+                    if let Err(e) = publish_bookmarks(bookmarks).await {
+                        log::error!("Failed to publish bookmarks: {}", e);
+                    }
+                });
+            });
+
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Non-WASM: publish immediately
+        publish_bookmarks(bookmarks).await?;
+    }
 
     Ok(())
 }
@@ -83,11 +119,34 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     // Remove the event ID
     bookmarks.retain(|id| id != &event_id);
 
-    // Publish updated bookmark list
-    publish_bookmarks(bookmarks.clone()).await?;
+    // Update local state immediately for UI responsiveness
+    *BOOKMARKED_EVENTS.write() = bookmarks.clone();
 
-    // Update local state
-    *BOOKMARKED_EVENTS.write() = bookmarks;
+    // Debounce relay publish (batches rapid unbookmarks into one publish)
+    #[cfg(target_arch = "wasm32")]
+    {
+        BOOKMARK_PUBLISH_TIMEOUT.with(|timeout| {
+            // Cancel any existing timeout
+            *timeout.borrow_mut() = None;
+
+            // Schedule new publish after 1 second
+            let timeout_handle = Timeout::new(1000, move || {
+                spawn(async move {
+                    if let Err(e) = publish_bookmarks(bookmarks).await {
+                        log::error!("Failed to publish bookmarks: {}", e);
+                    }
+                });
+            });
+
+            *timeout.borrow_mut() = Some(timeout_handle);
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Non-WASM: publish immediately
+        publish_bookmarks(bookmarks).await?;
+    }
 
     Ok(())
 }
