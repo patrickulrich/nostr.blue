@@ -16,4 +16,5 @@ pub mod emoji_store;
 pub mod gif_store;
 pub mod relay_metadata;
 pub mod voice_messages_store;
+pub mod cashu_wallet;
 

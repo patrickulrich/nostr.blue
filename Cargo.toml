@@ -11,7 +11,7 @@ license = "MIT"
 dioxus = { version = "0.6", features = ["web", "router"] }
 
 # Nostr protocol
-nostr = { version = "0.44", default-features = false, features = ["nip57"] }
+nostr = { version = "0.44", default-features = false, features = ["nip57", "nip60"] }
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip59", "nip57"] }
 nostr-database = { version = "0.44", default-features = false }
 nostr-indexeddb = { version = "0.44" }
