@@ -30,6 +30,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
 - ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
 - ✅ **Videos (NIP-71)** - Video event support with playback controls and comments
+- ✅ **Voice Messages (NIP-A0)** - Short audio messages up to 60 seconds with waveform visualization and threaded replies
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
 - ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
@@ -116,6 +117,7 @@ nostrbluerust/
 │   │   ├── profile_card.rs # User profile display
 │   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
+│   │   ├── voice_message_card.rs # Voice message card (NIP-A0)
 │   │   ├── zap_modal.rs    # Lightning zap interface
 │   │   ├── share_modal.rs  # Video sharing modal
 │   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
@@ -136,6 +138,7 @@ nostrbluerust/
 │   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
+│   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
 │   │   ├── communities.rs  # Communities (NIP-72)
 │   │   ├── lists.rs        # User lists (NIP-51)
 │   │   ├── dms.rs          # Direct messages (NIP-04/17/44)
@@ -173,6 +176,7 @@ nostrbluerust/
 │   │   ├── settings_store.rs # NIP-78 synced settings
 │   │   ├── theme_store.rs  # Theme preferences
 │   │   ├── blossom_store.rs # Blossom media storage (BUD-01)
+│   │   ├── voice_messages_store.rs # Voice message playback state
 │   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
 │   │   └── signer.rs       # Event signing
 │   ├── utils/              # Utility functions
@@ -300,6 +304,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
+| [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 
 ### Blossom Protocol Support
 

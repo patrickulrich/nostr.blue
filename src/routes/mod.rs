@@ -26,6 +26,8 @@ pub mod video_new_portrait;
 mod lists;
 pub mod photos;
 pub mod photo_detail;
+pub mod voicemessages;
+pub mod voice_message_new;
 pub mod terms;
 pub mod privacy;
 pub mod cookies;
@@ -49,6 +51,8 @@ use article_detail::ArticleDetail;
 use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
 use photos::Photos;
 use photo_detail::PhotoDetail;
+use voicemessages::VoiceMessages;
+use voice_message_new::VoiceMessageNew;
 use note_new::NoteNew;
 use article_new::ArticleNew;
 use photo_new::PhotoNew;
@@ -115,6 +119,12 @@ pub enum Route {
 
         #[route("/photos/:photo_id")]
         PhotoDetail { photo_id: String },
+
+        #[route("/voicemessages")]
+        VoiceMessages {},
+
+        #[route("/voicemessages/new")]
+        VoiceMessageNew {},
 
         #[route("/notes/new")]
         NoteNew {},
@@ -357,6 +367,29 @@ fn Layout() -> Element {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
+                                            Link {
+                                                to: Route::VoiceMessages {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                                                    path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                                                    line { x1: "12", x2: "12", y1: "19", y2: "22" }
+                                                }
+                                                span {
+                                                    "Voice Messages"
+                                                }
+                                            }
                                             a {
                                                 href: "https://nostrcal.com",
                                                 target: "_blank",
@@ -412,6 +445,10 @@ fn Layout() -> Element {
                                     on_video_portrait_click: move |_| {
                                         radial_menu_open.set(false);
                                         navigator.push(Route::VideoNewPortrait {});
+                                    },
+                                    on_voice_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::VoiceMessageNew {});
                                     },
                                 }
                             }
