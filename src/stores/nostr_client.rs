@@ -1221,9 +1221,9 @@ pub async fn publish_voice_message_reply(
     // Determine root and parent for NIP-22 structure
     // Check if reply_to has a root tag marker (NIP-10/NIP-22)
     // Extract root event ID, author pubkey, and relay URL
-    let (root_event_id, root_pubkey, root_relay_url): (Option<String>, Option<PublicKey>, Option<RelayUrl>) =
-        reply_to.tags.iter().find_map(|tag| {
-            // Parse standardized tag to check for root marker
+    let (root_event_id, root_pubkey, root_relay_url): (Option<String>, Option<PublicKey>, Option<RelayUrl>) = {
+        // First, try to find modern NIP-10/NIP-22 lowercase 'e' tag with marker="root"
+        let modern_root = reply_to.tags.iter().find_map(|tag| {
             if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
                 // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
                 if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
@@ -1234,21 +1234,37 @@ pub async fn publish_voice_message_reply(
                     ));
                 }
             }
+            None
+        });
 
-            // Fallback: check for uppercase 'E' tag (legacy support)
-            let tag_vec = tag.clone().to_vec();
-            if tag_vec.len() >= 2 && tag_vec[0] == "E" {
-                let event_id = tag_vec[1].clone();
+        if let Some(result) = modern_root {
+            result
+        } else {
+            // Fallback: Legacy uppercase 'E'/'P' tag support
+            // NIP-10 deprecated positional convention: first 'E' tag = root, first 'P' tag = root author
+            let uppercase_e_tags: Vec<_> = reply_to.tags.iter()
+                .filter_map(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    if tag_vec.len() >= 2 && tag_vec[0] == "E" {
+                        Some((
+                            tag_vec[1].clone(),
+                            if tag_vec.len() >= 3 && !tag_vec[2].is_empty() {
+                                RelayUrl::parse(&tag_vec[2]).ok()
+                            } else {
+                                None
+                            }
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-                // Extract relay hint from position 2 (if present)
-                let relay = if tag_vec.len() >= 3 && !tag_vec[2].is_empty() {
-                    RelayUrl::parse(&tag_vec[2]).ok()
-                } else {
-                    None
-                };
-
-                // Look for corresponding uppercase 'P' tag for the root author
-                let pubkey = reply_to.tags.iter().find_map(|p_tag| {
+            if let Some((root_event_id, relay)) = uppercase_e_tags.first() {
+                // Per deprecated NIP-10 positional convention, the first 'P' tag corresponds to the root author
+                // Note: This is a heuristic and may not be accurate if the event has multiple 'P' tags
+                // for different purposes (e.g., mentions). Modern events should use marker-based tags.
+                let root_pubkey = reply_to.tags.iter().find_map(|p_tag| {
                     let p_vec = p_tag.clone().to_vec();
                     if p_vec.len() >= 2 && p_vec[0] == "P" {
                         PublicKey::from_hex(&p_vec[1]).ok()
@@ -1257,11 +1273,12 @@ pub async fn publish_voice_message_reply(
                     }
                 });
 
-                return Some((Some(event_id), pubkey, relay));
+                (Some(root_event_id.clone()), root_pubkey, relay.clone())
+            } else {
+                (None, None, None)
             }
-
-            None
-        }).unwrap_or((None, None, None));
+        }
+    };
 
     let parent_id = reply_to.id.to_hex();
     let parent_pubkey = reply_to.pubkey;
