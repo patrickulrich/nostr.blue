@@ -64,6 +64,12 @@ web-sys = { version = "0.3", features = [
     "FileReader",
     "Event",
     "EventTarget",
+    # MediaRecorder API for voice messages
+    "MediaStream",
+    "MediaRecorder",
+    "MediaDevices",
+    "MediaStreamConstraints",
+    "BlobEvent",
     # Intersection Observer for infinite scroll
     "IntersectionObserver",
     "IntersectionObserverEntry",
