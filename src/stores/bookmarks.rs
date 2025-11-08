@@ -95,8 +95,10 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
         return Ok(());
     }
 
-    // Store rollback state before making changes
-    *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    // Store rollback state before making changes (preserve initial state for batch)
+    if BOOKMARK_ROLLBACK_STATE.read().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    }
 
     bookmarks.push(event_id);
 
@@ -134,8 +136,10 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     let mut bookmarks = BOOKMARKED_EVENTS.read().clone();
 
-    // Store rollback state before making changes
-    *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    // Store rollback state before making changes (preserve initial state for batch)
+    if BOOKMARK_ROLLBACK_STATE.read().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    }
 
     // Remove the event ID
     bookmarks.retain(|id| id != &event_id);
@@ -211,12 +215,21 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
                         publish_with_retry(bookmarks, retry_count + 1).await;
                     }
                 } else {
-                    // Max retries exceeded - set failed status
+                    // Max retries exceeded - rollback local state and set failed status
+                    log::error!("Bookmark publish failed after {} retries: {}", MAX_RETRIES, e);
+
+                    // Rollback local state to match persisted state
+                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().clone() {
+                        log::warn!("Automatically rolling back bookmarks to previous state due to publish failure");
+                        *BOOKMARKED_EVENTS.write() = previous_state;
+                    }
+
+                    // Set failed status (rollback state is cleared here)
+                    *BOOKMARK_ROLLBACK_STATE.write() = None;
                     *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Failed {
                         error: e.clone(),
                         retry_count,
                     };
-                    log::error!("Bookmark publish failed after {} retries: {}", MAX_RETRIES, e);
                 }
             }
         }

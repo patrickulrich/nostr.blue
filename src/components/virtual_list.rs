@@ -17,7 +17,6 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
-use js_sys::eval;
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -219,40 +218,14 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
     let config = props.config.unwrap_or_default();
     let mut virtual_state = use_signal(|| VirtualState::new(props.items.len(), config));
 
+    // Store reference to container element (scoped to this instance)
+    #[cfg(target_arch = "wasm32")]
+    let mut container_element = use_signal(|| None::<web_sys::HtmlElement>);
+
     // Update total items count when items change
     use_effect(use_reactive(&props.items, move |items| {
         virtual_state.write().total_items = items.len();
     }));
-
-    // Measure actual viewport height after mount
-    let container_class = props.container_class.clone();
-    use_effect(move || {
-        let mut state = virtual_state.clone();
-        let container_class = container_class.clone();
-        spawn(async move {
-            // Try to get the actual container height from DOM
-            let js_code = format!(
-                r#"
-                (function() {{
-                    const container = document.querySelector('.{}');
-                    if (container) {{
-                        return container.clientHeight || container.getBoundingClientRect().height;
-                    }}
-                    return 800.0;
-                }})()
-                "#,
-                container_class
-            );
-
-            if let Ok(result) = eval(&js_code) {
-                let height = result.as_f64().unwrap_or(800.0);
-                if height > 0.0 {
-                    state.write().viewport_height = height;
-                    log::debug!("Updated viewport_height to {}px", height);
-                }
-            }
-        });
-    });
 
     // Calculate visible range
     let state = virtual_state.read();
@@ -282,11 +255,26 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
             .collect::<Vec<(Rc<T>, usize)>>()
     });
 
-    let container_class_for_scroll = props.container_class.clone();
     rsx! {
         div {
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
+            onmounted: move |evt| {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // Store container element and measure viewport height
+                    let element = evt.data();
+                    if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                        *container_element.write() = Some(html_element.clone());
+
+                        let height = html_element.client_height() as f64;
+                        if height > 0.0 {
+                            virtual_state.write().viewport_height = height;
+                            log::debug!("Updated viewport_height to {}px", height);
+                        }
+                    }
+                }
+            },
             onscroll: move |_evt| {
                 // Throttle scroll updates using requestAnimationFrame to prevent flooding
                 // Only schedules one update per frame (~16ms) instead of hundreds per scroll
@@ -306,26 +294,14 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     }
 
                     let mut state = virtual_state.clone();
-                    let container_class = container_class_for_scroll.clone();
+                    let container = container_element.clone();
 
                     // Schedule update on next animation frame
                     let closure = wasm_bindgen::closure::Closure::once(move || {
                         spawn(async move {
-                            let js_code = format!(
-                                r#"
-                                (function() {{
-                                    const container = document.querySelector('.{}');
-                                    if (container) {{
-                                        return container.scrollTop;
-                                    }}
-                                    return 0;
-                                }})()
-                                "#,
-                                container_class
-                            );
-
-                            if let Ok(result) = eval(&js_code) {
-                                let scroll_top = result.as_f64().unwrap_or(0.0);
+                            // Use stored element to read scroll_top from this specific container instance
+                            if let Some(html_element) = container.read().as_ref() {
+                                let scroll_top = html_element.scroll_top() as f64;
                                 state.write().scroll_top = scroll_top;
                                 log::trace!("Updated scroll_top to {}px", scroll_top);
                             }
@@ -360,27 +336,9 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     LAST_SCROLL_UPDATE.store(now, Ordering::Relaxed);
 
                     let mut state = virtual_state.clone();
-                    let container_class = container_class_for_scroll.clone();
-                    spawn(async move {
-                        let js_code = format!(
-                            r#"
-                            (function() {{
-                                const container = document.querySelector('.{}');
-                                if (container) {{
-                                    return container.scrollTop;
-                                }}
-                                return 0;
-                            }})()
-                            "#,
-                            container_class
-                        );
-
-                        if let Ok(result) = eval(&js_code) {
-                            let scroll_top = result.as_f64().unwrap_or(0.0);
-                            state.write().scroll_top = scroll_top;
-                            log::trace!("Updated scroll_top to {}px", scroll_top);
-                        }
-                    });
+                    // Note: Element storage not available on non-WASM
+                    state.write().scroll_top = 0.0; // Fallback for non-WASM
+                    log::trace!("Updated scroll_top (non-WASM fallback)");
                 }
             },
 
@@ -402,28 +360,20 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                         rsx! {
                             div {
                                 key: "{index}",
-                                id: "virtual-item-{index}",
                                 class: "virtual-item",
                                 onmounted: move |evt| {
                                     let mut state = state.clone();
-                                    spawn(async move {
-                                        // Measure the item's height from DOM
-                                        let js_code = format!(
-                                            r#"
-                                            const item = document.getElementById('virtual-item-{}');
-                                            if (item) {{
-                                                return item.getBoundingClientRect().height;
-                                            }}
-                                            return null;
-                                            "#,
-                                            item_index
-                                        );
 
-                                        if let Ok(result) = eval(&js_code) {
-                                            let result_val = result.as_f64().unwrap_or(0.0);
-                                            if result_val > 0.0 {
-                                                state.write().set_item_height(item_index, result_val);
-                                                log::trace!("Measured item {} height: {}px", item_index, result_val);
+                                    // Measure using the mounted element directly (no global IDs)
+                                    #[cfg(target_arch = "wasm32")]
+                                    spawn(async move {
+                                        let element = evt.data();
+                                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                                            let rect = html_element.get_bounding_client_rect();
+                                            let height = rect.height();
+                                            if height > 0.0 {
+                                                state.write().set_item_height(item_index, height);
+                                                log::trace!("Measured item {} height: {}px", item_index, height);
                                             }
                                         }
                                     });
