@@ -18,7 +18,6 @@
 /// bookmarks.request_save(); // Called 10x per second = 1 write after 1s delay
 /// ```
 
-use std::time::Duration;
 use gloo_timers::callback::Timeout;
 use std::cell::RefCell;
 use std::rc::Rc;

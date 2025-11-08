@@ -23,7 +23,7 @@ use crate::stores::nostr_client::get_client;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use instant::{Duration, Instant};
 
 /// Aggregated interaction counts for a single event
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -156,17 +156,22 @@ pub async fn fetch_interaction_counts_batch(
     }
 
     // Phase 3.5: Check L2 cache first
-    let cache_signal = COUNTS_CACHE.write();
-    let mut cache = cache_signal.lock().unwrap();
-    let cached_counts = cache.get_batch(&event_ids);
-    let cache_hits = cached_counts.len();
+    let (cached_counts, cache_hits, uncached_ids) = {
+        let cache_signal = COUNTS_CACHE.write();
+        let mut cache = cache_signal.lock().unwrap();
+        let cached_counts = cache.get_batch(&event_ids);
+        let cache_hits = cached_counts.len();
 
-    // Identify cache misses - events we need to fetch from database
-    let mut uncached_ids: Vec<EventId> = event_ids
-        .iter()
-        .filter(|id| !cached_counts.contains_key(&id.to_hex()))
-        .cloned()
-        .collect();
+        // Identify cache misses - events we need to fetch from database
+        let uncached_ids: Vec<EventId> = event_ids
+            .iter()
+            .filter(|id| !cached_counts.contains_key(&id.to_hex()))
+            .cloned()
+            .collect();
+
+        (cached_counts, cache_hits, uncached_ids)
+        // Both cache and cache_signal are dropped here
+    };
 
     log::info!(
         "Batch fetching interaction counts for {} events ({} cache hits, {} cache misses)",
@@ -180,9 +185,6 @@ pub async fn fetch_interaction_counts_batch(
         log::info!("All counts served from cache!");
         return Ok(cached_counts);
     }
-
-    // Release cache lock before async database operation
-    drop(cache);
 
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -243,10 +245,12 @@ pub async fn fetch_interaction_counts_batch(
     }
 
     // Update L2 cache with freshly fetched counts
-    let cache_signal = COUNTS_CACHE.write();
-    let mut cache = cache_signal.lock().unwrap();
-    cache.insert_batch(freshly_fetched.clone());
-    drop(cache);
+    {
+        let cache_signal = COUNTS_CACHE.write();
+        let mut cache = cache_signal.lock().unwrap();
+        cache.insert_batch(freshly_fetched.clone());
+        // Both cache and cache_signal are dropped here
+    }
 
     // Combine cached and freshly fetched results
     let mut final_counts = cached_counts;
@@ -274,18 +278,22 @@ pub async fn fetch_interaction_counts_batch(
 /// invalidate_interaction_counts(&event_id);
 /// ```
 pub fn invalidate_interaction_counts(event_id: &str) {
-    let cache_signal = COUNTS_CACHE.write();
-    let mut cache = cache_signal.lock().unwrap();
-    cache.invalidate(event_id);
+    {
+        let cache_signal = COUNTS_CACHE.write();
+        let mut cache = cache_signal.lock().unwrap();
+        cache.invalidate(event_id);
+    }
     log::debug!("Invalidated interaction counts cache for {}", event_id);
 }
 
 /// Invalidate cached counts for multiple events at once
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
-    let cache_signal = COUNTS_CACHE.write();
-    let mut cache = cache_signal.lock().unwrap();
-    for event_id in event_ids {
-        cache.invalidate(event_id);
+    {
+        let cache_signal = COUNTS_CACHE.write();
+        let mut cache = cache_signal.lock().unwrap();
+        for event_id in event_ids {
+            cache.invalidate(event_id);
+        }
     }
     log::debug!("Invalidated interaction counts cache for {} events", event_ids.len());
 }

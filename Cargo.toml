@@ -90,6 +90,7 @@ qrcode = "0.14"
 base64 = "0.22"
 hex = "0.4"
 lru = "0.12"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
 
 # Markdown rendering
 pulldown-cmark = "0.12"

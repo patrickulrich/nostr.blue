@@ -2135,6 +2135,7 @@ dependencies = [
  "gloo-timers",
  "hex",
  "image",
+ "instant",
  "js-sys",
  "log",
  "lru 0.12.5",
