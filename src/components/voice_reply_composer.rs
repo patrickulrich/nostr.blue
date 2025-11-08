@@ -9,7 +9,7 @@ pub fn VoiceReplyComposer(
     on_close: EventHandler<()>,
     on_success: EventHandler<()>,
 ) -> Element {
-    let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>)>); // (bytes, duration, waveform)
+    let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
     let mut is_publishing = use_signal(|| false);
     let has_signer = *HAS_SIGNER.read();
 
@@ -27,15 +27,15 @@ pub fn VoiceReplyComposer(
     let reply_event = reply_to.clone();
 
     // Handle recording complete
-    let handle_recording_complete = move |(bytes, duration, waveform): (Vec<u8>, f64, Vec<u8>)| {
-        log::info!("Voice reply recording complete: {} bytes, duration: {}s",
-            bytes.len(), duration);
-        audio_data.set(Some((bytes, duration, waveform)));
+    let handle_recording_complete = move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+        log::info!("Voice reply recording complete: {} bytes, duration: {}s, MIME: {}",
+            bytes.len(), duration, mime_type);
+        audio_data.set(Some((bytes, duration, waveform, mime_type)));
     };
 
     // Handle publish
     let handle_publish = move |_| {
-        let Some((bytes, duration, waveform)) = audio_data.read().clone() else {
+        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone() else {
             return;
         };
 
@@ -47,11 +47,8 @@ pub fn VoiceReplyComposer(
         let event_for_reply = reply_event.clone();
 
         spawn(async move {
-            // Determine content type (audio/mp4 as default)
-            let content_type = "audio/mp4".to_string();
-
-            // Upload to Blossom
-            match blossom_store::upload_audio(bytes, content_type).await {
+            // Upload to Blossom with actual MIME type from recorder
+            match blossom_store::upload_audio(bytes, mime_type.clone()).await {
                 Ok(audio_url) => {
                     log::info!("Voice reply audio uploaded successfully: {}", audio_url);
 
@@ -61,6 +58,7 @@ pub fn VoiceReplyComposer(
                         duration,
                         waveform,
                         event_for_reply,
+                        Some(mime_type),
                     ).await {
                         Ok(event_id) => {
                             log::info!("Voice reply published successfully: {}", event_id);

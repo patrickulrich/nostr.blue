@@ -18,11 +18,12 @@ enum RecorderState {
 
 #[component]
 pub fn VoiceRecorder(
-    on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>)>,
+    on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>, String)>, // Added MIME type
 ) -> Element {
     let mut state = use_signal(|| RecorderState::Idle);
     let mut current_time = use_signal(|| 0.0);
     let mut waveform_data = use_signal(|| Vec::<u8>::new());
+    let mut mime_type = use_signal(|| String::from("audio/webm")); // Store MIME type
     let mut is_playing_preview = use_signal(|| false);
 
     // Start recording
@@ -35,7 +36,7 @@ pub fn VoiceRecorder(
                     log::info!("Microphone permission granted");
 
                     // Create and configure MediaRecorder
-                    match setup_media_recorder(stream, state, current_time, waveform_data).await {
+                    match setup_media_recorder(stream, state, current_time, waveform_data, mime_type).await {
                         Ok(recorder) => {
                             log::info!("MediaRecorder setup complete");
 
@@ -161,13 +162,14 @@ pub fn VoiceRecorder(
     let use_recording = move |_| {
         if let RecorderState::Stopped { blob_url, duration } = state.read().clone() {
             let waveform = waveform_data.read().clone();
+            let mime = mime_type.read().clone();
 
             spawn(async move {
                 match blob_url_to_bytes(&blob_url).await {
                     Ok(bytes) => {
-                        log::info!("Recording ready: {} bytes, duration: {}s, waveform points: {}",
-                            bytes.len(), duration, waveform.len());
-                        on_recording_complete.call((bytes, duration, waveform));
+                        log::info!("Recording ready: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
+                            bytes.len(), duration, waveform.len(), mime);
+                        on_recording_complete.call((bytes, duration, waveform, mime));
                     }
                     Err(e) => {
                         log::error!("Failed to convert recording to bytes: {}", e);
@@ -386,6 +388,7 @@ async fn setup_media_recorder(
     mut state: Signal<RecorderState>,
     _current_time: Signal<f64>,
     mut waveform_data: Signal<Vec<u8>>,
+    mut mime_type: Signal<String>,
 ) -> Result<MediaRecorder, String> {
     // Use JavaScript to set up MediaRecorder with all event handlers
     // This is simpler than trying to handle all the WASM bindings
@@ -448,6 +451,7 @@ async fn setup_media_recorder(
 
                 const url = URL.createObjectURL(blob);
                 const duration = window.__voiceRecorderSetup.duration || 0;
+                const mimeType = window.__voiceRecorderSetup.selectedMime || 'audio/webm';
 
                 // Generate simple waveform (100 random values for now)
                 const waveform = Array.from({length: 100}, () => Math.floor(Math.random() * 100));
@@ -455,13 +459,14 @@ async fn setup_media_recorder(
                 window.__voiceRecorderSetup.result = {
                     url: url,
                     duration: duration,
-                    waveform: waveform
+                    waveform: waveform,
+                    mimeType: mimeType
                 };
 
                 // Trigger Rust callback via global flag
                 window.__voiceRecorderSetup.ready = true;
 
-                console.log('Recording ready:', url, duration + 's');
+                console.log('Recording ready:', url, duration + 's', 'MIME:', mimeType);
             };
 
             recorder.onerror = function(e) {
@@ -499,6 +504,13 @@ async fn setup_media_recorder(
                                         .map(|v| v.as_f64().unwrap_or(0.0) as u8)
                                         .collect::<Vec<_>>();
                                     waveform_data.set(arr);
+                                }
+
+                                // Extract MIME type
+                                if let Ok(mime) = Reflect::get(&result, &JsValue::from_str("mimeType")) {
+                                    if let Some(mime_str) = mime.as_string() {
+                                        mime_type.set(mime_str);
+                                    }
                                 }
 
                                 state.set(RecorderState::Stopped {

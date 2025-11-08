@@ -136,12 +136,9 @@ pub fn cancel_recording() {
 /// Update recording duration
 #[allow(dead_code)]
 pub fn update_recording_duration(duration: f64) {
-    let mut state = RECORDING_STATE.write();
-    if let RecordingState::Recording { started_at, .. } = *state {
-        *state = RecordingState::Recording {
-            started_at,
-            duration,
-        };
+    let state = &mut *RECORDING_STATE.write();
+    if let RecordingState::Recording { duration: d, .. } = state {
+        *d = duration;
     }
 }
 
@@ -149,11 +146,18 @@ pub fn update_recording_duration(duration: f64) {
 /// Returns a vector of amplitude values (0-100) suitable for NIP-92 imeta tag
 #[allow(dead_code)]
 pub fn generate_waveform(samples: &[f32], target_points: usize) -> Vec<u8> {
+    // Guard against zero target_points
+    if target_points == 0 {
+        return Vec::new();
+    }
+
     if samples.is_empty() {
         return vec![0; target_points];
     }
 
-    let chunk_size = samples.len() / target_points;
+    // Guard against samples.len() < target_points by using ceiling division
+    // and ensuring chunk_size is at least 1
+    let chunk_size = ((samples.len() + target_points - 1) / target_points).max(1);
     let mut waveform = Vec::with_capacity(target_points);
 
     for i in 0..target_points {

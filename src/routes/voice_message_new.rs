@@ -5,7 +5,7 @@ use crate::components::VoiceRecorder;
 #[component]
 pub fn VoiceMessageNew() -> Element {
     let navigator = navigator();
-    let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>)>); // (bytes, duration, waveform)
+    let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
     let mut hashtags = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -22,10 +22,10 @@ pub fn VoiceMessageNew() -> Element {
     };
 
     // Handle recording complete
-    let handle_recording_complete = move |(bytes, duration, waveform): (Vec<u8>, f64, Vec<u8>)| {
-        log::info!("Recording complete: {} bytes, duration: {}s, waveform points: {}",
-            bytes.len(), duration, waveform.len());
-        audio_data.set(Some((bytes, duration, waveform)));
+    let handle_recording_complete = move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+        log::info!("Recording complete: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
+            bytes.len(), duration, waveform.len(), mime_type);
+        audio_data.set(Some((bytes, duration, waveform, mime_type)));
     };
 
     // Handle publishing
@@ -34,7 +34,7 @@ pub fn VoiceMessageNew() -> Element {
             return;
         }
 
-        let Some((bytes, duration, waveform)) = audio_data.read().clone() else {
+        let Some((bytes, duration, waveform, mime_type)) = audio_data.read().clone() else {
             return;
         };
 
@@ -51,12 +51,8 @@ pub fn VoiceMessageNew() -> Element {
                 .filter(|s| !s.is_empty())
                 .collect();
 
-            // Determine content type based on bytes
-            // For now, we'll use audio/mp4 as default, but this should ideally be detected
-            let content_type = "audio/mp4".to_string();
-
-            // Upload to Blossom
-            match blossom_store::upload_audio(bytes, content_type).await {
+            // Upload to Blossom with actual MIME type from recorder
+            match blossom_store::upload_audio(bytes, mime_type.clone()).await {
                 Ok(audio_url) => {
                     log::info!("Audio uploaded successfully: {}", audio_url);
 
@@ -66,6 +62,7 @@ pub fn VoiceMessageNew() -> Element {
                         duration,
                         waveform,
                         tags_vec,
+                        Some(mime_type),
                     ).await {
                         Ok(event_id) => {
                             log::info!("Voice message published successfully: {}", event_id);

@@ -1135,6 +1135,7 @@ pub async fn publish_voice_message(
     duration: f64,
     waveform: Vec<u8>,
     hashtags: Vec<String>,
+    mime_type: Option<String>,
 ) -> Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -1167,10 +1168,11 @@ pub async fn publish_voice_message(
         format!("waveform {}", waveform_str),
     ];
 
-    // Add MIME type if we can detect it
-    if let Some(mime_type) = detect_mime_type(&audio_url) {
-        imeta_fields.push(format!("m {}", mime_type));
-    }
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("imeta".into()),
@@ -1202,6 +1204,7 @@ pub async fn publish_voice_message_reply(
     duration: f64,
     waveform: Vec<u8>,
     reply_to: nostr::Event,
+    mime_type: Option<String>,
 ) -> Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -1275,10 +1278,11 @@ pub async fn publish_voice_message_reply(
         format!("waveform {}", waveform_str),
     ];
 
-    // Add MIME type if we can detect it
-    if let Some(mime_type) = detect_mime_type(&audio_url) {
-        imeta_fields.push(format!("m {}", mime_type));
-    }
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("imeta".into()),
