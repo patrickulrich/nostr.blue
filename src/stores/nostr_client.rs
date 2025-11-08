@@ -1220,23 +1220,48 @@ pub async fn publish_voice_message_reply(
 
     // Determine root and parent for NIP-22 structure
     // Check if reply_to has a root tag marker (NIP-10/NIP-22)
-    let root_event_id = reply_to.tags.iter().find_map(|tag| {
-        // Parse standardized tag to check for root marker
-        if let Some(nostr::TagStandard::Event { event_id, marker, .. }) = tag.as_standardized() {
-            // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
-            if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
-                return Some(event_id.to_hex());
+    // Extract root event ID, author pubkey, and relay URL
+    let (root_event_id, root_pubkey, root_relay_url): (Option<String>, Option<PublicKey>, Option<RelayUrl>) =
+        reply_to.tags.iter().find_map(|tag| {
+            // Parse standardized tag to check for root marker
+            if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+                // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
+                if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
+                    return Some((
+                        Some(event_id.to_hex()),
+                        *public_key,  // Public key from the tag
+                        relay_url.clone(),  // Relay URL from the tag
+                    ));
+                }
             }
-        }
 
-        // Fallback: check for uppercase 'E' tag (legacy support)
-        let tag_vec = tag.clone().to_vec();
-        if tag_vec.len() >= 2 && tag_vec[0] == "E" {
-            Some(tag_vec[1].clone())
-        } else {
+            // Fallback: check for uppercase 'E' tag (legacy support)
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.len() >= 2 && tag_vec[0] == "E" {
+                let event_id = tag_vec[1].clone();
+
+                // Extract relay hint from position 2 (if present)
+                let relay = if tag_vec.len() >= 3 && !tag_vec[2].is_empty() {
+                    RelayUrl::parse(&tag_vec[2]).ok()
+                } else {
+                    None
+                };
+
+                // Look for corresponding uppercase 'P' tag for the root author
+                let pubkey = reply_to.tags.iter().find_map(|p_tag| {
+                    let p_vec = p_tag.clone().to_vec();
+                    if p_vec.len() >= 2 && p_vec[0] == "P" {
+                        PublicKey::from_hex(&p_vec[1]).ok()
+                    } else {
+                        None
+                    }
+                });
+
+                return Some((Some(event_id), pubkey, relay));
+            }
+
             None
-        }
-    });
+        }).unwrap_or((None, None, None));
 
     let parent_id = reply_to.id.to_hex();
     let parent_pubkey = reply_to.pubkey;
@@ -1258,8 +1283,14 @@ pub async fn publish_voice_message_reply(
         if root_id != parent_id {
             let event_id = EventId::parse(&root_id)
                 .map_err(|e| format!("Failed to parse root event ID: {}", e))?;
-            // Assume root is Kind 1222 (root voice message)
-            Some(CommentTarget::event(event_id, nostr::Kind::VoiceMessage, None, None))
+            // Include root author and relay URL for proper NIP-22/NIP-10 compliance
+            use std::borrow::Cow;
+            Some(CommentTarget::event(
+                event_id,
+                nostr::Kind::VoiceMessage,
+                root_pubkey,  // Root author's public key
+                root_relay_url.as_ref().map(Cow::Borrowed)  // Relay hint/URL as Cow
+            ))
         } else {
             None
         }
