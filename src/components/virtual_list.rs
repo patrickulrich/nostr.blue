@@ -16,6 +16,7 @@
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use js_sys::eval;
 
 /// Configuration for virtual scrolling behavior
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -201,6 +202,36 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
         virtual_state.write().total_items = items.len();
     }));
 
+    // Measure actual viewport height after mount
+    let container_class = props.container_class.clone();
+    use_effect(move || {
+        let mut state = virtual_state.clone();
+        let container_class = container_class.clone();
+        spawn(async move {
+            // Try to get the actual container height from DOM
+            let js_code = format!(
+                r#"
+                (function() {{
+                    const container = document.querySelector('.{}');
+                    if (container) {{
+                        return container.clientHeight || container.getBoundingClientRect().height;
+                    }}
+                    return 800.0;
+                }})()
+                "#,
+                container_class
+            );
+
+            if let Ok(result) = eval(&js_code) {
+                let height = result.as_f64().unwrap_or(800.0);
+                if height > 0.0 {
+                    state.write().viewport_height = height;
+                    log::debug!("Updated viewport_height to {}px", height);
+                }
+            }
+        });
+    });
+
     // Calculate visible range
     let state = virtual_state.read();
     let (start_index, end_index) = state.calculate_visible_range();
@@ -226,16 +257,35 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
 
     drop(state); // Release borrow before rendering
 
+    let container_class_for_scroll = props.container_class.clone();
     rsx! {
         div {
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
             onscroll: move |_evt| {
-                // Update scroll position
-                // Note: evt.data doesn't provide scroll offset in current Dioxus
-                // This would need to be enhanced with JS interop for production use
-                // For now, this is a simplified implementation
-                log::debug!("Scroll event triggered");
+                // Update scroll position via JS interop
+                let mut state = virtual_state.clone();
+                let container_class = container_class_for_scroll.clone();
+                spawn(async move {
+                    let js_code = format!(
+                        r#"
+                        (function() {{
+                            const container = document.querySelector('.{}');
+                            if (container) {{
+                                return container.scrollTop;
+                            }}
+                            return 0;
+                        }})()
+                        "#,
+                        container_class
+                    );
+
+                    if let Ok(result) = eval(&js_code) {
+                        let scroll_top = result.as_f64().unwrap_or(0.0);
+                        state.write().scroll_top = scroll_top;
+                        log::trace!("Updated scroll_top to {}px", scroll_top);
+                    }
+                });
             },
 
             // Spacer div for total height (creates scrollbar)
@@ -249,10 +299,41 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
 
                 // Render visible items
                 for (item, index) in visible_items {
-                    div {
-                        key: "{index}",
-                        class: "virtual-item",
-                        {(props.item_content)(item, index)}
+                    {
+                        let item_index = index;
+                        let state = virtual_state.clone();
+                        rsx! {
+                            div {
+                                key: "{index}",
+                                id: "virtual-item-{index}",
+                                class: "virtual-item",
+                                onmounted: move |evt| {
+                                    let mut state = state.clone();
+                                    spawn(async move {
+                                        // Measure the item's height from DOM
+                                        let js_code = format!(
+                                            r#"
+                                            const item = document.getElementById('virtual-item-{}');
+                                            if (item) {{
+                                                return item.getBoundingClientRect().height;
+                                            }}
+                                            return null;
+                                            "#,
+                                            item_index
+                                        );
+
+                                        if let Ok(result) = eval(&js_code) {
+                                            let result_val = result.as_f64().unwrap_or(0.0);
+                                            if result_val > 0.0 {
+                                                state.write().set_item_height(item_index, result_val);
+                                                log::trace!("Measured item {} height: {}px", item_index, result_val);
+                                            }
+                                        }
+                                    });
+                                },
+                                {(props.item_content)(item, index)}
+                            }
+                        }
                     }
                 }
             }

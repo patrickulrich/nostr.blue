@@ -192,6 +192,11 @@ pub async fn fetch_interaction_counts_batch(
     let client = get_client().ok_or("Client not initialized")?;
 
     // Create filter for ONLY uncached events (cache-aware query)
+    // Cap the limit to avoid exceeding relay max limits
+    const MAX_RELAY_LIMIT: usize = 5000;
+    let requested_limit = uncached_ids.len() * 100;
+    let capped_limit = requested_limit.min(MAX_RELAY_LIMIT);
+
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,   // kind 1 - replies
@@ -200,7 +205,7 @@ pub async fn fetch_interaction_counts_batch(
             Kind::from(9735), // kind 9735 - zaps
         ])
         .events(uncached_ids.clone())
-        .limit(uncached_ids.len() * 100); // Reasonable limit per event
+        .limit(capped_limit); // Capped to avoid relay limit issues
 
     // Fetch all interactions in one query
     let events = client
