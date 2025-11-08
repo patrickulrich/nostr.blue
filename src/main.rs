@@ -5,6 +5,7 @@ use stores::{auth_store, nostr_client, theme_store, music_player};
 
 // Modules
 mod components;
+mod context;
 mod hooks;
 mod routes;
 mod services;

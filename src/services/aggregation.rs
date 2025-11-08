@@ -8,11 +8,22 @@
 /// - Before: N queries (one per event in feed)
 /// - After: 1 query (batched for all events)
 /// - Example: 100 notes → 99% reduction in queries (100 → 1)
+///
+/// # L2 Caching (Phase 3.5)
+/// Implements in-memory LRU cache for computed interaction counts:
+/// - Cache size: 1000 events
+/// - TTL: 5 minutes per entry
+/// - Automatic eviction of stale/excess entries
+/// - Reduces redundant database queries for recently-viewed events
 
+use dioxus::prelude::*;
+use lru::LruCache;
 use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagKind, SingleLetterTag, Alphabet};
 use crate::stores::nostr_client::get_client;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Aggregated interaction counts for a single event
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -23,6 +34,101 @@ pub struct InteractionCounts {
     pub zaps: usize,
     pub zap_amount_sats: u64,
 }
+
+/// Cache entry with TTL tracking
+#[derive(Clone, Debug)]
+struct CachedCounts {
+    counts: InteractionCounts,
+    cached_at: Instant,
+}
+
+impl CachedCounts {
+    fn new(counts: InteractionCounts) -> Self {
+        Self {
+            counts,
+            cached_at: Instant::now(),
+        }
+    }
+
+    /// Check if cache entry is still valid (within TTL)
+    fn is_valid(&self, ttl: Duration) -> bool {
+        self.cached_at.elapsed() < ttl
+    }
+}
+
+/// L2 cache for interaction counts (Phase 3.5)
+///
+/// In-memory LRU cache that sits between database and UI:
+/// - Reduces redundant queries for recently-viewed events
+/// - Automatic TTL-based freshness control
+/// - LRU eviction prevents unbounded growth
+struct CountsCache {
+    cache: LruCache<String, CachedCounts>,
+    ttl: Duration,
+}
+
+impl CountsCache {
+    fn new(capacity: usize, ttl: Duration) -> Self {
+        Self {
+            cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
+            ttl,
+        }
+    }
+
+    /// Get cached counts if they exist and are still valid
+    fn get(&mut self, event_id: &str) -> Option<InteractionCounts> {
+        if let Some(cached) = self.cache.get(event_id) {
+            if cached.is_valid(self.ttl) {
+                return Some(cached.counts.clone());
+            }
+            // Entry expired, will be overwritten on next insert
+        }
+        None
+    }
+
+    /// Cache counts for an event
+    fn insert(&mut self, event_id: String, counts: InteractionCounts) {
+        self.cache.put(event_id, CachedCounts::new(counts));
+    }
+
+    /// Get multiple counts from cache, returning only valid entries
+    fn get_batch(&mut self, event_ids: &[EventId]) -> HashMap<String, InteractionCounts> {
+        let mut result = HashMap::new();
+        for event_id in event_ids {
+            let event_id_hex = event_id.to_hex();
+            if let Some(counts) = self.get(&event_id_hex) {
+                result.insert(event_id_hex, counts);
+            }
+        }
+        result
+    }
+
+    /// Cache multiple counts at once
+    fn insert_batch(&mut self, counts_map: HashMap<String, InteractionCounts>) {
+        for (event_id, counts) in counts_map {
+            self.insert(event_id, counts);
+        }
+    }
+
+    /// Invalidate (remove) cached counts for an event
+    ///
+    /// Useful when user publishes a new interaction (like, repost, etc.)
+    fn invalidate(&mut self, event_id: &str) {
+        self.cache.pop(event_id);
+    }
+}
+
+/// Global L2 cache for interaction counts
+///
+/// Cache configuration:
+/// - Capacity: 1000 events (enough for ~10 full feeds)
+/// - TTL: 5 minutes (balance freshness vs performance)
+static COUNTS_CACHE: GlobalSignal<Mutex<CountsCache>> = Signal::global(|| {
+    Mutex::new(CountsCache::new(
+        1000,
+        Duration::from_secs(300), // 5 minutes
+    ))
+});
 
 /// Batch fetch interaction counts for multiple events
 ///
@@ -49,12 +155,38 @@ pub async fn fetch_interaction_counts_batch(
         return Ok(HashMap::new());
     }
 
+    // Phase 3.5: Check L2 cache first
+    let cache_signal = COUNTS_CACHE.write();
+    let mut cache = cache_signal.lock().unwrap();
+    let cached_counts = cache.get_batch(&event_ids);
+    let cache_hits = cached_counts.len();
+
+    // Identify cache misses - events we need to fetch from database
+    let mut uncached_ids: Vec<EventId> = event_ids
+        .iter()
+        .filter(|id| !cached_counts.contains_key(&id.to_hex()))
+        .cloned()
+        .collect();
+
+    log::info!(
+        "Batch fetching interaction counts for {} events ({} cache hits, {} cache misses)",
+        event_ids.len(),
+        cache_hits,
+        uncached_ids.len()
+    );
+
+    // If all counts are cached, return early
+    if uncached_ids.is_empty() {
+        log::info!("All counts served from cache!");
+        return Ok(cached_counts);
+    }
+
+    // Release cache lock before async database operation
+    drop(cache);
+
     let client = get_client().ok_or("Client not initialized")?;
 
-    log::info!("Batch fetching interaction counts for {} events", event_ids.len());
-
-    // Create filter for all interaction types across all events
-    // This is a single query that replaces N individual queries
+    // Create filter for ONLY uncached events (cache-aware query)
     let filter = Filter::new()
         .kinds(vec![
             Kind::TextNote,   // kind 1 - replies
@@ -62,8 +194,8 @@ pub async fn fetch_interaction_counts_batch(
             Kind::Repost,     // kind 6 - reposts
             Kind::from(9735), // kind 9735 - zaps
         ])
-        .events(event_ids.clone())
-        .limit(event_ids.len() * 100); // Reasonable limit per event
+        .events(uncached_ids.clone())
+        .limit(uncached_ids.len() * 100); // Reasonable limit per event
 
     // Fetch all interactions in one query
     let events = client
@@ -73,12 +205,12 @@ pub async fn fetch_interaction_counts_batch(
 
     log::info!("Fetched {} total interaction events", events.len());
 
-    // Aggregate counts by event_id
-    let mut counts_map: HashMap<String, InteractionCounts> = HashMap::new();
+    // Aggregate counts by event_id for uncached events only
+    let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
 
-    // Initialize all event IDs with zero counts
-    for event_id in &event_ids {
-        counts_map.insert(event_id.to_hex(), InteractionCounts::default());
+    // Initialize uncached event IDs with zero counts
+    for event_id in &uncached_ids {
+        freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
 
     // Count interactions
@@ -92,7 +224,7 @@ pub async fn fetch_interaction_counts_batch(
         let event_key = referenced_event_id.to_hex();
 
         // Get or create counts entry
-        let counts = counts_map.entry(event_key).or_default();
+        let counts = freshly_fetched.entry(event_key).or_default();
 
         // Increment appropriate counter
         match event.kind {
@@ -110,7 +242,52 @@ pub async fn fetch_interaction_counts_batch(
         }
     }
 
-    Ok(counts_map)
+    // Update L2 cache with freshly fetched counts
+    let cache_signal = COUNTS_CACHE.write();
+    let mut cache = cache_signal.lock().unwrap();
+    cache.insert_batch(freshly_fetched.clone());
+    drop(cache);
+
+    // Combine cached and freshly fetched results
+    let mut final_counts = cached_counts;
+    final_counts.extend(freshly_fetched);
+
+    log::info!(
+        "Returning {} interaction counts ({} from cache, {} freshly fetched)",
+        final_counts.len(),
+        cache_hits,
+        uncached_ids.len()
+    );
+
+    Ok(final_counts)
+}
+
+/// Invalidate cached counts for an event
+///
+/// Call this when the user publishes a new interaction (like, repost, reply)
+/// to ensure the next fetch gets fresh counts from the database.
+///
+/// # Example
+/// ```
+/// // After user likes a note
+/// publish_reaction(event_id, content).await?;
+/// invalidate_interaction_counts(&event_id);
+/// ```
+pub fn invalidate_interaction_counts(event_id: &str) {
+    let cache_signal = COUNTS_CACHE.write();
+    let mut cache = cache_signal.lock().unwrap();
+    cache.invalidate(event_id);
+    log::debug!("Invalidated interaction counts cache for {}", event_id);
+}
+
+/// Invalidate cached counts for multiple events at once
+pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
+    let cache_signal = COUNTS_CACHE.write();
+    let mut cache = cache_signal.lock().unwrap();
+    for event_id in event_ids {
+        cache.invalidate(event_id);
+    }
+    log::debug!("Invalidated interaction counts cache for {} events", event_ids.len());
 }
 
 /// Extract the event ID being referenced by an interaction event

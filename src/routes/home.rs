@@ -174,71 +174,105 @@ pub fn Home() -> Element {
                 None => return,
             };
 
-            // Subscribe to new posts from followed users
-            let filter = Filter::new()
-                .kind(Kind::TextNote)
-                .authors(authors)
-                .since(Timestamp::now())
-                .limit(0); // limit=0 means only new events
+            // Batch subscriptions for large contact lists to avoid overwhelming relays
+            // Split into chunks of 50 authors per subscription
+            const BATCH_SIZE: usize = 50;
+            const BATCH_DELAY_MS: u64 = 100; // 100ms delay between batches
 
-            log::info!("Starting real-time subscription for {} followed users using gossip", contacts.len());
+            let total_authors = authors.len();
+            let num_batches = (total_authors + BATCH_SIZE - 1) / BATCH_SIZE;
 
-            match client.subscribe(filter, None).await {
-                Ok(output) => {
-                    let home_feed_sub_id = output.val;
-                    log::info!("Subscribed to home feed updates: {:?}", home_feed_sub_id);
+            log::info!("Starting batched real-time subscription for {} followed users in {} batches using gossip",
+                contacts.len(), num_batches);
 
-                    // Handle incoming events
-                    spawn(async move {
-                        let mut notifications = client.notifications();
+            // Subscribe to batches with staggered timing
+            for (batch_idx, author_batch) in authors.chunks(BATCH_SIZE).enumerate() {
+                let batch_authors = author_batch.to_vec();
+                let client = client.clone();
+                let batch_num = batch_idx + 1;
 
-                        while let Ok(notification) = notifications.recv().await {
-                            if let nostr_sdk::RelayPoolNotification::Event {
-                                subscription_id,
-                                event,
-                                ..
-                            } = notification
-                            {
-                                // Only process events from our home feed subscription
-                                if subscription_id != home_feed_sub_id {
-                                    continue;
-                                }
+                // Stagger batches to avoid spike
+                if batch_idx > 0 {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use gloo_timers::future::TimeoutFuture;
+                        TimeoutFuture::new((batch_idx as u32 * BATCH_DELAY_MS as u32) as u32).await;
+                    }
 
-                                // Check if this matches our feed type
-                                let should_add = match current_feed_type {
-                                    FeedType::Following => {
-                                        // Only top-level posts (no e tags)
-                                        !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        use tokio::time::{sleep, Duration as TokioDuration};
+                        sleep(TokioDuration::from_millis(batch_idx as u64 * BATCH_DELAY_MS)).await;
+                    }
+                }
+
+                let filter = Filter::new()
+                    .kind(Kind::TextNote)
+                    .authors(batch_authors.clone())
+                    .since(Timestamp::now())
+                    .limit(0); // limit=0 means only new events
+
+                log::info!("Subscribing to batch {}/{} ({} authors)",
+                    batch_num, num_batches, batch_authors.len());
+
+                match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        let subscription_id = output.val;
+                        log::info!("Batch {}/{} subscribed: {:?}", batch_num, num_batches, subscription_id);
+
+                        // Handle incoming events for this batch
+                        let client_for_notifications = client.clone();
+                        spawn(async move {
+                            let mut notifications = client_for_notifications.notifications();
+
+                            while let Ok(notification) = notifications.recv().await {
+                                if let nostr_sdk::RelayPoolNotification::Event {
+                                    subscription_id: event_sub_id,
+                                    event,
+                                    ..
+                                } = notification
+                                {
+                                    // Only process events from this batch's subscription
+                                    if event_sub_id != subscription_id {
+                                        continue;
                                     }
-                                    FeedType::FollowingWithReplies => {
-                                        // All posts including replies
-                                        true
-                                    }
-                                };
 
-                                if should_add {
-                                    log::info!("New post received in real-time!");
+                                    // Check if this matches our feed type
+                                    let should_add = match current_feed_type {
+                                        FeedType::Following => {
+                                            // Only top-level posts (no e tags)
+                                            !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                                        }
+                                        FeedType::FollowingWithReplies => {
+                                            // All posts including replies
+                                            true
+                                        }
+                                    };
 
-                                    // Only add to feed if we're in Loaded state
-                                    let current_state = feed_state.read().clone();
-                                    if let DataState::Loaded(current_events) = current_state {
-                                        // Check if event already exists (avoid duplicates)
-                                        let exists = current_events.iter().any(|e| e.id == event.id);
+                                    if should_add {
+                                        log::info!("New post received in real-time from batch {}", batch_num);
 
-                                        if !exists {
-                                            // Prepend to feed
-                                            let mut new_events = vec![(*event).clone()];
-                                            new_events.extend(current_events);
-                                            feed_state.set(DataState::Loaded(new_events));
+                                        // Only add to feed if we're in Loaded state
+                                        let current_state = feed_state.read().clone();
+                                        if let DataState::Loaded(current_events) = current_state {
+                                            // Check if event already exists (avoid duplicates)
+                                            let exists = current_events.iter().any(|e| e.id == event.id);
+
+                                            if !exists {
+                                                // Prepend to feed
+                                                let mut new_events = vec![(*event).clone()];
+                                                new_events.extend(current_events);
+                                                feed_state.set(DataState::Loaded(new_events));
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    });
-                }
-                Err(e) => {
-                    log::error!("Failed to subscribe to home feed: {}", e);
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe batch {}/{}: {}", batch_num, num_batches, e);
+                    }
                 }
             }
         });
