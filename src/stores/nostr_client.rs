@@ -961,11 +961,14 @@ pub async fn publish_article(
 fn detect_mime_type(url: &str) -> Option<String> {
     let url_lower = url.to_lowercase();
 
-    // Extract extension from URL (handles query params)
-    let path = url_lower.split('?').next()?;
+    // Extract extension from URL (handles query params and fragments)
+    let path = url_lower
+        .split('?').next()?  // Remove query string
+        .split('#').next()?; // Remove fragment
     let extension = path.split('.').last()?;
 
     match extension {
+        // Image types
         "jpg" | "jpeg" => Some("image/jpeg".to_string()),
         "png" => Some("image/png".to_string()),
         "gif" => Some("image/gif".to_string()),
@@ -976,6 +979,15 @@ fn detect_mime_type(url: &str) -> Option<String> {
         "tiff" | "tif" => Some("image/tiff".to_string()),
         "avif" => Some("image/avif".to_string()),
         "heic" | "heif" => Some("image/heic".to_string()),
+
+        // Audio types
+        "mp3" => Some("audio/mpeg".to_string()),
+        "m4a" | "mp4" | "aac" => Some("audio/mp4".to_string()),
+        "ogg" | "opus" => Some("audio/ogg".to_string()),
+        "wav" => Some("audio/wav".to_string()),
+        "webm" | "weba" => Some("audio/webm".to_string()),
+        "flac" => Some("audio/flac".to_string()),
+
         _ => None,
     }
 }
