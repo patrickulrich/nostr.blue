@@ -5,12 +5,16 @@ use crate::routes::Route;
 use crate::stores::nostr_client::{publish_reaction, publish_repost, HAS_SIGNER, get_client};
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
+use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use std::time::Duration;
 
 #[component]
-pub fn NoteCard(event: NostrEvent) -> Element {
+pub fn NoteCard(
+    event: NostrEvent,
+    #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_repost = author_pubkey.clone();
@@ -47,8 +51,22 @@ pub fn NoteCard(event: NostrEvent) -> Element {
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Fetch counts - consolidated into a single batched fetch, only run once per event_id
+    // Initialize counts from precomputed data if available (batch optimization)
+    if let Some(ref counts) = precomputed_counts {
+        reply_count.set(counts.replies.min(500));
+        like_count.set(counts.likes.min(500));
+        repost_count.set(counts.reposts.min(500));
+        zap_amount_sats.set(counts.zap_amount_sats);
+    }
+    let has_precomputed = precomputed_counts.is_some();
+
+    // Fetch counts individually if not precomputed (fallback for single-note views)
+    // Skip if we have precomputed counts from batch aggregation
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
+        if has_precomputed {
+            return; // Skip individual fetch if we have batch data
+        }
+
         spawn(async move {
             let client = match get_client() {
                 Some(c) => c,

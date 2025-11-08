@@ -29,6 +29,7 @@ pub mod share_modal;
 pub mod radial_menu;
 pub mod markdown_editor;
 pub mod note_menu;
+pub mod virtual_list;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -57,3 +58,4 @@ pub use share_modal::ShareModal;
 pub use radial_menu::RadialMenu;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
+pub use virtual_list::{VirtualList, VirtualScrollConfig};
