@@ -11,6 +11,7 @@ pub fn VoiceReplyComposer(
 ) -> Element {
     let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
     let mut is_publishing = use_signal(|| false);
+    let mut error_message = use_signal(|| Option::<String>::None);
     let has_signer = *HAS_SIGNER.read();
 
     let can_publish = audio_data.read().is_some() && !*is_publishing.read() && has_signer;
@@ -44,6 +45,7 @@ pub fn VoiceReplyComposer(
         }
 
         is_publishing.set(true);
+        error_message.set(None);
         let event_for_reply = reply_event.clone();
 
         spawn(async move {
@@ -63,17 +65,20 @@ pub fn VoiceReplyComposer(
                         Ok(event_id) => {
                             log::info!("Voice reply published successfully: {}", event_id);
                             audio_data.set(None);
+                            error_message.set(None);
                             is_publishing.set(false);
                             on_success.call(());
                         }
                         Err(e) => {
                             log::error!("Failed to publish voice reply: {}", e);
+                            error_message.set(Some(format!("Failed to publish: {}", e)));
                             is_publishing.set(false);
                         }
                     }
                 }
                 Err(e) => {
                     log::error!("Failed to upload audio: {}", e);
+                    error_message.set(Some(format!("Failed to upload audio: {}", e)));
                     is_publishing.set(false);
                 }
             }
@@ -167,6 +172,14 @@ pub fn VoiceReplyComposer(
                                     class: "mt-2 text-sm text-green-600",
                                     "✓ Recording ready to publish"
                                 }
+                            }
+                        }
+
+                        // Error message
+                        if let Some(err) = error_message.read().as_ref() {
+                            div {
+                                class: "mb-4 p-4 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200",
+                                "{err}"
                             }
                         }
 

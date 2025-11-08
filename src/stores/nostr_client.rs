@@ -1219,10 +1219,18 @@ pub async fn publish_voice_message_reply(
         .map_err(|e| format!("Invalid audio URL: {}", e))?;
 
     // Determine root and parent for NIP-22 structure
-    // Check if reply_to has an uppercase E tag (root marker)
+    // Check if reply_to has a root tag marker (NIP-10/NIP-22)
     let root_event_id = reply_to.tags.iter().find_map(|tag| {
+        // Parse standardized tag to check for root marker
+        if let Some(nostr::TagStandard::Event { event_id, marker, .. }) = tag.as_standardized() {
+            // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
+            if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
+                return Some(event_id.to_hex());
+            }
+        }
+
+        // Fallback: check for uppercase 'E' tag (legacy support)
         let tag_vec = tag.clone().to_vec();
-        // Look for uppercase E tag
         if tag_vec.len() >= 2 && tag_vec[0] == "E" {
             Some(tag_vec[1].clone())
         } else {
