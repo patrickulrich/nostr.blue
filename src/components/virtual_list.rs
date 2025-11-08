@@ -22,6 +22,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -297,7 +299,8 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     let container = container_element.clone();
 
                     // Schedule update on next animation frame
-                    let closure = wasm_bindgen::closure::Closure::once(move || {
+                    // Use once_into_js to convert closure to JsValue that owns it (prevents premature drop)
+                    let closure = wasm_bindgen::closure::Closure::once_into_js(move || {
                         spawn(async move {
                             // Use stored element to read scroll_top from this specific container instance
                             if let Some(html_element) = container.read().as_ref() {
@@ -313,7 +316,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                         });
                     });
 
-                    request_animation_frame(closure.as_ref().unchecked_ref());
+                    request_animation_frame(closure.unchecked_ref());
                 }
 
                 #[cfg(not(target_arch = "wasm32"))]
