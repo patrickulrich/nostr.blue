@@ -7,15 +7,13 @@ use std::time::Duration;
 use gloo_timers::callback::Timeout;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
 
 /// Global signal to track bookmarked event IDs
 pub static BOOKMARKED_EVENTS: GlobalSignal<Vec<String>> = Signal::global(|| Vec::new());
 
-/// Pending bookmark publish timeout (for debouncing)
 #[cfg(target_arch = "wasm32")]
 thread_local! {
+    /// Pending bookmark publish timeout (for debouncing)
     static BOOKMARK_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = RefCell::new(None);
 }
 

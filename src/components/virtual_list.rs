@@ -230,7 +230,7 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
         div {
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
-            onscroll: move |evt| {
+            onscroll: move |_evt| {
                 // Update scroll position
                 // Note: evt.data doesn't provide scroll offset in current Dioxus
                 // This would need to be enhanced with JS interop for production use
