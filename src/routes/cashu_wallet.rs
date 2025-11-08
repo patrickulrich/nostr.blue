@@ -129,7 +129,7 @@ pub fn CashuWallet() -> Element {
                             }
                             p {
                                 class: "text-sm text-muted-foreground",
-                                "Browser extensions and remote signers are not currently supported."
+                                "If you're using a browser extension or remote signer, please authorize it or try reconnecting so it can decrypt."
                             }
                         }
                     }

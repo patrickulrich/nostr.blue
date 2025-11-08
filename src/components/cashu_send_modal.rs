@@ -9,6 +9,21 @@ pub fn CashuSendModal(
     let mints = cashu_wallet::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
 
+    // Keep selected_mint in sync with available mints
+    use_effect(move || {
+        let current_mints = cashu_wallet::get_mints();
+        let current_selection = selected_mint.read().clone();
+
+        // If no mint is selected, set it to the first available
+        if current_selection.is_empty() {
+            selected_mint.set(current_mints.first().cloned().unwrap_or_default());
+        }
+        // If the selected mint is no longer in the list, reset to first available
+        else if !current_mints.contains(&current_selection) {
+            selected_mint.set(current_mints.first().cloned().unwrap_or_default());
+        }
+    });
+
     rsx! {
         // Modal overlay
         div {
