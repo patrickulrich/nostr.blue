@@ -16,6 +16,7 @@
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use std::rc::Rc;
 use js_sys::eval;
 
 /// Configuration for virtual scrolling behavior
@@ -159,13 +160,13 @@ impl VirtualState {
 
 /// Props for VirtualList component
 #[derive(Props, Clone, PartialEq)]
-pub struct VirtualListProps<T: Clone + PartialEq + 'static> {
-    /// All items in the list
-    pub items: Vec<T>,
+pub struct VirtualListProps<T: PartialEq + 'static> {
+    /// All items in the list (wrapped in Rc for cheap cloning)
+    pub items: Vec<Rc<T>>,
 
     /// Render function for each item
-    /// Receives: (item, index, is_visible)
-    pub item_content: fn(T, usize) -> Element,
+    /// Receives: (item, index) where item is Rc<T>
+    pub item_content: fn(Rc<T>, usize) -> Element,
 
     /// Optional configuration (uses default if not provided)
     #[props(default)]
@@ -180,8 +181,11 @@ pub struct VirtualListProps<T: Clone + PartialEq + 'static> {
 ///
 /// # Example
 /// ```rust
+/// // Wrap items in Rc for efficient cloning
+/// let items_rc: Vec<Rc<Event>> = feed_events.into_iter().map(Rc::new).collect();
+///
 /// VirtualList {
-///     items: feed_events,
+///     items: items_rc,
 ///     item_content: |event, index| rsx! {
 ///         NoteCard { event: event }
 ///     },
@@ -193,7 +197,7 @@ pub struct VirtualListProps<T: Clone + PartialEq + 'static> {
 /// }
 /// ```
 #[component]
-pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -> Element {
+pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Element {
     let config = props.config.unwrap_or_default();
     let mut virtual_state = use_signal(|| VirtualState::new(props.items.len(), config));
 
@@ -238,15 +242,6 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
     let total_height = state.calculate_total_height();
     let start_offset = state.calculate_item_offset(start_index);
 
-    // Get visible items
-    let visible_items: Vec<(T, usize)> = props.items
-        .iter()
-        .enumerate()
-        .skip(start_index)
-        .take(end_index - start_index)
-        .map(|(i, item)| (item.clone(), i))
-        .collect();
-
     log::debug!(
         "VirtualList: Rendering items {}-{} of {} (viewport at {}px)",
         start_index,
@@ -256,6 +251,18 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
     );
 
     drop(state); // Release borrow before rendering
+
+    // Memoize visible items calculation - only recompute when items or range changes
+    // Cloning Rc<T> is cheap (just incrementing reference count)
+    let visible_items = use_memo(move || {
+        props.items
+            .iter()
+            .enumerate()
+            .skip(start_index)
+            .take(end_index - start_index)
+            .map(|(i, item)| (item.clone(), i))
+            .collect::<Vec<(Rc<T>, usize)>>()
+    });
 
     let container_class_for_scroll = props.container_class.clone();
     rsx! {
@@ -297,10 +304,11 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
                     style: "height: {start_offset}px;",
                 }
 
-                // Render visible items
-                for (item, index) in visible_items {
+                // Render visible items (memoized, only clones cheap Rc pointers)
+                for (item, index) in visible_items.read().iter() {
                     {
-                        let item_index = index;
+                        let item_index = *index;
+                        let item_rc = item.clone();
                         let state = virtual_state.clone();
                         rsx! {
                             div {
@@ -331,7 +339,7 @@ pub fn VirtualList<T: Clone + PartialEq + 'static>(props: VirtualListProps<T>) -
                                         }
                                     });
                                 },
-                                {(props.item_content)(item, index)}
+                                {(props.item_content)(item_rc, item_index)}
                             }
                         }
                     }

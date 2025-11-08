@@ -11,6 +11,25 @@ use std::cell::RefCell;
 /// Global signal to track bookmarked event IDs
 pub static BOOKMARKED_EVENTS: GlobalSignal<Vec<String>> = Signal::global(|| Vec::new());
 
+/// Sync status for bookmark publishing
+#[derive(Clone, Debug, PartialEq)]
+pub enum BookmarkSyncStatus {
+    /// No pending operations
+    Idle,
+    /// Publishing to relays in progress
+    Syncing,
+    /// Publish failed with error message and retry count
+    Failed { error: String, retry_count: u32 },
+}
+
+/// Global signal to track bookmark sync status
+pub static BOOKMARK_SYNC_STATUS: GlobalSignal<BookmarkSyncStatus> =
+    Signal::global(|| BookmarkSyncStatus::Idle);
+
+/// Previous bookmark state for rollback on failure
+pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Option<Vec<String>>> =
+    Signal::global(|| None);
+
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Pending bookmark publish timeout (for debouncing)
@@ -76,6 +95,9 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
         return Ok(());
     }
 
+    // Store rollback state before making changes
+    *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+
     bookmarks.push(event_id);
 
     // Update local state immediately for UI responsiveness
@@ -91,9 +113,7 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
             // Schedule new publish after 1 second
             let timeout_handle = Timeout::new(1000, move || {
                 spawn(async move {
-                    if let Err(e) = publish_bookmarks(bookmarks).await {
-                        log::error!("Failed to publish bookmarks: {}", e);
-                    }
+                    publish_with_retry(bookmarks, 0).await;
                 });
             });
 
@@ -103,8 +123,8 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Non-WASM: publish immediately
-        publish_bookmarks(bookmarks).await?;
+        // Non-WASM: publish immediately with retry
+        publish_with_retry(bookmarks, 0).await;
     }
 
     Ok(())
@@ -113,6 +133,9 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 /// Remove event from bookmarks
 pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     let mut bookmarks = BOOKMARKED_EVENTS.read().clone();
+
+    // Store rollback state before making changes
+    *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
 
     // Remove the event ID
     bookmarks.retain(|id| id != &event_id);
@@ -130,9 +153,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
             // Schedule new publish after 1 second
             let timeout_handle = Timeout::new(1000, move || {
                 spawn(async move {
-                    if let Err(e) = publish_bookmarks(bookmarks).await {
-                        log::error!("Failed to publish bookmarks: {}", e);
-                    }
+                    publish_with_retry(bookmarks, 0).await;
                 });
             });
 
@@ -142,11 +163,90 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Non-WASM: publish immediately
-        publish_bookmarks(bookmarks).await?;
+        // Non-WASM: publish immediately with retry
+        publish_with_retry(bookmarks, 0).await;
     }
 
     Ok(())
+}
+
+/// Publish bookmarks with retry and exponential backoff
+fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+    Box::pin(async move {
+        const MAX_RETRIES: u32 = 3;
+
+        // Set status to syncing
+        *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;
+
+        match publish_bookmarks(bookmarks.clone()).await {
+            Ok(_) => {
+                // Success - clear rollback state and set status to idle
+                *BOOKMARK_ROLLBACK_STATE.write() = None;
+                *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
+                log::info!("Bookmarks published successfully");
+            }
+            Err(e) => {
+                log::error!("Failed to publish bookmarks (attempt {}): {}", retry_count + 1, e);
+
+                if retry_count < MAX_RETRIES {
+                    // Calculate exponential backoff delay: 1s, 2s, 4s
+                    let delay_ms = 1000u32 * (1 << retry_count); // 2^retry_count seconds
+
+                    log::info!("Retrying bookmark publish in {}ms (attempt {}/{})",
+                        delay_ms, retry_count + 1, MAX_RETRIES);
+
+                    // Schedule retry with exponential backoff
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let timeout_handle = Timeout::new(delay_ms, move || {
+                            spawn(publish_with_retry(bookmarks, retry_count + 1));
+                        });
+                        // Note: We let the timeout run and don't store it since it's a retry
+                        std::mem::forget(timeout_handle);
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
+                        publish_with_retry(bookmarks, retry_count + 1).await;
+                    }
+                } else {
+                    // Max retries exceeded - set failed status
+                    *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Failed {
+                        error: e.clone(),
+                        retry_count,
+                    };
+                    log::error!("Bookmark publish failed after {} retries: {}", MAX_RETRIES, e);
+                }
+            }
+        }
+    })
+}
+
+/// Rollback bookmarks to previous state after failed publish
+pub fn rollback_bookmarks() {
+    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().clone() {
+        log::info!("Rolling back bookmarks to previous state");
+        *BOOKMARKED_EVENTS.write() = previous_state;
+        *BOOKMARK_ROLLBACK_STATE.write() = None;
+        *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
+    } else {
+        log::warn!("No rollback state available");
+    }
+}
+
+/// Manually retry failed bookmark publish
+pub async fn retry_bookmark_publish() {
+    let current_bookmarks = BOOKMARKED_EVENTS.read().clone();
+    log::info!("Manually retrying bookmark publish");
+    publish_with_retry(current_bookmarks, 0).await;
+}
+
+/// Dismiss failed status and keep local changes
+pub fn dismiss_bookmark_error() {
+    log::info!("Dismissing bookmark sync error, keeping local changes");
+    *BOOKMARK_ROLLBACK_STATE.write() = None;
+    *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
 }
 
 /// Publish bookmarks list to relays (NIP-51)
