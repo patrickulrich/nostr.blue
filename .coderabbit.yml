@@ -113,33 +113,34 @@ reviews:
           - Accessibility: Semantic HTML, ARIA attributes
           - SEO: Meta tags, Open Graph, structured data
 
-auto_review:
-  # Enable auto-review for pull requests.
-  enabled: true
+  # Auto-review configuration
+  auto_review:
+    # Enable auto-review for pull requests.
+    enabled: true
 
-  # Do not review PRs with these keywords in the title.
-  ignore_title_keywords:
-    - "WIP"
-    - "DO NOT MERGE"
-    - "DRAFT"
-    - "POC"
+    # Do not review PRs with these keywords in the title.
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "DRAFT"
+      - "POC"
 
-  # Do not review draft pull requests.
-  drafts: false
+    # Do not review draft pull requests.
+    drafts: false
 
-  # Auto-review PRs targeting these base branches.
-  base_branches:
-    - "main"
-    - "master"
-    - "develop"
-    - "feature/**"
-    - "up/**"
-    - "release/**"
+    # Auto-review PRs targeting these base branches.
+    base_branches:
+      - "main"
+      - "master"
+      - "develop"
+      - "feature/**"
+      - "up/**"
+      - "release/**"
 
-  # Only review if certain labels are present (optional - comment out if not needed)
-  # labels:
-  #   - "ready-for-review"
-  #   - "needs-review"
+    # Only review if certain labels are present (optional - comment out if not needed)
+    # labels:
+    #   - "ready-for-review"
+    #   - "needs-review"
 
 chat:
   # Allow CodeRabbit to auto-reply in chat.
