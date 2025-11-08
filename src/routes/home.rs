@@ -197,7 +197,8 @@ pub fn Home() -> Element {
                                     log::info!("New post received in real-time!");
 
                                     // Only add to feed if we're in Loaded state
-                                    if let DataState::Loaded(current_events) = feed_state.read().clone() {
+                                    let current_state = feed_state.read().clone();
+                                    if let DataState::Loaded(current_events) = current_state {
                                         // Check if event already exists (avoid duplicates)
                                         let exists = current_events.iter().any(|e| e.id == event.id);
 
@@ -246,7 +247,8 @@ pub fn Home() -> Element {
 
                             // Append and show new events immediately
                             let prefetch_events = new_events.clone();
-                            if let DataState::Loaded(mut current) = feed_state.read().clone() {
+                            let current_state = feed_state.read().clone();
+                            if let DataState::Loaded(mut current) = current_state {
                                 current.append(&mut new_events);
                                 feed_state.set(DataState::Loaded(current));
                             }
@@ -276,7 +278,8 @@ pub fn Home() -> Element {
 
                             // Append and show new events immediately
                             let prefetch_events = new_events.clone();
-                            if let DataState::Loaded(mut current) = feed_state.read().clone() {
+                            let current_state = feed_state.read().clone();
+                            if let DataState::Loaded(mut current) = current_state {
                                 current.append(&mut new_events);
                                 feed_state.set(DataState::Loaded(current));
                             }
