@@ -961,11 +961,14 @@ pub async fn publish_article(
 fn detect_mime_type(url: &str) -> Option<String> {
     let url_lower = url.to_lowercase();
 
-    // Extract extension from URL (handles query params)
-    let path = url_lower.split('?').next()?;
+    // Extract extension from URL (handles query params and fragments)
+    let path = url_lower
+        .split('?').next()?  // Remove query string
+        .split('#').next()?; // Remove fragment
     let extension = path.split('.').last()?;
 
     match extension {
+        // Image types
         "jpg" | "jpeg" => Some("image/jpeg".to_string()),
         "png" => Some("image/png".to_string()),
         "gif" => Some("image/gif".to_string()),
@@ -976,6 +979,15 @@ fn detect_mime_type(url: &str) -> Option<String> {
         "tiff" | "tif" => Some("image/tiff".to_string()),
         "avif" => Some("image/avif".to_string()),
         "heic" | "heif" => Some("image/heic".to_string()),
+
+        // Audio types
+        "mp3" => Some("audio/mpeg".to_string()),
+        "m4a" | "mp4" | "aac" => Some("audio/mp4".to_string()),
+        "ogg" | "opus" => Some("audio/ogg".to_string()),
+        "wav" => Some("audio/wav".to_string()),
+        "webm" | "weba" => Some("audio/webm".to_string()),
+        "flac" => Some("audio/flac".to_string()),
+
         _ => None,
     }
 }
@@ -1125,5 +1137,247 @@ pub async fn publish_video(
 
     let event_id = output.id().to_hex();
     log::info!("Video published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Publish a voice message (Kind 1222)
+/// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
+pub async fn publish_voice_message(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    hashtags: Vec<String>,
+    mime_type: Option<String>,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    log::info!("Publishing voice message: {}", audio_url);
+
+    // Parse URL
+    let url = nostr::Url::parse(&audio_url)
+        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+
+    // Build event using EventBuilder::voice_message
+    let mut builder = nostr::EventBuilder::voice_message(url);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = Vec::new();
+
+    // Add imeta tag with duration and waveform (NIP-92)
+    let waveform_str = waveform.iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut imeta_fields = vec![
+        format!("url {}", audio_url),
+        format!("duration {}", duration.round() as u64),
+        format!("waveform {}", waveform_str),
+    ];
+
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Add tags to builder
+    builder = builder.tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish voice message: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Voice message published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Publish a voice message reply (Kind 1244) following NIP-22
+/// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
+/// NIP-22: https://github.com/nostr-protocol/nips/blob/master/22.md
+pub async fn publish_voice_message_reply(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    reply_to: nostr::Event,
+    mime_type: Option<String>,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    log::info!("Publishing voice message reply to: {}", reply_to.id.to_hex());
+
+    // Parse URL
+    let url = nostr::Url::parse(&audio_url)
+        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+
+    // Determine root and parent for NIP-22 structure
+    // Check if reply_to has a root tag marker (NIP-10/NIP-22)
+    // Extract root event ID, author pubkey, and relay URL
+    let (root_event_id, root_pubkey, root_relay_url): (Option<String>, Option<PublicKey>, Option<RelayUrl>) = {
+        // First, try to find modern NIP-10/NIP-22 lowercase 'e' tag with marker="root"
+        let modern_root = reply_to.tags.iter().find_map(|tag| {
+            if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+                // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
+                if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
+                    return Some((
+                        Some(event_id.to_hex()),
+                        *public_key,  // Public key from the tag
+                        relay_url.clone(),  // Relay URL from the tag
+                    ));
+                }
+            }
+            None
+        });
+
+        if let Some(result) = modern_root {
+            result
+        } else {
+            // Fallback: Legacy uppercase 'E'/'P' tag support
+            // NIP-10 deprecated positional convention: first 'E' tag = root, first 'P' tag = root author
+            let uppercase_e_tags: Vec<_> = reply_to.tags.iter()
+                .filter_map(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    if tag_vec.len() >= 2 && tag_vec[0] == "E" {
+                        Some((
+                            tag_vec[1].clone(),
+                            if tag_vec.len() >= 3 && !tag_vec[2].is_empty() {
+                                RelayUrl::parse(&tag_vec[2]).ok()
+                            } else {
+                                None
+                            }
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if let Some((root_event_id, relay)) = uppercase_e_tags.first() {
+                // Per deprecated NIP-10 positional convention, the first 'P' tag corresponds to the root author
+                // Note: This is a heuristic and may not be accurate if the event has multiple 'P' tags
+                // for different purposes (e.g., mentions). Modern events should use marker-based tags.
+                let root_pubkey = reply_to.tags.iter().find_map(|p_tag| {
+                    let p_vec = p_tag.clone().to_vec();
+                    if p_vec.len() >= 2 && p_vec[0] == "P" {
+                        PublicKey::from_hex(&p_vec[1]).ok()
+                    } else {
+                        None
+                    }
+                });
+
+                (Some(root_event_id.clone()), root_pubkey, relay.clone())
+            } else {
+                (None, None, None)
+            }
+        }
+    };
+
+    let parent_id = reply_to.id.to_hex();
+    let parent_pubkey = reply_to.pubkey;
+    let parent_kind = reply_to.kind;
+
+    // Create CommentTarget for parent
+    use nostr::prelude::*;
+    let parent_target = if parent_kind.as_u16() == 1222 || parent_kind.as_u16() == 1244 {
+        // Voice message or voice reply
+        let event_id = EventId::parse(&parent_id)
+            .map_err(|e| format!("Failed to parse parent event ID: {}", e))?;
+        CommentTarget::event(event_id, parent_kind, Some(parent_pubkey), None)
+    } else {
+        return Err("Can only reply to voice messages (Kind 1222 or 1244)".to_string());
+    };
+
+    // Create root target if different from parent
+    let root_target = if let Some(root_id) = root_event_id {
+        if root_id != parent_id {
+            let event_id = EventId::parse(&root_id)
+                .map_err(|e| format!("Failed to parse root event ID: {}", e))?;
+            // Include root author and relay URL for proper NIP-22/NIP-10 compliance
+            use std::borrow::Cow;
+            Some(CommentTarget::event(
+                event_id,
+                nostr::Kind::VoiceMessage,
+                root_pubkey,  // Root author's public key
+                root_relay_url.as_ref().map(Cow::Borrowed)  // Relay hint/URL as Cow
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build event using EventBuilder::voice_message_reply
+    let mut builder = nostr::EventBuilder::voice_message_reply(url, root_target, parent_target);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = Vec::new();
+
+    // Add imeta tag with duration and waveform (NIP-92)
+    let waveform_str = waveform.iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut imeta_fields = vec![
+        format!("url {}", audio_url),
+        format!("duration {}", duration.round() as u64),
+        format!("waveform {}", waveform_str),
+    ];
+
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
+
+    // Add p tag for parent author
+    tags.push(Tag::public_key(parent_pubkey));
+
+    // Add p tags for anyone else mentioned in the parent
+    for tag in reply_to.tags.iter() {
+        if let Some(nostr::TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+            // Don't duplicate the parent author
+            if public_key != &parent_pubkey {
+                tags.push(Tag::public_key(*public_key));
+            }
+        }
+    }
+
+    // Add tags to builder
+    builder = builder.tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Voice message reply published successfully: {}", event_id);
     Ok(event_id)
 }

@@ -10,11 +10,12 @@ pub struct RadialMenuProps {
     pub on_photo_click: EventHandler<()>,
     pub on_video_landscape_click: EventHandler<()>,
     pub on_video_portrait_click: EventHandler<()>,
+    pub on_voice_click: EventHandler<()>,
 }
 
 #[component]
 pub fn RadialMenu(props: RadialMenuProps) -> Element {
-    // Calculate positions for 5 buttons in a circle
+    // Calculate positions for 6 buttons in a circle
     // Starting from left (180 degrees) and going counter-clockwise
     let radius = 100; // pixels from center
 
@@ -25,6 +26,7 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
         (270.0, "Photo"),          // Bottom
         (315.0, "Video"),          // Bottom-right
         (0.0, "Shorts"),           // Right
+        (135.0, "Voice"),          // Top-left
     ];
 
     let calculate_position = |angle: f64| -> (i32, i32) {
@@ -134,6 +136,32 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
                         title: "Create Short",
 
                         FileVideoIcon { class: "w-6 h-6".to_string() }
+                    }
+                }
+            }
+
+            // Voice Message button (top-left)
+            {
+                let (x, y) = calculate_position(positions[5].0);
+                rsx! {
+                    button {
+                        class: "absolute w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-lg flex items-center justify-center transition-all duration-300 z-50 pointer-events-auto opacity-100 scale-100",
+                        style: format!("left: 50%; top: 50%; transform: translate(calc(-50% + {}px), calc(-50% + {}px));", x, y),
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            props.on_voice_click.call(());
+                        },
+                        title: "Record Voice Message",
+
+                        // Microphone icon
+                        svg {
+                            class: "w-6 h-6",
+                            view_box: "0 0 24 24",
+                            fill: "currentColor",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            path { d: "M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" }
+                            path { d: "M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" }
+                        }
                     }
                 }
             }

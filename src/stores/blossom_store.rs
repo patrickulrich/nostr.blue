@@ -187,6 +187,84 @@ async fn compress_image(
     Ok(compressed_data)
 }
 
+/// Upload audio to Blossom (no compression)
+///
+/// # Arguments
+/// * `data` - Raw audio bytes
+/// * `content_type` - MIME type (e.g., "audio/mp4", "audio/webm", "audio/ogg")
+///
+/// # Returns
+/// URL of the uploaded audio
+#[allow(dead_code)]
+pub async fn upload_audio(
+    data: Vec<u8>,
+    content_type: String,
+) -> Result<String, String> {
+    log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
+
+    // Reset progress
+    UPLOAD_PROGRESS.write().replace(0.0);
+
+    // Get signer for authentication
+    let signer = nostr_client::get_signer()
+        .ok_or("Not authenticated. Please sign in to upload audio.")?;
+
+    UPLOAD_PROGRESS.write().replace(25.0);
+
+    // Get primary server
+    let server_url = get_primary_server();
+    let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
+
+    // Create Blossom client
+    let client = BlossomClient::new(url);
+
+    log::info!("Uploading to {} with authentication", server_url);
+    UPLOAD_PROGRESS.write().replace(50.0);
+
+    // Create authorization options for the upload
+    let auth_options = Some(BlossomAuthorizationOptions {
+        content: Some("Upload voice message via nostr.blue".to_string()),
+        expiration: None, // No expiration
+        action: None, // Default action (upload)
+        scope: None, // No specific scope restriction
+    });
+
+    // Upload with proper authentication based on signer type
+    let descriptor = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            client
+                .upload_blob(data, Some(content_type), auth_options, Some(&keys))
+                .await
+                .map_err(|e| format!("Upload failed: {}", e))?
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            client
+                .upload_blob(data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
+                .await
+                .map_err(|e| format!("Upload failed: {}", e))?
+        }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            client
+                .upload_blob(data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
+                .await
+                .map_err(|e| format!("Upload failed: {}", e))?
+        }
+    };
+
+    UPLOAD_PROGRESS.write().replace(100.0);
+
+    log::info!("Audio upload successful: {}", descriptor.url);
+
+    // Clear progress after a short delay
+    spawn(async move {
+        gloo_timers::future::TimeoutFuture::new(1000).await;
+        *UPLOAD_PROGRESS.write() = None;
+    });
+
+    Ok(descriptor.url.to_string())
+}
+
 /// Calculate SHA-256 hash of data
 #[allow(dead_code)]
 pub fn calculate_sha256(data: &[u8]) -> String {

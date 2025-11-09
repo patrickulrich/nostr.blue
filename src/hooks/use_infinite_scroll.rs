@@ -116,7 +116,7 @@ where
                 }) as Box<dyn FnMut(js_sys::Array)>);
 
                 // Create IntersectionObserver with root margin for early triggering
-                let mut options = web_sys::IntersectionObserverInit::new();
+                let options = web_sys::IntersectionObserverInit::new();
                 options.set_root_margin("300px"); // Trigger 300px before element enters viewport
 
                 let observer = match web_sys::IntersectionObserver::new_with_options(

@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.5.1-blue)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -30,9 +30,11 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
 - ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
 - ✅ **Videos (NIP-71)** - Video event support with playback controls and comments
+- ✅ **Voice Messages (NIP-A0)** - Short audio messages up to 60 seconds with waveform visualization and threaded replies
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
 - ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
+- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, persistent IndexedDB storage, atomic keyset counter management, and automatic cleanup of spent proofs with browser extension signer compatibility
 - ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
 
 ### User Experience
@@ -72,6 +74,13 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - `nostr-browser-signer` - NIP-07 browser extension integration
   - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
 
+### Bitcoin & Ecash
+- **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
+  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling
+  - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
+  - Custom IndexedDB implementation of `WalletDatabase` trait for browser persistence
+  - Atomic keyset counter management prevents "Blinded Message already signed" errors
+
 ### Styling & UI
 - **[TailwindCSS 3](https://tailwindcss.com/)** - Utility-first CSS framework
 - Custom icon components with SVG optimization
@@ -93,6 +102,11 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Parallel Fetching**: `tokio::join!()` for simultaneous queries
 - **Smart Caching**: 5-minute TTL for profiles, persistent event storage
 - **Outbox Model (NIP-65)**: Fetches content from author's preferred write relays for reliable content discovery
+- **Cashu Wallet Persistence**:
+  - IndexedDB storage for quotes, proofs, keyset counters, and mint cache
+  - Atomic keyset counter increments prevent duplicate blinded messages
+  - Multi-step mint/melt operations survive page refresh
+  - 9 object stores for complete wallet state management
 - **Relay Optimization**:
   - Max latency: 2 seconds (auto-skip slow relays)
   - Subscription verification (ban mismatched events)
@@ -116,6 +130,7 @@ nostrbluerust/
 │   │   ├── profile_card.rs # User profile display
 │   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
+│   │   ├── voice_message_card.rs # Voice message card (NIP-A0)
 │   │   ├── zap_modal.rs    # Lightning zap interface
 │   │   ├── share_modal.rs  # Video sharing modal
 │   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
@@ -123,6 +138,14 @@ nostrbluerust/
 │   │   ├── music_player.rs # Wavlake music player (NIP-38)
 │   │   ├── track_card.rs   # Music track display
 │   │   ├── wavlake_zap_dialog.rs # Music artist zaps
+│   │   ├── wallet_balance_card.rs # Cashu wallet balance display
+│   │   ├── token_list.rs   # Cashu token list by mint
+│   │   ├── transaction_history.rs # Cashu transaction history
+│   │   ├── cashu_setup_wizard.rs # Cashu wallet setup flow
+│   │   ├── cashu_send_modal.rs # Send ecash modal
+│   │   ├── cashu_receive_modal.rs # Receive ecash modal
+│   │   ├── cashu_receive_lightning_modal.rs # Lightning deposit modal
+│   │   ├── cashu_send_lightning_modal.rs # Lightning withdrawal modal
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
 │   │   ├── client_initializing.rs # Loading animation
@@ -136,6 +159,8 @@ nostrbluerust/
 │   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
+│   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
+│   │   ├── cashu_wallet.rs # Cashu ecash wallet (NIP-60)
 │   │   ├── communities.rs  # Communities (NIP-72)
 │   │   ├── lists.rs        # User lists (NIP-51)
 │   │   ├── dms.rs          # Direct messages (NIP-04/17/44)
@@ -173,7 +198,10 @@ nostrbluerust/
 │   │   ├── settings_store.rs # NIP-78 synced settings
 │   │   ├── theme_store.rs  # Theme preferences
 │   │   ├── blossom_store.rs # Blossom media storage (BUD-01)
+│   │   ├── voice_messages_store.rs # Voice message playback state
 │   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
+│   │   ├── cashu_wallet.rs # Cashu wallet state and operations (NIP-60)
+│   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
 │   │   └── signer.rs       # Event signing
 │   ├── utils/              # Utility functions
 │   │   ├── nip19.rs        # NIP-19 identifier parsing
@@ -294,12 +322,14 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |
+| [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu wallet (ecash) | ✅ |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay list metadata | ✅ |
 | [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) | Picture events with imeta tags | ✅ |
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
+| [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 
 ### Blossom Protocol Support
 
