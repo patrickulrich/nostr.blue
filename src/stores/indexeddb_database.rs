@@ -608,17 +608,31 @@ impl WalletDatabase for IndexedDbDatabase {
 
     async fn get_proofs(
         &self,
-        _mint_url: Option<MintUrl>,
+        mint_url: Option<MintUrl>,
         unit: Option<CurrencyUnit>,
         state: Option<Vec<State>>,
-        _spending_conditions: Option<Vec<SpendingConditions>>,
+        spending_conditions: Option<Vec<SpendingConditions>>,
     ) -> Result<Vec<ProofInfo>, Self::Err> {
         let all_proofs: Vec<ProofInfo> = self.get_all_values(STORE_PROOFS).await?;
 
-        // Filter proofs based on criteria
+        // Filter proofs based on all criteria
         let filtered: Vec<ProofInfo> = all_proofs
             .into_iter()
             .filter(|proof_info| {
+                // Filter by mint_url
+                if let Some(ref filter_mint_url) = mint_url {
+                    if &proof_info.mint_url != filter_mint_url {
+                        return false;
+                    }
+                }
+
+                // Filter by currency unit
+                if let Some(ref filter_unit) = unit {
+                    if &proof_info.unit != filter_unit {
+                        return false;
+                    }
+                }
+
                 // Filter by state
                 if let Some(ref states) = state {
                     if !states.contains(&proof_info.state) {
@@ -626,12 +640,22 @@ impl WalletDatabase for IndexedDbDatabase {
                     }
                 }
 
-                // Filter by unit - skip for now as Proof structure may not have unit field directly
-                // Unit filtering can be added if needed based on ProofInfo structure
-                let _ = unit; // Suppress unused variable warning
-
-                // Note: mint_url and spending_conditions filtering not fully implemented
-                // as ProofInfo doesn't always contain mint_url
+                // Filter by spending conditions
+                if let Some(ref filter_conditions) = spending_conditions {
+                    // If filter specifies conditions, proof must have matching condition
+                    match &proof_info.spending_condition {
+                        Some(proof_condition) => {
+                            if !filter_conditions.contains(proof_condition) {
+                                return false;
+                            }
+                        }
+                        None => {
+                            // Proof has no spending condition, only matches if filter is empty
+                            // or we're looking for proofs without conditions
+                            return false;
+                        }
+                    }
+                }
 
                 true
             })
@@ -715,13 +739,36 @@ impl WalletDatabase for IndexedDbDatabase {
     ) -> Result<Vec<Transaction>, Self::Err> {
         let all_transactions: Vec<Transaction> = self.get_all_values(STORE_TRANSACTIONS).await?;
 
-        // Filter transactions based on criteria
-        // Note: Transaction structure may not have all fields directly accessible
-        // For now, return all transactions and let the caller filter
-        // This can be improved once Transaction structure is fully understood
-        let _ = (mint_url, direction, unit); // Suppress unused warnings
+        // Filter transactions based on all criteria
+        let filtered: Vec<Transaction> = all_transactions
+            .into_iter()
+            .filter(|transaction| {
+                // Filter by mint_url
+                if let Some(ref filter_mint_url) = mint_url {
+                    if &transaction.mint_url != filter_mint_url {
+                        return false;
+                    }
+                }
 
-        Ok(all_transactions)
+                // Filter by transaction direction (Incoming/Outgoing)
+                if let Some(ref filter_direction) = direction {
+                    if &transaction.direction != filter_direction {
+                        return false;
+                    }
+                }
+
+                // Filter by currency unit
+                if let Some(ref filter_unit) = unit {
+                    if &transaction.unit != filter_unit {
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .collect();
+
+        Ok(filtered)
     }
 
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err> {
