@@ -334,27 +334,6 @@ fn Layout() -> Element {
                                     icon: rsx! { crate::components::icons::BookmarkIcon { class: "w-7 h-7" } },
                                     label: "Bookmarks"
                                 }
-                                NavLink {
-                                    to: Route::CashuWallet {},
-                                    icon: rsx! {
-                                        svg {
-                                            class: "w-7 h-7",
-                                            xmlns: "http://www.w3.org/2000/svg",
-                                            width: "24",
-                                            height: "24",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                                            path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                                            path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                                        }
-                                    },
-                                    label: "Wallet"
-                                }
 
                                 // Profile link with pubkey
                                 if let Some(pubkey) = &auth.pubkey {
@@ -394,6 +373,31 @@ fn Layout() -> Element {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
+                                            if auth.is_authenticated {
+                                                Link {
+                                                    to: Route::CashuWallet {},
+                                                    onclick: move |_| more_menu_open.set(false),
+                                                    class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                    svg {
+                                                        class: "w-5 h-5",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        width: "24",
+                                                        height: "24",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                        path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                        path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                    }
+                                                    span {
+                                                        "Wallet"
+                                                    }
+                                                }
+                                            }
                                             Link {
                                                 to: Route::VoiceMessages {},
                                                 onclick: move |_| more_menu_open.set(false),
@@ -634,30 +638,6 @@ fn Layout() -> Element {
                                                 label: "Bookmarks"
                                             }
                                         }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::CashuWallet {},
-                                                icon: rsx! {
-                                                    svg {
-                                                        class: "w-7 h-7",
-                                                        xmlns: "http://www.w3.org/2000/svg",
-                                                        width: "24",
-                                                        height: "24",
-                                                        view_box: "0 0 24 24",
-                                                        fill: "none",
-                                                        stroke: "currentColor",
-                                                        stroke_width: "2",
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                                                        path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                                                        path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                                                    }
-                                                },
-                                                label: "Wallet"
-                                            }
-                                        }
 
                                         if let Some(pubkey) = &auth.pubkey {
                                             div {
@@ -704,6 +684,60 @@ fn Layout() -> Element {
                                                 class: "absolute left-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                                 div {
                                                     class: "flex flex-col",
+                                                    if auth.is_authenticated {
+                                                        Link {
+                                                            to: Route::CashuWallet {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                                path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                                path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                            }
+                                                            span {
+                                                                "Wallet"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::VoiceMessages {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                                                                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                                                                line { x1: "12", x2: "12", y1: "19", y2: "22" }
+                                                            }
+                                                            span {
+                                                                "Voice Messages"
+                                                            }
+                                                        }
+                                                    }
                                                     a {
                                                         href: "https://nostrcal.com",
                                                         target: "_blank",

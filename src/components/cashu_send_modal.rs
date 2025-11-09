@@ -8,6 +8,9 @@ pub fn CashuSendModal(
     let mut amount = use_signal(|| String::new());
     let mints = cashu_wallet::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
+    let mut is_sending = use_signal(|| false);
+    let mut error_message = use_signal(|| Option::<String>::None);
+    let mut token_result = use_signal(|| Option::<String>::None);
 
     // Keep selected_mint in sync with available mints
     use_effect(move || {
@@ -30,6 +33,44 @@ pub fn CashuSendModal(
             }
         }
     });
+
+    let on_send = move |_| {
+        let amount_str = amount.read().clone();
+        let mint = selected_mint.read().clone();
+
+        // Validate amount
+        let amount_sats = match amount_str.parse::<u64>() {
+            Ok(a) if a > 0 => a,
+            _ => {
+                error_message.set(Some("Please enter a valid amount".to_string()));
+                return;
+            }
+        };
+
+        if mint.is_empty() {
+            error_message.set(Some("Please select a mint".to_string()));
+            return;
+        }
+
+        is_sending.set(true);
+        error_message.set(None);
+        token_result.set(None);
+
+        spawn(async move {
+            match cashu_wallet::send_tokens(mint, amount_sats).await {
+                Ok(token_string) => {
+                    token_result.set(Some(token_string));
+                    is_sending.set(false);
+                    // Clear amount input
+                    amount.set(String::new());
+                }
+                Err(e) => {
+                    error_message.set(Some(format!("Failed to send: {}", e)));
+                    is_sending.set(false);
+                }
+            }
+        });
+    };
 
     rsx! {
         // Modal overlay
@@ -97,23 +138,90 @@ pub fn CashuSendModal(
                         }
                     }
 
-                    // Phase 2 notice
-                    div {
-                        class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4",
+                    // Error message
+                    if let Some(msg) = error_message.read().as_ref() {
                         div {
-                            class: "flex items-start gap-3",
+                            class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
                             div {
-                                class: "text-2xl",
-                                "🚧"
-                            }
-                            div {
-                                h4 {
-                                    class: "font-semibold text-sm mb-1",
-                                    "Phase 2 Feature"
+                                class: "flex items-start gap-3",
+                                div {
+                                    class: "text-2xl",
+                                    "⚠️"
                                 }
-                                p {
-                                    class: "text-sm text-muted-foreground",
-                                    "Sending tokens requires Cashu mint API integration, which will be added in Phase 2. For now, you can view your tokens and balance."
+                                div {
+                                    p {
+                                        class: "text-sm text-red-800 dark:text-red-200",
+                                        "{msg}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Token result
+                    if let Some(token) = token_result.read().as_ref() {
+                        div {
+                            class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4",
+                            div {
+                                class: "space-y-2",
+                                div {
+                                    class: "flex items-start gap-3",
+                                    div {
+                                        class: "text-2xl",
+                                        "✅"
+                                    }
+                                    div {
+                                        p {
+                                            class: "text-sm font-semibold text-green-800 dark:text-green-200",
+                                            "Token created successfully!"
+                                        }
+                                    }
+                                }
+                                div {
+                                    label {
+                                        class: "block text-xs font-semibold mb-1 text-green-800 dark:text-green-200",
+                                        "Share this token:"
+                                    }
+                                    div {
+                                        class: "flex gap-2",
+                                        textarea {
+                                            class: "flex-1 px-3 py-2 bg-white dark:bg-gray-900 border border-green-300 dark:border-green-700 rounded font-mono text-xs min-h-[80px]",
+                                            readonly: true,
+                                            value: token.clone(),
+                                            onclick: move |_| {
+                                                // Select all text on click
+                                                #[cfg(target_arch = "wasm32")]
+                                                {
+                                                    use wasm_bindgen::JsCast;
+                                                    if let Some(window) = web_sys::window() {
+                                                        if let Some(document) = window.document() {
+                                                            if let Some(textarea) = document.query_selector("textarea[readonly]").ok().flatten() {
+                                                                if let Ok(element) = textarea.dyn_into::<web_sys::HtmlTextAreaElement>() {
+                                                                    element.select();
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition",
+                                            onclick: move |_| {
+                                                #[cfg(target_arch = "wasm32")]
+                                                {
+                                                    if let Some(token_to_copy) = token_result.read().as_ref() {
+                                                        if let Some(window) = web_sys::window() {
+                                                            let navigator = window.navigator();
+                                                            let clipboard = navigator.clipboard();
+                                                            let _ = clipboard.write_text(token_to_copy);
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "Copy"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -151,9 +259,18 @@ pub fn CashuSendModal(
                         "Cancel"
                     }
                     button {
-                        class: "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed",
-                        disabled: true,
-                        "Send (Phase 2)"
+                        class: if *is_sending.read() || amount.read().is_empty() {
+                            "flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
+                        } else {
+                            "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition"
+                        },
+                        disabled: *is_sending.read() || amount.read().is_empty(),
+                        onclick: on_send,
+                        if *is_sending.read() {
+                            "Sending..."
+                        } else {
+                            "Send Tokens"
+                        }
                     }
                 }
             }

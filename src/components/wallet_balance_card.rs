@@ -77,12 +77,6 @@ pub fn WalletBalanceCard(
                     span { "Send" }
                 }
             }
-
-            // Phase 2 notice
-            div {
-                class: "mt-4 text-xs opacity-75 text-center",
-                "Phase 1: Display only • Mint operations coming in Phase 2"
-            }
         }
     }
 }

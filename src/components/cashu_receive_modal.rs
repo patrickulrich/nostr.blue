@@ -1,10 +1,41 @@
 use dioxus::prelude::*;
+use crate::stores::cashu_wallet;
 
 #[component]
 pub fn CashuReceiveModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut token_string = use_signal(|| String::new());
+    let mut is_receiving = use_signal(|| false);
+    let mut error_message = use_signal(|| Option::<String>::None);
+    let mut success_message = use_signal(|| Option::<String>::None);
+
+    let on_receive = move |_| {
+        let token = token_string.read().trim().to_string();
+        if token.is_empty() {
+            error_message.set(Some("Please paste a token string".to_string()));
+            return;
+        }
+
+        is_receiving.set(true);
+        error_message.set(None);
+        success_message.set(None);
+
+        spawn(async move {
+            match cashu_wallet::receive_tokens(token).await {
+                Ok(amount) => {
+                    success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                    is_receiving.set(false);
+                    // Clear token input
+                    token_string.set(String::new());
+                }
+                Err(e) => {
+                    error_message.set(Some(format!("Failed to receive: {}", e)));
+                    is_receiving.set(false);
+                }
+            }
+        });
+    };
 
     rsx! {
         // Modal overlay
@@ -53,23 +84,41 @@ pub fn CashuReceiveModal(
                         }
                     }
 
-                    // Phase 2 notice
-                    div {
-                        class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4",
+                    // Success message
+                    if let Some(msg) = success_message.read().as_ref() {
                         div {
-                            class: "flex items-start gap-3",
+                            class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4",
                             div {
-                                class: "text-2xl",
-                                "🚧"
-                            }
-                            div {
-                                h4 {
-                                    class: "font-semibold text-sm mb-1",
-                                    "Phase 2 Feature"
+                                class: "flex items-start gap-3",
+                                div {
+                                    class: "text-2xl",
+                                    "✅"
                                 }
-                                p {
-                                    class: "text-sm text-muted-foreground",
-                                    "Receiving tokens requires Cashu mint API integration, which will be added in Phase 2. This will enable redeeming tokens and updating your balance."
+                                div {
+                                    p {
+                                        class: "text-sm text-green-800 dark:text-green-200",
+                                        "{msg}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Error message
+                    if let Some(msg) = error_message.read().as_ref() {
+                        div {
+                            class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
+                            div {
+                                class: "flex items-start gap-3",
+                                div {
+                                    class: "text-2xl",
+                                    "⚠️"
+                                }
+                                div {
+                                    p {
+                                        class: "text-sm text-red-800 dark:text-red-200",
+                                        "{msg}"
+                                    }
                                 }
                             }
                         }
@@ -102,9 +151,18 @@ pub fn CashuReceiveModal(
                         "Cancel"
                     }
                     button {
-                        class: "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed",
-                        disabled: true,
-                        "Receive (Phase 2)"
+                        class: if *is_receiving.read() || token_string.read().is_empty() {
+                            "flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
+                        } else {
+                            "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition"
+                        },
+                        disabled: *is_receiving.read() || token_string.read().is_empty(),
+                        onclick: on_receive,
+                        if *is_receiving.read() {
+                            "Receiving..."
+                        } else {
+                            "Receive Tokens"
+                        }
                     }
                 }
             }

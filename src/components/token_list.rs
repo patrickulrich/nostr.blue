@@ -165,6 +165,127 @@ pub fn TokenList() -> Element {
                                             }
                                         }
                                     }
+
+                                    // Mint actions
+                                    div {
+                                        class: "px-4 py-3 border-t border-border bg-background/30 flex gap-2",
+
+                                        // Cleanup button
+                                        {
+                                            let mint_url_clone = mint_url.clone();
+                                            let mut is_cleaning = use_signal(|| false);
+                                            let mut cleanup_message = use_signal(|| Option::<String>::None);
+
+                                            rsx! {
+                                                div {
+                                                    class: "flex-1",
+                                                    button {
+                                                        class: if *is_cleaning.read() {
+                                                            "w-full px-3 py-2 text-sm bg-yellow-500 text-white rounded-lg opacity-50 cursor-not-allowed"
+                                                        } else {
+                                                            "w-full px-3 py-2 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition"
+                                                        },
+                                                        disabled: *is_cleaning.read(),
+                                                        onclick: move |_| {
+                                                            let mint_url = mint_url_clone.clone();
+                                                            is_cleaning.set(true);
+                                                            cleanup_message.set(None);
+                                                            spawn(async move {
+                                                                match cashu_wallet::cleanup_spent_proofs(mint_url).await {
+                                                                    Ok((count, amount)) if count > 0 => {
+                                                                        cleanup_message.set(Some(format!("Cleaned {} proofs ({} sats)", count, amount)));
+                                                                        is_cleaning.set(false);
+                                                                    }
+                                                                    Ok(_) => {
+                                                                        cleanup_message.set(Some("No spent proofs found".to_string()));
+                                                                        is_cleaning.set(false);
+                                                                    }
+                                                                    Err(e) => {
+                                                                        cleanup_message.set(Some(format!("Error: {}", e)));
+                                                                        is_cleaning.set(false);
+                                                                    }
+                                                                }
+                                                            });
+                                                        },
+                                                        if *is_cleaning.read() {
+                                                            "🧹 Cleaning..."
+                                                        } else {
+                                                            "🧹 Cleanup Spent"
+                                                        }
+                                                    }
+                                                    if let Some(msg) = cleanup_message.read().as_ref() {
+                                                        div {
+                                                            class: "mt-1 text-xs text-center text-muted-foreground",
+                                                            "{msg}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Remove mint button
+                                        {
+                                            let mint_url_clone = mint_url.clone();
+                                            let mut is_removing = use_signal(|| false);
+                                            let mut show_confirm = use_signal(|| false);
+
+                                            rsx! {
+                                                div {
+                                                    class: "flex-1",
+                                                    if *show_confirm.read() {
+                                                        div {
+                                                            class: "flex flex-col gap-2",
+                                                            p {
+                                                                class: "text-xs text-destructive text-center",
+                                                                "Remove all tokens from this mint?"
+                                                            }
+                                                            div {
+                                                                class: "flex gap-2",
+                                                                button {
+                                                                    class: "flex-1 px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
+                                                                    onclick: move |_| {
+                                                                        let mint_url = mint_url_clone.clone();
+                                                                        is_removing.set(true);
+                                                                        spawn(async move {
+                                                                            match cashu_wallet::remove_mint(mint_url).await {
+                                                                                Ok((count, amount)) => {
+                                                                                    log::info!("Removed mint: {} events, {} sats", count, amount);
+                                                                                    is_removing.set(false);
+                                                                                    show_confirm.set(false);
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    log::error!("Failed to remove mint: {}", e);
+                                                                                    is_removing.set(false);
+                                                                                    show_confirm.set(false);
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    },
+                                                                    disabled: *is_removing.read(),
+                                                                    if *is_removing.read() {
+                                                                        "Removing..."
+                                                                    } else {
+                                                                        "Yes, Remove"
+                                                                    }
+                                                                }
+                                                                button {
+                                                                    class: "flex-1 px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded-lg transition",
+                                                                    onclick: move |_| show_confirm.set(false),
+                                                                    "Cancel"
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        button {
+                                                            class: "w-full px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
+                                                            onclick: move |_| show_confirm.set(true),
+                                                            "🗑️ Remove Mint"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
