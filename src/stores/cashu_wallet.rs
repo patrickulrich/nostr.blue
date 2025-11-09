@@ -334,7 +334,12 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                         .map(|p| p.amount)
                                         .sum();
 
-                                    total_balance += token_balance;
+                                    // Use checked addition to prevent silent overflow
+                                    total_balance = total_balance.checked_add(token_balance)
+                                        .ok_or_else(|| format!(
+                                            "Balance overflow when adding token event {} (balance: {}, adding: {})",
+                                            event.id.to_hex(), total_balance, token_balance
+                                        ))?;
 
                                     tokens.push(TokenData {
                                         event_id: event.id.to_hex(),
@@ -402,7 +407,7 @@ pub async fn fetch_history() -> Result<(), String> {
                         match serde_json::from_str::<Vec<Vec<String>>>(&decrypted) {
                             Ok(pairs) => {
                                 let mut direction = TransactionDirection::In;
-                                let mut amount = 0u64;
+                                let mut amount: Option<u64> = None;
                                 let mut created_tokens = Vec::new();
                                 let mut destroyed_tokens = Vec::new();
 
@@ -422,7 +427,20 @@ pub async fn fetch_history() -> Result<(), String> {
                                         }
                                         "amount" => {
                                             if pair.len() > 1 {
-                                                amount = pair[1].parse().unwrap_or(0);
+                                                match pair[1].parse::<u64>() {
+                                                    Ok(parsed_amount) => {
+                                                        amount = Some(parsed_amount);
+                                                    }
+                                                    Err(e) => {
+                                                        log::error!(
+                                                            "Failed to parse amount in history event {}: '{}' - {}",
+                                                            event.id.to_hex(),
+                                                            pair[1],
+                                                            e
+                                                        );
+                                                        // Keep amount as None to skip this event
+                                                    }
+                                                }
                                             }
                                         }
                                         "e" => {
@@ -451,16 +469,24 @@ pub async fn fetch_history() -> Result<(), String> {
                                     })
                                     .collect();
 
-                                history.push(HistoryItem {
-                                    event_id: event.id.to_hex(),
-                                    direction,
-                                    amount,
-                                    unit: "sat".to_string(),
-                                    created_at: event.created_at.as_secs(),
-                                    created_tokens,
-                                    destroyed_tokens,
-                                    redeemed_events,
-                                });
+                                // Only add to history if amount was successfully parsed
+                                if let Some(parsed_amount) = amount {
+                                    history.push(HistoryItem {
+                                        event_id: event.id.to_hex(),
+                                        direction,
+                                        amount: parsed_amount,
+                                        unit: "sat".to_string(),
+                                        created_at: event.created_at.as_secs(),
+                                        created_tokens,
+                                        destroyed_tokens,
+                                        redeemed_events,
+                                    });
+                                } else {
+                                    log::warn!(
+                                        "Skipping history event {} due to missing or invalid amount",
+                                        event.id.to_hex()
+                                    );
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to parse history event {}: {}", event.id, e);
