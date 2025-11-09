@@ -11,6 +11,7 @@ use indexed_db_futures::IdbQuerySource;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::IntoFuture;
+use std::str::FromStr;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 use web_sys::IdbTransactionMode;
@@ -234,6 +235,52 @@ impl IndexedDbDatabase {
 
         Ok(results)
     }
+
+    /// Helper: Get all key-value pairs from a store
+    async fn get_all_key_values<T>(&self, store_name: &str) -> Result<Vec<(String, T)>, database::Error>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(store_name, IdbTransactionMode::Readonly)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(store_name)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        // Get all keys
+        let js_keys_array = store
+            .get_all_keys()
+            .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
+
+        // Get all values
+        let js_values_array = store
+            .get_all()
+            .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
+
+        let mut results = Vec::new();
+
+        // Pair up keys and values
+        for (key_js, val_js) in js_keys_array.into_iter().zip(js_values_array.into_iter()) {
+            if !val_js.is_undefined() && !val_js.is_null() {
+                if let (Some(key_str), Some(json_str)) = (key_js.as_string(), val_js.as_string()) {
+                    let deserialized: T = serde_json::from_str(&json_str)
+                        .map_err(|e| {
+                            Self::make_error(format!("JSON deserialization error: {}", e))
+                        })?;
+                    results.push((key_str, deserialized));
+                }
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 // Implement WalletDatabase trait for IndexedDbDatabase
@@ -263,9 +310,25 @@ impl WalletDatabase for IndexedDbDatabase {
     }
 
     async fn get_mints(&self) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
-        // For now, return empty HashMap as we're storing individual entries
-        // This could be optimized later if needed
-        Ok(HashMap::new())
+        // Load all stored mint entries and rebuild the map
+        let key_values = self.get_all_key_values::<Option<MintInfo>>(STORE_MINTS).await?;
+
+        let mut result = HashMap::new();
+        for (key_str, mint_info) in key_values {
+            // Parse the key string back into a MintUrl
+            match MintUrl::from_str(&key_str) {
+                Ok(mint_url) => {
+                    result.insert(mint_url, mint_info);
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse stored mint URL '{}': {:?}", key_str, e);
+                    // Continue processing other entries even if one fails
+                }
+            }
+        }
+
+        log::debug!("Loaded {} mints from IndexedDB", result.len());
+        Ok(result)
     }
 
     async fn update_mint_url(

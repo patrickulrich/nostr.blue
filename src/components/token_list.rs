@@ -9,6 +9,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool,
     let mut cleanup_message = use_signal(|| Option::<String>::None);
     let mut is_removing = use_signal(|| false);
     let mut show_confirm = use_signal(|| false);
+    let mut remove_error = use_signal(|| Option::<String>::None);
 
     // Calculate total for this mint
     let total_balance: u64 = tokens_for_mint.iter()
@@ -176,6 +177,13 @@ fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool,
                                         class: "text-xs text-destructive text-center",
                                         "Remove all tokens from this mint?"
                                     }
+                                    // Display error message if removal failed
+                                    if let Some(error) = remove_error.read().as_ref() {
+                                        div {
+                                            class: "text-xs text-destructive text-center bg-destructive/10 rounded p-2",
+                                            "Failed: {error}"
+                                        }
+                                    }
                                     div {
                                         class: "flex gap-2",
                                         button {
@@ -185,17 +193,20 @@ fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool,
                                                 move |_| {
                                                     let mint_url = mint_url_clone.clone();
                                                     is_removing.set(true);
+                                                    remove_error.set(None);
                                                     spawn(async move {
                                                         match cashu_wallet::remove_mint(mint_url).await {
                                                             Ok((count, amount)) => {
                                                                 log::info!("Removed mint: {} events, {} sats", count, amount);
                                                                 is_removing.set(false);
                                                                 show_confirm.set(false);
+                                                                remove_error.set(None);
                                                             }
                                                             Err(e) => {
                                                                 log::error!("Failed to remove mint: {}", e);
                                                                 is_removing.set(false);
-                                                                show_confirm.set(false);
+                                                                // Keep dialog open and show error
+                                                                remove_error.set(Some(e.to_string()));
                                                             }
                                                         }
                                                     });
@@ -210,7 +221,10 @@ fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool,
                                         }
                                         button {
                                             class: "flex-1 px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded-lg transition",
-                                            onclick: move |_| show_confirm.set(false),
+                                            onclick: move |_| {
+                                                show_confirm.set(false);
+                                                remove_error.set(None);
+                                            },
                                             "Cancel"
                                         }
                                     }
@@ -218,7 +232,10 @@ fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool,
                             } else {
                                 button {
                                     class: "w-full px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
-                                    onclick: move |_| show_confirm.set(true),
+                                    onclick: move |_| {
+                                        show_confirm.set(true);
+                                        remove_error.set(None);
+                                    },
                                     "🗑️ Remove Mint"
                                 }
                             }

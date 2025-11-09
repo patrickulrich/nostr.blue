@@ -52,19 +52,26 @@ pub fn NoteCard(
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
+    // Track whether we have precomputed counts
+    let mut has_precomputed = use_signal(|| false);
+
     // Initialize counts from precomputed data if available (batch optimization)
-    if let Some(ref counts) = precomputed_counts {
-        reply_count.set(counts.replies.min(500));
-        like_count.set(counts.likes.min(500));
-        repost_count.set(counts.reposts.min(500));
-        zap_amount_sats.set(counts.zap_amount_sats);
-    }
-    let has_precomputed = precomputed_counts.is_some();
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies.min(500));
+            like_count.set(counts.likes.min(500));
+            repost_count.set(counts.reposts.min(500));
+            zap_amount_sats.set(counts.zap_amount_sats);
+            has_precomputed.set(true);
+        } else {
+            has_precomputed.set(false);
+        }
+    }));
 
     // Fetch counts individually if not precomputed (fallback for single-note views)
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        let has_precomputed_clone = has_precomputed;
+        let has_precomputed_clone = *has_precomputed.read();
 
         spawn(async move {
             let client = match get_client() {

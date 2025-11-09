@@ -92,51 +92,50 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         let is_playing = global_state.currently_playing == Some(event_id);
         let audio_id_clone = audio_id_for_effect.clone();
 
-        spawn(async move {
-            // Use direct web-sys calls instead of eval
-            let window = match web_sys::window() {
-                Some(w) => w,
-                None => {
-                    log::error!("Failed to get window object");
-                    return;
-                }
-            };
-
-            let document = match window.document() {
-                Some(d) => d,
-                None => {
-                    log::error!("Failed to get document object");
-                    return;
-                }
-            };
-
-            let element = match document.get_element_by_id(&audio_id_clone) {
-                Some(e) => e,
-                None => {
-                    log::debug!("Audio element {} not found yet", audio_id_clone);
-                    return;
-                }
-            };
-
-            let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
-                Ok(a) => a,
-                Err(e) => {
-                    log::error!("Element is not an HtmlAudioElement: {:?}", e);
-                    return;
-                }
-            };
-
-            if is_playing {
-                // play() returns a Promise, but we can ignore errors in the Promise
-                let _ = audio.play().map_err(|e| {
-                    log::debug!("Play failed: {:?}", e);
-                });
-            } else {
-                if let Err(e) = audio.pause() {
-                    log::debug!("Pause failed: {:?}", e);
-                }
+        // Execute DOM operations synchronously without spawning
+        // Use direct web-sys calls instead of eval
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                log::error!("Failed to get window object");
+                return;
             }
-        });
+        };
+
+        let document = match window.document() {
+            Some(d) => d,
+            None => {
+                log::error!("Failed to get document object");
+                return;
+            }
+        };
+
+        let element = match document.get_element_by_id(&audio_id_clone) {
+            Some(e) => e,
+            None => {
+                log::debug!("Audio element {} not found yet", audio_id_clone);
+                return;
+            }
+        };
+
+        let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
+            Ok(a) => a,
+            Err(e) => {
+                log::error!("Element is not an HtmlAudioElement: {:?}", e);
+                return;
+            }
+        };
+
+        if is_playing {
+            // play() returns a Promise, but we can ignore errors in the Promise
+            let _ = audio.play().map_err(|e| {
+                log::debug!("Play failed: {:?}", e);
+            });
+        } else {
+            if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
+        }
     });
 
     // Handle time update from audio element
@@ -214,15 +213,14 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
     // Format time display
     let current_time_str = voice_messages_store::format_time(*current_time.read());
-    let duration_str = if let Some(d) = imeta_duration {
-        voice_messages_store::format_time(d)
-    } else {
-        voice_messages_store::format_time(*duration.read())
-    };
 
-    // Calculate progress percentage
-    let progress_percent = if *duration.read() > 0.0 {
-        *current_time.read() / *duration.read() * 100.0
+    // Use the same duration value for both display and calculation
+    let duration_val = imeta_duration.unwrap_or(*duration.read());
+    let duration_str = voice_messages_store::format_time(duration_val);
+
+    // Calculate progress percentage using the same duration value
+    let progress_percent = if duration_val > 0.0 {
+        *current_time.read() / duration_val * 100.0
     } else {
         0.0
     };
