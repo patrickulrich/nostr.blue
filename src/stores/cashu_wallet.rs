@@ -14,7 +14,6 @@ struct TokenEventData {
     pub mint: String,
     pub proofs: Vec<ProofData>,
     #[serde(default)]
-    #[allow(dead_code)] // Will be used in Phase 2 for tracking deleted token events
     pub del: Vec<String>,
 }
 
@@ -222,6 +221,29 @@ pub async fn fetch_tokens() -> Result<(), String> {
 
     log::info!("Fetching token events");
 
+    // Fetch kind-5 deletion events that target kind-7375 token events
+    let deletion_filter = Filter::new()
+        .author(pubkey.clone())
+        .kind(Kind::from(5));
+
+    let mut deleted_event_ids = std::collections::HashSet::new();
+
+    if let Ok(deletion_events) = client.fetch_events(deletion_filter, Duration::from_secs(10)).await {
+        for del_event in deletion_events {
+            // Check e tags that reference kind-7375 events
+            for tag in del_event.tags.iter() {
+                let tag_vec = tag.clone().to_vec();
+                if tag_vec.len() >= 2 && tag_vec[0] == "e" {
+                    deleted_event_ids.insert(tag_vec[1].clone());
+                }
+            }
+        }
+        if !deleted_event_ids.is_empty() {
+            log::info!("Found {} deleted token events via kind-5", deleted_event_ids.len());
+        }
+    }
+
+    // Fetch all token events
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(7375));
@@ -229,16 +251,48 @@ pub async fn fetch_tokens() -> Result<(), String> {
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             use nostr_sdk::signer::NostrSigner;
+            use std::collections::HashSet;
 
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?
                 .as_nostr_signer();
+
+            // Convert Events to Vec for multiple iterations
+            let events: Vec<_> = events.into_iter().collect();
+
+            // First pass: collect all deleted proof secrets from del fields
+            let mut deleted_secrets = HashSet::new();
+
+            for event in &events {
+                // Skip events that are deleted by kind-5
+                if deleted_event_ids.contains(&event.id.to_hex()) {
+                    continue;
+                }
+
+                // Decrypt and parse to get del field
+                if let Ok(decrypted) = signer.nip44_decrypt(&event.pubkey, &event.content).await {
+                    if let Ok(token_event) = serde_json::from_str::<TokenEventData>(&decrypted) {
+                        // Add all deleted proof identifiers to the set
+                        for del_id in &token_event.del {
+                            deleted_secrets.insert(del_id.clone());
+                        }
+                    }
+                }
+            }
+
+            if !deleted_secrets.is_empty() {
+                log::info!("Found {} deleted proof identifiers via del field", deleted_secrets.len());
+            }
+
+            // Second pass: collect tokens and filter out deleted proofs
             let mut tokens = Vec::new();
             let mut total_balance = 0u64;
 
-            for event in events {
-                // Skip deleted events (check for kind 5 deletion events)
-                // TODO: Implement proper deletion checking
+            for event in &events {
+                // Skip events deleted by kind-5
+                if deleted_event_ids.contains(&event.id.to_hex()) {
+                    continue;
+                }
 
                 // Decrypt token event using signer
                 match signer.nip44_decrypt(&event.pubkey, &event.content).await {
@@ -246,8 +300,20 @@ pub async fn fetch_tokens() -> Result<(), String> {
                         // Parse JSON: { mint: string, proofs: [...], del?: [...] }
                         match serde_json::from_str::<TokenEventData>(&decrypted) {
                             Ok(token_event) => {
-                                // Convert ProofData to CashuProof
+                                // Convert ProofData to CashuProof, filtering out deleted proofs
                                 let proofs: Vec<CashuProof> = token_event.proofs.iter()
+                                    .filter(|p| {
+                                        // Filter out proofs that are in the deletion set
+                                        // Check by id, secret, or the combined identifier
+                                        let proof_id = if p.id.is_empty() {
+                                            format!("{}_{}", p.secret, p.amount)
+                                        } else {
+                                            p.id.clone()
+                                        };
+                                        !deleted_secrets.contains(&p.secret)
+                                            && !deleted_secrets.contains(&p.id)
+                                            && !deleted_secrets.contains(&proof_id)
+                                    })
                                     .map(|p| CashuProof {
                                         id: if p.id.is_empty() {
                                             // Generate a placeholder ID if missing
@@ -261,20 +327,23 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                     })
                                     .collect();
 
-                                // Calculate balance from proofs
-                                let token_balance: u64 = proofs.iter()
-                                    .map(|p| p.amount)
-                                    .sum();
+                                // Only include tokens with remaining proofs
+                                if !proofs.is_empty() {
+                                    // Calculate balance from non-deleted proofs
+                                    let token_balance: u64 = proofs.iter()
+                                        .map(|p| p.amount)
+                                        .sum();
 
-                                total_balance += token_balance;
+                                    total_balance += token_balance;
 
-                                tokens.push(TokenData {
-                                    event_id: event.id.to_hex(),
-                                    mint: token_event.mint.clone(),
-                                    unit: "sat".to_string(), // TODO: Parse unit from event
-                                    proofs,
-                                    created_at: event.created_at.as_secs(),
-                                });
+                                    tokens.push(TokenData {
+                                        event_id: event.id.to_hex(),
+                                        mint: token_event.mint.clone(),
+                                        unit: "sat".to_string(), // TODO: Parse unit from event
+                                        proofs,
+                                        created_at: event.created_at.as_secs(),
+                                    });
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to parse token event {}: {}", event.id, e);
