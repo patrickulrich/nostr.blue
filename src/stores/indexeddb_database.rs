@@ -336,13 +336,54 @@ impl WalletDatabase for IndexedDbDatabase {
         old_mint_url: MintUrl,
         new_mint_url: MintUrl,
     ) -> Result<(), Self::Err> {
+        // Perform all operations in a single transaction for atomicity
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_MINTS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_MINTS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
         // Get the mint info from old URL
-        if let Some(mint_info) = self.get_mint(old_mint_url.clone()).await? {
+        let old_key = JsValue::from_str(&old_mint_url.to_string());
+        let value_opt = store
+            .get(&old_key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+
+        if let Some(value) = value_opt {
+            // Deserialize the mint info
+            let json_str = value
+                .as_string()
+                .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+
+            let mint_info: Option<MintInfo> = serde_json::from_str(&json_str)
+                .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+
             // Store under new URL
-            self.add_mint(new_mint_url, Some(mint_info)).await?;
+            let new_key = JsValue::from_str(&new_mint_url.to_string());
+            let new_json_str = serde_json::to_string(&mint_info)
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+            let new_value = JsValue::from_str(&new_json_str);
+
+            store
+                .put_key_val(&new_key, &new_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+
             // Remove old URL
-            self.remove_mint(old_mint_url).await?;
+            store
+                .delete(&old_key)
+                .map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
         }
+
+        // Commit the transaction
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+
         Ok(())
     }
 
@@ -351,16 +392,52 @@ impl WalletDatabase for IndexedDbDatabase {
         mint_url: MintUrl,
         keysets: Vec<KeySetInfo>,
     ) -> Result<(), Self::Err> {
-        let key = mint_url.to_string();
+        // Perform all writes in a single transaction for atomicity
+        let tx = self
+            .db
+            .transaction_on_multi_with_mode(
+                &[STORE_KEYSETS, STORE_KEYSET_BY_ID],
+                IdbTransactionMode::Readwrite,
+            )
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        // Get both object stores
+        let keysets_store = tx
+            .object_store(STORE_KEYSETS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        let keyset_by_id_store = tx
+            .object_store(STORE_KEYSET_BY_ID)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
 
         // Store keysets for this mint
-        self.put_value(STORE_KEYSETS, &key, &keysets).await?;
+        let key = mint_url.to_string();
+        let json_str = serde_json::to_string(&keysets)
+            .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+        let js_key = JsValue::from_str(&key);
+        let js_value = JsValue::from_str(&json_str);
 
-        // Also store each keyset individually for lookup by ID
+        keysets_store
+            .put_key_val(&js_key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+
+        // Store each keyset individually for lookup by ID
         for keyset in keysets {
             let keyset_key = keyset.id.to_string();
-            self.put_value(STORE_KEYSET_BY_ID, &keyset_key, &keyset).await?;
+            let keyset_json = serde_json::to_string(&keyset)
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+            let js_keyset_key = JsValue::from_str(&keyset_key);
+            let js_keyset_value = JsValue::from_str(&keyset_json);
+
+            keyset_by_id_store
+                .put_key_val(&js_keyset_key, &js_keyset_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
         }
+
+        // Commit the transaction
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
 
         Ok(())
     }
@@ -488,17 +565,43 @@ impl WalletDatabase for IndexedDbDatabase {
         added: Vec<ProofInfo>,
         removed_ys: Vec<CashuPublicKey>,
     ) -> Result<(), Self::Err> {
+        // Perform all operations in a single transaction for atomicity
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_PROOFS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_PROOFS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
         // Add new proofs
         for proof_info in added {
             let key = proof_info.y.to_string();
-            self.put_value(STORE_PROOFS, &key, &proof_info).await?;
+            let json_str = serde_json::to_string(&proof_info)
+                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+            let js_key = JsValue::from_str(&key);
+            let js_value = JsValue::from_str(&json_str);
+
+            store
+                .put_key_val(&js_key, &js_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
         }
 
         // Remove proofs by Y value
         for y in removed_ys {
             let key = y.to_string();
-            self.delete_value(STORE_PROOFS, &key).await?;
+            let js_key = JsValue::from_str(&key);
+
+            store
+                .delete(&js_key)
+                .map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
         }
+
+        // Commit the transaction
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
 
         Ok(())
     }
@@ -538,15 +641,55 @@ impl WalletDatabase for IndexedDbDatabase {
     }
 
     async fn update_proofs_state(&self, ys: Vec<CashuPublicKey>, state: State) -> Result<(), Self::Err> {
+        // Perform all operations in a single write transaction for atomicity
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_PROOFS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_PROOFS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        // Update each proof's state within the transaction
         for y in ys {
             let key = y.to_string();
+            let js_key = JsValue::from_str(&key);
 
             // Get existing proof
-            if let Some(mut proof_info) = self.get_value::<ProofInfo>(STORE_PROOFS, &key).await? {
+            let value_opt = store
+                .get(&js_key)
+                .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+                .await
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+
+            if let Some(value) = value_opt {
+                // Deserialize the proof info
+                let json_str = value
+                    .as_string()
+                    .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+
+                let mut proof_info: ProofInfo = serde_json::from_str(&json_str)
+                    .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+
+                // Update state
                 proof_info.state = state;
-                self.put_value(STORE_PROOFS, &key, &proof_info).await?;
+
+                // Write back
+                let updated_json = serde_json::to_string(&proof_info)
+                    .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                let js_value = JsValue::from_str(&updated_json);
+
+                store
+                    .put_key_val(&js_key, &js_value)
+                    .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
             }
         }
+
+        // Commit the transaction
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
 
         Ok(())
     }

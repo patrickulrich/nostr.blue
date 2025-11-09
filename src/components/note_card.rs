@@ -52,8 +52,8 @@ pub fn NoteCard(
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Track whether we have precomputed counts
-    let mut has_precomputed = use_signal(|| false);
+    // Compute whether we have precomputed counts (plain derived boolean)
+    let has_precomputed = precomputed_counts.is_some();
 
     // Initialize counts from precomputed data if available (batch optimization)
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
@@ -62,18 +62,14 @@ pub fn NoteCard(
             like_count.set(counts.likes.min(500));
             repost_count.set(counts.reposts.min(500));
             zap_amount_sats.set(counts.zap_amount_sats);
-            has_precomputed.set(true);
-        } else {
-            has_precomputed.set(false);
         }
     }));
 
     // Fetch counts individually if not precomputed (fallback for single-note views)
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
-    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        let has_precomputed_clone = *has_precomputed.read();
-
+    use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
         spawn(async move {
+            let has_precomputed = counts_opt.is_some();
             let client = match get_client() {
                 Some(c) => c,
                 None => return,
@@ -202,7 +198,7 @@ pub fn NoteCard(
                 }
 
                 // Update counts only if we don't have precomputed data
-                if !has_precomputed_clone {
+                if !has_precomputed {
                     reply_count.set(replies.min(500));
                     like_count.set(likes.min(500));
                     repost_count.set(reposts.min(500));
