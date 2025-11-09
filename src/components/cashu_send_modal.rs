@@ -185,6 +185,7 @@ pub fn CashuSendModal(
                                     div {
                                         class: "flex gap-2",
                                         textarea {
+                                            id: "send-token",
                                             class: "flex-1 px-3 py-2 bg-white dark:bg-gray-900 border border-green-300 dark:border-green-700 rounded font-mono text-xs min-h-[80px]",
                                             readonly: true,
                                             value: token.clone(),
@@ -195,7 +196,7 @@ pub fn CashuSendModal(
                                                     use wasm_bindgen::JsCast;
                                                     if let Some(window) = web_sys::window() {
                                                         if let Some(document) = window.document() {
-                                                            if let Some(textarea) = document.query_selector("textarea[readonly]").ok().flatten() {
+                                                            if let Some(textarea) = document.query_selector("#send-token").ok().flatten() {
                                                                 if let Ok(element) = textarea.dyn_into::<web_sys::HtmlTextAreaElement>() {
                                                                     element.select();
                                                                 }

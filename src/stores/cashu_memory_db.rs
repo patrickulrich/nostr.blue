@@ -98,11 +98,28 @@ impl Database for MemoryDatabase {
         let mut all_keysets = self.keysets.write().await;
         let mut by_id = self.keyset_by_id.write().await;
 
+        // Update keyset_by_id with incoming keysets
         for keyset in &keysets {
             by_id.insert(keyset.id.clone(), keyset.clone());
         }
 
-        all_keysets.insert(mint_url, keysets);
+        // Merge with existing keysets, deduplicating by id
+        let existing = all_keysets.get(&mint_url).cloned().unwrap_or_default();
+        let mut keyset_map: HashMap<Id, KeySetInfo> = HashMap::new();
+
+        // First, add all existing keysets
+        for keyset in existing {
+            keyset_map.insert(keyset.id.clone(), keyset);
+        }
+
+        // Then, add/update with incoming keysets (replaces if same id)
+        for keyset in keysets {
+            keyset_map.insert(keyset.id.clone(), keyset);
+        }
+
+        // Collect back into a Vec and store
+        let merged_keysets: Vec<KeySetInfo> = keyset_map.into_values().collect();
+        all_keysets.insert(mint_url, merged_keysets);
         Ok(())
     }
 
