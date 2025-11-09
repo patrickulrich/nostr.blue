@@ -2,9 +2,10 @@ use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, TokenData};
 use crate::utils::format_sats_with_separator;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[component]
-fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool, on_toggle: EventHandler<()>) -> Element {
+fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: bool, on_toggle: EventHandler<()>) -> Element {
     let mut is_cleaning = use_signal(|| false);
     let mut cleanup_message = use_signal(|| Option::<String>::None);
     let mut is_removing = use_signal(|| false);
@@ -272,37 +273,48 @@ pub fn TokenList() -> Element {
         };
     }
 
-    // Group tokens by mint
-    let mut tokens_by_mint: HashMap<String, Vec<&TokenData>> = HashMap::new();
-    for token in tokens.iter() {
-        tokens_by_mint.entry(token.mint.clone())
-            .or_insert_with(Vec::new)
-            .push(token);
-    }
+    // Memoize the grouping and sorting to avoid recomputation on every render
+    let grouped_mints = use_memo(move || {
+        let tokens = cashu_wallet::WALLET_TOKENS.read();
 
-    // Sort mints by total balance (descending)
-    let mut sorted_mints: Vec<_> = tokens_by_mint.iter().collect();
-    sorted_mints.sort_by(|a, b| {
-        let balance_a: u64 = a.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
-        let balance_b: u64 = b.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
-        balance_b.cmp(&balance_a)
+        // Group tokens by mint
+        let mut tokens_by_mint: HashMap<String, Vec<TokenData>> = HashMap::new();
+        for token in tokens.iter() {
+            tokens_by_mint.entry(token.mint.clone())
+                .or_insert_with(Vec::new)
+                .push(token.clone());
+        }
+
+        // Sort mints by total balance (descending) and wrap in Rc
+        let mut sorted_mints: Vec<(String, Rc<Vec<TokenData>>)> = tokens_by_mint
+            .into_iter()
+            .map(|(mint_url, tokens_vec)| (mint_url, Rc::new(tokens_vec)))
+            .collect();
+
+        sorted_mints.sort_by(|a, b| {
+            let balance_a: u64 = a.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
+            let balance_b: u64 = b.1.iter().flat_map(|t| &t.proofs).map(|p| p.amount).sum();
+            balance_b.cmp(&balance_a)
+        });
+
+        sorted_mints
     });
 
     rsx! {
         div {
             class: "flex flex-col gap-3",
 
-            for (mint_url, tokens_for_mint) in sorted_mints {
+            for (mint_url, tokens_for_mint) in grouped_mints.read().iter() {
                 {
                     let mint_url = mint_url.clone();
+                    let tokens_rc = tokens_for_mint.clone();
                     let is_expanded = expanded_mints.read().contains(&mint_url);
-                    let tokens_vec: Vec<TokenData> = tokens_for_mint.iter().map(|t| (*t).clone()).collect();
 
                     rsx! {
                         MintRow {
                             key: "{mint_url}",
                             mint_url: mint_url.clone(),
-                            tokens_for_mint: tokens_vec,
+                            tokens_for_mint: tokens_rc,
                             is_expanded: is_expanded,
                             on_toggle: move |_| {
                                 let mut expanded = expanded_mints.write();

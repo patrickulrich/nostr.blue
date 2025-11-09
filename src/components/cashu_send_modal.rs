@@ -35,6 +35,11 @@ pub fn CashuSendModal(
     });
 
     let on_send = move |_| {
+        // Early guard: prevent concurrent send operations
+        if *is_sending.read() {
+            return;
+        }
+
         let amount_str = amount.read().clone();
         let mint = selected_mint.read().clone();
 

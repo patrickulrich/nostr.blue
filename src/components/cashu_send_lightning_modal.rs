@@ -131,26 +131,48 @@ pub fn CashuSendLightningModal(
                     class: "p-6 space-y-4",
 
                     // Payment result
-                    if let Some((_paid, preimage, fee)) = payment_result.read().as_ref() {
-                        div {
-                            class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2",
+                    if let Some((paid, preimage, fee)) = payment_result.read().as_ref() {
+                        if *paid {
+                            // Success case: payment was settled
                             div {
-                                class: "flex items-start gap-3",
-                                div { class: "text-2xl", "✅" }
+                                class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2",
                                 div {
-                                    p {
-                                        class: "text-sm font-semibold text-green-800 dark:text-green-200",
-                                        "Payment successful!"
-                                    }
-                                    if let Some(pre) = preimage {
+                                    class: "flex items-start gap-3",
+                                    div { class: "text-2xl", "✅" }
+                                    div {
                                         p {
-                                            class: "text-xs text-green-700 dark:text-green-300 mt-1 font-mono break-all",
-                                            "Preimage: {pre}"
+                                            class: "text-sm font-semibold text-green-800 dark:text-green-200",
+                                            "Payment successful!"
+                                        }
+                                        if let Some(pre) = preimage {
+                                            p {
+                                                class: "text-xs text-green-700 dark:text-green-300 mt-1 font-mono break-all",
+                                                "Preimage: {pre}"
+                                            }
+                                        }
+                                        p {
+                                            class: "text-xs text-green-700 dark:text-green-300 mt-1",
+                                            "Fee paid: {fee} sats"
                                         }
                                     }
-                                    p {
-                                        class: "text-xs text-green-700 dark:text-green-300 mt-1",
-                                        "Fee paid: {fee} sats"
+                                }
+                            }
+                        } else {
+                            // Unpaid/pending case: payment not settled
+                            div {
+                                class: "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2",
+                                div {
+                                    class: "flex items-start gap-3",
+                                    div { class: "text-2xl", "⏳" }
+                                    div {
+                                        p {
+                                            class: "text-sm font-semibold text-yellow-800 dark:text-yellow-200",
+                                            "Payment pending or unpaid"
+                                        }
+                                        p {
+                                            class: "text-xs text-yellow-700 dark:text-yellow-300 mt-1",
+                                            "The payment has not been settled yet. Please check the status or try again."
+                                        }
                                     }
                                 }
                             }

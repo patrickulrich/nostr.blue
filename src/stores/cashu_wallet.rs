@@ -8,9 +8,6 @@ use serde::{Deserialize, Serialize};
 // CDK database trait for calling methods on IndexedDbDatabase
 use cdk::cdk_database::WalletDatabase;
 
-#[cfg(target_arch = "wasm32")]
-use gloo_storage::{LocalStorage, Storage};
-
 /// Custom deserialization structure for token events (more lenient than rust-nostr)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TokenEventData {
@@ -86,7 +83,8 @@ pub static WALLET_BALANCE: GlobalSignal<u64> = Signal::global(|| 0);
 /// Global signal for wallet status
 pub static WALLET_STATUS: GlobalSignal<WalletStatus> = Signal::global(|| WalletStatus::Uninitialized);
 
-const STORAGE_KEY_WALLET_PRIVKEY: &str = "cashu_wallet_privkey";
+// Removed: STORAGE_KEY_WALLET_PRIVKEY - wallet privkey is now derived deterministically
+// and no longer stored in plaintext in LocalStorage
 
 /// Initialize wallet by fetching from relays
 pub async fn init_wallet() -> Result<(), String> {
@@ -117,13 +115,8 @@ pub async fn init_wallet() -> Result<(), String> {
                     Ok(wallet_data) => {
                         log::info!("Wallet loaded with {} mints", wallet_data.mints.len());
 
-                        // Store wallet privkey securely in localStorage
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            if let Err(e) = LocalStorage::set(STORAGE_KEY_WALLET_PRIVKEY, &wallet_data.privkey) {
-                                log::error!("Failed to store wallet privkey: {:?}", e);
-                            }
-                        }
+                        // Note: wallet privkey is no longer stored in plaintext LocalStorage
+                        // It is derived deterministically from the user's Nostr key when needed
 
                         *WALLET_STATE.write() = Some(WalletState {
                             privkey: wallet_data.privkey.clone(),
@@ -332,10 +325,14 @@ pub async fn fetch_tokens() -> Result<(), String> {
 
                                 // Only include tokens with remaining proofs
                                 if !proofs.is_empty() {
-                                    // Calculate balance from non-deleted proofs
+                                    // Calculate balance from non-deleted proofs using checked arithmetic
                                     let token_balance: u64 = proofs.iter()
                                         .map(|p| p.amount)
-                                        .sum();
+                                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                                        .ok_or_else(|| format!(
+                                            "Proof amount overflow in token event {}",
+                                            event.id.to_hex()
+                                        ))?;
 
                                     // Use checked addition to prevent silent overflow
                                     total_balance = total_balance.checked_add(token_balance)
@@ -569,13 +566,8 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
         Ok(_) => {
             log::info!("Wallet created successfully");
 
-            // Store wallet privkey in localStorage
-            #[cfg(target_arch = "wasm32")]
-            {
-                if let Err(e) = LocalStorage::set(STORAGE_KEY_WALLET_PRIVKEY, &wallet_privkey) {
-                    log::error!("Failed to store wallet privkey: {:?}", e);
-                }
-            }
+            // Note: wallet privkey is no longer stored in plaintext LocalStorage
+            // It is derived deterministically from the user's Nostr key when needed
 
             // Update local state
             *WALLET_STATE.write() = Some(WalletState {
@@ -670,7 +662,13 @@ async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     }
 
     // For browser extension or remote signer, use a stored seed
-    log::info!("Using browser extension or remote signer - checking for stored seed");
+    // TODO: SECURITY WARNING - For extension users, the seed is still stored in plaintext
+    // in LocalStorage because we don't have access to their private key for encryption.
+    // This is an XSS risk. Consider alternatives:
+    // 1. Store encrypted seed in extension storage (requires extension API)
+    // 2. Require wallet re-import each session for extension users
+    // 3. Use WebCrypto API with a user-provided password
+    log::warn!("Using browser extension or remote signer - seed will be stored in plaintext LocalStorage (XSS risk)");
 
     let pubkey = auth_store::get_pubkey()
         .ok_or("Not authenticated - no pubkey available")?;
@@ -691,7 +689,7 @@ async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     }
 
     // Generate new seed and store it
-    log::info!("Generating new seed for browser extension user");
+    log::warn!("Generating new seed for browser extension user - will be stored in plaintext");
     let mut seed = [0u8; 64];
 
     #[cfg(target_arch = "wasm32")]
@@ -701,12 +699,12 @@ async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         rng.fill_bytes(&mut seed);
     }
 
-    // Store the seed
+    // Store the seed (plaintext - SECURITY RISK for extension users)
     let seed_hex = hex::encode(&seed);
     LocalStorage::set(&storage_key, seed_hex)
         .map_err(|e| format!("Failed to store seed: {:?}", e))?;
 
-    log::info!("Generated and stored new seed");
+    log::warn!("Generated and stored new seed in plaintext LocalStorage");
     Ok(seed)
 }
 
@@ -745,7 +743,32 @@ fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
     }
 }
 
+/// Remove a melt quote from the database without creating a full wallet
+async fn remove_melt_quote_from_db(quote_id: &str) -> Result<(), String> {
+    use std::sync::Arc;
+    use cdk::cdk_database::WalletDatabase;
+
+    // Create localstore directly without full wallet initialization
+    let localstore = Arc::new(
+        crate::stores::indexeddb_database::IndexedDbDatabase::new()
+            .await
+            .map_err(|e| format!("Failed to create IndexedDB for cleanup: {}", e))?
+    );
+
+    localstore.remove_melt_quote(quote_id).await
+        .map_err(|e| format!("Failed to remove melt quote: {}", e))?;
+
+    log::info!("Successfully removed melt quote {} from database", quote_id);
+    Ok(())
+}
+
 /// Create ephemeral CDK wallet with injected proofs
+///
+/// Note on atomicity: Each ephemeral wallet creates its own connection to the shared
+/// IndexedDB database. The increment_keyset_counter method uses IndexedDB transactions
+/// to ensure atomic read-modify-write operations, so concurrent wallet operations
+/// will not produce duplicate blinded messages even if multiple ephemeral wallets
+/// are active simultaneously.
 async fn create_ephemeral_wallet(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>
@@ -755,7 +778,8 @@ async fn create_ephemeral_wallet(
     use cdk::types::ProofInfo;
     use std::sync::Arc;
 
-    // Create IndexedDB database for persistent storage
+    // Create IndexedDB database connection for persistent storage
+    // Multiple connections to the same database are safe - IndexedDB handles concurrency
     let localstore = Arc::new(
         crate::stores::indexeddb_database::IndexedDbDatabase::new()
             .await
@@ -873,6 +897,11 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
         // Try adding padding if it's close to being valid
         if remainder == 2 || remainder == 3 {
             let padding_needed = 4 - remainder;
+            log::warn!(
+                "Auto-correcting malformed token: adding {} padding character(s) to base64 portion (original length: {})",
+                padding_needed,
+                base64_part.len()
+            );
             let padded = format!("{}{}", token_string, "=".repeat(padding_needed));
             log::info!("Attempting to parse with {} padding characters added", padding_needed);
             padded
@@ -1018,11 +1047,12 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
         created_at: chrono::Utc::now().timestamp() as u64,
     });
 
-    // Recalculate balance from all tokens
+    // Recalculate balance from all tokens using checked arithmetic
     let new_balance: u64 = tokens.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+        .ok_or_else(|| "Balance calculation overflow in receive_tokens".to_string())?;
 
     drop(tokens);
 
@@ -1291,11 +1321,12 @@ pub async fn send_tokens(
         });
     }
 
-    // Recalculate balance from remaining tokens
+    // Recalculate balance from remaining tokens using checked arithmetic
     let new_balance: u64 = tokens_write.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+        .ok_or_else(|| "Balance calculation overflow in send_tokens".to_string())?;
 
     drop(tokens_write);
 
@@ -1546,11 +1577,12 @@ pub async fn cleanup_spent_proofs(mint_url: String) -> Result<(usize, u64), Stri
         });
     }
 
-    // Recalculate balance from all tokens
+    // Recalculate balance from all tokens using checked arithmetic
     let new_balance: u64 = tokens_write.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+        .ok_or_else(|| "Balance calculation overflow in cleanup_spent_proofs".to_string())?;
 
     drop(tokens_write);
 
@@ -1629,12 +1661,13 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
     }
     drop(state_write);
 
-    // Recalculate balance
+    // Recalculate balance using checked arithmetic
     let tokens = WALLET_TOKENS.read();
     let new_balance: u64 = tokens.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+        .ok_or_else(|| "Balance calculation overflow in remove_mint".to_string())?;
     drop(tokens);
 
     *WALLET_BALANCE.write() = new_balance;
@@ -1895,8 +1928,11 @@ pub async fn mint_tokens_from_quote(
     });
     drop(tokens);
 
-    // Update balance
-    *WALLET_BALANCE.write() += amount_minted;
+    // Update balance using checked arithmetic
+    let current_balance = *WALLET_BALANCE.read();
+    let new_balance = current_balance.checked_add(amount_minted)
+        .ok_or_else(|| format!("Balance overflow when adding {} to {}", amount_minted, current_balance))?;
+    *WALLET_BALANCE.write() = new_balance;
 
     // Create history event
     create_history_event_with_type(
@@ -2114,9 +2150,10 @@ pub async fn melt_tokens(
                     log::warn!("Melt failed, cleaning up quote from database");
                     PENDING_MELT_QUOTES.write().retain(|q| q.quote_id != quote_id);
 
-                    // Also try to remove from wallet database
-                    if let Ok(wallet) = create_ephemeral_wallet(&mint_url, vec![]).await {
-                        let _ = wallet.localstore.remove_melt_quote(&quote_id).await;
+                    // Remove from wallet database using dedicated cleanup function
+                    if let Err(cleanup_err) = remove_melt_quote_from_db(&quote_id).await {
+                        log::error!("Failed to remove melt quote from database: {}", cleanup_err);
+                        // Continue anyway - the quote is already removed from PENDING_MELT_QUOTES
                     }
 
                     return Err(format!("Failed to melt: {}. Quote has been cleaned up, please try again with a new quote.", e));
@@ -2220,12 +2257,13 @@ pub async fn melt_tokens(
     }
     drop(tokens_write);
 
-    // Update balance
+    // Update balance using checked arithmetic
     let tokens = WALLET_TOKENS.read();
     let new_balance: u64 = tokens.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+        .ok_or_else(|| "Balance calculation overflow in melt_tokens".to_string())?;
     drop(tokens);
 
     *WALLET_BALANCE.write() = new_balance;

@@ -73,7 +73,7 @@ reviews:
           - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
           - **Security**: Vulnerabilities, especially:
             - Nostr event validation and signature verification
-            - XSS risks in user-generated content rendering (ensure ammonia sanitization)
+            - XSS risks in user-generated content rendering (use the ammonia crate for HTML sanitization)
             - Relay communication and untrusted data handling
             - Cryptographic operations and key management
             - LocalStorage/IndexedDB data exposure

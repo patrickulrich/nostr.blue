@@ -52,9 +52,6 @@ pub fn NoteCard(
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Compute whether we have precomputed counts (plain derived boolean)
-    let has_precomputed = precomputed_counts.is_some();
-
     // Initialize counts from precomputed data if available (batch optimization)
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
