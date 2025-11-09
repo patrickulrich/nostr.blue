@@ -33,23 +33,47 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     // Audio element ID
     let audio_id = format!("voice-audio-{}", event_id_str);
 
-    // Parse imeta tags for duration and waveform
+    // Parse imeta tags for duration per NIP-92/NIP-94
+    // Expected format: ["imeta", "url <value>", "m <mime-type>", "duration <seconds>", ...]
+    // Each field is a key-value pair separated by space or follows "key value" format
     let imeta_duration = event.tags.iter()
         .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
         .and_then(|tag| {
-            tag.as_slice().iter()
-                .find(|s| s.starts_with("duration "))
-                .and_then(|s| s.strip_prefix("duration ").and_then(|d| d.parse::<f64>().ok()))
+            // Validate and parse imeta tag structure
+            let fields = tag.as_slice();
+            if fields.len() < 2 {
+                return None; // Invalid imeta tag structure
+            }
+
+            // Search for duration field in the expected key-value format
+            fields.iter().skip(1).find_map(|field| {
+                let field_str = field.as_str();
+                // Check for "duration <value>" or "duration=<value>" format
+                if field_str.starts_with("duration ") {
+                    field_str.strip_prefix("duration ")
+                        .and_then(|d| d.parse::<f64>().ok())
+                } else if field_str.starts_with("duration=") {
+                    field_str.strip_prefix("duration=")
+                        .and_then(|d| d.parse::<f64>().ok())
+                } else {
+                    None
+                }
+            })
         });
 
     // Fetch author profile
     use_effect(use_reactive(&author_pubkey, move |pubkey| {
         spawn(async move {
-            if let Ok(pk) = PublicKey::parse(&pubkey) {
-                if let Some(client) = nostr_client::get_client() {
-                    if let Ok(Some(metadata)) = client.fetch_metadata(pk, Duration::from_secs(5)).await {
-                        author_metadata.set(Some(metadata));
+            match PublicKey::parse(&pubkey) {
+                Ok(pk) => {
+                    if let Some(client) = nostr_client::get_client() {
+                        if let Ok(Some(metadata)) = client.fetch_metadata(pk, Duration::from_secs(5)).await {
+                            author_metadata.set(Some(metadata));
+                        }
                     }
+                }
+                Err(e) => {
+                    log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
                 }
             }
         });
@@ -69,26 +93,49 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         let audio_id_clone = audio_id_for_effect.clone();
 
         spawn(async move {
-            let audio_id_json = serde_json::to_string(&audio_id_clone).unwrap_or_else(|_| format!("\"{}\"", audio_id_clone));
-            let is_playing_literal = if is_playing { "true" } else { "false" };
+            // Use direct web-sys calls instead of eval
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    log::error!("Failed to get window object");
+                    return;
+                }
+            };
 
-            let script = format!(
-                r#"
-                (function() {{
-                    let audio = document.getElementById({audio_id});
-                    if (!audio) return;
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    log::error!("Failed to get document object");
+                    return;
+                }
+            };
 
-                    if ({is_playing}) {{
-                        audio.play().catch(e => console.log('Play failed:', e));
-                    }} else {{
-                        audio.pause();
-                    }}
-                }})();
-                "#,
-                audio_id = audio_id_json,
-                is_playing = is_playing_literal
-            );
-            let _ = js_sys::eval(&script);
+            let element = match document.get_element_by_id(&audio_id_clone) {
+                Some(e) => e,
+                None => {
+                    log::debug!("Audio element {} not found yet", audio_id_clone);
+                    return;
+                }
+            };
+
+            let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("Element is not an HtmlAudioElement: {:?}", e);
+                    return;
+                }
+            };
+
+            if is_playing {
+                // play() returns a Promise, but we can ignore errors in the Promise
+                let _ = audio.play().map_err(|e| {
+                    log::debug!("Play failed: {:?}", e);
+                });
+            } else {
+                if let Err(e) = audio.pause() {
+                    log::debug!("Pause failed: {:?}", e);
+                }
+            }
         });
     });
 

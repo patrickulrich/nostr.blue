@@ -62,11 +62,9 @@ pub fn NoteCard(
     let has_precomputed = precomputed_counts.is_some();
 
     // Fetch counts individually if not precomputed (fallback for single-note views)
-    // Skip if we have precomputed counts from batch aggregation
+    // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        if has_precomputed {
-            return; // Skip individual fetch if we have batch data
-        }
+        let has_precomputed_clone = has_precomputed;
 
         spawn(async move {
             let client = match get_client() {
@@ -196,11 +194,15 @@ pub fn NoteCard(
                     }
                 }
 
-                // Update all counts and states at once
-                reply_count.set(replies.min(500));
-                like_count.set(likes.min(500));
-                repost_count.set(reposts.min(500));
-                zap_amount_sats.set(total_sats);
+                // Update counts only if we don't have precomputed data
+                if !has_precomputed_clone {
+                    reply_count.set(replies.min(500));
+                    like_count.set(likes.min(500));
+                    repost_count.set(reposts.min(500));
+                    zap_amount_sats.set(total_sats);
+                }
+
+                // Always update user interaction flags
                 is_liked.set(user_has_liked);
                 is_reposted.set(user_has_reposted);
                 is_zapped.set(user_has_zapped);
