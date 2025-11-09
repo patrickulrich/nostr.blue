@@ -5,10 +5,10 @@ use crate::stores::cashu_wallet;
 pub fn WalletBalanceCard(
     on_send: EventHandler<()>,
     on_receive: EventHandler<()>,
+    on_lightning_deposit: EventHandler<()>,
+    on_lightning_withdraw: EventHandler<()>,
 ) -> Element {
     let balance = cashu_wallet::WALLET_BALANCE.read();
-    let mint_count = cashu_wallet::get_mint_count();
-    let mints = cashu_wallet::get_mints();
 
     // Format balance with thousands separator
     let formatted_balance = format_sats(*balance);
@@ -34,47 +34,50 @@ pub fn WalletBalanceCard(
                 }
             }
 
-            // Mints info
-            if mint_count > 0 {
+            // Action buttons row 1: Lightning
+            div {
+                class: "mb-3",
                 div {
-                    class: "mb-6 opacity-90",
-                    div {
-                        class: "text-sm mb-2",
-                        "Active Mints: {mint_count}"
+                    class: "text-xs opacity-75 mb-2",
+                    "Lightning"
+                }
+                div {
+                    class: "flex gap-3",
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_lightning_deposit.call(()),
+                        span { "⚡" }
+                        span { "Deposit" }
                     }
-                    div {
-                        class: "flex flex-col gap-1",
-                        for mint_url in mints.iter().take(3) {
-                            div {
-                                class: "text-xs opacity-75 truncate",
-                                title: "{mint_url}",
-                                "{shorten_url(mint_url)}"
-                            }
-                        }
-                        if mint_count > 3 {
-                            div {
-                                class: "text-xs opacity-75",
-                                "+{mint_count - 3} more"
-                            }
-                        }
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_lightning_withdraw.call(()),
+                        span { "⚡" }
+                        span { "Withdraw" }
                     }
                 }
             }
 
-            // Action buttons
+            // Action buttons row 2: Ecash
             div {
-                class: "flex gap-3",
-                button {
-                    class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
-                    onclick: move |_| on_receive.call(()),
-                    span { "⬇️" }
-                    span { "Receive" }
+                div {
+                    class: "text-xs opacity-75 mb-2",
+                    "Ecash"
                 }
-                button {
-                    class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
-                    onclick: move |_| on_send.call(()),
-                    span { "⬆️" }
-                    span { "Send" }
+                div {
+                    class: "flex gap-3",
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_receive.call(()),
+                        span { "⬇️" }
+                        span { "Receive" }
+                    }
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_send.call(()),
+                        span { "⬆️" }
+                        span { "Send" }
+                    }
                 }
             }
         }
@@ -96,14 +99,4 @@ fn format_sats(sats: u64) -> String {
     }
 
     result.chars().rev().collect()
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 30 {
-        format!("{}...", &url[..27])
-    } else {
-        url.to_string()
-    }
 }

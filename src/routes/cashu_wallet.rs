@@ -10,6 +10,8 @@ pub fn CashuWallet() -> Element {
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
+    let mut show_lightning_deposit_modal = use_signal(|| false);
+    let mut show_lightning_withdraw_modal = use_signal(|| false);
 
     // Initialize wallet on mount
     use_effect(move || {
@@ -168,6 +170,8 @@ pub fn CashuWallet() -> Element {
                     crate::components::WalletBalanceCard {
                         on_send: move |_| show_send_modal.set(true),
                         on_receive: move |_| show_receive_modal.set(true),
+                        on_lightning_deposit: move |_| show_lightning_deposit_modal.set(true),
+                        on_lightning_withdraw: move |_| show_lightning_withdraw_modal.set(true),
                     }
 
                     // Tokens section
@@ -203,6 +207,20 @@ pub fn CashuWallet() -> Element {
             if *show_receive_modal.read() {
                 crate::components::CashuReceiveModal {
                     on_close: move |_| show_receive_modal.set(false),
+                }
+            }
+
+            // Lightning deposit modal
+            if *show_lightning_deposit_modal.read() {
+                crate::components::CashuReceiveLightningModal {
+                    on_close: move |_| show_lightning_deposit_modal.set(false),
+                }
+            }
+
+            // Lightning withdraw modal
+            if *show_lightning_withdraw_modal.read() {
+                crate::components::CashuSendLightningModal {
+                    on_close: move |_| show_lightning_withdraw_modal.set(false),
                 }
             }
         }

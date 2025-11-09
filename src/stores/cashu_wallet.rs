@@ -5,6 +5,9 @@ use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
+// CDK database trait for calling methods on IndexedDbDatabase
+use cdk::cdk_database::WalletDatabase;
+
 #[cfg(target_arch = "wasm32")]
 use gloo_storage::{LocalStorage, Storage};
 
@@ -602,6 +605,7 @@ pub fn is_wallet_initialized() -> bool {
 }
 
 /// Get total number of mints
+#[allow(dead_code)]
 pub fn get_mint_count() -> usize {
     WALLET_STATE.read()
         .as_ref()
@@ -751,8 +755,12 @@ async fn create_ephemeral_wallet(
     use cdk::types::ProofInfo;
     use std::sync::Arc;
 
-    // Create in-memory database
-    let localstore = Arc::new(crate::stores::cashu_memory_db::MemoryDatabase::new());
+    // Create IndexedDB database for persistent storage
+    let localstore = Arc::new(
+        crate::stores::indexeddb_database::IndexedDbDatabase::new()
+            .await
+            .map_err(|e| format!("Failed to create IndexedDB: {}", e))?
+    );
 
     // Derive deterministic seed from Nostr key
     let seed = derive_wallet_seed().await?;
@@ -766,9 +774,15 @@ async fn create_ephemeral_wallet(
         None // target_proof_count
     ).map_err(|e| format!("Failed to create wallet: {}", e))?;
 
-    // Fetch mint info
+    // Fetch mint info and keysets
     wallet.fetch_mint_info().await
         .map_err(|e| format!("Failed to fetch mint info: {}", e))?;
+
+    // Ensure we have all keysets loaded
+    wallet.refresh_keysets().await
+        .map_err(|e| format!("Failed to refresh keysets: {}", e))?;
+
+    log::debug!("Ephemeral wallet created for {}", mint_url);
 
     // Inject proofs if any provided
     if !proofs.is_empty() {
@@ -788,7 +802,6 @@ async fn create_ephemeral_wallet(
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Failed to create proof info: {}", e))?;
 
-        use cdk::cdk_database::WalletDatabase;
         localstore.update_proofs(proof_infos, vec![]).await
             .map_err(|e| format!("Failed to inject proofs: {}", e))?;
     }
@@ -1629,4 +1642,682 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
         token_count, total_amount, new_balance);
 
     Ok((token_count, total_amount))
+}
+
+// ============================================================================
+// Phase 3: Lightning Payment Support (Mint & Melt Operations)
+// ============================================================================
+
+/// Mint quote information for receiving lightning payments
+#[derive(Clone, Debug, PartialEq)]
+pub struct MintQuoteInfo {
+    pub quote_id: String,
+    pub invoice: String,
+    pub amount: u64,
+    pub expiry: u64,
+    pub mint_url: String,
+}
+
+/// Melt quote information for sending lightning payments
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeltQuoteInfo {
+    pub quote_id: String,
+    pub invoice: String,
+    pub amount: u64,
+    pub fee_reserve: u64,
+    pub mint_url: String,
+}
+
+/// Quote status for polling
+#[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)] // Some variants reserved for future use
+pub enum QuoteStatus {
+    Unpaid,
+    Paid,
+    Pending,
+    Failed,
+    Expired,
+}
+
+/// Global signal for pending mint quotes
+pub static PENDING_MINT_QUOTES: GlobalSignal<Vec<MintQuoteInfo>> = Signal::global(Vec::new);
+
+/// Global signal for pending melt quotes
+pub static PENDING_MELT_QUOTES: GlobalSignal<Vec<MeltQuoteInfo>> = Signal::global(Vec::new);
+
+/// Create a mint quote (request lightning invoice to receive sats)
+pub async fn create_mint_quote(
+    mint_url: String,
+    amount_sats: u64,
+    description: Option<String>,
+) -> Result<MintQuoteInfo, String> {
+    use cdk::Amount;
+
+    log::info!("Creating mint quote for {} sats at {}", amount_sats, mint_url);
+
+    // Create ephemeral wallet
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+
+    // Create mint quote
+    let quote = wallet.mint_quote(
+        Amount::from(amount_sats),
+        description
+    ).await
+    .map_err(|e| format!("Failed to create mint quote: {}", e))?;
+
+    log::info!("Mint quote created: {}", quote.id);
+
+    let quote_info = MintQuoteInfo {
+        quote_id: quote.id.clone(),
+        invoice: quote.request,
+        amount: u64::from(quote.amount.unwrap_or(Amount::ZERO)),
+        expiry: quote.expiry,
+        mint_url: mint_url.clone(),
+    };
+
+    // Store in global state for tracking
+    PENDING_MINT_QUOTES.write().push(quote_info.clone());
+
+    Ok(quote_info)
+}
+
+/// Check mint quote payment status
+pub async fn check_mint_quote_status(
+    mint_url: String,
+    quote_id: String,
+) -> Result<QuoteStatus, String> {
+    log::info!("Checking mint quote status: {}", quote_id);
+
+    // Create ephemeral wallet
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+
+    // Check quote status
+    let response = wallet.mint_quote_state(&quote_id).await
+        .map_err(|e| format!("Failed to check mint quote status: {}", e))?;
+
+    use cdk::nuts::MintQuoteState;
+
+    let status = match response.state {
+        MintQuoteState::Unpaid => QuoteStatus::Unpaid,
+        MintQuoteState::Paid => QuoteStatus::Paid,
+        MintQuoteState::Issued => QuoteStatus::Paid, // Already minted
+    };
+
+    log::info!("Quote {} status: {:?}", quote_id, status);
+
+    Ok(status)
+}
+
+/// Mint tokens from a paid quote
+pub async fn mint_tokens_from_quote(
+    mint_url: String,
+    quote_id: String,
+) -> Result<u64, String> {
+    use cdk::nuts::MintQuoteState;
+
+    log::info!("Minting tokens from quote: {}", quote_id);
+
+    // Create ephemeral wallet (now shares database with the wallet that created the quote)
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+
+    // Verify the quote is paid and ready to mint
+    let quote_response = wallet.mint_quote_state(&quote_id).await
+        .map_err(|e| format!("Failed to fetch quote state: {}", e))?;
+
+    log::info!("Quote state: {:?}, amount: {:?}", quote_response.state, quote_response.amount);
+
+    // Verify the quote is paid AND not already issued
+    match quote_response.state {
+        MintQuoteState::Paid => {
+            // Good to proceed
+        }
+        MintQuoteState::Issued => {
+            return Err("Quote has already been minted. Tokens were already issued for this payment.".to_string());
+        }
+        MintQuoteState::Unpaid => {
+            return Err("Quote has not been paid yet. Please pay the lightning invoice first.".to_string());
+        }
+    }
+
+    log::info!("Quote is paid, proceeding to mint tokens");
+
+    // Mint tokens - the quote is already in the shared database from create_mint_quote
+    let proofs = match wallet.mint(
+        &quote_id,
+        cdk::amount::SplitTarget::default(),
+        None  // No spending conditions (TODO: support P2PK in future)
+    ).await {
+        Ok(proofs) => {
+            log::info!("Mint succeeded, received {} proofs", proofs.len());
+            proofs
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            log::error!("Mint failed with error: {:?}", e);
+            log::error!("Error message: {}", error_msg);
+
+            // CRITICAL: Clean up the quote from shared database even on failure
+            // Why: The mint might have partially processed the blinded messages before failing
+            // If the mint marked them as "used" but didn't return signatures, retrying with
+            // the same quote will fail with "Blinded Message is already signed"
+            if let Err(cleanup_err) = wallet.localstore.remove_mint_quote(&quote_id).await {
+                log::warn!("Failed to remove mint quote after error: {}", cleanup_err);
+            } else {
+                log::info!("Cleaned up failed quote {} from database", quote_id);
+            }
+
+            // Also remove from pending quotes signal
+            PENDING_MINT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+
+            // If the quote lookup fails, it means the shared database lost the quote somehow
+            // 1. The quote was already used/issued
+            // 2. The quote is not in the correct state
+            // 3. The request was malformed
+
+            if error_msg.contains("missing field `signatures`") {
+                // Try to extract more context about what went wrong
+                if error_msg.contains("line 1 column") {
+                    return Err(format!(
+                        "Mint returned an error instead of tokens. The quote has been cleaned up. \
+                        Please generate a NEW invoice and try again (do not retry with the same invoice). \
+                        Technical error: {}",
+                        error_msg
+                    ));
+                }
+            }
+
+            return Err(format!("Failed to mint tokens: {}", error_msg));
+        }
+    };
+
+    let amount_minted: u64 = proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    log::info!("Minted {} sats", amount_minted);
+
+    // Convert to ProofData
+    let proof_data: Vec<ProofData> = proofs.iter()
+        .map(|p| cdk_proof_to_proof_data(p))
+        .collect();
+
+    // Create token event (kind 7375) - same as receive_tokens
+    let token_event_data = TokenEventData {
+        mint: mint_url.clone(),
+        proofs: proof_data.clone(),
+        del: vec![],
+    };
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let json_content = serde_json::to_string(&token_event_data)
+        .map_err(|e| format!("Failed to serialize: {}", e))?;
+
+    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(
+        Kind::from(7375),
+        encrypted
+    );
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    let event_output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish event: {}", e))?;
+
+    let event_id = event_output.id().to_hex();
+
+    log::info!("Published token event: {}", event_id);
+
+    // Update local state
+    let mut tokens = WALLET_TOKENS.write();
+    tokens.push(TokenData {
+        event_id: event_id.clone(),
+        mint: mint_url.clone(),
+        unit: "sat".to_string(),
+        proofs: proof_data.iter().map(|p| CashuProof {
+            id: p.id.clone(),
+            amount: p.amount,
+            secret: p.secret.clone(),
+            c: p.c.clone(),
+        }).collect(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+    });
+    drop(tokens);
+
+    // Update balance
+    *WALLET_BALANCE.write() += amount_minted;
+
+    // Create history event
+    create_history_event_with_type(
+        "in",
+        amount_minted,
+        vec![event_id.clone()],
+        vec![],
+        Some("lightning_mint"),
+        None,
+    ).await?;
+
+    // Remove from pending quotes
+    PENDING_MINT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+
+    // Clean up: Remove quote from shared database to prevent reuse
+    if let Err(e) = wallet.localstore.remove_mint_quote(&quote_id).await {
+        log::warn!("Failed to remove mint quote from database: {}", e);
+    }
+
+    log::info!("Mint complete: {} sats", amount_minted);
+
+    Ok(amount_minted)
+}
+
+/// Create a melt quote (request to pay a lightning invoice)
+pub async fn create_melt_quote(
+    mint_url: String,
+    invoice: String,
+) -> Result<MeltQuoteInfo, String> {
+    log::info!("Creating melt quote for invoice at {}", mint_url);
+
+    // Create ephemeral wallet
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+
+    // Create melt quote
+    let quote = wallet.melt_quote(invoice.clone(), None).await
+        .map_err(|e| format!("Failed to create melt quote: {}", e))?;
+
+    log::info!("Melt quote created: {}", quote.id);
+
+    let quote_info = MeltQuoteInfo {
+        quote_id: quote.id.clone(),
+        invoice: quote.request,
+        amount: u64::from(quote.amount),
+        fee_reserve: u64::from(quote.fee_reserve),
+        mint_url: mint_url.clone(),
+    };
+
+    // Store in global state
+    PENDING_MELT_QUOTES.write().push(quote_info.clone());
+
+    Ok(quote_info)
+}
+
+/// Check melt quote status
+#[allow(dead_code)] // Reserved for future melt quote status polling
+pub async fn check_melt_quote_status(
+    mint_url: String,
+    quote_id: String,
+) -> Result<QuoteStatus, String> {
+    log::info!("Checking melt quote status: {}", quote_id);
+
+    // Create ephemeral wallet
+    let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
+
+    // Check quote status
+    let response = wallet.melt_quote_status(&quote_id).await
+        .map_err(|e| format!("Failed to check melt quote status: {}", e))?;
+
+    use cdk::nuts::MeltQuoteState;
+
+    let status = match response.state {
+        MeltQuoteState::Unpaid => QuoteStatus::Unpaid,
+        MeltQuoteState::Paid => QuoteStatus::Paid,
+        MeltQuoteState::Pending => QuoteStatus::Pending,
+        MeltQuoteState::Failed => QuoteStatus::Failed,
+        _ => QuoteStatus::Unpaid,
+    };
+
+    log::info!("Melt quote {} status: {:?}", quote_id, status);
+
+    Ok(status)
+}
+
+/// Melt tokens to pay a lightning invoice
+pub async fn melt_tokens(
+    mint_url: String,
+    quote_id: String,
+) -> Result<(bool, Option<String>, u64), String> {
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Melting tokens to pay invoice via quote: {}", quote_id);
+
+    // Get melt quote details
+    let quote_info = PENDING_MELT_QUOTES.read()
+        .iter()
+        .find(|q| q.quote_id == quote_id)
+        .cloned()
+        .ok_or("Melt quote not found")?;
+
+    let amount_needed = quote_info.amount + quote_info.fee_reserve;
+
+    // Get available proofs for this mint
+    let (all_proofs, event_ids_to_delete) = {
+        let tokens = WALLET_TOKENS.read();
+        let mint_tokens: Vec<_> = tokens.iter()
+            .filter(|t| t.mint == mint_url)
+            .collect();
+
+        if mint_tokens.is_empty() {
+            return Err("No tokens found for this mint".to_string());
+        }
+
+        // Convert to CDK proofs
+        let mut all_proofs = Vec::new();
+        let mut event_ids_to_delete = Vec::new();
+
+        for token in &mint_tokens {
+            event_ids_to_delete.push(token.event_id.clone());
+            for proof in &token.proofs {
+                let temp_proof_data = ProofData {
+                    id: proof.id.clone(),
+                    amount: proof.amount,
+                    secret: proof.secret.clone(),
+                    c: proof.c.clone(),
+                };
+                all_proofs.push(proof_data_to_cdk_proof(&temp_proof_data)?);
+            }
+        }
+
+        (all_proofs, event_ids_to_delete)
+    };
+
+    // Check balance
+    let total_available: u64 = all_proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    if total_available < amount_needed {
+        return Err(format!(
+            "Insufficient funds. Need {} sats (amount: {}, fee: {}), have: {} sats",
+            amount_needed, quote_info.amount, quote_info.fee_reserve, total_available
+        ));
+    }
+
+    // Melt with auto-retry on spent proofs
+    let (melted, keep_proofs) = {
+        let result = async {
+            let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
+
+            // Execute melt
+            let melted = wallet.melt(&quote_id).await
+                .map_err(|e| e.to_string())?;
+
+            let keep_proofs = wallet.get_unspent_proofs().await
+                .map_err(|e| e.to_string())?;
+
+            Ok::<(cdk::types::Melted, Vec<cdk::nuts::Proof>), String>((melted, keep_proofs))
+        }.await;
+
+        match result {
+            Ok((melted, proofs)) => (melted, proofs),
+            Err(e) => {
+                let error_msg = e.to_string();
+
+                // Auto-retry if proofs are already spent
+                if error_msg.contains("already spent") || error_msg.contains("already redeemed") {
+                    log::warn!("Some proofs already spent, cleaning up and retrying...");
+
+                    // Cleanup spent proofs
+                    let (cleaned_count, cleaned_amount) = cleanup_spent_proofs(mint_url.clone()).await
+                        .map_err(|e| format!("Cleanup failed: {}", e))?;
+
+                    log::info!("Cleaned up {} spent proofs worth {} sats, retrying melt", cleaned_count, cleaned_amount);
+
+                    // Get fresh proofs after cleanup
+                    let fresh_proofs = {
+                        let tokens = WALLET_TOKENS.read();
+                        let mut proofs = Vec::new();
+
+                        for token in tokens.iter().filter(|t| t.mint == mint_url) {
+                            for proof in &token.proofs {
+                                let temp = ProofData {
+                                    id: proof.id.clone(),
+                                    amount: proof.amount,
+                                    secret: proof.secret.clone(),
+                                    c: proof.c.clone(),
+                                };
+                                proofs.push(proof_data_to_cdk_proof(&temp)?);
+                            }
+                        }
+                        proofs
+                    };
+
+                    // Check we still have enough after cleanup
+                    let fresh_total: u64 = fresh_proofs.iter().map(|p| u64::from(p.amount)).sum();
+                    if fresh_total < amount_needed {
+                        return Err(format!(
+                            "Insufficient funds after cleanup. Need: {} sats, have: {} sats",
+                            amount_needed, fresh_total
+                        ));
+                    }
+
+                    // Retry melt with fresh proofs
+                    let wallet = create_ephemeral_wallet(&mint_url, fresh_proofs).await?;
+                    let melted = wallet.melt(&quote_id).await
+                        .map_err(|e| format!("Retry failed: {}", e))?;
+                    let keep_proofs = wallet.get_unspent_proofs().await
+                        .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
+
+                    log::info!("Melt succeeded after cleanup and retry");
+                    (melted, keep_proofs)
+                } else {
+                    // Clean up the melt quote on failure to prevent issues with retries
+                    log::warn!("Melt failed, cleaning up quote from database");
+                    PENDING_MELT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+
+                    // Also try to remove from wallet database
+                    if let Ok(wallet) = create_ephemeral_wallet(&mint_url, vec![]).await {
+                        let _ = wallet.localstore.remove_melt_quote(&quote_id).await;
+                    }
+
+                    return Err(format!("Failed to melt: {}. Quote has been cleaned up, please try again with a new quote.", e));
+                }
+            }
+        }
+    };
+
+    let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
+    let preimage = melted.preimage;
+    let fee_paid = u64::from(melted.fee_paid);
+
+    log::info!("Melt result: paid={}, fee_paid={}", paid, fee_paid);
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    let mut new_event_id: Option<String> = None;
+
+    // Update token events with remaining proofs
+    if !keep_proofs.is_empty() {
+        let proof_data: Vec<ProofData> = keep_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        let token_event_data = TokenEventData {
+            mint: mint_url.clone(),
+            proofs: proof_data.clone(),
+            del: event_ids_to_delete.clone(),
+        };
+
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize: {}", e))?;
+
+        let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+            .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+        let builder = nostr_sdk::EventBuilder::new(
+            Kind::from(7375),
+            encrypted
+        );
+
+        let event_output = client.send_event_builder(builder).await
+            .map_err(|e| format!("Failed to publish token event: {}", e))?;
+
+        new_event_id = Some(event_output.id().to_hex());
+        log::info!("Published new token event: {}", new_event_id.as_ref().unwrap());
+    }
+
+    // Delete old token events
+    if !event_ids_to_delete.is_empty() {
+        let mut tags = Vec::new();
+        for event_id in &event_ids_to_delete {
+            tags.push(nostr_sdk::Tag::event(
+                nostr_sdk::EventId::from_hex(event_id)
+                    .map_err(|e| format!("Invalid event ID: {}", e))?
+            ));
+        }
+
+        let deletion_builder = nostr_sdk::EventBuilder::new(
+            Kind::from(5),
+            "Melted token"
+        ).tags(tags);
+
+        client.send_event_builder(deletion_builder).await
+            .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
+
+        log::info!("Published deletion event for {} token events", event_ids_to_delete.len());
+    }
+
+    // Update local state
+    let mut tokens_write = WALLET_TOKENS.write();
+    tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+
+    if let Some(ref event_id) = new_event_id {
+        let proof_data: Vec<ProofData> = keep_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        tokens_write.push(TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.clone(),
+            unit: "sat".to_string(),
+            proofs: proof_data.iter().map(|p| CashuProof {
+                id: p.id.clone(),
+                amount: p.amount,
+                secret: p.secret.clone(),
+                c: p.c.clone(),
+            }).collect(),
+            created_at: chrono::Utc::now().timestamp() as u64,
+        });
+    }
+    drop(tokens_write);
+
+    // Update balance
+    let tokens = WALLET_TOKENS.read();
+    let new_balance: u64 = tokens.iter()
+        .flat_map(|t| &t.proofs)
+        .map(|p| p.amount)
+        .sum();
+    drop(tokens);
+
+    *WALLET_BALANCE.write() = new_balance;
+
+    // Create history event
+    let created_events = if let Some(ref event_id) = new_event_id {
+        vec![event_id.clone()]
+    } else {
+        vec![]
+    };
+
+    create_history_event_with_type(
+        "out",
+        quote_info.amount + fee_paid,
+        created_events,
+        event_ids_to_delete,
+        Some("lightning_melt"),
+        Some(&quote_info.invoice),
+    ).await?;
+
+    // Remove from pending quotes
+    PENDING_MELT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+
+    log::info!("Melt complete: paid={}, amount={}, fee={}", paid, quote_info.amount, fee_paid);
+
+    Ok((paid, preimage, fee_paid))
+}
+
+/// Extended history event creation with operation type and invoice
+async fn create_history_event_with_type(
+    direction: &str,
+    amount: u64,
+    created_tokens: Vec<String>,
+    destroyed_tokens: Vec<String>,
+    operation_type: Option<&str>,
+    invoice: Option<&str>,
+) -> Result<(), String> {
+    use nostr_sdk::signer::NostrSigner;
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    // Build content array
+    let mut content_array = vec![
+        vec!["direction".to_string(), direction.to_string()],
+        vec!["amount".to_string(), amount.to_string()],
+        vec!["unit".to_string(), "sat".to_string()],
+    ];
+
+    // Add operation type if provided
+    if let Some(op_type) = operation_type {
+        content_array.push(vec!["type".to_string(), op_type.to_string()]);
+    }
+
+    // Add invoice if provided (for lightning operations)
+    if let Some(inv) = invoice {
+        content_array.push(vec!["invoice".to_string(), inv.to_string()]);
+    }
+
+    // Add created token events
+    for event_id in created_tokens {
+        content_array.push(vec!["e".to_string(), event_id, "".to_string(), "created".to_string()]);
+    }
+
+    // Add destroyed token events
+    for event_id in destroyed_tokens {
+        content_array.push(vec!["e".to_string(), event_id, "".to_string(), "destroyed".to_string()]);
+    }
+
+    let json_content = serde_json::to_string(&content_array)
+        .map_err(|e| format!("Failed to serialize: {}", e))?;
+
+    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(
+        Kind::from(7376),
+        encrypted
+    );
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    let event_output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish history event: {}", e))?;
+
+    log::info!("Published history event: {}", event_output.id().to_hex());
+
+    Ok(())
 }

@@ -39,6 +39,8 @@ pub mod transaction_history;
 pub mod cashu_setup_wizard;
 pub mod cashu_send_modal;
 pub mod cashu_receive_modal;
+pub mod cashu_receive_lightning_modal;
+pub mod cashu_send_lightning_modal;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -77,3 +79,5 @@ pub use transaction_history::TransactionHistory;
 pub use cashu_setup_wizard::CashuSetupWizard;
 pub use cashu_send_modal::CashuSendModal;
 pub use cashu_receive_modal::CashuReceiveModal;
+pub use cashu_receive_lightning_modal::CashuReceiveLightningModal;
+pub use cashu_send_lightning_modal::CashuSendLightningModal;

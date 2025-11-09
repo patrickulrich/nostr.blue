@@ -59,6 +59,8 @@ reviews:
         - **WebAssembly (WASM)**: Browser-based Rust applications, WASM-bindgen patterns, and performance considerations
         - **Dioxus Framework**: Component patterns, reactive state management, hooks, and routing
         - **Async Rust**: Tokio runtime, async/await patterns, futures, and concurrency primitives
+        - **Cashu/Ecash Protocol**: CDK (Cashu Development Kit) integration, mint/melt operations, quote lifecycle, blind signatures, and proof management
+        - **Browser Storage**: IndexedDB patterns for persistent state, atomic transactions, and database trait implementations
 
         Thoroughly review the code snippets and suggest improvements for these key areas:
           - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
@@ -71,13 +73,16 @@ reviews:
           - **Performance**: Bottlenecks, inefficient algorithms, or unnecessary allocations, especially:
             - WASM binary size optimizations
             - Unnecessary clones or allocations
-            - Database query efficiency (nostr-indexeddb)
+            - Database query efficiency (nostr-indexeddb and IndexedDB for CDK wallet)
             - Rendering performance in Dioxus components
+            - Atomic IndexedDB transactions for wallet operations
           - **Concurrency**: Potential data races, deadlocks, improper use of async/await, or channel misuse.
           - **Nostr Protocol Compliance**: Correct implementation of NIPs, event structure, and relay communication patterns.
-          - **WASM Best Practices**: Efficient JavaScript interop, memory management, and avoiding panics.
+          - **Cashu Protocol Compliance**: Proper CDK trait implementations, quote lifecycle management, keyset counter atomicity, and blind signature handling.
+          - **Database Correctness**: Atomic transactions for wallet operations, proper quote cleanup, counter persistence across page refresh, and race condition prevention.
+          - **WASM Best Practices**: Efficient JavaScript interop, memory management, avoiding panics, and Send+Sync safety in single-threaded contexts.
           - **Dioxus Patterns**: Proper use of hooks, memo, signals, and component lifecycle.
-          - **Error Handling**: Proper use of Result/Option, error propagation, and user-facing error messages.
+          - **Error Handling**: Proper use of Result/Option, error propagation, quote cleanup on failures, and user-facing error messages.
           - **Maintainability & Modularity**: Code that is overly complex, monolithic, or violates separation of concerns.
           - **Best Practices**: Adherence to Rust idioms (ownership, lifetimes, zero-cost abstractions) and SOLID/KISS principles.
 
@@ -146,17 +151,24 @@ chat:
   # Allow CodeRabbit to auto-reply in chat.
   auto_reply: true
 
-# Optional: Configure knowledge base for project-specific context
-# knowledge_base:
-#   # Learnings that CodeRabbit should remember about this project
-#   learnings:
-#     - "This project uses nostr-sdk 0.44 with specific NIPs enabled"
-#     - "Performance is critical - watch for WASM binary size increases"
-#     - "All user content must be sanitized with ammonia before rendering"
+# Configure knowledge base for project-specific context
+knowledge_base:
+  # Learnings that CodeRabbit should remember about this project
+  learnings:
+    - "This project uses nostr-sdk 0.44 with specific NIPs enabled, including NIP-60 for Cashu wallet integration"
+    - "Performance is critical - watch for WASM binary size increases and unnecessary allocations"
+    - "All user content must be sanitized with ammonia before rendering to prevent XSS"
+    - "Cashu wallet uses CDK 0.13.4 with custom IndexedDB implementation of WalletDatabase trait"
+    - "Keyset counters MUST be atomic and persistent to prevent 'Blinded Message already signed' errors"
+    - "Quote lifecycle: create → poll payment → mint/melt → cleanup. Always clean up quotes on failure or success"
+    - "IndexedDB operations in WASM are single-threaded but require unsafe Send+Sync impls for trait compatibility"
+    - "Deterministic seed derivation from Nostr key means counter persistence is CRITICAL for preventing duplicate blinded messages"
+    - "Multi-step wallet operations (Lightning deposits/withdrawals) must survive page refresh via IndexedDB"
+    - "Database has 9 object stores: mints, keysets, keyset_by_id, keys, mint_quotes, melt_quotes, proofs, transactions, keyset_counters"
 
-# Optional: Configure tools and integrations
-# tools:
-#   # Enable GitHub Actions integration
-#   github_actions: true
-#   # Enable AST-based analysis
-#   ast_analysis: true
+# Configure tools and integrations
+tools:
+  # Enable GitHub Actions integration
+  github_actions: true
+  # Enable AST-based analysis
+  ast_analysis: true

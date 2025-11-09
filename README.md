@@ -34,7 +34,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
 - ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
-- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with send/receive, multi-mint support, automatic cleanup of spent proofs, and browser extension signer compatibility
+- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, persistent IndexedDB storage, atomic keyset counter management, and automatic cleanup of spent proofs with browser extension signer compatibility
 - ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
 
 ### User Experience
@@ -76,8 +76,10 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 
 ### Bitcoin & Ecash
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
-  - `cdk` - Core Cashu wallet implementation with mint operations
-  - `cdk-common` - Common types and utilities for Cashu protocol
+  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling
+  - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
+  - Custom IndexedDB implementation of `WalletDatabase` trait for browser persistence
+  - Atomic keyset counter management prevents "Blinded Message already signed" errors
 
 ### Styling & UI
 - **[TailwindCSS 3](https://tailwindcss.com/)** - Utility-first CSS framework
@@ -100,6 +102,11 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Parallel Fetching**: `tokio::join!()` for simultaneous queries
 - **Smart Caching**: 5-minute TTL for profiles, persistent event storage
 - **Outbox Model (NIP-65)**: Fetches content from author's preferred write relays for reliable content discovery
+- **Cashu Wallet Persistence**:
+  - IndexedDB storage for quotes, proofs, keyset counters, and mint cache
+  - Atomic keyset counter increments prevent duplicate blinded messages
+  - Multi-step mint/melt operations survive page refresh
+  - 9 object stores for complete wallet state management
 - **Relay Optimization**:
   - Max latency: 2 seconds (auto-skip slow relays)
   - Subscription verification (ban mismatched events)
@@ -137,6 +144,8 @@ nostrbluerust/
 │   │   ├── cashu_setup_wizard.rs # Cashu wallet setup flow
 │   │   ├── cashu_send_modal.rs # Send ecash modal
 │   │   ├── cashu_receive_modal.rs # Receive ecash modal
+│   │   ├── cashu_receive_lightning_modal.rs # Lightning deposit modal
+│   │   ├── cashu_send_lightning_modal.rs # Lightning withdrawal modal
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
 │   │   ├── client_initializing.rs # Loading animation
@@ -192,7 +201,7 @@ nostrbluerust/
 │   │   ├── voice_messages_store.rs # Voice message playback state
 │   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
 │   │   ├── cashu_wallet.rs # Cashu wallet state and operations (NIP-60)
-│   │   ├── cashu_memory_db.rs # In-memory database for CDK wallet
+│   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
 │   │   └── signer.rs       # Event signing
 │   ├── utils/              # Utility functions
 │   │   ├── nip19.rs        # NIP-19 identifier parsing
