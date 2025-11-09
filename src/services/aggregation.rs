@@ -17,7 +17,7 @@
 /// - Reduces redundant database queries for recently-viewed events
 
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagKind, SingleLetterTag, Alphabet};
+use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagStandard};
 use crate::stores::nostr_client::get_client;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -307,16 +307,8 @@ pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
 fn extract_referenced_event(event: &Event) -> Option<EventId> {
     // Check for 'e' tags (most interactions use this)
     for tag in event.tags.iter() {
-        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)) {
-            if let Some(content) = tag.content() {
-                // Content is tab-separated: event_id\trelay_url\tmarker
-                let parts: Vec<&str> = content.split('\t').collect();
-                if !parts.is_empty() {
-                    if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                        return Some(event_id);
-                    }
-                }
-            }
+        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+            return Some(*event_id);
         }
     }
     None

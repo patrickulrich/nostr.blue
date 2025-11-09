@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet;
+use crate::utils::format_sats_with_separator;
 use nostr_sdk::nips::nip60::TransactionDirection;
 
 #[component]
@@ -106,7 +107,7 @@ pub fn TransactionHistory() -> Element {
                                         class: "text-right flex-shrink-0",
                                         div {
                                             class: "font-bold text-lg {direction_color}",
-                                            "{amount_prefix}{format_sats(item.amount)}"
+                                            "{amount_prefix}{format_sats_with_separator(item.amount)}"
                                         }
                                         div {
                                             class: "text-sm text-muted-foreground",
@@ -121,23 +122,6 @@ pub fn TransactionHistory() -> Element {
             }
         }
     }
-}
-
-/// Format satoshi amount with thousands separator
-fn format_sats(sats: u64) -> String {
-    let s = sats.to_string();
-    let mut result = String::new();
-    let mut count = 0;
-
-    for c in s.chars().rev() {
-        if count > 0 && count % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-        count += 1;
-    }
-
-    result.chars().rev().collect()
 }
 
 /// Format Unix timestamp to human-readable string

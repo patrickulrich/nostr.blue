@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet;
+use crate::utils::format_sats_with_separator;
 
 #[component]
 pub fn WalletBalanceCard(
@@ -11,7 +12,7 @@ pub fn WalletBalanceCard(
     let balance = cashu_wallet::WALLET_BALANCE.read();
 
     // Format balance with thousands separator
-    let formatted_balance = format_sats(*balance);
+    let formatted_balance = format_sats_with_separator(*balance);
 
     rsx! {
         div {
@@ -82,21 +83,4 @@ pub fn WalletBalanceCard(
             }
         }
     }
-}
-
-/// Format satoshi amount with thousands separator
-fn format_sats(sats: u64) -> String {
-    let s = sats.to_string();
-    let mut result = String::new();
-    let mut count = 0;
-
-    for c in s.chars().rev() {
-        if count > 0 && count % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-        count += 1;
-    }
-
-    result.chars().rev().collect()
 }

@@ -23,7 +23,7 @@ pub fn VoiceRecorder(
     let mut state = use_signal(|| RecorderState::Idle);
     let mut current_time = use_signal(|| 0.0);
     let mut waveform_data = use_signal(|| Vec::<u8>::new());
-    let mut mime_type = use_signal(|| String::from("audio/webm")); // Store MIME type
+    let mime_type = use_signal(|| String::from("audio/webm")); // Store MIME type
     let mut is_playing_preview = use_signal(|| false);
     let is_mounted = use_signal(|| true);
     let mut is_stopping = use_signal(|| false);
@@ -494,8 +494,26 @@ async fn setup_media_recorder(
     let _ = js_sys::eval(script)
         .map_err(|e| format!("Failed to setup recorder: {:?}", e))?;
 
-    let recorder = MediaRecorder::new_with_media_stream(&stream)
+    // Create MediaRecorder with MIME type via JavaScript to avoid web-sys limitations
+    let create_recorder_script = format!(
+        r#"
+        (function() {{
+            const mimeType = window.__voiceRecorderSetup.selectedMime;
+            const options = {{ mimeType: mimeType }};
+            window.__voiceRecorderSetup.tempRecorder = new MediaRecorder(arguments[0], options);
+            return window.__voiceRecorderSetup.tempRecorder;
+        }})
+        "#
+    );
+
+    let recorder_js = js_sys::Function::new_with_args(
+        "stream",
+        &create_recorder_script
+    ).call1(&wasm_bindgen::JsValue::NULL, &stream.clone().into())
         .map_err(|e| format!("Failed to create MediaRecorder: {:?}", e))?;
+
+    let recorder: MediaRecorder = recorder_js.dyn_into()
+        .map_err(|_| "Failed to convert to MediaRecorder")?;
 
     // Set up event handlers using JavaScript
     let setup_handlers_script = r#"

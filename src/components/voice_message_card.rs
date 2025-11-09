@@ -99,7 +99,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 let time = audio.current_time();
                 if !time.is_nan() {
                     current_time.set(time);
-                    voice_messages_store::set_current_time(time);
+                    // Only update global state if this card is currently playing
+                    if voice_messages_store::is_playing(&event_id) {
+                        voice_messages_store::set_current_time(time);
+                    }
                 }
             }
         }
@@ -112,7 +115,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 let dur = audio.duration();
                 if !dur.is_nan() {
                     duration.set(dur);
-                    voice_messages_store::set_duration(dur);
+                    // Only update global state if this card is currently playing
+                    if voice_messages_store::is_playing(&event_id) {
+                        voice_messages_store::set_duration(dur);
+                    }
                 }
                 is_loading.set(false);
             }

@@ -3,6 +3,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, ShareModal, icons::MessageCircleIcon};
 use crate::utils::build_thread_tree;
+use crate::utils::format_sats_compact;
 use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -1062,7 +1063,7 @@ fn VideoInfo(
                                     if *zap_amount_sats.read() > 0 {
                                         span {
                                             class: "text-xs mt-1 font-semibold text-yellow-400",
-                                            {format_sats(*zap_amount_sats.read())}
+                                            {format_sats_compact(*zap_amount_sats.read())}
                                         }
                                     }
                                 }
@@ -1352,7 +1353,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                 }
                 span {
                     if *zap_amount_sats.read() > 0 {
-                        "Zap ({format_sats(*zap_amount_sats.read())})"
+                        "Zap ({format_sats_compact(*zap_amount_sats.read())})"
                     } else {
                         "Zap"
                     }
@@ -1525,17 +1526,6 @@ fn format_count(count: usize) -> String {
         format!("{}k", count / 1_000)
     } else {
         count.to_string()
-    }
-}
-
-// Format sats with k/M suffixes
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{}M", sats / 1_000_000)
-    } else if sats >= 1_000 {
-        format!("{}k", sats / 1_000)
-    } else {
-        sats.to_string()
     }
 }
 

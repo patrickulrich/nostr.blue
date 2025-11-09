@@ -41,15 +41,32 @@ pub fn CashuReceiveLightningModal(
                 let mint_url = q.mint_url.clone();
 
                 is_polling.set(true);
+
+                // Clone reactive handles into the async task to observe cancellation
+                let is_polling_clone = is_polling.clone();
+                let quote_info_clone = quote_info.clone();
+
                 spawn(async move {
                     let mut attempts = 0;
                     let max_attempts = 300; // 10 minutes at 2-second intervals
 
                     loop {
+                        // Check for cancellation before each iteration
+                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                            log::info!("Polling cancelled, modal was closed");
+                            break;
+                        }
+
                         if attempts >= max_attempts {
                             error_message.set(Some("Invoice expired. Please try again.".to_string()));
                             is_polling.set(false);
                             quote_info.set(None);
+                            break;
+                        }
+
+                        // Check for cancellation before network call
+                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                            log::info!("Polling cancelled before network call");
                             break;
                         }
 
@@ -62,12 +79,24 @@ pub fn CashuReceiveLightningModal(
                                 log::info!("Payment detected, waiting 2 seconds before minting...");
                                 gloo_timers::future::TimeoutFuture::new(2000).await;
 
+                                // Check for cancellation before minting
+                                if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                    log::info!("Polling cancelled before minting");
+                                    break;
+                                }
+
                                 // Mint tokens
                                 match cashu_wallet::mint_tokens_from_quote(
                                     mint_url.clone(),
                                     quote_id.clone()
                                 ).await {
                                     Ok(amount) => {
+                                        // Re-check flags before updating state
+                                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                            log::info!("Polling cancelled after minting, not updating state");
+                                            break;
+                                        }
+
                                         success_message.set(Some(format!(
                                             "Successfully received {} sats!", amount
                                         )));
@@ -109,6 +138,13 @@ pub fn CashuReceiveLightningModal(
                         }
 
                         attempts += 1;
+
+                        // Check for cancellation before sleeping
+                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                            log::info!("Polling cancelled before sleep");
+                            break;
+                        }
+
                         gloo_timers::future::TimeoutFuture::new(2000).await;
                     }
                 });

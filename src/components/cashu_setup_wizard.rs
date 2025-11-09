@@ -56,10 +56,12 @@ pub fn CashuSetupWizard(
                         class: "px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition",
                         onclick: move |_| {
                             creating.set(true);
+                            error_msg.set(None); // Clear any previous error before starting
                             spawn(async move {
                                 match cashu_wallet::create_wallet(vec![DEFAULT_MINT_URL.to_string()]).await {
                                     Ok(_) => {
                                         log::info!("Wallet created successfully");
+                                        error_msg.set(None); // Clear error on success
                                         creating.set(false);
                                         on_complete.call(());
                                     }

@@ -887,7 +887,7 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     let token = Token::from_str(&token_to_parse)
         .map_err(|e| {
             log::error!("Token parse error: {:?}", e);
-            log::error!("Full token (length {}): {}", token_to_parse.len(), token_to_parse);
+            log::error!("Token length: {}, base64 part length: {}", token_to_parse.len(), base64_part.len());
             let error_str = e.to_string();
 
             // Provide helpful error messages
@@ -921,8 +921,9 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
 
     // Receive token (contacts mint to swap proofs) with auto-cleanup on spent errors
+    // Use the corrected/padded token to ensure padding fix is preserved
     let amount_received = match wallet.receive(
-        &token_string,
+        &token_to_parse,
         ReceiveOptions::default()
     ).await {
         Ok(amount) => amount,

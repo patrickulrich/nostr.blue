@@ -1,6 +1,234 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, TokenData};
+use crate::utils::format_sats_with_separator;
 use std::collections::HashMap;
+
+#[component]
+fn MintRow(mint_url: String, tokens_for_mint: Vec<TokenData>, is_expanded: bool, on_toggle: EventHandler<()>) -> Element {
+    let mut is_cleaning = use_signal(|| false);
+    let mut cleanup_message = use_signal(|| Option::<String>::None);
+    let mut is_removing = use_signal(|| false);
+    let mut show_confirm = use_signal(|| false);
+
+    // Calculate total for this mint
+    let total_balance: u64 = tokens_for_mint.iter()
+        .flat_map(|t| &t.proofs)
+        .map(|p| p.amount)
+        .sum();
+
+    let proof_count: usize = tokens_for_mint.iter()
+        .map(|t| t.proofs.len())
+        .sum();
+
+    rsx! {
+        div {
+            key: "{mint_url}",
+            class: "bg-card border border-border rounded-lg overflow-hidden",
+
+            // Mint header (clickable to expand/collapse)
+            button {
+                class: "w-full px-4 py-3 flex items-center justify-between hover:bg-accent transition text-left",
+                onclick: move |_| on_toggle.call(()),
+
+                div {
+                    class: "flex-1 min-w-0",
+                    div {
+                        class: "font-semibold text-sm truncate",
+                        title: "{mint_url}",
+                        "{shorten_mint_url(&mint_url)}"
+                    }
+                    div {
+                        class: "text-xs text-muted-foreground mt-1",
+                        "{proof_count} proofs"
+                    }
+                }
+
+                div {
+                    class: "flex items-center gap-3",
+                    div {
+                        class: "text-right",
+                        div {
+                            class: "font-bold",
+                            "{format_sats_with_separator(total_balance)} sats"
+                        }
+                    }
+                    div {
+                        class: "text-muted-foreground",
+                        if is_expanded { "▼" } else { "▶" }
+                    }
+                }
+            }
+
+            // Token details (expanded)
+            if is_expanded {
+                div {
+                    class: "border-t border-border",
+                    for (i, token) in tokens_for_mint.iter().enumerate() {
+                        div {
+                            key: "{token.event_id}",
+                            class: if i > 0 { "border-t border-border/50 px-4 py-3" } else { "px-4 py-3" },
+
+                            div {
+                                class: "flex items-start justify-between mb-2",
+                                div {
+                                    class: "text-xs text-muted-foreground",
+                                    "Token Event"
+                                }
+                                div {
+                                    class: "text-xs font-mono text-muted-foreground",
+                                    "{&token.event_id[..12]}..."
+                                }
+                            }
+
+                            // List of proofs
+                            div {
+                                class: "space-y-2",
+                                for (proof_idx, proof) in token.proofs.iter().enumerate() {
+                                    div {
+                                        key: "{proof_idx}",
+                                        class: "bg-background/50 rounded p-2 text-xs",
+                                        div {
+                                            class: "flex justify-between items-center",
+                                            div {
+                                                class: "font-mono text-muted-foreground",
+                                                "Proof #{proof_idx + 1}"
+                                            }
+                                            div {
+                                                class: "font-bold",
+                                                "{proof.amount} sats"
+                                            }
+                                        }
+                                        div {
+                                            class: "mt-1 text-muted-foreground truncate",
+                                            "ID: {&proof.id}"
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Token metadata
+                            div {
+                                class: "mt-3 text-xs text-muted-foreground",
+                                "Total: {token.proofs.iter().map(|p| p.amount).sum::<u64>()} sats • {token.proofs.len()} proofs"
+                            }
+                        }
+                    }
+
+                    // Mint actions
+                    div {
+                        class: "px-4 py-3 border-t border-border bg-background/30 flex gap-2",
+
+                        // Cleanup button
+                        div {
+                            class: "flex-1",
+                            button {
+                                class: if *is_cleaning.read() {
+                                    "w-full px-3 py-2 text-sm bg-yellow-500 text-white rounded-lg opacity-50 cursor-not-allowed"
+                                } else {
+                                    "w-full px-3 py-2 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition"
+                                },
+                                disabled: *is_cleaning.read(),
+                                onclick: {
+                                    let mint_url_clone = mint_url.clone();
+                                    move |_| {
+                                        let mint_url = mint_url_clone.clone();
+                                        is_cleaning.set(true);
+                                        cleanup_message.set(None);
+                                        spawn(async move {
+                                            match cashu_wallet::cleanup_spent_proofs(mint_url).await {
+                                                Ok((count, amount)) if count > 0 => {
+                                                    cleanup_message.set(Some(format!("Cleaned {} proofs ({} sats)", count, amount)));
+                                                    is_cleaning.set(false);
+                                                }
+                                                Ok(_) => {
+                                                    cleanup_message.set(Some("No spent proofs found".to_string()));
+                                                    is_cleaning.set(false);
+                                                }
+                                                Err(e) => {
+                                                    cleanup_message.set(Some(format!("Error: {}", e)));
+                                                    is_cleaning.set(false);
+                                                }
+                                            }
+                                        });
+                                    }
+                                },
+                                if *is_cleaning.read() {
+                                    "🧹 Cleaning..."
+                                } else {
+                                    "🧹 Cleanup Spent"
+                                }
+                            }
+                            if let Some(msg) = cleanup_message.read().as_ref() {
+                                div {
+                                    class: "mt-1 text-xs text-center text-muted-foreground",
+                                    "{msg}"
+                                }
+                            }
+                        }
+
+                        // Remove mint button
+                        div {
+                            class: "flex-1",
+                            if *show_confirm.read() {
+                                div {
+                                    class: "flex flex-col gap-2",
+                                    p {
+                                        class: "text-xs text-destructive text-center",
+                                        "Remove all tokens from this mint?"
+                                    }
+                                    div {
+                                        class: "flex gap-2",
+                                        button {
+                                            class: "flex-1 px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
+                                            onclick: {
+                                                let mint_url_clone = mint_url.clone();
+                                                move |_| {
+                                                    let mint_url = mint_url_clone.clone();
+                                                    is_removing.set(true);
+                                                    spawn(async move {
+                                                        match cashu_wallet::remove_mint(mint_url).await {
+                                                            Ok((count, amount)) => {
+                                                                log::info!("Removed mint: {} events, {} sats", count, amount);
+                                                                is_removing.set(false);
+                                                                show_confirm.set(false);
+                                                            }
+                                                            Err(e) => {
+                                                                log::error!("Failed to remove mint: {}", e);
+                                                                is_removing.set(false);
+                                                                show_confirm.set(false);
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            },
+                                            disabled: *is_removing.read(),
+                                            if *is_removing.read() {
+                                                "Removing..."
+                                            } else {
+                                                "Yes, Remove"
+                                            }
+                                        }
+                                        button {
+                                            class: "flex-1 px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded-lg transition",
+                                            onclick: move |_| show_confirm.set(false),
+                                            "Cancel"
+                                        }
+                                    }
+                                }
+                            } else {
+                                button {
+                                    class: "w-full px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
+                                    onclick: move |_| show_confirm.set(true),
+                                    "🗑️ Remove Mint"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[component]
 pub fn TokenList() -> Element {
@@ -51,241 +279,20 @@ pub fn TokenList() -> Element {
                 {
                     let mint_url = mint_url.clone();
                     let is_expanded = expanded_mints.read().contains(&mint_url);
-
-                    // Calculate total for this mint
-                    let total_balance: u64 = tokens_for_mint.iter()
-                        .flat_map(|t| &t.proofs)
-                        .map(|p| p.amount)
-                        .sum();
-
-                    let proof_count: usize = tokens_for_mint.iter()
-                        .map(|t| t.proofs.len())
-                        .sum();
+                    let tokens_vec: Vec<TokenData> = tokens_for_mint.iter().map(|t| (*t).clone()).collect();
 
                     rsx! {
-                        div {
+                        MintRow {
                             key: "{mint_url}",
-                            class: "bg-card border border-border rounded-lg overflow-hidden",
-
-                            // Mint header (clickable to expand/collapse)
-                            button {
-                                class: "w-full px-4 py-3 flex items-center justify-between hover:bg-accent transition text-left",
-                                onclick: {
-                                    let mint_url_clone = mint_url.clone();
-                                    move |_| {
-                                        let mut expanded = expanded_mints.write();
-                                        if expanded.contains(&mint_url_clone) {
-                                            expanded.remove(&mint_url_clone);
-                                        } else {
-                                            expanded.insert(mint_url_clone.clone());
-                                        }
-                                    }
-                                },
-
-                                div {
-                                    class: "flex-1 min-w-0",
-                                    div {
-                                        class: "font-semibold text-sm truncate",
-                                        title: "{mint_url}",
-                                        "{shorten_mint_url(&mint_url)}"
-                                    }
-                                    div {
-                                        class: "text-xs text-muted-foreground mt-1",
-                                        "{proof_count} proofs"
-                                    }
-                                }
-
-                                div {
-                                    class: "flex items-center gap-3",
-                                    div {
-                                        class: "text-right",
-                                        div {
-                                            class: "font-bold",
-                                            "{format_sats(total_balance)} sats"
-                                        }
-                                    }
-                                    div {
-                                        class: "text-muted-foreground",
-                                        if is_expanded { "▼" } else { "▶" }
-                                    }
-                                }
-                            }
-
-                            // Token details (expanded)
-                            if is_expanded {
-                                div {
-                                    class: "border-t border-border",
-                                    for (i, token) in tokens_for_mint.iter().enumerate() {
-                                        div {
-                                            key: "{token.event_id}",
-                                            class: if i > 0 { "border-t border-border/50 px-4 py-3" } else { "px-4 py-3" },
-
-                                            div {
-                                                class: "flex items-start justify-between mb-2",
-                                                div {
-                                                    class: "text-xs text-muted-foreground",
-                                                    "Token Event"
-                                                }
-                                                div {
-                                                    class: "text-xs font-mono text-muted-foreground",
-                                                    "{&token.event_id[..12]}..."
-                                                }
-                                            }
-
-                                            // List of proofs
-                                            div {
-                                                class: "space-y-2",
-                                                for (proof_idx, proof) in token.proofs.iter().enumerate() {
-                                                    div {
-                                                        key: "{proof_idx}",
-                                                        class: "bg-background/50 rounded p-2 text-xs",
-                                                        div {
-                                                            class: "flex justify-between items-center",
-                                                            div {
-                                                                class: "font-mono text-muted-foreground",
-                                                                "Proof #{proof_idx + 1}"
-                                                            }
-                                                            div {
-                                                                class: "font-bold",
-                                                                "{proof.amount} sats"
-                                                            }
-                                                        }
-                                                        div {
-                                                            class: "mt-1 text-muted-foreground truncate",
-                                                            "ID: {&proof.id}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            // Token metadata
-                                            div {
-                                                class: "mt-3 text-xs text-muted-foreground",
-                                                "Total: {token.proofs.iter().map(|p| p.amount).sum::<u64>()} sats • {token.proofs.len()} proofs"
-                                            }
-                                        }
-                                    }
-
-                                    // Mint actions
-                                    div {
-                                        class: "px-4 py-3 border-t border-border bg-background/30 flex gap-2",
-
-                                        // Cleanup button
-                                        {
-                                            let mint_url_clone = mint_url.clone();
-                                            let mut is_cleaning = use_signal(|| false);
-                                            let mut cleanup_message = use_signal(|| Option::<String>::None);
-
-                                            rsx! {
-                                                div {
-                                                    class: "flex-1",
-                                                    button {
-                                                        class: if *is_cleaning.read() {
-                                                            "w-full px-3 py-2 text-sm bg-yellow-500 text-white rounded-lg opacity-50 cursor-not-allowed"
-                                                        } else {
-                                                            "w-full px-3 py-2 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition"
-                                                        },
-                                                        disabled: *is_cleaning.read(),
-                                                        onclick: move |_| {
-                                                            let mint_url = mint_url_clone.clone();
-                                                            is_cleaning.set(true);
-                                                            cleanup_message.set(None);
-                                                            spawn(async move {
-                                                                match cashu_wallet::cleanup_spent_proofs(mint_url).await {
-                                                                    Ok((count, amount)) if count > 0 => {
-                                                                        cleanup_message.set(Some(format!("Cleaned {} proofs ({} sats)", count, amount)));
-                                                                        is_cleaning.set(false);
-                                                                    }
-                                                                    Ok(_) => {
-                                                                        cleanup_message.set(Some("No spent proofs found".to_string()));
-                                                                        is_cleaning.set(false);
-                                                                    }
-                                                                    Err(e) => {
-                                                                        cleanup_message.set(Some(format!("Error: {}", e)));
-                                                                        is_cleaning.set(false);
-                                                                    }
-                                                                }
-                                                            });
-                                                        },
-                                                        if *is_cleaning.read() {
-                                                            "🧹 Cleaning..."
-                                                        } else {
-                                                            "🧹 Cleanup Spent"
-                                                        }
-                                                    }
-                                                    if let Some(msg) = cleanup_message.read().as_ref() {
-                                                        div {
-                                                            class: "mt-1 text-xs text-center text-muted-foreground",
-                                                            "{msg}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Remove mint button
-                                        {
-                                            let mint_url_clone = mint_url.clone();
-                                            let mut is_removing = use_signal(|| false);
-                                            let mut show_confirm = use_signal(|| false);
-
-                                            rsx! {
-                                                div {
-                                                    class: "flex-1",
-                                                    if *show_confirm.read() {
-                                                        div {
-                                                            class: "flex flex-col gap-2",
-                                                            p {
-                                                                class: "text-xs text-destructive text-center",
-                                                                "Remove all tokens from this mint?"
-                                                            }
-                                                            div {
-                                                                class: "flex gap-2",
-                                                                button {
-                                                                    class: "flex-1 px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
-                                                                    onclick: move |_| {
-                                                                        let mint_url = mint_url_clone.clone();
-                                                                        is_removing.set(true);
-                                                                        spawn(async move {
-                                                                            match cashu_wallet::remove_mint(mint_url).await {
-                                                                                Ok((count, amount)) => {
-                                                                                    log::info!("Removed mint: {} events, {} sats", count, amount);
-                                                                                    is_removing.set(false);
-                                                                                    show_confirm.set(false);
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    log::error!("Failed to remove mint: {}", e);
-                                                                                    is_removing.set(false);
-                                                                                    show_confirm.set(false);
-                                                                                }
-                                                                            }
-                                                                        });
-                                                                    },
-                                                                    disabled: *is_removing.read(),
-                                                                    if *is_removing.read() {
-                                                                        "Removing..."
-                                                                    } else {
-                                                                        "Yes, Remove"
-                                                                    }
-                                                                }
-                                                                button {
-                                                                    class: "flex-1 px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded-lg transition",
-                                                                    onclick: move |_| show_confirm.set(false),
-                                                                    "Cancel"
-                                                                }
-                                                            }
-                                                        }
-                                                    } else {
-                                                        button {
-                                                            class: "w-full px-3 py-2 text-sm bg-destructive hover:bg-destructive/80 text-white rounded-lg transition",
-                                                            onclick: move |_| show_confirm.set(true),
-                                                            "🗑️ Remove Mint"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                            mint_url: mint_url.clone(),
+                            tokens_for_mint: tokens_vec,
+                            is_expanded: is_expanded,
+                            on_toggle: move |_| {
+                                let mut expanded = expanded_mints.write();
+                                if expanded.contains(&mint_url) {
+                                    expanded.remove(&mint_url);
+                                } else {
+                                    expanded.insert(mint_url.clone());
                                 }
                             }
                         }
@@ -294,23 +301,6 @@ pub fn TokenList() -> Element {
             }
         }
     }
-}
-
-/// Format satoshi amount with thousands separator
-fn format_sats(sats: u64) -> String {
-    let s = sats.to_string();
-    let mut result = String::new();
-    let mut count = 0;
-
-    for c in s.chars().rev() {
-        if count > 0 && count % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-        count += 1;
-    }
-
-    result.chars().rev().collect()
 }
 
 /// Shorten mint URL for display

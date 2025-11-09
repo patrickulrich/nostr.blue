@@ -8,6 +8,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::utils::format_sats_compact;
 use std::time::Duration;
 
 #[component]
@@ -537,7 +538,7 @@ pub fn NoteCard(
                                             {
                                                 let amount = *zap_amount_sats.read();
                                                 if amount > 0 {
-                                                    format_sats(amount)
+                                                    format_sats_compact(amount)
                                                 } else {
                                                     "".to_string()
                                                 }
@@ -650,17 +651,6 @@ fn format_timestamp(unix_timestamp: u64) -> String {
         3600..=86399 => format!("{}h", diff / 3600),
         86400..=604799 => format!("{}d", diff / 86400),
         _ => format!("{}w", diff / 604800),
-    }
-}
-
-// Helper function to format sats amounts
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{}M", sats / 1_000_000)
-    } else if sats >= 1_000 {
-        format!("{}k", sats / 1_000)
-    } else {
-        sats.to_string()
     }
 }
 
