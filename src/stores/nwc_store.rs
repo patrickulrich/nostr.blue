@@ -131,7 +131,11 @@ pub async fn connect_nwc(uri_string: &str) -> Result<(), String> {
 
     // Parse the NWC URI
     let uri = NostrWalletConnectURI::from_str(uri_string.trim())
-        .map_err(|e| format!("Invalid NWC URI: {}", e))?;
+        .map_err(|e| {
+            let error_msg = format!("Invalid NWC URI: {}", e);
+            *NWC_STATUS.write() = ConnectionStatus::Error(error_msg.clone());
+            error_msg
+        })?;
 
     // Create NWC client
     let nwc = NWC::new(uri);
