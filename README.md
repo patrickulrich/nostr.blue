@@ -31,6 +31,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
 - ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
 - ✅ **Videos (NIP-71)** - Video event support with playback controls and comments
+- ✅ **Livestreaming (NIP-53)** - Live video streaming with HLS support, chat integration, status indicators (live/upcoming/ended), viewer counts, and dual-feed layout (Following + Global)
 - ✅ **Voice Messages (NIP-A0)** - Short audio messages up to 60 seconds with waveform visualization and threaded replies
 - ✅ **Web Bookmarks (NIP-B0)** - Pocket-inspired bookmark manager with auto-metadata fetching, tag filtering, favorites, and search
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
@@ -140,6 +141,10 @@ nostrbluerust/
 │   │   ├── webbookmark_modal.rs # Add/edit bookmark modal (NIP-B0)
 │   │   ├── zap_modal.rs    # Lightning zap interface
 │   │   ├── share_modal.rs  # Video sharing modal
+│   │   ├── live_stream_card.rs # Livestream card (NIP-53)
+│   │   ├── mini_live_stream_card.rs # Compact livestream card (NIP-53)
+│   │   ├── live_stream_player.rs # HLS video player for livestreams
+│   │   ├── live_chat.rs    # Livestream chat component (NIP-53)
 │   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
 │   │   ├── threaded_comment.rs # Comment threads
 │   │   ├── music_player.rs # Wavlake music player (NIP-38)
@@ -166,6 +171,10 @@ nostrbluerust/
 │   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
+│   │   ├── videos_live.rs  # Livestream feed (NIP-53)
+│   │   ├── videos_live_tag.rs # Tagged livestream feed (NIP-53)
+│   │   ├── live_stream_detail.rs # Livestream detail page (NIP-53)
+│   │   ├── live_stream_new.rs # Create new livestream (NIP-53)
 │   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
 │   │   ├── polls.rs        # Polls feed (NIP-88)
 │   │   ├── poll_view.rs    # Individual poll view (NIP-88)
@@ -333,6 +342,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
 | [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (relay-based search, GIF search) | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
+| [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live activities (livestreaming) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu wallet (ecash) | ✅ |
