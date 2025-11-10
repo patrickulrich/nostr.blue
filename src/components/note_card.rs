@@ -8,6 +8,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::utils::format_sats_compact;
 use std::time::Duration;
 
 #[component]
@@ -52,22 +53,20 @@ pub fn NoteCard(
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // Initialize counts from precomputed data if available (batch optimization)
-    if let Some(ref counts) = precomputed_counts {
-        reply_count.set(counts.replies.min(500));
-        like_count.set(counts.likes.min(500));
-        repost_count.set(counts.reposts.min(500));
-        zap_amount_sats.set(counts.zap_amount_sats);
-    }
-    let has_precomputed = precomputed_counts.is_some();
+    use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
+        if let Some(counts) = counts_opt {
+            reply_count.set(counts.replies.min(500));
+            like_count.set(counts.likes.min(500));
+            repost_count.set(counts.reposts.min(500));
+            zap_amount_sats.set(counts.zap_amount_sats);
+        }
+    }));
 
     // Fetch counts individually if not precomputed (fallback for single-note views)
-    // Skip if we have precomputed counts from batch aggregation
-    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        if has_precomputed {
-            return; // Skip individual fetch if we have batch data
-        }
-
+    // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
+    use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
         spawn(async move {
+            let has_precomputed = counts_opt.is_some();
             let client = match get_client() {
                 Some(c) => c,
                 None => return,
@@ -195,11 +194,15 @@ pub fn NoteCard(
                     }
                 }
 
-                // Update all counts and states at once
-                reply_count.set(replies.min(500));
-                like_count.set(likes.min(500));
-                repost_count.set(reposts.min(500));
-                zap_amount_sats.set(total_sats);
+                // Update counts only if we don't have precomputed data
+                if !has_precomputed {
+                    reply_count.set(replies.min(500));
+                    like_count.set(likes.min(500));
+                    repost_count.set(reposts.min(500));
+                    zap_amount_sats.set(total_sats);
+                }
+
+                // Always update user interaction flags
                 is_liked.set(user_has_liked);
                 is_reposted.set(user_has_reposted);
                 is_zapped.set(user_has_zapped);
@@ -537,7 +540,7 @@ pub fn NoteCard(
                                             {
                                                 let amount = *zap_amount_sats.read();
                                                 if amount > 0 {
-                                                    format_sats(amount)
+                                                    format_sats_compact(amount)
                                                 } else {
                                                     "".to_string()
                                                 }
@@ -650,17 +653,6 @@ fn format_timestamp(unix_timestamp: u64) -> String {
         3600..=86399 => format!("{}h", diff / 3600),
         86400..=604799 => format!("{}d", diff / 86400),
         _ => format!("{}w", diff / 604800),
-    }
-}
-
-// Helper function to format sats amounts
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{}M", sats / 1_000_000)
-    } else if sats >= 1_000 {
-        format!("{}k", sats / 1_000)
-    } else {
-        sats.to_string()
     }
 }
 

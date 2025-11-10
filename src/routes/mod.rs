@@ -28,6 +28,7 @@ pub mod photos;
 pub mod photo_detail;
 pub mod voicemessages;
 pub mod voice_message_new;
+pub mod cashu_wallet;
 pub mod terms;
 pub mod privacy;
 pub mod cookies;
@@ -53,6 +54,7 @@ use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
 use voice_message_new::VoiceMessageNew;
+use cashu_wallet::CashuWallet;
 use note_new::NoteNew;
 use article_new::ArticleNew;
 use photo_new::PhotoNew;
@@ -126,6 +128,9 @@ pub enum Route {
         #[route("/voicemessages/new")]
         VoiceMessageNew {},
 
+        #[route("/cashuwallet")]
+        CashuWallet {},
+
         #[route("/notes/new")]
         NoteNew {},
 
@@ -184,9 +189,10 @@ fn Layout() -> Element {
     let current_route = use_route::<Route>();
     let navigator = navigator();
 
-    // Check if we're on the DMs or Videos pages (hide right sidebar)
+    // Check if we're on the DMs, Videos, or Wallet pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. });
+    let is_wallet_page = matches!(current_route, Route::CashuWallet {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -367,6 +373,31 @@ fn Layout() -> Element {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
+                                            if auth.is_authenticated {
+                                                Link {
+                                                    to: Route::CashuWallet {},
+                                                    onclick: move |_| more_menu_open.set(false),
+                                                    class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                    svg {
+                                                        class: "w-5 h-5",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        width: "24",
+                                                        height: "24",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                        path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                        path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                    }
+                                                    span {
+                                                        "Wallet"
+                                                    }
+                                                }
+                                            }
                                             Link {
                                                 to: Route::VoiceMessages {},
                                                 onclick: move |_| more_menu_open.set(false),
@@ -653,6 +684,60 @@ fn Layout() -> Element {
                                                 class: "absolute left-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                                 div {
                                                     class: "flex flex-col",
+                                                    if auth.is_authenticated {
+                                                        Link {
+                                                            to: Route::CashuWallet {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                                path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                                path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                            }
+                                                            span {
+                                                                "Wallet"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::VoiceMessages {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                                                                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                                                                line { x1: "12", x2: "12", y1: "19", y2: "22" }
+                                                            }
+                                                            span {
+                                                                "Voice Messages"
+                                                            }
+                                                        }
+                                                    }
                                                     a {
                                                         href: "https://nostrcal.com",
                                                         target: "_blank",
@@ -681,7 +766,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_creation_page {
+                    class: if is_dms_page || is_videos_page || is_wallet_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -711,8 +796,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs and Videos pages
-                if !is_dms_page && !is_videos_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, and Wallet pages
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -800,6 +885,7 @@ fn NavLink(
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
+        (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
         _ => false,
