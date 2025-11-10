@@ -357,6 +357,42 @@ impl WalletDatabase for IndexedDbDatabase {
         let old_url_str = old_mint_url.to_string();
         let new_url_str = new_mint_url.to_string();
 
+        // Guard: Check if destination mint_url already exists in any keyed stores
+        // This prevents accidentally overwriting existing mint data
+        {
+            let new_key = JsValue::from_str(&new_url_str);
+
+            // Check STORE_MINTS
+            let mints_store = tx.object_store(STORE_MINTS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+            if let Some(_) = mints_store.get(&new_key)
+                .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+                .await
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                return Err(Self::make_error(format!(
+                    "Cannot migrate: destination mint URL {} already exists in STORE_MINTS. \
+                    This would overwrite existing mint data.",
+                    new_url_str
+                )));
+            }
+
+            // Check STORE_KEYSETS
+            let keysets_store = tx.object_store(STORE_KEYSETS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+            if let Some(_) = keysets_store.get(&new_key)
+                .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+                .await
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                return Err(Self::make_error(format!(
+                    "Cannot migrate: destination mint URL {} already exists in STORE_KEYSETS. \
+                    This would overwrite existing keyset data.",
+                    new_url_str
+                )));
+            }
+
+            log::debug!("Destination mint URL validation passed - no existing data will be overwritten");
+        }
+
         // 1. Migrate STORE_MINTS
         {
             let store = tx.object_store(STORE_MINTS)
