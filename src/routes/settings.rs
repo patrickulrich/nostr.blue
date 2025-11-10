@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata};
+use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata, nwc_store};
+use crate::components::NwcSetupModal;
 use crate::routes::Route;
 use nostr_sdk::ToBech32;
 use gloo_storage::Storage;
@@ -44,6 +45,11 @@ pub fn Settings() -> Element {
 
     let mut new_server_input = use_signal(|| String::new());
     let mut server_error = use_signal(|| None::<String>);
+
+    // NWC state
+    let mut show_nwc_modal = use_signal(|| false);
+    let nwc_status = nwc_store::NWC_STATUS.read().clone();
+    let nwc_balance = nwc_store::NWC_BALANCE.read().clone();
 
     // Load settings from Nostr on mount
     use_effect(move || {
@@ -458,6 +464,260 @@ pub fn Settings() -> Element {
                 }
             }
 
+            // NWC Section
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h3 {
+                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "⚡ Nostr Wallet Connect"
+                    }
+                    span {
+                        class: "text-xs text-gray-500 dark:text-gray-400",
+                        "NIP-47"
+                    }
+                }
+
+                p {
+                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Connect your lightning wallet to enable instant zaps and payments."
+                }
+
+                // Connection status
+                match &nwc_status {
+                    nwc_store::ConnectionStatus::Connected => {
+                        rsx! {
+                            div {
+                                class: "space-y-4",
+
+                                // Wallet info
+                                div {
+                                    class: "p-4 bg-green-50 dark:bg-green-900/20 border border-green-200
+                                            dark:border-green-800 rounded-lg",
+                                    div {
+                                        class: "flex items-center gap-2 mb-2",
+                                        span {
+                                            class: "text-sm font-medium text-green-800 dark:text-green-200",
+                                            "✓ Wallet Connected"
+                                        }
+                                    }
+
+                                    // Balance display
+                                    if let Some(balance_msats) = nwc_balance {
+                                        div {
+                                            class: "flex items-center justify-between",
+                                            span {
+                                                class: "text-xs text-gray-600 dark:text-gray-400",
+                                                "Balance:"
+                                            }
+                                            span {
+                                                class: "text-sm font-mono text-gray-900 dark:text-white",
+                                                {format!("{} sats", balance_msats / 1000)}
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Action buttons
+                                div {
+                                    class: "flex gap-3",
+                                    button {
+                                        class: "px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700
+                                                text-gray-700 dark:text-gray-300 rounded-lg
+                                                hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors",
+                                        onclick: move |_| {
+                                            spawn(async move {
+                                                let _ = nwc_store::refresh_balance().await;
+                                            });
+                                        },
+                                        "Refresh Balance"
+                                    }
+                                    button {
+                                        class: "px-4 py-2 text-sm bg-red-100 dark:bg-red-900/30
+                                                text-red-700 dark:text-red-300 rounded-lg
+                                                hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors",
+                                        onclick: move |_| {
+                                            nwc_store::disconnect_nwc();
+                                        },
+                                        "Disconnect"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    nwc_store::ConnectionStatus::Connecting => {
+                        rsx! {
+                            div {
+                                class: "p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200
+                                        dark:border-blue-800 rounded-lg",
+                                p {
+                                    class: "text-sm text-blue-800 dark:text-blue-200",
+                                    "Connecting to wallet..."
+                                }
+                            }
+                        }
+                    },
+                    nwc_store::ConnectionStatus::Error(error) => {
+                        rsx! {
+                            div {
+                                class: "space-y-4",
+                                div {
+                                    class: "p-4 bg-red-50 dark:bg-red-900/20 border border-red-200
+                                            dark:border-red-800 rounded-lg",
+                                    p {
+                                        class: "text-sm text-red-800 dark:text-red-200",
+                                        "Connection error: {error}"
+                                    }
+                                }
+                                button {
+                                    class: "px-4 py-2 text-sm bg-purple-600 text-white rounded-lg
+                                            hover:bg-purple-700 transition-colors",
+                                    onclick: move |_| show_nwc_modal.set(true),
+                                    "Connect Wallet"
+                                }
+                            }
+                        }
+                    },
+                    nwc_store::ConnectionStatus::Disconnected => {
+                        rsx! {
+                            button {
+                                class: "px-4 py-2 text-sm bg-purple-600 text-white rounded-lg
+                                        hover:bg-purple-700 transition-colors",
+                                onclick: move |_| show_nwc_modal.set(true),
+                                "Connect Wallet"
+                            }
+                        }
+                    }
+                }
+
+                // Payment Method Preference (shown when NWC is connected)
+                if matches!(nwc_status, nwc_store::ConnectionStatus::Connected) {
+                    div {
+                        class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
+                        h4 {
+                            class: "text-sm font-medium text-gray-900 dark:text-white mb-3",
+                            "Payment Method Preference"
+                        }
+                        p {
+                            class: "text-xs text-gray-600 dark:text-gray-400 mb-3",
+                            "Choose how you want to pay when zapping content"
+                        }
+                        div {
+                            class: "space-y-2",
+
+                            // NWC First
+                            label {
+                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+                                input {
+                                    r#type: "radio",
+                                    name: "payment_method",
+                                    value: "nwc_first",
+                                    checked: settings_store::SETTINGS.read().payment_method_preference == "nwc_first",
+                                    onchange: move |_| {
+                                        spawn(async move {
+                                            settings_store::update_payment_method_preference("nwc_first".to_string()).await;
+                                        });
+                                    }
+                                }
+                                div {
+                                    div {
+                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "NWC First (Recommended)"
+                                    }
+                                    p {
+                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        "Try NWC, fallback to WebLN, then show invoice"
+                                    }
+                                }
+                            }
+
+                            // WebLN First
+                            label {
+                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+                                input {
+                                    r#type: "radio",
+                                    name: "payment_method",
+                                    value: "webln_first",
+                                    checked: settings_store::SETTINGS.read().payment_method_preference == "webln_first",
+                                    onchange: move |_| {
+                                        spawn(async move {
+                                            settings_store::update_payment_method_preference("webln_first".to_string()).await;
+                                        });
+                                    }
+                                }
+                                div {
+                                    div {
+                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "WebLN First"
+                                    }
+                                    p {
+                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        "Try WebLN extension, fallback to NWC, then show invoice"
+                                    }
+                                }
+                            }
+
+                            // Always Ask
+                            label {
+                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+                                input {
+                                    r#type: "radio",
+                                    name: "payment_method",
+                                    value: "always_ask",
+                                    checked: settings_store::SETTINGS.read().payment_method_preference == "always_ask",
+                                    onchange: move |_| {
+                                        spawn(async move {
+                                            settings_store::update_payment_method_preference("always_ask".to_string()).await;
+                                        });
+                                    }
+                                }
+                                div {
+                                    div {
+                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "Always Ask"
+                                    }
+                                    p {
+                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        "Show payment method selector each time"
+                                    }
+                                }
+                            }
+
+                            // Manual Only
+                            label {
+                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
+                                input {
+                                    r#type: "radio",
+                                    name: "payment_method",
+                                    value: "manual_only",
+                                    checked: settings_store::SETTINGS.read().payment_method_preference == "manual_only",
+                                    onchange: move |_| {
+                                        spawn(async move {
+                                            settings_store::update_payment_method_preference("manual_only".to_string()).await;
+                                        });
+                                    }
+                                }
+                                div {
+                                    div {
+                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        "Manual Only"
+                                    }
+                                    p {
+                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        "Always show QR code and invoice (no auto-payment)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Relay Management (NIP-65/NIP-17)
             if auth.is_authenticated {
                 div {
@@ -836,6 +1096,13 @@ pub fn Settings() -> Element {
                         }
                     }
                 }
+            }
+        }
+
+        // NWC Setup Modal
+        if *show_nwc_modal.read() {
+            NwcSetupModal {
+                on_close: move |_| show_nwc_modal.set(false)
             }
         }
     }

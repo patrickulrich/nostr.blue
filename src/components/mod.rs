@@ -50,6 +50,7 @@ pub mod cashu_send_modal;
 pub mod cashu_receive_modal;
 pub mod cashu_receive_lightning_modal;
 pub mod cashu_send_lightning_modal;
+pub mod nwc_setup_modal;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -98,3 +99,4 @@ pub use cashu_send_modal::CashuSendModal;
 pub use cashu_receive_modal::CashuReceiveModal;
 pub use cashu_receive_lightning_modal::CashuReceiveLightningModal;
 pub use cashu_send_lightning_modal::CashuSendLightningModal;
+pub use nwc_setup_modal::NwcSetupModal;

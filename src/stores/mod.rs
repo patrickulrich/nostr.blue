@@ -18,5 +18,6 @@ pub mod relay_metadata;
 pub mod voice_messages_store;
 pub mod webbookmarks;
 pub mod cashu_wallet;
+pub mod nwc_store;
 pub mod indexeddb_database;
 
