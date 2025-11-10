@@ -144,19 +144,28 @@ pub fn WebBookmarks() -> Element {
             };
 
             match result {
-                Ok(mut new_bookmarks) => {
-                    // Track oldest timestamp from new events
-                    if let Some(last_event) = new_bookmarks.last() {
+                Ok(new_bookmarks) => {
+                    // Filter out duplicates before appending
+                    let current = bookmarks.read().clone();
+                    let existing_ids: std::collections::HashSet<_> = current.iter().map(|e| e.id).collect();
+
+                    let filtered_bookmarks: Vec<_> = new_bookmarks
+                        .into_iter()
+                        .filter(|bookmark| !existing_ids.contains(&bookmark.id))
+                        .collect();
+
+                    // Update oldest timestamp from the actual oldest non-duplicate item
+                    if let Some(last_event) = filtered_bookmarks.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load
-                    has_more.set(new_bookmarks.len() >= 50);
+                    has_more.set(filtered_bookmarks.len() >= 50);
 
-                    // Append new events to existing events
-                    let mut current = bookmarks.read().clone();
-                    current.append(&mut new_bookmarks);
-                    bookmarks.set(current);
+                    // Append only non-duplicate events
+                    let mut updated = current;
+                    updated.extend(filtered_bookmarks);
+                    bookmarks.set(updated);
                     loading.set(false);
                 }
                 Err(e) => {

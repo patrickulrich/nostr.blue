@@ -223,8 +223,8 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
 
 /// Extract attribute value from HTML tag
 fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
-    let tag_lower = tag.to_lowercase();
-    let pattern = format!("{}=", attr_name);
+    let tag_lower = tag.to_ascii_lowercase();
+    let pattern = format!("{}=", attr_name.to_ascii_lowercase());
 
     if let Some(attr_pos) = tag_lower.find(&pattern) {
         let value_start = attr_pos + pattern.len();
@@ -246,9 +246,9 @@ fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
 
 /// Extract content between opening and closing tags
 fn extract_tag_content(html: &str, open_tag: &str, close_tag: &str) -> Option<String> {
-    let html_lower = html.to_lowercase();
-    let open_tag_lower = open_tag.to_lowercase();
-    let close_tag_lower = close_tag.to_lowercase();
+    let html_lower = html.to_ascii_lowercase();
+    let open_tag_lower = open_tag.to_ascii_lowercase();
+    let close_tag_lower = close_tag.to_ascii_lowercase();
 
     if let Some(start_pos) = html_lower.find(&open_tag_lower) {
         // Find the end of the opening tag

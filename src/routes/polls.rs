@@ -33,6 +33,7 @@ pub fn Polls() -> Element {
     // Pagination state for infinite scroll
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
 
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
@@ -49,19 +50,21 @@ pub fn Polls() -> Element {
         loading.set(true);
         error.set(None);
         oldest_timestamp.set(None);
+        last_event_id.set(None);
         has_more.set(true);
 
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => load_following_polls(None).await,
-                FeedType::Global => load_global_polls(None).await,
+                FeedType::Following => load_following_polls(None, None).await,
+                FeedType::Global => load_global_polls(None, None).await,
             };
 
             match result {
                 Ok(poll_events) => {
-                    // Track oldest timestamp for pagination
+                    // Track oldest timestamp and event ID for pagination
                     if let Some(last_event) = poll_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        last_event_id.set(Some(last_event.id));
                     }
 
                     // Determine if there are more events to load
@@ -85,30 +88,40 @@ pub fn Polls() -> Element {
         }
 
         let until = *oldest_timestamp.read();
+        let last_id = *last_event_id.read();
         let current_feed_type = *feed_type.read();
 
         loading.set(true);
 
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => load_following_polls(until).await,
-                FeedType::Global => load_global_polls(until).await,
+                FeedType::Following => load_following_polls(until, last_id).await,
+                FeedType::Global => load_global_polls(until, last_id).await,
             };
 
             match result {
-                Ok(mut new_events) => {
-                    // Track oldest timestamp from new events
+                Ok(new_events) => {
+                    // Track oldest timestamp and event ID from new events
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        last_event_id.set(Some(last_event.id));
                     }
 
                     // Determine if there are more events to load
                     has_more.set(new_events.len() >= 50);
 
-                    // Append new events to existing events
-                    let mut current = events.read().clone();
-                    current.append(&mut new_events);
-                    events.set(current);
+                    // Deduplicate and append new events using with_mut
+                    events.with_mut(|current| {
+                        let mut existing_ids: std::collections::HashSet<_> =
+                            current.iter().map(|e| e.id).collect();
+
+                        for event in new_events {
+                            if !existing_ids.contains(&event.id) {
+                                existing_ids.insert(event.id);
+                                current.push(event);
+                            }
+                        }
+                    });
                     loading.set(false);
                 }
                 Err(e) => {
@@ -281,7 +294,7 @@ pub fn Polls() -> Element {
 }
 
 /// Load polls from followed users
-async fn load_following_polls(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_following_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated. Please sign in to view your following feed.")?;
 
@@ -305,8 +318,7 @@ async fn load_following_polls(until: Option<u64>) -> Result<Vec<Event>, String> 
         .limit(50);
 
     if let Some(until_ts) = until {
-        // Subtract 1 to make the boundary exclusive and avoid duplicates
-        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
+        filter = filter.until(Timestamp::from(until_ts));
     }
 
     // Fetch events from database and relays
@@ -317,19 +329,23 @@ async fn load_following_polls(until: Option<u64>) -> Result<Vec<Event>, String> 
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
+    // Filter out the last seen event ID to avoid duplicates
+    if let Some(last_id) = last_event_id {
+        event_vec.retain(|e| e.id != last_id);
+    }
+
     Ok(event_vec)
 }
 
 /// Load polls from everyone (global feed)
-async fn load_global_polls(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_global_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
     // Create filter for polls
     let mut filter = Filter::new()
         .kind(Kind::Poll)
         .limit(50);
 
     if let Some(until_ts) = until {
-        // Subtract 1 to make the boundary exclusive and avoid duplicates
-        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
+        filter = filter.until(Timestamp::from(until_ts));
     }
 
     // Fetch events from database and relays
@@ -339,6 +355,11 @@ async fn load_global_polls(until: Option<u64>) -> Result<Vec<Event>, String> {
     // Convert to vector and sort by timestamp (newest first)
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    // Filter out the last seen event ID to avoid duplicates
+    if let Some(last_id) = last_event_id {
+        event_vec.retain(|e| e.id != last_id);
+    }
 
     Ok(event_vec)
 }
