@@ -2696,6 +2696,7 @@ dependencies = [
  "nostr-indexeddb",
  "nostr-relay-pool",
  "nostr-sdk",
+ "nwc",
  "once_cell",
  "pulldown-cmark",
  "qrcode",
@@ -2707,6 +2708,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "url",
  "urlencoding",
  "uuid",
  "wasm-bindgen",
@@ -2767,6 +2769,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "nwc"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f651e3c28dd9da0873151233e804a92b6240a1db1260f3c9d727950adb8e9036"
+dependencies = [
+ "nostr",
+ "nostr-relay-pool",
+ "tracing",
 ]
 
 [[package]]

@@ -312,7 +312,8 @@ pub async fn load_following_webbookmarks(until: Option<u64>, limit: usize) -> Re
         .limit(limit);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        // Subtract 1 to make the boundary exclusive and avoid duplicates
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     log::info!("Fetching web bookmarks from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
@@ -341,7 +342,8 @@ pub async fn load_global_webbookmarks(until: Option<u64>, limit: usize) -> Resul
         .limit(limit);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        // Subtract 1 to make the boundary exclusive and avoid duplicates
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {

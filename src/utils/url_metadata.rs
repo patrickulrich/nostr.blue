@@ -178,29 +178,63 @@ struct MetaTag {
     content: Option<String>,
 }
 
+/// Find the closing '>' bracket while ignoring those inside quotes
+fn find_unquoted_close_bracket(tag: &str) -> Option<usize> {
+    let bytes = tag.as_bytes();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            b'"' if !in_single_quote => in_double_quote = !in_double_quote,
+            b'>' if !in_single_quote && !in_double_quote => return Some(i),
+            _ => {}
+        }
+    }
+
+    None
+}
+
 /// Extract all meta tags from HTML
 fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
     let mut tags = Vec::new();
-    let html_lower = html.to_lowercase();
     let mut pos = 0;
 
-    while let Some(meta_start) = html_lower[pos..].find("<meta") {
-        let meta_pos = pos + meta_start;
+    // Search for "<meta" case-insensitively by scanning byte positions
+    while pos < html.len() {
+        // Look for '<' character
+        if let Some(lt_pos) = html[pos..].find('<') {
+            let meta_pos = pos + lt_pos;
+            let remaining = &html[meta_pos..];
 
-        if let Some(close_pos) = html_lower[meta_pos..].find('>') {
-            let tag_end = meta_pos + close_pos;
-            let tag_content = &html[meta_pos..tag_end];
+            // Check if this is a "<meta" tag (case-insensitive)
+            if remaining.len() >= 5 && remaining[..5].eq_ignore_ascii_case("<meta") {
+                // Find the closing '>' while handling quoted attributes
+                let close_offset = find_unquoted_close_bracket(remaining);
 
-            let name = extract_attribute(tag_content, "name");
-            let property = extract_attribute(tag_content, "property");
-            let content = extract_attribute(tag_content, "content");
+                if let Some(offset) = close_offset {
+                    let tag_content = &remaining[..offset];
 
-            if name.is_some() || property.is_some() {
-                tags.push(MetaTag { name, property, content });
+                    let name = extract_attribute(tag_content, "name");
+                    let property = extract_attribute(tag_content, "property");
+                    let content = extract_attribute(tag_content, "content");
+
+                    if name.is_some() || property.is_some() {
+                        tags.push(MetaTag { name, property, content });
+                    }
+
+                    pos = meta_pos + offset + 1;
+                } else {
+                    // Unterminated tag, break out safely
+                    break;
+                }
+            } else {
+                // Not a meta tag, move past this '<'
+                pos = meta_pos + 1;
             }
-
-            pos = tag_end + 1;
         } else {
+            // No more '<' characters found
             break;
         }
     }
@@ -210,22 +244,67 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
 
 /// Extract attribute value from HTML tag
 fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
-    let tag_lower = tag.to_lowercase();
-    let pattern = format!("{}=", attr_name);
+    let tag_lower = tag.to_ascii_lowercase();
+    let attr_name_lower = attr_name.to_ascii_lowercase();
 
-    if let Some(attr_pos) = tag_lower.find(&pattern) {
-        let value_start = attr_pos + pattern.len();
-        let remaining = &tag[value_start..].trim_start();
+    // Find the attribute name
+    let mut search_pos = 0;
+    while let Some(attr_pos) = tag_lower[search_pos..].find(&attr_name_lower) {
+        let actual_pos = search_pos + attr_pos;
+
+        // Check if this is a word boundary (preceded by whitespace or start of tag)
+        let is_word_start = actual_pos == 0 ||
+            tag_lower.as_bytes()[actual_pos - 1].is_ascii_whitespace() ||
+            tag_lower.as_bytes()[actual_pos - 1] == b'<';
+
+        if !is_word_start {
+            search_pos = actual_pos + 1;
+            continue;
+        }
+
+        // Skip past the attribute name
+        let mut pos = actual_pos + attr_name_lower.len();
+
+        // Skip whitespace after attribute name
+        while pos < tag.len() && tag.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        // Check for '='
+        if pos >= tag.len() || tag.as_bytes()[pos] != b'=' {
+            search_pos = actual_pos + 1;
+            continue;
+        }
+        pos += 1; // Skip '='
+
+        // Skip whitespace after '='
+        while pos < tag.len() && tag.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        if pos >= tag.len() {
+            return None;
+        }
+
+        let remaining = &tag[pos..];
 
         // Check for quote character
-        if let Some(quote_char) = remaining.chars().next() {
-            if quote_char == '"' || quote_char == '\'' {
-                // Find closing quote
-                if let Some(close_pos) = remaining[1..].find(quote_char) {
+        if let Some(first_char) = remaining.chars().next() {
+            if first_char == '"' || first_char == '\'' {
+                // Quoted value
+                if let Some(close_pos) = remaining[1..].find(first_char) {
                     return Some(remaining[1..close_pos + 1].to_string());
                 }
+            } else {
+                // Unquoted value - read until whitespace or '>'
+                let end_pos = remaining
+                    .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                    .unwrap_or(remaining.len());
+                return Some(remaining[..end_pos].to_string());
             }
         }
+
+        return None;
     }
 
     None
@@ -233,9 +312,9 @@ fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
 
 /// Extract content between opening and closing tags
 fn extract_tag_content(html: &str, open_tag: &str, close_tag: &str) -> Option<String> {
-    let html_lower = html.to_lowercase();
-    let open_tag_lower = open_tag.to_lowercase();
-    let close_tag_lower = close_tag.to_lowercase();
+    let html_lower = html.to_ascii_lowercase();
+    let open_tag_lower = open_tag.to_ascii_lowercase();
+    let close_tag_lower = close_tag.to_ascii_lowercase();
 
     if let Some(start_pos) = html_lower.find(&open_tag_lower) {
         // Find the end of the opening tag
@@ -257,7 +336,7 @@ fn extract_tag_content(html: &str, open_tag: &str, close_tag: &str) -> Option<St
 fn clean_text(text: &str) -> String {
     let mut result = text.trim().to_string();
 
-    // Decode common HTML entities
+    // Decode common named HTML entities
     result = result.replace("&amp;", "&");
     result = result.replace("&lt;", "<");
     result = result.replace("&gt;", ">");
@@ -265,6 +344,69 @@ fn clean_text(text: &str) -> String {
     result = result.replace("&#39;", "'");
     result = result.replace("&apos;", "'");
     result = result.replace("&nbsp;", " ");
+
+    // Decode numeric HTML entities (&#DDDD; and &#xHHHH;)
+    let mut decoded = String::new();
+    let mut chars = result.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '&' && chars.peek() == Some(&'#') {
+            let hash_ch = chars.next().unwrap(); // consume '#'
+
+            let (is_hex, hex_ch) = if chars.peek() == Some(&'x') {
+                (true, Some(chars.next().unwrap()))
+            } else if chars.peek() == Some(&'X') {
+                (true, Some(chars.next().unwrap()))
+            } else {
+                (false, None)
+            };
+
+            let mut num_str = String::new();
+            let mut has_semicolon = false;
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == ';' {
+                    chars.next(); // consume ';'
+                    has_semicolon = true;
+                    break;
+                } else if next_ch.is_alphanumeric() {
+                    num_str.push(next_ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+
+            if !num_str.is_empty() {
+                let code_point = if is_hex {
+                    u32::from_str_radix(&num_str, 16).ok()
+                } else {
+                    num_str.parse::<u32>().ok()
+                };
+
+                if let Some(cp) = code_point {
+                    if let Some(decoded_char) = char::from_u32(cp) {
+                        decoded.push(decoded_char);
+                        continue;
+                    }
+                }
+            }
+
+            // If decoding failed, restore the original sequence exactly as it appeared
+            decoded.push('&');
+            decoded.push(hash_ch);
+            if let Some(x_char) = hex_ch {
+                decoded.push(x_char);
+            }
+            decoded.push_str(&num_str);
+            if has_semicolon {
+                decoded.push(';');
+            }
+        } else {
+            decoded.push(ch);
+        }
+    }
+
+    result = decoded;
 
     // Remove extra whitespace
     result = result.split_whitespace()

@@ -11,7 +11,7 @@ license = "MIT"
 dioxus = { version = "0.6", features = ["web", "router"] }
 
 # Nostr protocol
-nostr = { version = "0.44", default-features = false, features = ["nip57", "nip60"] }
+nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60"] }
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip59", "nip57"] }
 nostr-database = { version = "0.44", default-features = false }
 nostr-indexeddb = { version = "0.44" }
@@ -20,6 +20,7 @@ nostr-blossom = { version = "0.44" }
 nostr-connect = { version = "0.44" }
 nostr-gossip-memory = { version = "0.44" }
 nostr-relay-pool = { version = "0.44" }
+nwc = { version = "0.44" }
 
 # Cashu ecash protocol
 cdk = { version = "0.13.4", default-features = false, features = ["wallet"] }
@@ -109,6 +110,7 @@ anyhow = "1.0"
 regex = "1.10"
 urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "js"] }
+url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 gloo-net = "0.5"
 bech32 = "0.11"

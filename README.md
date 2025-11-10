@@ -20,16 +20,19 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Search** - Find users, notes, and content by hashtags with NIP-50 relay search support
 - ✅ **Notifications** - Track mentions, replies, and interactions
 - ✅ **Explore** - Discover trending content and new users
+- ✅ **Polls (NIP-88)** - Create and vote on single-choice and multiple-choice polls with real-time results, countdown timers, and hashtag support
 
 ### Advanced Features
 - ✅ **Outbox Model (NIP-65)** - Smart relay routing using author's preferred write relays for improved content discovery
 - ✅ **Communities (NIP-72)** - Moderated topic-based communities
 - ✅ **Lists (NIP-51)** - Create and manage custom lists and bookmarks
 - ✅ **Lightning Zaps (NIP-57)** - Send and receive Bitcoin micropayments
+- ✅ **Nostr Wallet Connect (NIP-47)** - Remote Lightning wallet integration with IndexedDB persistence, configurable payment preferences (NWC-first, WebLN-first, manual-only, always-ask), automatic payment routing with smart fallbacks, and balance display
 - ✅ **Direct Messages (NIP-04/NIP-17/NIP-44)** - Encrypted private messaging with full NIP-17 compliance
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
 - ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
 - ✅ **Videos (NIP-71)** - Video event support with playback controls and comments
+- ✅ **Livestreaming (NIP-53)** - Live video streaming with HLS support, chat integration, status indicators (live/upcoming/ended), viewer counts, and dual-feed layout (Following + Global)
 - ✅ **Voice Messages (NIP-A0)** - Short audio messages up to 60 seconds with waveform visualization and threaded replies
 - ✅ **Web Bookmarks (NIP-B0)** - Pocket-inspired bookmark manager with auto-metadata fetching, tag filtering, favorites, and search
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
@@ -74,6 +77,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - `nostr-indexeddb` - IndexedDB persistent storage
   - `nostr-browser-signer` - NIP-07 browser extension integration
   - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
+  - `nwc` - NIP-47 Nostr Wallet Connect for remote Lightning wallet integration
 
 ### Bitcoin & Ecash
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
@@ -132,10 +136,17 @@ nostrbluerust/
 │   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
 │   │   ├── voice_message_card.rs # Voice message card (NIP-A0)
+│   │   ├── poll_card.rs    # Poll display with voting (NIP-88)
+│   │   ├── poll_timer.rs   # Poll countdown timer (NIP-88)
+│   │   ├── poll_option_list.rs # Poll option editor (NIP-88)
 │   │   ├── webbookmark_card.rs # Web bookmark card (NIP-B0)
 │   │   ├── webbookmark_modal.rs # Add/edit bookmark modal (NIP-B0)
 │   │   ├── zap_modal.rs    # Lightning zap interface
 │   │   ├── share_modal.rs  # Video sharing modal
+│   │   ├── live_stream_card.rs # Livestream card (NIP-53)
+│   │   ├── mini_live_stream_card.rs # Compact livestream card (NIP-53)
+│   │   ├── live_stream_player.rs # HLS video player for livestreams
+│   │   ├── live_chat.rs    # Livestream chat component (NIP-53)
 │   │   ├── rich_content.rs # Content rendering (Wavlake embeds)
 │   │   ├── threaded_comment.rs # Comment threads
 │   │   ├── music_player.rs # Wavlake music player (NIP-38)
@@ -149,6 +160,7 @@ nostrbluerust/
 │   │   ├── cashu_receive_modal.rs # Receive ecash modal
 │   │   ├── cashu_receive_lightning_modal.rs # Lightning deposit modal
 │   │   ├── cashu_send_lightning_modal.rs # Lightning withdrawal modal
+│   │   ├── nwc_setup_modal.rs # Nostr Wallet Connect setup (NIP-47)
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
 │   │   ├── client_initializing.rs # Loading animation
@@ -162,7 +174,14 @@ nostrbluerust/
 │   │   ├── photo_detail.rs # Photo detail view with NIP-22 comments
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
+│   │   ├── videos_live.rs  # Livestream feed (NIP-53)
+│   │   ├── videos_live_tag.rs # Tagged livestream feed (NIP-53)
+│   │   ├── live_stream_detail.rs # Livestream detail page (NIP-53)
+│   │   ├── live_stream_new.rs # Create new livestream (NIP-53)
 │   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
+│   │   ├── polls.rs        # Polls feed (NIP-88)
+│   │   ├── poll_view.rs    # Individual poll view (NIP-88)
+│   │   ├── poll_new.rs     # Poll creation form (NIP-88)
 │   │   ├── webbookmarks.rs # Web bookmarks manager (NIP-B0)
 │   │   ├── cashu_wallet.rs # Cashu ecash wallet (NIP-60)
 │   │   ├── communities.rs  # Communities (NIP-72)
@@ -207,6 +226,7 @@ nostrbluerust/
 │   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
 │   │   ├── cashu_wallet.rs # Cashu wallet state and operations (NIP-60)
 │   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
+│   │   ├── nwc_store.rs    # Nostr Wallet Connect state and operations (NIP-47)
 │   │   └── signer.rs       # Event signing
 │   ├── utils/              # Utility functions
 │   │   ├── nip19.rs        # NIP-19 identifier parsing
@@ -324,8 +344,10 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User status (music listening, etc.) | ✅ |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (remote Lightning wallet) | ✅ |
 | [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (relay-based search, GIF search) | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
+| [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live activities (livestreaming) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu wallet (ecash) | ✅ |
@@ -334,6 +356,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
+| [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls (single/multiple choice with results) | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web bookmarks | ✅ |

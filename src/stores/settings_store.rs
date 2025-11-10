@@ -18,6 +18,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub sync_notifications: bool, // Sync notification read status across devices via NIP-78
     #[serde(default)]
+    pub payment_method_preference: String, // "nwc_first", "webln_first", "manual_only", "always_ask"
+    #[serde(default)]
     pub version: u32, // Settings schema version
 }
 
@@ -28,7 +30,8 @@ impl Default for AppSettings {
             // relay_urls removed - now using kind 10002/10050 (NIP-65/NIP-17)
             blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
             sync_notifications: false, // Privacy-first: opt-in by default
-            version: 2, // Incremented for breaking change (removed relay_urls)
+            payment_method_preference: "nwc_first".to_string(), // Default to NWC if connected
+            version: 3, // Incremented for payment_method_preference addition
         }
     }
 }
@@ -192,5 +195,16 @@ pub async fn update_notification_sync(enabled: bool) {
     // Save to Nostr
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save notification sync setting: {}", e);
+    }
+}
+
+/// Update payment method preference and save to Nostr
+pub async fn update_payment_method_preference(preference: String) {
+    let mut settings = SETTINGS.read().clone();
+    settings.payment_method_preference = preference;
+
+    // Save to Nostr
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save payment method preference: {}", e);
     }
 }

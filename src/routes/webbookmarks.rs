@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::{nostr_client, webbookmarks};
 use crate::components::{WebBookmarkCard, WebBookmarkCardSkeleton, WebBookmarkModal, BookmarkModalMode, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Timestamp};
+use nostr_sdk::Event;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -107,6 +107,12 @@ pub fn WebBookmarks() -> Element {
 
             match result {
                 Ok(feed_events) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -119,6 +125,12 @@ pub fn WebBookmarks() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     error.set(Some(e));
                     loading.set(false);
                 }
@@ -144,22 +156,54 @@ pub fn WebBookmarks() -> Element {
             };
 
             match result {
-                Ok(mut new_bookmarks) => {
-                    // Track oldest timestamp from new events
-                    if let Some(last_event) = new_bookmarks.last() {
+                Ok(new_bookmarks) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
+                    // Capture the original count and last event before deduplication
+                    let returned_count = new_bookmarks.len();
+                    let last_event_in_batch = new_bookmarks.last().cloned();
+
+                    // Filter out duplicates before appending
+                    let current = bookmarks.read().clone();
+                    let existing_ids: std::collections::HashSet<_> = current.iter().map(|e| e.id).collect();
+
+                    let filtered_bookmarks: Vec<_> = new_bookmarks
+                        .into_iter()
+                        .filter(|bookmark| !existing_ids.contains(&bookmark.id))
+                        .collect();
+
+                    // Update cursor: use filtered items if available, otherwise use raw batch boundary
+                    if let Some(last_event) = filtered_bookmarks.last() {
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                    } else if let Some(last_event) = last_event_in_batch {
+                        // All items were duplicates but batch was non-empty; advance cursor
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
                     // Determine if there are more events to load
-                    has_more.set(new_bookmarks.len() >= 50);
+                    if returned_count == 0 {
+                        has_more.set(false);
+                    } else {
+                        has_more.set(returned_count >= 50);
+                    }
 
-                    // Append new events to existing events
-                    let mut current = bookmarks.read().clone();
-                    current.append(&mut new_bookmarks);
-                    bookmarks.set(current);
+                    // Append only non-duplicate events
+                    let mut updated = current;
+                    updated.extend(filtered_bookmarks);
+                    bookmarks.set(updated);
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     log::error!("Failed to load more bookmarks: {}", e);
                     loading.set(false);
                 }
@@ -249,8 +293,8 @@ pub fn WebBookmarks() -> Element {
             }
             SortOrder::DatePublished => {
                 filtered.sort_by(|a, b| {
-                    let a_ts = webbookmarks::get_published_at(a).unwrap_or(Timestamp::from(0));
-                    let b_ts = webbookmarks::get_published_at(b).unwrap_or(Timestamp::from(0));
+                    let a_ts = webbookmarks::get_published_at(a).unwrap_or(a.created_at);
+                    let b_ts = webbookmarks::get_published_at(b).unwrap_or(b.created_at);
                     b_ts.cmp(&a_ts)
                 });
             }
@@ -566,7 +610,10 @@ pub fn WebBookmarks() -> Element {
                             WebBookmarkCard {
                                 key: "{bookmark.id}",
                                 event: bookmark.clone(),
-                                on_edit: None,
+                                on_edit: move |event: Event| {
+                                    editing_event.set(Some(event));
+                                    show_edit_modal.set(true);
+                                },
                             }
                         }
                     }

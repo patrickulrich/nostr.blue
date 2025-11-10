@@ -1381,3 +1381,114 @@ pub async fn publish_voice_message_reply(
     log::info!("Voice message reply published successfully: {}", event_id);
     Ok(event_id)
 }
+
+/// Get the current user's public key
+pub async fn get_user_pubkey() -> Result<PublicKey, String> {
+    let signer = get_signer().ok_or("No signer available")?;
+    signer.public_key().await
+        .map_err(|e| format!("Failed to get public key: {}", e))
+}
+
+/// Publish a poll vote (Kind 1018) following NIP-88
+/// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
+pub async fn publish_poll_vote(
+    poll_id: nostr::EventId,
+    response: nostr::nips::nip88::PollResponse,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate that the poll_id matches the poll referenced in the PollResponse
+    let referenced_poll_id = match &response {
+        nostr::nips::nip88::PollResponse::SingleChoice { poll_id: ref_id, .. } => ref_id,
+        nostr::nips::nip88::PollResponse::MultipleChoice { poll_id: ref_id, .. } => ref_id,
+    };
+
+    if *referenced_poll_id != poll_id {
+        return Err(format!(
+            "Poll ID mismatch: expected {}, but PollResponse references {}",
+            poll_id.to_hex(),
+            referenced_poll_id.to_hex()
+        ));
+    }
+
+    log::info!("Publishing poll vote for poll: {}", poll_id.to_hex());
+
+    // Build event using EventBuilder::poll_response
+    let builder = nostr::EventBuilder::poll_response(response);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish poll vote: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Poll vote published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Publish a poll (Kind 1068) following NIP-88
+/// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
+pub async fn publish_poll(
+    title: String,
+    poll_type: nostr::nips::nip88::PollType,
+    options: Vec<nostr::nips::nip88::PollOption>,
+    relays: Vec<String>,
+    ends_at: Option<nostr::Timestamp>,
+    hashtags: Vec<String>,
+) -> Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate inputs
+    if title.trim().is_empty() {
+        return Err("Poll title cannot be empty".to_string());
+    }
+
+    if options.len() < 2 {
+        return Err("Poll must have at least 2 options".to_string());
+    }
+
+    if options.len() > 10 {
+        return Err("Poll cannot have more than 10 options".to_string());
+    }
+
+    log::info!("Publishing poll: {}", title);
+
+    // Parse relay URLs
+    let relay_urls: Vec<nostr::RelayUrl> = relays
+        .into_iter()
+        .filter_map(|r| nostr::RelayUrl::parse(&r).ok())
+        .collect();
+
+    // Build poll struct
+    let poll = nostr::nips::nip88::Poll {
+        title,
+        r#type: poll_type,
+        options,
+        relays: relay_urls,
+        ends_at,
+    };
+
+    // Build event using EventBuilder::poll
+    let mut builder = nostr::EventBuilder::poll(poll);
+
+    // Add hashtags
+    use nostr::Tag;
+    for hashtag in hashtags {
+        builder = builder.tags([Tag::hashtag(hashtag)]);
+    }
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish poll: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Poll published successfully: {}", event_id);
+    Ok(event_id)
+}

@@ -2,18 +2,41 @@ use dioxus::prelude::*;
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
-use crate::stores::signer;
+use crate::stores::{signer, nwc_store, settings_store};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = enable)]
-    async fn webln_enable() -> JsValue;
+    #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = enable, catch)]
+    async fn webln_enable_raw() -> Result<JsValue, JsValue>;
 
-    #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = sendPayment)]
-    async fn webln_send_payment(invoice: &str) -> JsValue;
+    #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = sendPayment, catch)]
+    async fn webln_send_payment_raw(invoice: &str) -> Result<JsValue, JsValue>;
+}
+
+// Safe wrapper for webln_enable that handles errors gracefully
+async fn webln_enable() -> Result<(), String> {
+    webln_enable_raw()
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("WebLN enable failed: {:?}", e))
+}
+
+// Safe wrapper for webln_send_payment that handles errors gracefully
+async fn webln_send_payment(invoice: &str) -> Result<JsValue, String> {
+    webln_send_payment_raw(invoice)
+        .await
+        .map_err(|e| {
+            // Check if it's a user cancellation
+            let error_msg = format!("{:?}", e);
+            if error_msg.contains("Prompt was closed") || error_msg.contains("User rejected") {
+                "Payment cancelled by user".to_string()
+            } else {
+                format!("WebLN payment failed: {}", error_msg)
+            }
+        })
 }
 
 fn is_webln_available() -> bool {
@@ -47,6 +70,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut invoice = use_signal(|| None::<String>);
     let mut qr_code_svg = use_signal(|| None::<String>);
     let mut payment_success = use_signal(|| false);
+    let mut payment_method = use_signal(|| None::<String>);
     let webln_available = is_webln_available();
 
     // Preset amounts in sats
@@ -65,6 +89,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         invoice.set(None);
         qr_code_svg.set(None);
         payment_success.set(false);
+        payment_method.set(None);
 
         spawn(async move {
             // Get signer
@@ -206,22 +231,112 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             let inv_clone = inv.clone();
 
+            // Get payment preference
+            let payment_preference = settings_store::SETTINGS.read().payment_method_preference.clone();
+            let nwc_available = nwc_store::is_connected();
+
+            // Try payment based on preference
+            match payment_preference.as_str() {
+                "nwc_first" if nwc_available => {
+                    // Try NWC first
+                    log::info!("Attempting payment with NWC");
+                    match nwc_store::pay_invoice(inv_clone.clone()).await {
+                        Ok(_) => {
+                            log::info!("NWC payment successful");
+                            payment_success.set(true);
+                            payment_method.set(Some("Nostr Wallet Connect".to_string()));
+                            loading.set(false);
+                            return;
+                        }
+                        Err(e) => {
+                            log::warn!("NWC payment failed, falling back to WebLN: {}", e);
+                            // Continue to WebLN fallback
+                        }
+                    }
+                }
+                "webln_first" if webln_available => {
+                    // WebLN will be tried below, then NWC as fallback
+                    // Skip NWC attempt here
+                }
+                "manual_only" => {
+                    // Skip auto-payment, just show invoice and QR
+                    invoice.set(Some(inv_clone.clone()));
+
+                    // Generate QR code
+                    if let Ok(code) = QrCode::new(&inv_clone) {
+                        let svg_string = code.render::<svg::Color>()
+                            .min_dimensions(200, 200)
+                            .build();
+                        qr_code_svg.set(Some(svg_string));
+                    }
+
+                    loading.set(false);
+                    return;
+                }
+                _ => {
+                    // Default or "always_ask": try NWC if available
+                    if nwc_available {
+                        log::info!("Attempting payment with NWC");
+                        match nwc_store::pay_invoice(inv_clone.clone()).await {
+                            Ok(_) => {
+                                log::info!("NWC payment successful");
+                                payment_success.set(true);
+                                payment_method.set(Some("Nostr Wallet Connect".to_string()));
+                                loading.set(false);
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!("NWC payment failed, falling back to WebLN: {}", e);
+                                // Continue to WebLN fallback
+                            }
+                        }
+                    }
+                }
+            }
+
             // Try to pay with WebLN if available
             if webln_available {
                 // Enable WebLN
                 match webln_enable().await {
-                    _ => {
+                    Ok(_) => {
                         // Try to send payment
                         match webln_send_payment(&inv_clone).await {
-                            result if !result.is_null() && !result.is_undefined() => {
+                            Ok(result) if !result.is_null() && !result.is_undefined() => {
                                 // Payment successful
                                 payment_success.set(true);
+                                payment_method.set(Some("WebLN".to_string()));
                                 loading.set(false);
                                 return;
                             }
-                            _ => {
+                            Ok(_) => {
+                                log::info!("WebLN payment returned null/undefined");
+                                // Payment failed, show invoice
+                            }
+                            Err(e) => {
+                                log::info!("WebLN payment failed: {}", e);
                                 // Payment failed or cancelled, show invoice
                             }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("WebLN enable failed: {}", e);
+                        // Continue to fallback
+                    }
+                }
+
+                // If WebLN failed and preference is "webln_first", try NWC as fallback
+                if payment_preference == "webln_first" && nwc_available && !*payment_success.read() {
+                    log::info!("WebLN failed, trying NWC as fallback");
+                    match nwc_store::pay_invoice(inv_clone.clone()).await {
+                        Ok(_) => {
+                            log::info!("NWC fallback payment successful");
+                            payment_success.set(true);
+                            payment_method.set(Some("Nostr Wallet Connect".to_string()));
+                            loading.set(false);
+                            return;
+                        }
+                        Err(e) => {
+                            log::warn!("NWC fallback also failed: {}", e);
                         }
                     }
                 }
@@ -317,7 +432,13 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                             p {
                                 class: "text-muted-foreground",
-                                "Your zap was successfully sent via WebLN"
+                                {
+                                    let method = payment_method.read();
+                                    match method.as_deref() {
+                                        Some(m) => format!("Your zap was successfully sent via {}", m),
+                                        None => "Your zap was successfully sent!".to_string(),
+                                    }
+                                }
                             }
                             button {
                                 class: "w-full bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 transition",

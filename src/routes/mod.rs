@@ -13,6 +13,10 @@ pub mod hashtag;
 pub mod nip19;
 pub mod videos;
 pub mod video_detail;
+pub mod videos_live;
+pub mod videos_live_tag;
+pub mod live_stream_detail;
+pub mod live_stream_new;
 pub mod articles;
 pub mod article_detail;
 pub mod music;
@@ -29,6 +33,9 @@ pub mod photo_detail;
 pub mod voicemessages;
 pub mod voice_message_new;
 pub mod webbookmarks;
+pub mod polls;
+pub mod poll_view;
+pub mod poll_new;
 pub mod cashu_wallet;
 pub mod terms;
 pub mod privacy;
@@ -48,6 +55,10 @@ use hashtag::Hashtag;
 use nip19::Nip19Handler;
 use videos::Videos;
 use video_detail::VideoDetail;
+use videos_live::VideosLive;
+use videos_live_tag::VideosLiveTag;
+use live_stream_detail::LiveStreamDetail;
+use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
 use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
@@ -56,6 +67,9 @@ use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
 use voice_message_new::VoiceMessageNew;
 use webbookmarks::WebBookmarks;
+use polls::Polls;
+use poll_view::PollView;
+use poll_new::PollNew;
 use cashu_wallet::CashuWallet;
 use note_new::NoteNew;
 use article_new::ArticleNew;
@@ -93,6 +107,18 @@ pub enum Route {
 
         #[route("/videos/:video_id")]
         VideoDetail { video_id: String },
+
+        #[route("/videos/live")]
+        VideosLive {},
+
+        #[route("/videos/live/tag/:tag")]
+        VideosLiveTag { tag: String },
+
+        #[route("/videos/live/new")]
+        LiveStreamNew {},
+
+        #[route("/videos/live/:note_id")]
+        LiveStreamDetail { note_id: String },
 
         #[route("/music")]
         MusicHome {},
@@ -132,6 +158,15 @@ pub enum Route {
 
         #[route("/webbookmarks")]
         WebBookmarks {},
+
+        #[route("/polls")]
+        Polls {},
+
+        #[route("/polls/new")]
+        PollNew {},
+
+        #[route("/polls/:noteid")]
+        PollView { noteid: String },
 
         #[route("/cashuwallet")]
         CashuWallet {},
@@ -196,7 +231,7 @@ fn Layout() -> Element {
 
     // Check if we're on the DMs, Videos, or Wallet pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
-    let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. });
+    let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
@@ -207,6 +242,7 @@ fn Layout() -> Element {
         | Route::PhotoNew {}
         | Route::VideoNewLandscape {}
         | Route::VideoNewPortrait {}
+        | Route::LiveStreamNew {}
     );
 
     // Check if we're on home page for home button styling
@@ -324,6 +360,23 @@ fn Layout() -> Element {
                                     label: "Videos"
                                 }
                                 NavLink {
+                                    to: Route::VideosLive {},
+                                    icon: rsx! {
+                                        svg {
+                                            class: "w-7 h-7",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            fill: "none",
+                                            view_box: "0 0 24 24",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+                                        }
+                                    },
+                                    label: "Live"
+                                }
+                                NavLink {
                                     to: Route::Notifications {},
                                     icon: rsx! { crate::components::icons::BellIcon { class: "w-7 h-7" } },
                                     label: "Notifications",
@@ -427,6 +480,29 @@ fn Layout() -> Element {
                                                 }
                                             }
                                             Link {
+                                                to: Route::Polls {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                    line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                    line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                }
+                                                span {
+                                                    "Polls"
+                                                }
+                                            }
+                                            Link {
                                                 to: Route::WebBookmarks {},
                                                 onclick: move |_| more_menu_open.set(false),
                                                 class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
@@ -506,6 +582,10 @@ fn Layout() -> Element {
                                     on_voice_click: move |_| {
                                         radial_menu_open.set(false);
                                         navigator.push(Route::VoiceMessageNew {});
+                                    },
+                                    on_poll_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::PollNew {});
                                     },
                                 }
                             }
@@ -613,6 +693,26 @@ fn Layout() -> Element {
                                                 to: Route::Videos {},
                                                 icon: rsx! { crate::components::icons::VideoIcon { class: "w-7 h-7" } },
                                                 label: "Videos"
+                                            }
+                                        }
+                                        div {
+                                            onclick: move |_| sidebar_open.set(false),
+                                            NavLink {
+                                                to: Route::VideosLive {},
+                                                icon: rsx! {
+                                                    svg {
+                                                        class: "w-7 h-7",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        fill: "none",
+                                                        view_box: "0 0 24 24",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+                                                    }
+                                                },
+                                                label: "Live"
                                             }
                                         }
                                         div {
@@ -761,6 +861,32 @@ fn Layout() -> Element {
                                                             }
                                                             span {
                                                                 "Voice Messages"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::Polls {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                                line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                                line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                            }
+                                                            span {
+                                                                "Polls"
                                                             }
                                                         }
                                                         Link {
@@ -935,6 +1061,12 @@ fn NavLink(
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
+        (Route::VideosLive {}, Route::VideosLive {}) |
+        (Route::VideosLive {}, Route::VideosLiveTag { .. }) |
+        (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
+        (Route::VideosLiveTag { tag: t1 }, Route::VideosLiveTag { tag: t2 }) => t1 == t2,
+        (Route::LiveStreamDetail { note_id: n1 }, Route::LiveStreamDetail { note_id: n2 }) => n1 == n2,
+        (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
