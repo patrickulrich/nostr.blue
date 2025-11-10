@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::{nostr_client, webbookmarks};
 use crate::components::{WebBookmarkCard, WebBookmarkCardSkeleton, WebBookmarkModal, BookmarkModalMode, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Timestamp};
+use nostr_sdk::Event;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -163,6 +163,9 @@ pub fn WebBookmarks() -> Element {
                         return;
                     }
 
+                    // Capture the original count before deduplication for pagination
+                    let returned_count = new_bookmarks.len();
+
                     // Filter out duplicates before appending
                     let current = bookmarks.read().clone();
                     let existing_ids: std::collections::HashSet<_> = current.iter().map(|e| e.id).collect();
@@ -177,8 +180,8 @@ pub fn WebBookmarks() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // Determine if there are more events to load
-                    has_more.set(filtered_bookmarks.len() >= 50);
+                    // Determine if there are more events to load based on returned count
+                    has_more.set(returned_count >= 50);
 
                     // Append only non-duplicate events
                     let mut updated = current;
@@ -282,8 +285,8 @@ pub fn WebBookmarks() -> Element {
             }
             SortOrder::DatePublished => {
                 filtered.sort_by(|a, b| {
-                    let a_ts = webbookmarks::get_published_at(a).unwrap_or(Timestamp::from(0));
-                    let b_ts = webbookmarks::get_published_at(b).unwrap_or(Timestamp::from(0));
+                    let a_ts = webbookmarks::get_published_at(a).unwrap_or(a.created_at);
+                    let b_ts = webbookmarks::get_published_at(b).unwrap_or(b.created_at);
                     b_ts.cmp(&a_ts)
                 });
             }
@@ -599,7 +602,10 @@ pub fn WebBookmarks() -> Element {
                             WebBookmarkCard {
                                 key: "{bookmark.id}",
                                 event: bookmark.clone(),
-                                on_edit: None,
+                                on_edit: move |event: Event| {
+                                    editing_event.set(Some(event));
+                                    show_edit_modal.set(true);
+                                },
                             }
                         }
                     }

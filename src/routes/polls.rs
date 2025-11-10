@@ -167,6 +167,15 @@ pub fn Polls() -> Element {
 
                         // Dropdown menu
                         if *show_dropdown.read() {
+                            // Backdrop to close dropdown when clicking outside
+                            div {
+                                class: "fixed inset-0 z-20",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    show_dropdown.set(false);
+                                }
+                            }
+
                             div {
                                 class: "absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-30 min-w-[150px]",
                                 button {

@@ -336,7 +336,7 @@ fn extract_tag_content(html: &str, open_tag: &str, close_tag: &str) -> Option<St
 fn clean_text(text: &str) -> String {
     let mut result = text.trim().to_string();
 
-    // Decode common HTML entities
+    // Decode common named HTML entities
     result = result.replace("&amp;", "&");
     result = result.replace("&lt;", "<");
     result = result.replace("&gt;", ">");
@@ -344,6 +344,61 @@ fn clean_text(text: &str) -> String {
     result = result.replace("&#39;", "'");
     result = result.replace("&apos;", "'");
     result = result.replace("&nbsp;", " ");
+
+    // Decode numeric HTML entities (&#DDDD; and &#xHHHH;)
+    let mut decoded = String::new();
+    let mut chars = result.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '&' && chars.peek() == Some(&'#') {
+            chars.next(); // consume '#'
+
+            let is_hex = chars.peek() == Some(&'x') || chars.peek() == Some(&'X');
+            if is_hex {
+                chars.next(); // consume 'x' or 'X'
+            }
+
+            let mut num_str = String::new();
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == ';' {
+                    chars.next(); // consume ';'
+                    break;
+                } else if next_ch.is_alphanumeric() {
+                    num_str.push(next_ch);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+
+            if !num_str.is_empty() {
+                let code_point = if is_hex {
+                    u32::from_str_radix(&num_str, 16).ok()
+                } else {
+                    num_str.parse::<u32>().ok()
+                };
+
+                if let Some(cp) = code_point {
+                    if let Some(decoded_char) = char::from_u32(cp) {
+                        decoded.push(decoded_char);
+                        continue;
+                    }
+                }
+            }
+
+            // If decoding failed, restore the original sequence
+            decoded.push('&');
+            decoded.push('#');
+            if is_hex {
+                decoded.push('x');
+            }
+            decoded.push_str(&num_str);
+        } else {
+            decoded.push(ch);
+        }
+    }
+
+    result = decoded;
 
     // Remove extra whitespace
     result = result.split_whitespace()
