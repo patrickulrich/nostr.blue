@@ -163,8 +163,9 @@ pub fn WebBookmarks() -> Element {
                         return;
                     }
 
-                    // Capture the original count before deduplication for pagination
+                    // Capture the original count and last event before deduplication
                     let returned_count = new_bookmarks.len();
+                    let last_event_in_batch = new_bookmarks.last().cloned();
 
                     // Filter out duplicates before appending
                     let current = bookmarks.read().clone();
@@ -175,13 +176,20 @@ pub fn WebBookmarks() -> Element {
                         .filter(|bookmark| !existing_ids.contains(&bookmark.id))
                         .collect();
 
-                    // Update oldest timestamp from the actual oldest non-duplicate item
+                    // Update cursor: use filtered items if available, otherwise use raw batch boundary
                     if let Some(last_event) = filtered_bookmarks.last() {
+                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                    } else if let Some(last_event) = last_event_in_batch {
+                        // All items were duplicates but batch was non-empty; advance cursor
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // Determine if there are more events to load based on returned count
-                    has_more.set(returned_count >= 50);
+                    // Determine if there are more events to load
+                    if returned_count == 0 {
+                        has_more.set(false);
+                    } else {
+                        has_more.set(returned_count >= 50);
+                    }
 
                     // Append only non-duplicate events
                     let mut updated = current;

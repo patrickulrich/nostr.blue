@@ -61,6 +61,12 @@ pub fn Polls() -> Element {
 
             match result {
                 Ok(poll_events) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     // Track oldest timestamp and event ID for pagination
                     if let Some(last_event) = poll_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -74,6 +80,12 @@ pub fn Polls() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     error.set(Some(e));
                     loading.set(false);
                 }
@@ -101,6 +113,12 @@ pub fn Polls() -> Element {
 
             match result {
                 Ok(new_events) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     // Track oldest timestamp and event ID from new events
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -125,6 +143,12 @@ pub fn Polls() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     log::error!("Failed to load more polls: {}", e);
                     loading.set(false);
                 }
