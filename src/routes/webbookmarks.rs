@@ -107,6 +107,12 @@ pub fn WebBookmarks() -> Element {
 
             match result {
                 Ok(feed_events) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -119,6 +125,12 @@ pub fn WebBookmarks() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     error.set(Some(e));
                     loading.set(false);
                 }
@@ -145,6 +157,12 @@ pub fn WebBookmarks() -> Element {
 
             match result {
                 Ok(new_bookmarks) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     // Filter out duplicates before appending
                     let current = bookmarks.read().clone();
                     let existing_ids: std::collections::HashSet<_> = current.iter().map(|e| e.id).collect();
@@ -169,6 +187,12 @@ pub fn WebBookmarks() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
+                    // Check if feed type changed while we were fetching
+                    if *feed_type.read() != current_feed_type {
+                        loading.set(false);
+                        return;
+                    }
+
                     log::error!("Failed to load more bookmarks: {}", e);
                     loading.set(false);
                 }

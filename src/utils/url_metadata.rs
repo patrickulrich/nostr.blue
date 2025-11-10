@@ -178,6 +178,24 @@ struct MetaTag {
     content: Option<String>,
 }
 
+/// Find the closing '>' bracket while ignoring those inside quotes
+fn find_unquoted_close_bracket(tag: &str) -> Option<usize> {
+    let bytes = tag.as_bytes();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            b'"' if !in_single_quote => in_double_quote = !in_double_quote,
+            b'>' if !in_single_quote && !in_double_quote => return Some(i),
+            _ => {}
+        }
+    }
+
+    None
+}
+
 /// Extract all meta tags from HTML
 fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
     let mut tags = Vec::new();
@@ -192,9 +210,11 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
 
             // Check if this is a "<meta" tag (case-insensitive)
             if remaining.len() >= 5 && remaining[..5].eq_ignore_ascii_case("<meta") {
-                // Find the closing '>' from the original string
-                if let Some(close_offset) = remaining.find('>') {
-                    let tag_content = &remaining[..close_offset];
+                // Find the closing '>' while handling quoted attributes
+                let close_offset = find_unquoted_close_bracket(remaining);
+
+                if let Some(offset) = close_offset {
+                    let tag_content = &remaining[..offset];
 
                     let name = extract_attribute(tag_content, "name");
                     let property = extract_attribute(tag_content, "property");
@@ -204,8 +224,9 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
                         tags.push(MetaTag { name, property, content });
                     }
 
-                    pos = meta_pos + close_offset + 1;
+                    pos = meta_pos + offset + 1;
                 } else {
+                    // Unterminated tag, break out safely
                     break;
                 }
             } else {
@@ -224,21 +245,66 @@ fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
 /// Extract attribute value from HTML tag
 fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
     let tag_lower = tag.to_ascii_lowercase();
-    let pattern = format!("{}=", attr_name.to_ascii_lowercase());
+    let attr_name_lower = attr_name.to_ascii_lowercase();
 
-    if let Some(attr_pos) = tag_lower.find(&pattern) {
-        let value_start = attr_pos + pattern.len();
-        let remaining = &tag[value_start..].trim_start();
+    // Find the attribute name
+    let mut search_pos = 0;
+    while let Some(attr_pos) = tag_lower[search_pos..].find(&attr_name_lower) {
+        let actual_pos = search_pos + attr_pos;
+
+        // Check if this is a word boundary (preceded by whitespace or start of tag)
+        let is_word_start = actual_pos == 0 ||
+            tag_lower.as_bytes()[actual_pos - 1].is_ascii_whitespace() ||
+            tag_lower.as_bytes()[actual_pos - 1] == b'<';
+
+        if !is_word_start {
+            search_pos = actual_pos + 1;
+            continue;
+        }
+
+        // Skip past the attribute name
+        let mut pos = actual_pos + attr_name_lower.len();
+
+        // Skip whitespace after attribute name
+        while pos < tag.len() && tag.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        // Check for '='
+        if pos >= tag.len() || tag.as_bytes()[pos] != b'=' {
+            search_pos = actual_pos + 1;
+            continue;
+        }
+        pos += 1; // Skip '='
+
+        // Skip whitespace after '='
+        while pos < tag.len() && tag.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        if pos >= tag.len() {
+            return None;
+        }
+
+        let remaining = &tag[pos..];
 
         // Check for quote character
-        if let Some(quote_char) = remaining.chars().next() {
-            if quote_char == '"' || quote_char == '\'' {
-                // Find closing quote
-                if let Some(close_pos) = remaining[1..].find(quote_char) {
+        if let Some(first_char) = remaining.chars().next() {
+            if first_char == '"' || first_char == '\'' {
+                // Quoted value
+                if let Some(close_pos) = remaining[1..].find(first_char) {
                     return Some(remaining[1..close_pos + 1].to_string());
                 }
+            } else {
+                // Unquoted value - read until whitespace or '>'
+                let end_pos = remaining
+                    .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                    .unwrap_or(remaining.len());
+                return Some(remaining[..end_pos].to_string());
             }
         }
+
+        return None;
     }
 
     None
