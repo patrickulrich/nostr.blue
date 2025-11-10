@@ -47,8 +47,8 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
     let metadata = parse_html_metadata(&html, full_url);
 
     log::info!("Extracted metadata: title={:?}, description={:?}, image={:?}",
-        metadata.title.as_ref().map(|s| &s[..s.len().min(50)]),
-        metadata.description.as_ref().map(|s| &s[..s.len().min(50)]),
+        metadata.title.as_ref().map(|s| s.chars().take(50).collect::<String>()),
+        metadata.description.as_ref().map(|s| s.chars().take(50).collect::<String>()),
         metadata.image.is_some()
     );
 

@@ -7,45 +7,6 @@ use std::time::Duration;
 /// Global signal to track web bookmarks (kind 39701)
 pub static WEB_BOOKMARKS: GlobalSignal<Vec<Event>> = Signal::global(|| Vec::new());
 
-/// Loading state for web bookmarks
-pub static WEB_BOOKMARKS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
-
-/// Initialize web bookmarks by fetching from relays
-pub async fn init_webbookmarks() -> Result<(), String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
-
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
-
-    log::info!("Loading web bookmarks for {}", pubkey_str);
-
-    *WEB_BOOKMARKS_LOADING.write() = true;
-
-    // Fetch web bookmarks (kind 39701)
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::WebBookmark);
-
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let mut bookmarks: Vec<Event> = events.into_iter().collect();
-            // Sort by created_at descending (newest first)
-            bookmarks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-            log::info!("Loaded {} web bookmarks", bookmarks.len());
-            *WEB_BOOKMARKS.write() = bookmarks;
-            *WEB_BOOKMARKS_LOADING.write() = false;
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("Failed to fetch web bookmarks: {}", e);
-            *WEB_BOOKMARKS_LOADING.write() = false;
-            Err(format!("Failed to fetch web bookmarks: {}", e))
-        }
-    }
-}
-
 /// Add a new web bookmark
 ///
 /// # Arguments
@@ -114,10 +75,6 @@ pub async fn add_webbookmark(
     match client.send_event_builder(builder).await {
         Ok(output) => {
             log::info!("Web bookmark published: {}", output.id());
-
-            // Refresh bookmarks to include the new one
-            let _ = init_webbookmarks().await;
-
             Ok(())
         }
         Err(e) => {
@@ -199,7 +156,7 @@ pub async fn toggle_favorite(event: &Event, is_favorite: bool) -> Result<(), Str
 
     // Update the bookmark with new hashtags
     update_webbookmark(
-        format!("https://{}", url), // Add scheme back
+        url,
         title,
         description,
         image_url,
@@ -231,7 +188,7 @@ pub async fn toggle_archived(event: &Event, is_archived: bool) -> Result<(), Str
 
     // Update the bookmark with new hashtags
     update_webbookmark(
-        format!("https://{}", url), // Add scheme back
+        url,
         title,
         description,
         image_url,
