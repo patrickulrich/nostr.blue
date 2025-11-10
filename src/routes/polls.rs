@@ -305,7 +305,8 @@ async fn load_following_polls(until: Option<u64>) -> Result<Vec<Event>, String> 
         .limit(50);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        // Subtract 1 to make the boundary exclusive and avoid duplicates
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     // Fetch events from database and relays
@@ -327,7 +328,8 @@ async fn load_global_polls(until: Option<u64>) -> Result<Vec<Event>, String> {
         .limit(50);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        // Subtract 1 to make the boundary exclusive and avoid duplicates
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     // Fetch events from database and relays

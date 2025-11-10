@@ -109,11 +109,15 @@ pub fn PollNew() -> Element {
         });
     };
 
-    // Redirect if not authenticated
-    if !*is_authenticated.read() {
-        use_effect(move || {
+    // Redirect if not authenticated - hoist use_effect to maintain hook order
+    use_effect(move || {
+        if !*is_authenticated.read() {
             navigator.push(crate::routes::Route::Home {});
-        });
+        }
+    });
+
+    // Conditional UI render
+    if !*is_authenticated.read() {
         return rsx! {
             div { class: "flex items-center justify-center h-screen",
                 "Redirecting..."
@@ -396,11 +400,23 @@ fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
                 return None;
             }
             // Parse datetime-local format (YYYY-MM-DDTHH:MM)
-            // This is a simplified parser - in production you'd want better error handling
-            use chrono::{NaiveDateTime, TimeZone, Utc};
-            if let Ok(dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
-                let timestamp = Utc.from_utc_datetime(&dt).timestamp() as u64;
-                Some(Timestamp::from(timestamp))
+            use chrono::{NaiveDateTime, Local, TimeZone, Utc};
+
+            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
+                // Convert from local time to UTC
+                if let Some(local_dt) = Local.from_local_datetime(&naive_dt).single() {
+                    let utc_dt = local_dt.with_timezone(&Utc);
+                    let timestamp = utc_dt.timestamp();
+
+                    // Verify timestamp is valid (non-negative and in the future)
+                    if timestamp >= 0 && timestamp > Utc::now().timestamp() {
+                        Some(Timestamp::from(timestamp as u64))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             } else {
                 None
             }

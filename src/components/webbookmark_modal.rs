@@ -125,6 +125,9 @@ pub fn WebBookmarkModal(
         let new_url = evt.value().clone();
         url_input.set(new_url.clone());
 
+        // Reset auto_fetched flag when URL changes to re-enable auto-fetch
+        auto_fetched.set(false);
+
         // Auto-fetch if this is a new bookmark and we haven't fetched yet
         if mode == BookmarkModalMode::Add && !*auto_fetched.read() && !new_url.trim().is_empty() {
             // Check if it looks like a complete URL

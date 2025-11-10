@@ -181,26 +181,39 @@ struct MetaTag {
 /// Extract all meta tags from HTML
 fn extract_meta_tags(html: &str) -> Vec<MetaTag> {
     let mut tags = Vec::new();
-    let html_lower = html.to_lowercase();
     let mut pos = 0;
 
-    while let Some(meta_start) = html_lower[pos..].find("<meta") {
-        let meta_pos = pos + meta_start;
+    // Search for "<meta" case-insensitively by scanning byte positions
+    while pos < html.len() {
+        // Look for '<' character
+        if let Some(lt_pos) = html[pos..].find('<') {
+            let meta_pos = pos + lt_pos;
+            let remaining = &html[meta_pos..];
 
-        if let Some(close_pos) = html_lower[meta_pos..].find('>') {
-            let tag_end = meta_pos + close_pos;
-            let tag_content = &html[meta_pos..tag_end];
+            // Check if this is a "<meta" tag (case-insensitive)
+            if remaining.len() >= 5 && remaining[..5].eq_ignore_ascii_case("<meta") {
+                // Find the closing '>' from the original string
+                if let Some(close_offset) = remaining.find('>') {
+                    let tag_content = &remaining[..close_offset];
 
-            let name = extract_attribute(tag_content, "name");
-            let property = extract_attribute(tag_content, "property");
-            let content = extract_attribute(tag_content, "content");
+                    let name = extract_attribute(tag_content, "name");
+                    let property = extract_attribute(tag_content, "property");
+                    let content = extract_attribute(tag_content, "content");
 
-            if name.is_some() || property.is_some() {
-                tags.push(MetaTag { name, property, content });
+                    if name.is_some() || property.is_some() {
+                        tags.push(MetaTag { name, property, content });
+                    }
+
+                    pos = meta_pos + close_offset + 1;
+                } else {
+                    break;
+                }
+            } else {
+                // Not a meta tag, move past this '<'
+                pos = meta_pos + 1;
             }
-
-            pos = tag_end + 1;
         } else {
+            // No more '<' characters found
             break;
         }
     }
