@@ -20,6 +20,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Search** - Find users, notes, and content by hashtags with NIP-50 relay search support
 - ✅ **Notifications** - Track mentions, replies, and interactions
 - ✅ **Explore** - Discover trending content and new users
+- ✅ **Polls (NIP-88)** - Create and vote on single-choice and multiple-choice polls with real-time results, countdown timers, and hashtag support
 
 ### Advanced Features
 - ✅ **Outbox Model (NIP-65)** - Smart relay routing using author's preferred write relays for improved content discovery
@@ -132,6 +133,9 @@ nostrbluerust/
 │   │   ├── photo_card.rs   # Photo grid item (NIP-68)
 │   │   ├── article_card.rs # Long-form article card
 │   │   ├── voice_message_card.rs # Voice message card (NIP-A0)
+│   │   ├── poll_card.rs    # Poll display with voting (NIP-88)
+│   │   ├── poll_timer.rs   # Poll countdown timer (NIP-88)
+│   │   ├── poll_option_list.rs # Poll option editor (NIP-88)
 │   │   ├── webbookmark_card.rs # Web bookmark card (NIP-B0)
 │   │   ├── webbookmark_modal.rs # Add/edit bookmark modal (NIP-B0)
 │   │   ├── zap_modal.rs    # Lightning zap interface
@@ -163,6 +167,9 @@ nostrbluerust/
 │   │   ├── photos.rs       # Photo feed (NIP-68)
 │   │   ├── videos.rs       # Video feed (NIP-71)
 │   │   ├── voicemessages.rs # Voice messages feed (NIP-A0)
+│   │   ├── polls.rs        # Polls feed (NIP-88)
+│   │   ├── poll_view.rs    # Individual poll view (NIP-88)
+│   │   ├── poll_new.rs     # Poll creation form (NIP-88)
 │   │   ├── webbookmarks.rs # Web bookmarks manager (NIP-B0)
 │   │   ├── cashu_wallet.rs # Cashu ecash wallet (NIP-60)
 │   │   ├── communities.rs  # Communities (NIP-72)
@@ -334,6 +341,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
+| [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls (single/multiple choice with results) | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web bookmarks | ✅ |
