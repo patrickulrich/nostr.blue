@@ -237,6 +237,7 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
 }
 
 /// Rollback bookmarks to previous state after failed publish
+#[allow(dead_code)]
 pub fn rollback_bookmarks() {
     if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().clone() {
         log::info!("Rolling back bookmarks to previous state");
@@ -249,6 +250,7 @@ pub fn rollback_bookmarks() {
 }
 
 /// Manually retry failed bookmark publish
+#[allow(dead_code)]
 pub async fn retry_bookmark_publish() {
     let current_bookmarks = BOOKMARKED_EVENTS.read().clone();
     log::info!("Manually retrying bookmark publish");
@@ -256,6 +258,7 @@ pub async fn retry_bookmark_publish() {
 }
 
 /// Dismiss failed status and keep local changes
+#[allow(dead_code)]
 pub fn dismiss_bookmark_error() {
     log::info!("Dismissing bookmark sync error, keeping local changes");
     *BOOKMARK_ROLLBACK_STATE.write() = None;
