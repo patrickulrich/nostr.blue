@@ -347,6 +347,7 @@ impl WalletDatabase for IndexedDbDatabase {
                     STORE_MINTS,
                     STORE_KEYSETS,
                     STORE_PROOFS,
+                    STORE_MINT_QUOTES,
                     STORE_TRANSACTIONS,
                 ],
                 IdbTransactionMode::Readwrite,
@@ -428,8 +429,44 @@ impl WalletDatabase for IndexedDbDatabase {
             log::debug!("Migrated {} proofs", migrated_count);
         }
 
-        // 5. STORE_MINT_QUOTES - keyed by quote_id, doesn't have mint_url field in the CDK type
-        // These quotes are temporary and will expire, so no migration needed
+        // 5. Migrate STORE_MINT_QUOTES (each MintQuote contains mint_url)
+        {
+            let store = tx.object_store(STORE_MINT_QUOTES)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+            // Read all mint quotes using the transaction's store (avoid nested transaction)
+            let get_all_request = store.get_all()
+                .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?;
+            let all_values = get_all_request.await
+                .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
+
+            let get_all_keys_request = store.get_all_keys()
+                .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
+            let all_keys = get_all_keys_request.await
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
+
+            let mut migrated_count = 0;
+            for (i, value) in all_values.iter().enumerate() {
+                let key = all_keys.get(i as u32);
+                if !key.is_undefined() && !key.is_null() {
+                    let json_str = value.as_string().ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+
+                    let mint_quote: MintQuote = serde_json::from_str(&json_str)
+                        .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+
+                    if mint_quote.mint_url == old_mint_url {
+                        let mut updated_quote = mint_quote;
+                        updated_quote.mint_url = new_mint_url.clone();
+                        let json = serde_json::to_string(&updated_quote)
+                            .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                        store.put_key_val(&key, &JsValue::from_str(&json))
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                        migrated_count += 1;
+                    }
+                }
+            }
+            log::debug!("Migrated {} mint quotes", migrated_count);
+        }
 
         // 6. STORE_MELT_QUOTES - keyed by quote_id, doesn't have mint_url field in the CDK type
         // These quotes are temporary and will expire, so no migration needed
