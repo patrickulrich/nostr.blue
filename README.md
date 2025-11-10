@@ -27,6 +27,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Communities (NIP-72)** - Moderated topic-based communities
 - ✅ **Lists (NIP-51)** - Create and manage custom lists and bookmarks
 - ✅ **Lightning Zaps (NIP-57)** - Send and receive Bitcoin micropayments
+- ✅ **Nostr Wallet Connect (NIP-47)** - Remote Lightning wallet integration with IndexedDB persistence, configurable payment preferences (NWC-first, WebLN-first, manual-only, always-ask), automatic payment routing with smart fallbacks, and balance display
 - ✅ **Direct Messages (NIP-04/NIP-17/NIP-44)** - Encrypted private messaging with full NIP-17 compliance
 - ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
 - ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
@@ -76,6 +77,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - `nostr-indexeddb` - IndexedDB persistent storage
   - `nostr-browser-signer` - NIP-07 browser extension integration
   - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
+  - `nwc` - NIP-47 Nostr Wallet Connect for remote Lightning wallet integration
 
 ### Bitcoin & Ecash
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
@@ -158,6 +160,7 @@ nostrbluerust/
 │   │   ├── cashu_receive_modal.rs # Receive ecash modal
 │   │   ├── cashu_receive_lightning_modal.rs # Lightning deposit modal
 │   │   ├── cashu_send_lightning_modal.rs # Lightning withdrawal modal
+│   │   ├── nwc_setup_modal.rs # Nostr Wallet Connect setup (NIP-47)
 │   │   ├── sidebar.rs      # Navigation sidebar
 │   │   ├── layout.rs       # App shell layout
 │   │   ├── client_initializing.rs # Loading animation
@@ -223,6 +226,7 @@ nostrbluerust/
 │   │   ├── emoji_store.rs  # Custom emoji management (NIP-30/NIP-51)
 │   │   ├── cashu_wallet.rs # Cashu wallet state and operations (NIP-60)
 │   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
+│   │   ├── nwc_store.rs    # Nostr Wallet Connect state and operations (NIP-47)
 │   │   └── signer.rs       # Event signing
 │   ├── utils/              # Utility functions
 │   │   ├── nip19.rs        # NIP-19 identifier parsing
@@ -340,6 +344,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User status (music listening, etc.) | ✅ |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (remote Lightning wallet) | ✅ |
 | [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (relay-based search, GIF search) | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
 | [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live activities (livestreaming) | ✅ |
