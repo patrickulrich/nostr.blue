@@ -14,6 +14,7 @@ pub mod mention_extractor;
 pub mod data_state;
 pub mod timed_serializer;
 pub mod format;
+pub mod url_metadata;
 
 pub use thread_tree::{ThreadNode, build_thread_tree, invalidate_thread_tree_cache, invalidate_thread_tree_cache_batch};
 pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};

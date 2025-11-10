@@ -28,6 +28,10 @@ pub mod photos;
 pub mod photo_detail;
 pub mod voicemessages;
 pub mod voice_message_new;
+pub mod webbookmarks;
+pub mod polls;
+pub mod poll_view;
+pub mod poll_new;
 pub mod cashu_wallet;
 pub mod terms;
 pub mod privacy;
@@ -54,6 +58,10 @@ use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
 use voice_message_new::VoiceMessageNew;
+use webbookmarks::WebBookmarks;
+use polls::Polls;
+use poll_view::PollView;
+use poll_new::PollNew;
 use cashu_wallet::CashuWallet;
 use note_new::NoteNew;
 use article_new::ArticleNew;
@@ -127,6 +135,18 @@ pub enum Route {
 
         #[route("/voicemessages/new")]
         VoiceMessageNew {},
+
+        #[route("/webbookmarks")]
+        WebBookmarks {},
+
+        #[route("/polls")]
+        Polls {},
+
+        #[route("/polls/new")]
+        PollNew {},
+
+        #[route("/polls/:noteid")]
+        PollView { noteid: String },
 
         #[route("/cashuwallet")]
         CashuWallet {},
@@ -421,6 +441,50 @@ fn Layout() -> Element {
                                                     "Voice Messages"
                                                 }
                                             }
+                                            Link {
+                                                to: Route::Polls {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                    line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                    line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                }
+                                                span {
+                                                    "Polls"
+                                                }
+                                            }
+                                            Link {
+                                                to: Route::WebBookmarks {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
+                                                }
+                                                span {
+                                                    "Web Bookmarks"
+                                                }
+                                            }
                                             a {
                                                 href: "https://nostrcal.com",
                                                 target: "_blank",
@@ -480,6 +544,10 @@ fn Layout() -> Element {
                                     on_voice_click: move |_| {
                                         radial_menu_open.set(false);
                                         navigator.push(Route::VoiceMessageNew {});
+                                    },
+                                    on_poll_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::PollNew {});
                                     },
                                 }
                             }
@@ -735,6 +803,56 @@ fn Layout() -> Element {
                                                             }
                                                             span {
                                                                 "Voice Messages"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::Polls {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                                line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                                line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                            }
+                                                            span {
+                                                                "Polls"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::WebBookmarks {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
+                                                            }
+                                                            span {
+                                                                "Web Bookmarks"
                                                             }
                                                         }
                                                     }
