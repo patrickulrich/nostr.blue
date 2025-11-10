@@ -93,7 +93,12 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
                 "starts" => {
                     if let Some(value) = tag_vec.get(1) {
                         if let Ok(ts) = value.parse::<i64>() {
-                            meta.starts = Some(Timestamp::from(ts as u64));
+                            // Validate timestamp is non-negative to avoid wraparound
+                            if ts >= 0 {
+                                meta.starts = Some(Timestamp::from(ts as u64));
+                            } else {
+                                log::warn!("Negative timestamp {} in starts tag, skipping", ts);
+                            }
                         }
                     }
                 }

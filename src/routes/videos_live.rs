@@ -46,12 +46,12 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_following_streams(None, current_status).await {
-                Ok(events) => {
+                Ok((events, hit_limit)) => {
                     if let Some(last_event) = events.last() {
                         oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    has_more_following.set(events.len() >= 50);
+                    has_more_following.set(hit_limit);
                     following_streams.set(events);
                     loading_following.set(false);
                 }
@@ -78,12 +78,12 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_global_streams(None, current_status).await {
-                Ok(events) => {
+                Ok((events, hit_limit)) => {
                     if let Some(last_event) = events.last() {
                         oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    has_more_global.set(events.len() >= 50);
+                    has_more_global.set(hit_limit);
                     global_streams.set(events);
                     loading_global.set(false);
                 }
@@ -108,7 +108,7 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_following_streams(until, current_status).await {
-                Ok(new_events) => {
+                Ok((new_events, hit_limit)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -127,7 +127,7 @@ pub fn VideosLive() -> Element {
                             oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
                         }
 
-                        has_more_following.set(unique_events.len() >= 50);
+                        has_more_following.set(hit_limit);
 
                         let mut current = following_streams.read().clone();
                         current.extend(unique_events);
@@ -156,7 +156,7 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_global_streams(until, current_status).await {
-                Ok(new_events) => {
+                Ok((new_events, hit_limit)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = global_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -175,7 +175,7 @@ pub fn VideosLive() -> Element {
                             oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
                         }
 
-                        has_more_global.set(unique_events.len() >= 50);
+                        has_more_global.set(hit_limit);
 
                         let mut current = global_streams.read().clone();
                         current.extend(unique_events);
@@ -415,7 +415,7 @@ pub fn VideosLive() -> Element {
 
 // Helper functions to load streams
 
-async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<Vec<Event>, String> {
+async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, bool), String> {
     let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone()
         .ok_or("Not authenticated")?;
 
@@ -460,10 +460,14 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    Ok(filter_by_status(events, status))
+    // Base has_more on raw page size, not filtered results
+    let hit_limit = events.len() >= 50;
+    let filtered_events = filter_by_status(events, status);
+
+    Ok((filtered_events, hit_limit))
 }
 
-async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<Vec<Event>, String> {
+async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, bool), String> {
     // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
     let mut filter = Filter::new()
         .kind(Kind::Custom(30311))
@@ -477,7 +481,11 @@ async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    Ok(filter_by_status(events, status))
+    // Base has_more on raw page size, not filtered results
+    let hit_limit = events.len() >= 50;
+    let filtered_events = filter_by_status(events, status);
+
+    Ok((filtered_events, hit_limit))
 }
 
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
