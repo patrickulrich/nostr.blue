@@ -336,54 +336,111 @@ impl WalletDatabase for IndexedDbDatabase {
         old_mint_url: MintUrl,
         new_mint_url: MintUrl,
     ) -> Result<(), Self::Err> {
-        // Perform all operations in a single transaction for atomicity
+        log::info!("Migrating mint URL from {} to {}", old_mint_url, new_mint_url);
+
+        // Perform all operations in a single multi-store transaction for atomicity
+        // This ensures all data is migrated together or none at all
         let tx = self
             .db
-            .transaction_on_one_with_mode(STORE_MINTS, IdbTransactionMode::Readwrite)
+            .transaction_on_multi_with_mode(
+                &[
+                    STORE_MINTS,
+                    STORE_KEYSETS,
+                    STORE_PROOFS,
+                    STORE_TRANSACTIONS,
+                ],
+                IdbTransactionMode::Readwrite,
+            )
             .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
 
-        let store = tx
-            .object_store(STORE_MINTS)
-            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+        let old_url_str = old_mint_url.to_string();
+        let new_url_str = new_mint_url.to_string();
 
-        // Get the mint info from old URL
-        let old_key = JsValue::from_str(&old_mint_url.to_string());
-        let value_opt = store
-            .get(&old_key)
-            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
-            .await
-            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+        // 1. Migrate STORE_MINTS
+        {
+            let store = tx.object_store(STORE_MINTS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
 
-        if let Some(value) = value_opt {
-            // Deserialize the mint info
-            let json_str = value
-                .as_string()
-                .ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
-
-            let mint_info: Option<MintInfo> = serde_json::from_str(&json_str)
-                .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
-
-            // Store under new URL
-            let new_key = JsValue::from_str(&new_mint_url.to_string());
-            let new_json_str = serde_json::to_string(&mint_info)
-                .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
-            let new_value = JsValue::from_str(&new_json_str);
-
-            store
-                .put_key_val(&new_key, &new_value)
-                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
-
-            // Remove old URL
-            store
-                .delete(&old_key)
-                .map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
+            let old_key = JsValue::from_str(&old_url_str);
+            if let Some(value) = store.get(&old_key).map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?.await.map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                let new_key = JsValue::from_str(&new_url_str);
+                store.put_key_val(&new_key, &value).map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                store.delete(&old_key).map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
+                log::debug!("Migrated mint info");
+            }
         }
 
-        // Commit the transaction
+        // 2. Migrate STORE_KEYSETS (keyed by mint_url, data is Vec<KeySetInfo>)
+        {
+            let store = tx.object_store(STORE_KEYSETS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+            let old_key = JsValue::from_str(&old_url_str);
+            if let Some(value) = store.get(&old_key).map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?.await.map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                // Simply re-key the data under new URL (KeySetInfo doesn't contain mint_url)
+                let new_key = JsValue::from_str(&new_url_str);
+                store.put_key_val(&new_key, &value)
+                    .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                store.delete(&old_key).map_err(|e| Self::make_error(format!("Delete error: {:?}", e)))?;
+                log::debug!("Migrated keysets");
+            }
+        }
+
+        // 3. STORE_KEYS is keyed by keyset_id and doesn't contain mint_url - no migration needed
+        // The keys are associated with keysets which are migrated above
+
+        // 4. Migrate STORE_PROOFS (each ProofInfo contains mint_url)
+        {
+            let store = tx.object_store(STORE_PROOFS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+            let all_proofs = self.get_all_key_values::<ProofInfo>(STORE_PROOFS).await?;
+            let mut migrated_count = 0;
+            for (proof_id, proof_info) in all_proofs {
+                if proof_info.mint_url == old_mint_url {
+                    let mut updated_proof = proof_info;
+                    updated_proof.mint_url = new_mint_url.clone();
+                    let json = serde_json::to_string(&updated_proof)
+                        .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                    store.put_key_val(&JsValue::from_str(&proof_id), &JsValue::from_str(&json))
+                        .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                    migrated_count += 1;
+                }
+            }
+            log::debug!("Migrated {} proofs", migrated_count);
+        }
+
+        // 5. STORE_MINT_QUOTES - keyed by quote_id, doesn't have mint_url field in the CDK type
+        // These quotes are temporary and will expire, so no migration needed
+
+        // 6. STORE_MELT_QUOTES - keyed by quote_id, doesn't have mint_url field in the CDK type
+        // These quotes are temporary and will expire, so no migration needed
+
+        // 7. Migrate STORE_TRANSACTIONS (each Transaction contains mint_url)
+        {
+            let store = tx.object_store(STORE_TRANSACTIONS)
+                .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+            let all_transactions = self.get_all_key_values::<Transaction>(STORE_TRANSACTIONS).await?;
+            for (tx_id, transaction) in all_transactions {
+                if transaction.mint_url == old_mint_url {
+                    let mut updated_tx = transaction;
+                    updated_tx.mint_url = new_mint_url.clone();
+                    let json = serde_json::to_string(&updated_tx)
+                        .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                    store.put_key_val(&JsValue::from_str(&tx_id.to_string()), &JsValue::from_str(&json))
+                        .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                }
+            }
+            log::debug!("Migrated transactions");
+        }
+
+        // Commit the entire multi-store transaction
         tx.await
             .into_result()
             .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
 
+        log::info!("Successfully migrated all data from {} to {}", old_mint_url, new_mint_url);
         Ok(())
     }
 

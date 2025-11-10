@@ -635,7 +635,6 @@ pub async fn refresh_wallet() -> Result<(), String> {
 #[cfg(target_arch = "wasm32")]
 async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     use sha2::{Sha256, Digest};
-    use gloo_storage::{LocalStorage, Storage};
 
     // Try to get Keys first (for nsec login)
     if let Some(keys) = auth_store::get_keys() {
@@ -661,50 +660,35 @@ async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         return Ok(seed);
     }
 
-    // For browser extension or remote signer, use a stored seed
-    // TODO: SECURITY WARNING - For extension users, the seed is still stored in plaintext
-    // in LocalStorage because we don't have access to their private key for encryption.
-    // This is an XSS risk. Consider alternatives:
-    // 1. Store encrypted seed in extension storage (requires extension API)
-    // 2. Require wallet re-import each session for extension users
-    // 3. Use WebCrypto API with a user-provided password
-    log::warn!("Using browser extension or remote signer - seed will be stored in plaintext LocalStorage (XSS risk)");
+    // For browser extension or remote signer, use NIP-07 to sign a deterministic challenge
+    // The signature acts as our secret seed material
+    // This requires user approval but provides secure, deterministic derivation
 
-    let pubkey = auth_store::get_pubkey()
-        .ok_or("Not authenticated - no pubkey available")?;
+    log::info!("Using browser extension - deriving seed from NIP-07 signature");
 
-    let storage_key = format!("cashu_seed_{}", pubkey);
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available for extension user")?
+        .as_nostr_signer();
 
-    // Try to get existing seed
-    if let Ok(seed_hex) = LocalStorage::get::<String>(&storage_key) {
-        log::info!("Found existing seed in storage");
-        let seed_bytes = hex::decode(&seed_hex)
-            .map_err(|e| format!("Failed to decode stored seed: {}", e))?;
+    // Create a deterministic challenge event for wallet seed derivation
+    let challenge_content = "nostr.blue Cashu Wallet Seed Derivation - Sign this message to derive your wallet encryption key";
 
-        if seed_bytes.len() == 64 {
-            let mut seed = [0u8; 64];
-            seed.copy_from_slice(&seed_bytes);
-            return Ok(seed);
-        }
-    }
+    // Use a fixed timestamp to ensure deterministic challenge
+    use nostr_sdk::{EventBuilder, Timestamp};
+    let challenge_event = EventBuilder::text_note(challenge_content)
+        .custom_created_at(Timestamp::from(1700000000)) // Fixed timestamp for determinism
+        .sign(&signer)
+        .await
+        .map_err(|e| format!("Failed to sign challenge for wallet derivation: {}", e))?;
 
-    // Generate new seed and store it
-    log::warn!("Generating new seed for browser extension user - will be stored in plaintext");
+    // Use the signature as our seed material (64 bytes)
+    // Schnorr signatures are exactly 64 bytes
+    let sig_bytes = challenge_event.sig.serialize();
+
     let mut seed = [0u8; 64];
+    seed.copy_from_slice(&sig_bytes);
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        use rand::RngCore;
-        let mut rng = rand::thread_rng();
-        rng.fill_bytes(&mut seed);
-    }
-
-    // Store the seed (plaintext - SECURITY RISK for extension users)
-    let seed_hex = hex::encode(&seed);
-    LocalStorage::set(&storage_key, seed_hex)
-        .map_err(|e| format!("Failed to store seed: {:?}", e))?;
-
-    log::warn!("Generated and stored new seed in plaintext LocalStorage");
+    log::info!("Wallet seed derived from NIP-07 signature (deterministic, no storage needed)");
     Ok(seed)
 }
 
