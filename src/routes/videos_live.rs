@@ -446,9 +446,9 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         return load_global_streams(until, status).await;
     }
 
-    // Fetch all content types (same as /videos page) to get same event pool
+    // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
     let mut filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22), Kind::Custom(30311)])
+        .kind(Kind::Custom(30311))
         .authors(authors)
         .limit(50);
 
@@ -460,18 +460,13 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    // Filter to only livestreams (Kind 30311)
-    let livestreams: Vec<Event> = events.into_iter()
-        .filter(|e| e.kind == Kind::Custom(30311))
-        .collect();
-
-    Ok(filter_by_status(livestreams, status))
+    Ok(filter_by_status(events, status))
 }
 
 async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<Vec<Event>, String> {
-    // Fetch all content types (same as /videos page) to get same event pool
+    // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
     let mut filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22), Kind::Custom(30311)])
+        .kind(Kind::Custom(30311))
         .limit(50);
 
     if let Some(until_ts) = until {
@@ -482,12 +477,7 @@ async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    // Filter to only livestreams (Kind 30311)
-    let livestreams: Vec<Event> = events.into_iter()
-        .filter(|e| e.kind == Kind::Custom(30311))
-        .collect();
-
-    Ok(filter_by_status(livestreams, status))
+    Ok(filter_by_status(events, status))
 }
 
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {

@@ -51,6 +51,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
     let tag_for_scroll = tag.clone();
 
     // Infinite scroll detection with inline loading logic
+    let mut scroll_callback = use_signal(|| None::<wasm_bindgen::closure::Closure<dyn FnMut()>>);
+
     use_effect(move || {
         let window = web_sys::window().expect("no global window");
         let _document = window.document().expect("no document");
@@ -114,9 +116,20 @@ pub fn VideosLiveTag(tag: String) -> Element {
             }
         }) as Box<dyn FnMut()>);
 
+        // Register the event listener (keep ownership of callback)
         window.add_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref()).ok();
 
-        callback.forget();
+        // Store callback to clean up later
+        scroll_callback.set(Some(callback));
+    });
+
+    // Cleanup scroll listener on unmount
+    use_drop(move || {
+        if let Some(callback) = scroll_callback.write().take() {
+            if let Some(window) = web_sys::window() {
+                window.remove_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref()).ok();
+            }
+        }
     });
 
     rsx! {

@@ -107,9 +107,14 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
             gloo_timers::future::TimeoutFuture::new(100).await;
 
             match initVideoJs(&vid, &url) {
-                Ok(_) => {
-                    player_initialized.set(true);
-                    log::info!("video.js player initialized successfully");
+                Ok(js_val) => {
+                    // Check if the returned value is null or undefined
+                    if js_val.is_null() || js_val.is_undefined() {
+                        log::error!("Failed to initialize video.js player: videojs is not present or returned null/undefined");
+                    } else {
+                        player_initialized.set(true);
+                        log::info!("video.js player initialized successfully");
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to initialize video.js player: {:?}", e);

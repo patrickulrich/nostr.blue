@@ -14,7 +14,8 @@ pub fn LiveChat(
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(|| String::new());
     let mut sending = use_signal(|| false);
-    let has_signer = *HAS_SIGNER.read();
+    // Make has_signer reactive - read from the store when needed instead of capturing once
+    let has_signer = use_memo(move || *HAS_SIGNER.read());
 
     // Create the 'a' tag for this livestream
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
@@ -63,11 +64,16 @@ pub fn LiveChat(
     }));
 
     // Auto-refresh messages every 5 seconds
-    use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
-        spawn(async move {
-            loop {
-                gloo_timers::future::TimeoutFuture::new(5000).await;
+    let mut interval_handle = use_signal(|| None::<gloo_timers::callback::Interval>);
 
+    use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
+        // Cancel any existing interval
+        interval_handle.set(None);
+
+        // Create new interval
+        let interval = gloo_timers::callback::Interval::new(5000, move || {
+            let tag = tag.clone();
+            spawn(async move {
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 {
                     let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
@@ -89,9 +95,16 @@ pub fn LiveChat(
                         }
                     }
                 }
-            }
+            });
         });
+
+        interval_handle.set(Some(interval));
     }));
+
+    // Cleanup interval on unmount
+    use_drop(move || {
+        interval_handle.set(None);
+    });
 
 
     rsx! {
@@ -132,7 +145,7 @@ pub fn LiveChat(
             }
 
             // Message input
-            if has_signer {
+            if *has_signer.read() {
                 div {
                     class: "p-4 border-t border-border",
                     div {
@@ -148,7 +161,7 @@ pub fn LiveChat(
                                 if e.key() == Key::Enter && !e.modifiers().shift() {
                                     e.prevent_default();
                                     let content = message_input.read().clone();
-                                    if content.trim().is_empty() || *sending.read() || !has_signer {
+                                    if content.trim().is_empty() || *sending.read() || !*has_signer.read() {
                                         return;
                                     }
                                     let tag_clone = a_tag_for_send_keydown.clone();
@@ -200,7 +213,7 @@ pub fn LiveChat(
                             disabled: *sending.read() || message_input.read().trim().is_empty(),
                             onclick: move |_| {
                                 let content = message_input.read().clone();
-                                if content.trim().is_empty() || *sending.read() || !has_signer {
+                                if content.trim().is_empty() || *sending.read() || !*has_signer.read() {
                                     return;
                                 }
                                 let tag_clone = a_tag_for_send_onclick.clone();

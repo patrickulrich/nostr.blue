@@ -57,7 +57,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 
                     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                         Ok(events) => {
-                            if let Some(event) = events.into_iter().next() {
+                            // Select the newest event by created_at (largest timestamp)
+                            if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
                                 stream_event.set(Some(event));
                             } else {
                                 error.set(Some("Stream not found".to_string()));

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus::events::MouseData;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, Timestamp, JsonUtil};
 use crate::routes::Route;
-use crate::stores::nostr_client::get_client;
+use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED};
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,7 +135,12 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // Fetch author profile
-    use_effect(use_reactive(&author_pubkey_for_fetch, move |pk| {
+    use_effect(use_reactive((&author_pubkey_for_fetch, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
+        // Short-circuit until client is ready
+        if !client_initialized {
+            return;
+        }
+
         spawn(async move {
             if let Ok(pubkey) = PublicKey::from_bech32(&pk).or_else(|_| PublicKey::parse(&pk)) {
                 if let Some(client) = get_client() {
