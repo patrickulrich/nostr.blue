@@ -118,22 +118,18 @@ pub fn VideosLive() -> Element {
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
-                    if unique_events.is_empty() {
-                        has_more_following.set(false);
-                        loading_following.set(false);
-                        log::info!("No new unique following streams found");
-                    } else {
-                        if let Some(last_event) = unique_events.last() {
-                            oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
-                        }
+                    if let Some(last_event) = unique_events.last() {
+                        oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
+                    }
 
-                        has_more_following.set(hit_limit);
+                    has_more_following.set(hit_limit);
 
+                    if !unique_events.is_empty() {
                         let mut current = following_streams.read().clone();
                         current.extend(unique_events);
                         following_streams.set(current);
-                        loading_following.set(false);
                     }
+                    loading_following.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to load more following streams: {}", e);
@@ -166,22 +162,18 @@ pub fn VideosLive() -> Element {
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
-                    if unique_events.is_empty() {
-                        has_more_global.set(false);
-                        loading_global.set(false);
-                        log::info!("No new unique global streams found");
-                    } else {
-                        if let Some(last_event) = unique_events.last() {
-                            oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
-                        }
+                    if let Some(last_event) = unique_events.last() {
+                        oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
+                    }
 
-                        has_more_global.set(hit_limit);
+                    has_more_global.set(hit_limit);
 
+                    if !unique_events.is_empty() {
                         let mut current = global_streams.read().clone();
                         current.extend(unique_events);
                         global_streams.set(current);
-                        loading_global.set(false);
                     }
+                    loading_global.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to load more global streams: {}", e);

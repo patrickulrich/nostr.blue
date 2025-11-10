@@ -30,12 +30,12 @@ pub fn VideosLiveTag(tag: String) -> Element {
 
         spawn(async move {
             match load_streams_by_tag(&current_tag, None).await {
-                Ok(events) => {
+                Ok((events, hit_limit)) => {
                     if let Some(last_event) = events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    has_more.set(events.len() >= 50);
+                    has_more.set(hit_limit);
                     stream_events.set(events);
                     loading.set(false);
                 }
@@ -87,7 +87,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
 
                 spawn(async move {
                     match load_streams_by_tag(&current_tag, until).await {
-                        Ok(new_events) => {
+                        Ok((new_events, hit_limit)) => {
                             let existing_ids: std::collections::HashSet<_> = {
                                 let current = stream_events.read();
                                 current.iter().map(|e| e.id).collect()
@@ -97,22 +97,18 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 .filter(|e| !existing_ids.contains(&e.id))
                                 .collect();
 
-                            if unique_events.is_empty() {
-                                has_more.set(false);
-                                loading.set(false);
-                                log::info!("No new unique streams found, stopping pagination");
-                            } else {
-                                if let Some(last_event) = unique_events.last() {
-                                    oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                                }
+                            if let Some(last_event) = unique_events.last() {
+                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                            }
 
-                                has_more.set(unique_events.len() >= 50);
+                            has_more.set(hit_limit);
 
+                            if !unique_events.is_empty() {
                                 let mut current = stream_events.read().clone();
                                 current.extend(unique_events);
                                 stream_events.set(current);
-                                loading.set(false);
                             }
+                            loading.set(false);
                         }
                         Err(e) => {
                             log::error!("Failed to load more streams: {}", e);
@@ -241,7 +237,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
     }
 }
 
-async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     let mut filter = Filter::new()
         .kind(Kind::from(30311))
         .custom_tag(
@@ -254,7 +250,10 @@ async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<Vec<Event>
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
-        .map_err(|e| format!("Failed to fetch streams: {}", e))
+        .map_err(|e| format!("Failed to fetch streams: {}", e))?;
+
+    let hit_limit = events.len() >= 50;
+    Ok((events, hit_limit))
 }

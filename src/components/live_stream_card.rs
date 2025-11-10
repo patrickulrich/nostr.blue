@@ -203,7 +203,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
                     } else {
                         div {
                             class: "w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold",
-                            "{author_name.chars().next().unwrap_or('?').to_uppercase()}"
+                            "{author_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
                         }
                     }
                     div {

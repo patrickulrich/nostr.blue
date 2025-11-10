@@ -4,6 +4,29 @@ use nostr::{TagKind};
 use crate::stores::nostr_client::{get_client, fetch_events_aggregated, HAS_SIGNER};
 use crate::routes::Route;
 use std::time::Duration;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(inline_js = r#"
+export function scrollChatToBottom(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.scrollTop = element.scrollHeight;
+    }
+}
+
+export function isScrolledNearBottom(elementId, threshold) {
+    const element = document.getElementById(elementId);
+    if (!element) return true;
+    const scrollTop = element.scrollTop;
+    const scrollHeight = element.scrollHeight;
+    const clientHeight = element.clientHeight;
+    return scrollHeight - scrollTop - clientHeight < threshold;
+}
+"#)]
+extern "C" {
+    fn scrollChatToBottom(element_id: &str);
+    fn isScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
+}
 
 #[component]
 pub fn LiveChat(
@@ -16,6 +39,12 @@ pub fn LiveChat(
     let mut sending = use_signal(|| false);
     // Make has_signer reactive - read from the store when needed instead of capturing once
     let has_signer = use_memo(move || *HAS_SIGNER.read());
+
+    // Create unique ID for this chat container
+    let chat_container_id = use_signal(|| {
+        let timestamp = js_sys::Date::now() as u64;
+        format!("live-chat-messages-{}", timestamp)
+    });
 
     // Create the 'a' tag for this livestream
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
@@ -63,17 +92,25 @@ pub fn LiveChat(
         });
     }));
 
-    // Auto-refresh messages every 5 seconds
-    let mut interval_handle = use_signal(|| None::<gloo_timers::callback::Interval>);
+    // Auto-refresh messages every 5 seconds with cancellable polling
+    let mut should_poll = use_signal(|| true);
 
     use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
-        // Cancel any existing interval
-        interval_handle.set(None);
+        // Signal the old loop to stop
+        should_poll.set(false);
 
-        // Create new interval
-        let interval = gloo_timers::callback::Interval::new(5000, move || {
-            let tag = tag.clone();
-            spawn(async move {
+        // Start new polling loop
+        should_poll.set(true);
+
+        spawn(async move {
+            while *should_poll.read() {
+                gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                // Check again after timeout in case we were cancelled
+                if !*should_poll.read() {
+                    break;
+                }
+
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 {
                     let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
@@ -95,15 +132,35 @@ pub fn LiveChat(
                         }
                     }
                 }
-            });
+            }
         });
-
-        interval_handle.set(Some(interval));
     }));
 
-    // Cleanup interval on unmount
+    // Scroll to bottom on initial load
+    use_effect(use_reactive(&*chat_container_id.read(), move |container_id| {
+        spawn(async move {
+            // Wait for DOM to render
+            gloo_timers::future::TimeoutFuture::new(100).await;
+            scrollChatToBottom(&container_id);
+        });
+    }));
+
+    // Auto-scroll to bottom when messages change (if user is already near bottom)
+    use_effect(use_reactive(&messages.read().len(), move |_| {
+        let container_id = chat_container_id.read().clone();
+        // Small delay to ensure DOM has updated with new messages
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(50).await;
+            // Only auto-scroll if user is already near the bottom (within 150px)
+            if isScrolledNearBottom(&container_id, 150.0) {
+                scrollChatToBottom(&container_id);
+            }
+        });
+    }));
+
+    // Stop polling on unmount
     use_drop(move || {
-        interval_handle.set(None);
+        should_poll.set(false);
     });
 
 
@@ -122,7 +179,8 @@ pub fn LiveChat(
 
             // Messages container
             div {
-                class: "flex-1 overflow-y-auto p-4 space-y-3",
+                id: "{chat_container_id.read()}",
+                class: "flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar",
                 if *loading.read() {
                     div {
                         class: "flex items-center justify-center h-full text-muted-foreground",

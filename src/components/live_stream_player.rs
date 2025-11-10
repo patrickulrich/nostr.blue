@@ -102,22 +102,41 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
             return;
         }
 
-        // Small delay to ensure DOM is ready
+        // Retry logic to wait for video.js to load (due to defer attribute)
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(100).await;
+            let max_retries = 10;
+            let mut retry_count = 0;
 
-            match initVideoJs(&vid, &url) {
-                Ok(js_val) => {
-                    // Check if the returned value is null or undefined
-                    if js_val.is_null() || js_val.is_undefined() {
-                        log::error!("Failed to initialize video.js player: videojs is not present or returned null/undefined");
-                    } else {
-                        player_initialized.set(true);
-                        log::info!("video.js player initialized successfully");
+            loop {
+                // Wait before attempting
+                gloo_timers::future::TimeoutFuture::new(100 * (retry_count + 1)).await;
+
+                match initVideoJs(&vid, &url) {
+                    Ok(js_val) => {
+                        // Check if the returned value is null or undefined
+                        if js_val.is_null() || js_val.is_undefined() {
+                            retry_count += 1;
+                            if retry_count >= max_retries {
+                                log::error!("Failed to initialize video.js player after {} retries: videojs is not present or returned null/undefined", max_retries);
+                                break;
+                            }
+                            log::debug!("video.js not ready yet, retrying ({}/{})", retry_count, max_retries);
+                            continue;
+                        } else {
+                            player_initialized.set(true);
+                            log::info!("video.js player initialized successfully");
+                            break;
+                        }
                     }
-                }
-                Err(e) => {
-                    log::error!("Failed to initialize video.js player: {:?}", e);
+                    Err(e) => {
+                        retry_count += 1;
+                        if retry_count >= max_retries {
+                            log::error!("Failed to initialize video.js player after {} retries: {:?}", max_retries, e);
+                            break;
+                        }
+                        log::debug!("video.js initialization error, retrying ({}/{}): {:?}", retry_count, max_retries, e);
+                        continue;
+                    }
                 }
             }
         });
