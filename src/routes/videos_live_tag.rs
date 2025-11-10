@@ -259,6 +259,10 @@ async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<(Vec<Event
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    let hit_limit = events.len() >= 50;
-    Ok((events, hit_limit))
+    // Sort events by timestamp in descending order (newest first)
+    let mut sorted_events: Vec<Event> = events.into_iter().collect();
+    sorted_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    let hit_limit = sorted_events.len() >= 50;
+    Ok((sorted_events, hit_limit))
 }

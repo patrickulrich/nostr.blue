@@ -29,7 +29,10 @@ pub fn LiveStreamNew() -> Element {
         !title_val.is_empty()
             && !stream_url_val.is_empty()
             && Url::parse(&*stream_url_val)
-                .map(|u| u.scheme() == "http" || u.scheme() == "https")
+                .map(|u| {
+                    let scheme = u.scheme();
+                    scheme == "http" || scheme == "https" || scheme == "rtmp" || scheme == "rtmps"
+                })
                 .unwrap_or(false)
             && !is_pub
     };

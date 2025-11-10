@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 use url::Url;
+use std::rc::Rc;
+use std::cell::Cell;
 
 #[wasm_bindgen(inline_js = r#"
 export function initVideoJs(videoId, streamUrl) {
@@ -8,12 +10,6 @@ export function initVideoJs(videoId, streamUrl) {
     if (typeof window.videojs === 'undefined') {
         console.error('video.js not loaded');
         return null;
-    }
-
-    // Validate that this looks like an HLS stream
-    if (!streamUrl || (!streamUrl.includes('.m3u8') && !streamUrl.includes('application/x-mpegURL'))) {
-        console.warn('Stream URL does not appear to be an HLS stream:', streamUrl);
-        // Still try to load it, but log a warning
     }
 
     try {
@@ -127,6 +123,9 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
     });
     let mut player_initialized = use_signal(|| false);
 
+    // Mounted flag to track component lifecycle
+    let mounted = use_signal(|| Rc::new(Cell::new(true)));
+
     // Compute the video ID once for the reactive dependency
     let vid = video_id.read().clone();
 
@@ -145,12 +144,21 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
             }
         };
 
+        // Clone mounted flag for async task
+        let mounted_flag = mounted.read().clone();
+
         // Retry logic to wait for video.js to load (due to defer attribute)
         spawn(async move {
             let max_retries = 10;
             let mut retry_count = 0;
 
             loop {
+                // Check if component is still mounted before attempting
+                if !mounted_flag.get() {
+                    log::debug!("Component unmounted, aborting video.js initialization");
+                    break;
+                }
+
                 // Wait before attempting
                 gloo_timers::future::TimeoutFuture::new(100 * (retry_count + 1)).await;
 
@@ -166,6 +174,12 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
                             log::debug!("video.js not ready yet, retrying ({}/{})", retry_count, max_retries);
                             continue;
                         } else {
+                            // Check if component is still mounted after successful init
+                            if !mounted_flag.get() {
+                                log::debug!("Component unmounted after init, disposing player immediately");
+                                disposeVideoJs(&vid);
+                                break;
+                            }
                             player_initialized.set(true);
                             log::info!("video.js player initialized successfully");
                             break;
@@ -188,7 +202,12 @@ pub fn LiveStreamPlayer(stream_url: String) -> Element {
     // Cleanup on unmount
     let video_id_clone = video_id.clone();
     let player_initialized_clone = player_initialized.clone();
+    let mounted_clone = mounted.clone();
     use_drop(move || {
+        // Mark component as unmounted
+        mounted_clone.read().set(false);
+
+        // Dispose player if it was initialized
         if *player_initialized_clone.read() {
             disposeVideoJs(&video_id_clone.read());
         }

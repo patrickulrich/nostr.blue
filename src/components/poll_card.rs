@@ -133,9 +133,29 @@ pub fn PollCard(event: NostrEvent) -> Element {
             };
 
             match nostr_client::publish_poll_vote(poll_id, response).await {
-                Ok(_) => {
+                Ok(_event_id) => {
                     log::info!("Vote published successfully");
-                    // Keep optimistic changes
+
+                    // Refresh votes to get updated totals including the new vote
+                    match fetch_poll_votes(poll_id, poll.ends_at).await {
+                        Ok(vote_events) => {
+                            votes.set(vote_events.clone());
+
+                            // Update user vote state - find the user's vote in the refreshed list
+                            if let Ok(user_pubkey) = nostr_client::get_user_pubkey().await {
+                                let user_pubkey_str = user_pubkey.to_string();
+                                if let Some(user_vote_event) = vote_events.iter()
+                                    .find(|v| v.pubkey.to_string() == user_pubkey_str) {
+                                    user_vote.set(Some(user_vote_event.clone()));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to refresh votes after voting: {}", e);
+                        }
+                    }
+
+                    // Clear selection and keep results visible
                     selected_options.set(Vec::new());
                 }
                 Err(e) => {

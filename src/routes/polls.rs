@@ -119,26 +119,35 @@ pub fn Polls() -> Element {
                         return;
                     }
 
-                    // Track oldest timestamp and event ID from new events
-                    if let Some(last_event) = new_events.last() {
+                    // First, deduplicate to get unique new events
+                    let existing_ids: std::collections::HashSet<_> = {
+                        let current = events.read();
+                        current.iter().map(|e| e.id).collect()
+                    };
+
+                    let unique_new: Vec<_> = new_events.into_iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .collect();
+
+                    // If no unique events, bail out early without updating cursors
+                    if unique_new.is_empty() {
+                        loading.set(false);
+                        has_more.set(false);
+                        return;
+                    }
+
+                    // Track oldest timestamp and event ID from unique new events
+                    if let Some(last_event) = unique_new.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         last_event_id.set(Some(last_event.id));
                     }
 
-                    // Determine if there are more events to load
-                    has_more.set(new_events.len() >= 50);
+                    // Determine if there are more events to load based on unique count
+                    has_more.set(unique_new.len() >= 50);
 
-                    // Deduplicate and append new events using with_mut
+                    // Append only unique new events
                     events.with_mut(|current| {
-                        let mut existing_ids: std::collections::HashSet<_> =
-                            current.iter().map(|e| e.id).collect();
-
-                        for event in new_events {
-                            if !existing_ids.contains(&event.id) {
-                                existing_ids.insert(event.id);
-                                current.push(event);
-                            }
-                        }
+                        current.extend(unique_new);
                     });
                     loading.set(false);
                 }
