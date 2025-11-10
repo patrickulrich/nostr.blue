@@ -32,10 +32,10 @@ pub fn PollCard(event: NostrEvent) -> Element {
     let mut show_results = use_signal(|| false);
     let mut is_voting = use_signal(|| false);
 
-    // Fetch author metadata
-    use_effect(move || {
+    // Fetch author metadata using use_future for automatic cancellation
+    let _metadata_task = use_future(move || {
         let pubkey_str = author_pubkey_for_metadata.clone();
-        spawn(async move {
+        async move {
             match PublicKey::parse(&pubkey_str) {
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
@@ -48,25 +48,25 @@ pub fn PollCard(event: NostrEvent) -> Element {
                     log::error!("Failed to parse pubkey: {}", e);
                 }
             }
-        });
+        }
     });
 
-    // Parse poll data
-    use_effect(move || {
+    // Parse poll data using use_future for automatic cancellation
+    let _poll_parse_task = use_future(move || {
         let evt = event_clone.clone();
-        spawn(async move {
+        async move {
             match Poll::from_event(&evt) {
                 Ok(poll) => poll_data.set(Some(poll)),
                 Err(e) => log::error!("Failed to parse poll: {}", e),
             }
-        });
+        }
     });
 
-    // Fetch votes for this poll
-    use_effect(move || {
+    // Fetch votes for this poll using use_future for automatic cancellation
+    let _votes_task = use_future(move || {
         let poll_id = event_id;
         let poll = poll_data.read().clone();
-        spawn(async move {
+        async move {
             loading_votes.set(true);
             match fetch_poll_votes(poll_id, poll.and_then(|p| p.ends_at)).await {
                 Ok(vote_events) => {
@@ -85,7 +85,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
                 Err(e) => log::error!("Failed to fetch votes: {}", e),
             }
             loading_votes.set(false);
-        });
+        }
     });
 
     // Calculate poll results
@@ -99,7 +99,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
         calculate_poll_results(&poll, vote_events)
     });
 
-    // Submit vote
+    // Submit vote with optimistic UI update
     let submit_vote = move |_| {
         let options = selected_options.read().clone();
         if options.is_empty() {
@@ -112,7 +112,14 @@ pub fn PollCard(event: NostrEvent) -> Element {
             None => return,
         };
 
+        // Capture previous state for rollback on error
+        let previous_selected = selected_options.read().clone();
+        let previous_show_results = *show_results.read();
+
+        // Optimistically update UI immediately
+        show_results.set(true);
         is_voting.set(true);
+
         spawn(async move {
             let response = match poll.r#type {
                 PollType::SingleChoice => PollResponse::SingleChoice {
@@ -128,10 +135,15 @@ pub fn PollCard(event: NostrEvent) -> Element {
             match nostr_client::publish_poll_vote(poll_id, response).await {
                 Ok(_) => {
                     log::info!("Vote published successfully");
-                    show_results.set(true);
+                    // Keep optimistic changes
                     selected_options.set(Vec::new());
                 }
-                Err(e) => log::error!("Failed to publish vote: {}", e),
+                Err(e) => {
+                    log::error!("Failed to publish vote: {}", e);
+                    // Revert optimistic changes on error
+                    selected_options.set(previous_selected);
+                    show_results.set(previous_show_results);
+                }
             }
             is_voting.set(false);
         });

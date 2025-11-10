@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{PollOptionList, PollOptionData};
 use nostr_sdk::{nips::nip88::{PollType, PollOption}, Timestamp};
+use once_cell::sync::Lazy;
 
 #[component]
 pub fn PollNew() -> Element {
@@ -425,14 +426,18 @@ fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
     }
 }
 
+/// Cached compiled regex for hashtag extraction
+static HASHTAG_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
+});
+
 /// Extract hashtags from question and additional input
 fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {
     use std::collections::HashSet;
     let mut hashtags = HashSet::new();
 
-    // Extract from question (format: #hashtag)
-    let hashtag_regex = regex::Regex::new(r"#(\w+)").unwrap();
-    for cap in hashtag_regex.captures_iter(question) {
+    // Extract from question (format: #hashtag) using cached regex
+    for cap in HASHTAG_REGEX.captures_iter(question) {
         if let Some(tag) = cap.get(1) {
             hashtags.insert(tag.as_str().to_lowercase());
         }

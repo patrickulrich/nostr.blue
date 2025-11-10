@@ -97,17 +97,22 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 .filter(|e| !existing_ids.contains(&e.id))
                                 .collect();
 
+                            // If no unique events, we're done scrolling
+                            if unique_events.is_empty() {
+                                has_more.set(false);
+                                loading.set(false);
+                                return;
+                            }
+
                             if let Some(last_event) = unique_events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
 
                             has_more.set(hit_limit);
 
-                            if !unique_events.is_empty() {
-                                let mut current = stream_events.read().clone();
-                                current.extend(unique_events);
-                                stream_events.set(current);
-                            }
+                            let mut current = stream_events.read().clone();
+                            current.extend(unique_events);
+                            stream_events.set(current);
                             loading.set(false);
                         }
                         Err(e) => {

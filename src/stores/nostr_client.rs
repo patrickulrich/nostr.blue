@@ -1401,6 +1401,20 @@ pub async fn publish_poll_vote(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
+    // Validate that the poll_id matches the poll referenced in the PollResponse
+    let referenced_poll_id = match &response {
+        nostr::nips::nip88::PollResponse::SingleChoice { poll_id: ref_id, .. } => ref_id,
+        nostr::nips::nip88::PollResponse::MultipleChoice { poll_id: ref_id, .. } => ref_id,
+    };
+
+    if *referenced_poll_id != poll_id {
+        return Err(format!(
+            "Poll ID mismatch: expected {}, but PollResponse references {}",
+            poll_id.to_hex(),
+            referenced_poll_id.to_hex()
+        ));
+    }
+
     log::info!("Publishing poll vote for poll: {}", poll_id.to_hex());
 
     // Build event using EventBuilder::poll_response

@@ -351,8 +351,8 @@ async fn load_following_polls(until: Option<u64>, last_event_id: Option<nostr_sd
         .limit(50);
 
     if let Some(until_ts) = until {
-        // Make boundary exclusive to avoid re-fetching the last event
-        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
+        // Keep boundary inclusive
+        filter = filter.until(Timestamp::from(until_ts));
     }
 
     // Fetch events from database and relays
@@ -379,8 +379,8 @@ async fn load_global_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::
         .limit(50);
 
     if let Some(until_ts) = until {
-        // Make boundary exclusive to avoid re-fetching the last event
-        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
+        // Keep boundary inclusive
+        filter = filter.until(Timestamp::from(until_ts));
     }
 
     // Fetch events from database and relays

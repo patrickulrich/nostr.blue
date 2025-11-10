@@ -92,7 +92,13 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
                 "starts" => {
                     if let Some(value) = tag_vec.get(1) {
                         if let Ok(ts) = value.parse::<i64>() {
-                            meta.starts = Some(nostr_sdk::Timestamp::from(ts as u64));
+                            // Only convert to u64 if timestamp is non-negative
+                            if ts >= 0 {
+                                if let Ok(timestamp_u64) = u64::try_from(ts) {
+                                    meta.starts = Some(nostr_sdk::Timestamp::from(timestamp_u64));
+                                }
+                            }
+                            // Negative timestamps are ignored
                         }
                     }
                 }

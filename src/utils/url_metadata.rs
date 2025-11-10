@@ -351,17 +351,22 @@ fn clean_text(text: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '&' && chars.peek() == Some(&'#') {
-            chars.next(); // consume '#'
+            let hash_ch = chars.next().unwrap(); // consume '#'
 
-            let is_hex = chars.peek() == Some(&'x') || chars.peek() == Some(&'X');
-            if is_hex {
-                chars.next(); // consume 'x' or 'X'
-            }
+            let (is_hex, hex_ch) = if chars.peek() == Some(&'x') {
+                (true, Some(chars.next().unwrap()))
+            } else if chars.peek() == Some(&'X') {
+                (true, Some(chars.next().unwrap()))
+            } else {
+                (false, None)
+            };
 
             let mut num_str = String::new();
+            let mut has_semicolon = false;
             while let Some(&next_ch) = chars.peek() {
                 if next_ch == ';' {
                     chars.next(); // consume ';'
+                    has_semicolon = true;
                     break;
                 } else if next_ch.is_alphanumeric() {
                     num_str.push(next_ch);
@@ -386,13 +391,16 @@ fn clean_text(text: &str) -> String {
                 }
             }
 
-            // If decoding failed, restore the original sequence
+            // If decoding failed, restore the original sequence exactly as it appeared
             decoded.push('&');
-            decoded.push('#');
-            if is_hex {
-                decoded.push('x');
+            decoded.push(hash_ch);
+            if let Some(x_char) = hex_ch {
+                decoded.push(x_char);
             }
             decoded.push_str(&num_str);
+            if has_semicolon {
+                decoded.push(';');
+            }
         } else {
             decoded.push(ch);
         }

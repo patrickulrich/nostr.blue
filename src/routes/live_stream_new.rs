@@ -3,6 +3,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 use nostr_sdk::{EventBuilder, Kind, Tag, Timestamp};
 use nostr::{TagKind};
+use url::Url;
 
 #[component]
 pub fn LiveStreamNew() -> Element {
@@ -19,10 +20,19 @@ pub fn LiveStreamNew() -> Element {
     // Check if user is authenticated
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
 
-    // Validation
-    let can_publish = title.read().chars().count() > 0
-        && stream_url.read().chars().count() > 0
-        && !*is_publishing.read();
+    // Validation with efficient is_empty() and URL parsing
+    let can_publish = {
+        let title_val = title.read();
+        let stream_url_val = stream_url.read();
+        let is_pub = *is_publishing.read();
+
+        !title_val.is_empty()
+            && !stream_url_val.is_empty()
+            && Url::parse(&*stream_url_val)
+                .map(|u| u.scheme() == "http" || u.scheme() == "https")
+                .unwrap_or(false)
+            && !is_pub
+    };
 
     // Handle close
     let handle_close = move |_| {
@@ -291,8 +301,11 @@ async fn publish_live_stream(
     let client = nostr_client::get_client()
         .ok_or_else(|| "Client not initialized".to_string())?;
 
-    // Generate unique identifier (d tag)
-    let d_tag = format!("stream-{}", chrono::Utc::now().timestamp());
+    // Generate unique identifier (d tag) with high-resolution time and random component
+    let now = chrono::Utc::now();
+    let timestamp_ms = now.timestamp_millis();
+    let random_component = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("").to_string();
+    let d_tag = format!("stream-{}-{}", timestamp_ms, random_component);
 
     // Build event with tags
     let mut builder = EventBuilder::new(Kind::from(30311), "");
