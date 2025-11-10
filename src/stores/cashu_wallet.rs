@@ -748,11 +748,16 @@ async fn remove_melt_quote_from_db(quote_id: &str) -> Result<(), String> {
 
 /// Create ephemeral CDK wallet with injected proofs
 ///
-/// Note on atomicity: Each ephemeral wallet creates its own connection to the shared
-/// IndexedDB database. The increment_keyset_counter method uses IndexedDB transactions
-/// to ensure atomic read-modify-write operations, so concurrent wallet operations
-/// will not produce duplicate blinded messages even if multiple ephemeral wallets
-/// are active simultaneously.
+/// Note on atomicity and counter safety:
+/// - Each ephemeral wallet creates its own IndexedDbDatabase connection instance
+/// - All connections share the same underlying IndexedDB database (same DB_NAME)
+/// - The increment_keyset_counter method uses IndexedDB readwrite transactions
+///   to perform atomic read-modify-write operations (get → increment → put → commit)
+/// - IndexedDB serializes all transactions on the same object store, guaranteeing
+///   that concurrent counter increments from multiple ephemeral wallets will never
+///   produce duplicate values or race conditions
+/// - Therefore, multiple concurrent wallet operations are safe and will not generate
+///   duplicate blinded messages
 async fn create_ephemeral_wallet(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>

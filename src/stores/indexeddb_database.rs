@@ -394,17 +394,35 @@ impl WalletDatabase for IndexedDbDatabase {
             let store = tx.object_store(STORE_PROOFS)
                 .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
 
-            let all_proofs = self.get_all_key_values::<ProofInfo>(STORE_PROOFS).await?;
+            // Read all proofs using the transaction's store (avoid nested transaction)
+            let get_all_request = store.get_all()
+                .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?;
+            let all_values = get_all_request.await
+                .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
+
+            let get_all_keys_request = store.get_all_keys()
+                .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
+            let all_keys = get_all_keys_request.await
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
+
             let mut migrated_count = 0;
-            for (proof_id, proof_info) in all_proofs {
-                if proof_info.mint_url == old_mint_url {
-                    let mut updated_proof = proof_info;
-                    updated_proof.mint_url = new_mint_url.clone();
-                    let json = serde_json::to_string(&updated_proof)
-                        .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
-                    store.put_key_val(&JsValue::from_str(&proof_id), &JsValue::from_str(&json))
-                        .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
-                    migrated_count += 1;
+            for (i, value) in all_values.iter().enumerate() {
+                let key = all_keys.get(i as u32);
+                if !key.is_undefined() && !key.is_null() {
+                    let json_str = value.as_string().ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+
+                    let proof_info: ProofInfo = serde_json::from_str(&json_str)
+                        .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+
+                    if proof_info.mint_url == old_mint_url {
+                        let mut updated_proof = proof_info;
+                        updated_proof.mint_url = new_mint_url.clone();
+                        let json = serde_json::to_string(&updated_proof)
+                            .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                        store.put_key_val(&key, &JsValue::from_str(&json))
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                        migrated_count += 1;
+                    }
                 }
             }
             log::debug!("Migrated {} proofs", migrated_count);
@@ -421,18 +439,38 @@ impl WalletDatabase for IndexedDbDatabase {
             let store = tx.object_store(STORE_TRANSACTIONS)
                 .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
 
-            let all_transactions = self.get_all_key_values::<Transaction>(STORE_TRANSACTIONS).await?;
-            for (tx_id, transaction) in all_transactions {
-                if transaction.mint_url == old_mint_url {
-                    let mut updated_tx = transaction;
-                    updated_tx.mint_url = new_mint_url.clone();
-                    let json = serde_json::to_string(&updated_tx)
-                        .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
-                    store.put_key_val(&JsValue::from_str(&tx_id.to_string()), &JsValue::from_str(&json))
-                        .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+            // Read all transactions using the transaction's store (avoid nested transaction)
+            let get_all_request = store.get_all()
+                .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?;
+            let all_values = get_all_request.await
+                .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
+
+            let get_all_keys_request = store.get_all_keys()
+                .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?;
+            let all_keys = get_all_keys_request.await
+                .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
+
+            let mut migrated_count = 0;
+            for (i, value) in all_values.iter().enumerate() {
+                let key = all_keys.get(i as u32);
+                if !key.is_undefined() && !key.is_null() {
+                    let json_str = value.as_string().ok_or_else(|| Self::make_error("Value is not a string".to_string()))?;
+
+                    let transaction: Transaction = serde_json::from_str(&json_str)
+                        .map_err(|e| Self::make_error(format!("JSON deserialization error: {}", e)))?;
+
+                    if transaction.mint_url == old_mint_url {
+                        let mut updated_tx = transaction;
+                        updated_tx.mint_url = new_mint_url.clone();
+                        let json = serde_json::to_string(&updated_tx)
+                            .map_err(|e| Self::make_error(format!("JSON serialization error: {}", e)))?;
+                        store.put_key_val(&key, &JsValue::from_str(&json))
+                            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+                        migrated_count += 1;
+                    }
                 }
             }
-            log::debug!("Migrated transactions");
+            log::debug!("Migrated {} transactions", migrated_count);
         }
 
         // Commit the entire multi-store transaction
