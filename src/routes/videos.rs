@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
-use crate::components::ClientInitializing;
+use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -118,7 +118,8 @@ pub fn Videos() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    has_more.set(video_events.len() >= 50);
+                    // Lower threshold since we fetch videos and livestreams separately
+                    has_more.set(video_events.len() >= 20);
                     feed_events.set(video_events);
                     loading_feed.set(false);
                 }
@@ -170,8 +171,8 @@ pub fn Videos() -> Element {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
 
-                        // Set has_more based on number of unique events
-                        has_more.set(unique_events.len() >= 50);
+                        // Lower threshold since we fetch videos and livestreams separately
+                        has_more.set(unique_events.len() >= 20);
 
                         // Append only unique events
                         let mut current = feed_events.read().clone();
@@ -236,7 +237,7 @@ pub fn Videos() -> Element {
                             class: "mb-8",
                             h2 {
                                 class: "text-xl font-semibold mb-4",
-                                "Recommended Videos"
+                                "Recent Videos"
                             }
                             div {
                                 class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
@@ -380,20 +381,37 @@ pub fn Videos() -> Element {
                                 }
                             }
                         } else {
-                            // Unified feed with both landscape and verts mixed together
+                            // Unified feed with landscape, verts, and livestreams mixed together in a single grid
                             div {
                                 class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in feed_events.read().iter() {
-                                    // Each video type uses its own card component with appropriate styling
-                                    if event.kind == Kind::Custom(22) {
-                                        // Verts use vertical card
+                                    if event.kind == Kind::Custom(30311) {
+                                        // Only show LIVE streams on the videos page
+                                        {
+                                            let is_live = event.tags.iter().any(|tag| {
+                                                let tag_vec = tag.clone().to_vec();
+                                                tag_vec.first().map(|s| s.as_str()) == Some("status") &&
+                                                tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+                                            });
+
+                                            if is_live {
+                                                rsx! {
+                                                    MiniLiveStreamCard {
+                                                        key: "{event.id}",
+                                                        event: event.clone()
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! { }
+                                            }
+                                        }
+                                    } else if event.kind == Kind::Custom(22) {
                                         VertsVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
                                             feed_type: *feed_type.read()
                                         }
-                                    } else {
-                                        // Landscape videos use horizontal card
+                                    } else if event.kind == Kind::Custom(21) {
                                         LandscapeVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
@@ -868,65 +886,130 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
         return load_global_videos(until).await;
     }
 
-    // Create filter for NIP-71 video events (Kind 21 and 22)
-    let mut filter = Filter::new()
+    // Fetch videos (Kind 21, 22) and livestreams (Kind 30311) separately for better distribution
+    let authors_clone = authors.clone();
+
+    let mut video_filter = Filter::new()
         .kinds([Kind::Custom(21), Kind::Custom(22)])
         .authors(authors)
-        .limit(50);
+        .limit(40);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        video_filter = video_filter.until(Timestamp::from(until_ts));
     }
 
-    log::info!("Fetching video events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    let mut stream_filter = Filter::new()
+        .kind(Kind::Custom(30311))
+        .authors(authors_clone)
+        .limit(10);
 
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            log::info!("Loaded {} video events from following", events.len());
+    if let Some(until_ts) = until {
+        stream_filter = stream_filter.until(Timestamp::from(until_ts));
+    }
 
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    log::info!("Fetching videos and livestreams separately from followed accounts");
 
-            if event_vec.is_empty() {
-                log::info!("No videos from followed users, showing global feed");
-                return load_global_videos(until).await;
-            }
+    // Fetch both concurrently
+    let (video_result, stream_result) = tokio::join!(
+        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+    );
 
-            Ok(event_vec)
+    let mut all_events = Vec::new();
+
+    match video_result {
+        Ok(videos) => {
+            log::info!("Loaded {} video events from following", videos.len());
+            all_events.extend(videos);
         }
         Err(e) => {
-            log::error!("Failed to fetch following videos: {}, falling back to global", e);
-            load_global_videos(until).await
+            log::warn!("Failed to fetch video events from following: {}", e);
         }
     }
+
+    match stream_result {
+        Ok(streams) => {
+            log::info!("Loaded {} livestream events from following", streams.len());
+            all_events.extend(streams);
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch livestream events from following: {}", e);
+        }
+    }
+
+    if all_events.is_empty() {
+        log::info!("No videos from followed users, showing global feed");
+        return load_global_videos(until).await;
+    }
+
+    // Sort all content chronologically
+    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    log::info!("Loaded total of {} events from following", all_events.len());
+
+    Ok(all_events)
 }
 
-// Helper function to load global videos (Kind 21 & 22 from everyone)
+// Helper function to load global videos (Kind 21, 22) and livestreams (Kind 30311) from everyone
 async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
 
-    let mut filter = Filter::new()
+    // Fetch videos (Kind 21, 22) separately to ensure they're included
+    let mut video_filter = Filter::new()
         .kinds([Kind::Custom(21), Kind::Custom(22)])
-        .limit(50);
+        .limit(40);
 
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        video_filter = video_filter.until(Timestamp::from(until_ts));
     }
 
-    log::info!("Fetching global video events with filter: {:?}", filter);
+    // Fetch livestreams (Kind 30311) separately
+    let mut stream_filter = Filter::new()
+        .kind(Kind::Custom(30311))
+        .limit(10);
 
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            log::info!("Loaded {} global video events", events.len());
+    if let Some(until_ts) = until {
+        stream_filter = stream_filter.until(Timestamp::from(until_ts));
+    }
 
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    log::info!("Fetching global videos and livestreams separately");
 
-            Ok(event_vec)
+    // Fetch both concurrently
+    let (video_result, stream_result) = tokio::join!(
+        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+    );
+
+    let mut all_events = Vec::new();
+
+    match video_result {
+        Ok(videos) => {
+            log::info!("Loaded {} video events (Kind 21, 22)", videos.len());
+            all_events.extend(videos);
         }
         Err(e) => {
-            log::error!("Failed to fetch global video events: {}", e);
-            Err(format!("Failed to load videos: {}", e))
+            log::warn!("Failed to fetch video events: {}", e);
         }
     }
+
+    match stream_result {
+        Ok(streams) => {
+            log::info!("Loaded {} livestream events (Kind 30311)", streams.len());
+            all_events.extend(streams);
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch livestream events: {}", e);
+        }
+    }
+
+    if all_events.is_empty() {
+        return Err("Failed to load any content".to_string());
+    }
+
+    // Sort all content chronologically
+    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    log::info!("Loaded total of {} events", all_events.len());
+
+    Ok(all_events)
 }
