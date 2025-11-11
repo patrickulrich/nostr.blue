@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nwc::prelude::*;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -31,7 +32,7 @@ pub static NWC_STATUS: GlobalSignal<ConnectionStatus> =
 pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
 
 /// Open or create IndexedDB for NWC settings
-async fn open_db() -> Result<IdbDatabase, String> {
+async fn open_db() -> std::result::Result<IdbDatabase, String> {
     let mut db_req = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
         .map_err(|e| format!("Failed to open IndexedDB: {:?}", e))?;
 
@@ -48,7 +49,7 @@ async fn open_db() -> Result<IdbDatabase, String> {
 }
 
 /// Save NWC URI to IndexedDB
-async fn save_nwc_uri(uri: &str) -> Result<(), String> {
+async fn save_nwc_uri(uri: &str) -> std::result::Result<(), String> {
     let db = open_db().await?;
     let tx = db
         .transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)
@@ -71,7 +72,7 @@ async fn save_nwc_uri(uri: &str) -> Result<(), String> {
 }
 
 /// Load NWC URI from IndexedDB
-async fn load_nwc_uri() -> Result<Option<String>, String> {
+async fn load_nwc_uri() -> std::result::Result<Option<String>, String> {
     let db = open_db().await?;
     let tx = db
         .transaction_on_one(STORE_NAME)
@@ -105,7 +106,7 @@ async fn load_nwc_uri() -> Result<Option<String>, String> {
 }
 
 /// Delete NWC URI from IndexedDB
-async fn delete_nwc_uri() -> Result<(), String> {
+async fn delete_nwc_uri() -> std::result::Result<(), String> {
     let db = open_db().await?;
     let tx = db
         .transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)
@@ -126,7 +127,7 @@ async fn delete_nwc_uri() -> Result<(), String> {
 }
 
 /// Connect to NWC using a connection URI
-pub async fn connect_nwc(uri_string: &str) -> Result<(), String> {
+pub async fn connect_nwc(uri_string: &str) -> std::result::Result<(), String> {
     NWC_STATUS.write().clone_from(&ConnectionStatus::Connecting);
 
     // Parse the NWC URI
@@ -208,7 +209,7 @@ pub async fn restore_connection() {
 }
 
 /// Get wallet balance in millisatoshis
-pub async fn get_balance() -> Result<u64, String> {
+pub async fn get_balance() -> std::result::Result<u64, String> {
     let client = NWC_CLIENT
         .read()
         .clone()
@@ -221,7 +222,7 @@ pub async fn get_balance() -> Result<u64, String> {
 }
 
 /// Refresh the cached balance
-pub async fn refresh_balance() -> Result<(), String> {
+pub async fn refresh_balance() -> std::result::Result<(), String> {
     match get_balance().await {
         Ok(balance) => {
             *NWC_BALANCE.write() = Some(balance);
@@ -235,7 +236,7 @@ pub async fn refresh_balance() -> Result<(), String> {
 }
 
 /// Pay a lightning invoice
-pub async fn pay_invoice(invoice: String) -> Result<PayInvoiceResponse, String> {
+pub async fn pay_invoice(invoice: String) -> std::result::Result<PayInvoiceResponse, String> {
     let client = NWC_CLIENT
         .read()
         .clone()

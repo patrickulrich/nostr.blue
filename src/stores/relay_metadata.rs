@@ -5,6 +5,8 @@
 /// It implements the Outbox model for intelligent relay routing.
 
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::{Client, EventBuilder, Filter, Kind, PublicKey, Tag, TagKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,9 +32,15 @@ pub struct RelayListMetadata {
     pub updated_at: u64,               // timestamp of last update
 }
 
+/// Store for relay list cache with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct RelayListCacheStore {
+    pub data: HashMap<String, RelayListMetadata>,
+}
+
 /// Cache for relay lists by pubkey (24 hour TTL)
-pub static RELAY_LIST_CACHE: GlobalSignal<HashMap<String, RelayListMetadata>> =
-    Signal::global(HashMap::new);
+pub static RELAY_LIST_CACHE: GlobalSignal<Store<RelayListCacheStore>> =
+    Signal::global(|| Store::new(RelayListCacheStore::default()));
 
 /// Current user's relay metadata
 pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> =
@@ -285,7 +293,7 @@ pub async fn sync_relay_lists_on_login(client: Arc<Client>) -> Result<(), String
         *USER_RELAY_METADATA.write() = Some(remote.clone());
 
         // Update cache
-        RELAY_LIST_CACHE.write().insert(user_pubkey.to_hex(), remote);
+        RELAY_LIST_CACHE.read().data().write().insert(user_pubkey.to_hex(), remote);
 
         log::info!("Relay lists synced successfully");
     }

@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
@@ -8,8 +10,21 @@ use gloo_timers::callback::Timeout;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 
+/// Store for bookmarked event IDs with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct BookmarkedEventsStore {
+    pub data: Vec<String>,
+}
+
+/// Store for bookmark rollback state with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct BookmarkRollbackStore {
+    pub data: Option<Vec<String>>,
+}
+
 /// Global signal to track bookmarked event IDs
-pub static BOOKMARKED_EVENTS: GlobalSignal<Vec<String>> = Signal::global(|| Vec::new());
+pub static BOOKMARKED_EVENTS: GlobalSignal<Store<BookmarkedEventsStore>> =
+    Signal::global(|| Store::new(BookmarkedEventsStore::default()));
 
 /// Sync status for bookmark publishing
 #[derive(Clone, Debug, PartialEq)]
@@ -27,8 +42,8 @@ pub static BOOKMARK_SYNC_STATUS: GlobalSignal<BookmarkSyncStatus> =
     Signal::global(|| BookmarkSyncStatus::Idle);
 
 /// Previous bookmark state for rollback on failure
-pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Option<Vec<String>>> =
-    Signal::global(|| None);
+pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Store<BookmarkRollbackStore>> =
+    Signal::global(|| Store::new(BookmarkRollbackStore::default()));
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -66,11 +81,11 @@ pub async fn init_bookmarks() -> Result<(), String> {
                     .collect();
 
                 log::info!("Loaded {} bookmarks", bookmarked.len());
-                *BOOKMARKED_EVENTS.write() = bookmarked;
+                *BOOKMARKED_EVENTS.read().data().write() = bookmarked;
                 Ok(())
             } else {
                 log::info!("No bookmarks found");
-                *BOOKMARKED_EVENTS.write() = Vec::new();
+                *BOOKMARKED_EVENTS.read().data().write() = Vec::new();
                 Ok(())
             }
         }
@@ -83,7 +98,7 @@ pub async fn init_bookmarks() -> Result<(), String> {
 
 /// Check if an event is bookmarked
 pub fn is_bookmarked(event_id: &str) -> bool {
-    BOOKMARKED_EVENTS.read().contains(&event_id.to_string())
+    BOOKMARKED_EVENTS.read().data().read().contains(&event_id.to_string())
 }
 
 /// Add event to bookmarks
@@ -93,7 +108,7 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
     EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
 
-    let mut bookmarks = BOOKMARKED_EVENTS.read().clone();
+    let mut bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
 
     // Don't add if already bookmarked
     if bookmarks.contains(&event_id) {
@@ -101,14 +116,14 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
     }
 
     // Store rollback state before making changes (preserve initial state for batch)
-    if BOOKMARK_ROLLBACK_STATE.read().is_none() {
-        *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    if BOOKMARK_ROLLBACK_STATE.read().data().read().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.read().data().write() = Some(bookmarks.clone());
     }
 
     bookmarks.push(event_id);
 
     // Update local state immediately for UI responsiveness
-    *BOOKMARKED_EVENTS.write() = bookmarks.clone();
+    *BOOKMARKED_EVENTS.read().data().write() = bookmarks.clone();
 
     // Debounce relay publish (batches rapid bookmarks into one publish)
     #[cfg(target_arch = "wasm32")]
@@ -139,18 +154,18 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 
 /// Remove event from bookmarks
 pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
-    let mut bookmarks = BOOKMARKED_EVENTS.read().clone();
+    let mut bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
 
     // Store rollback state before making changes (preserve initial state for batch)
-    if BOOKMARK_ROLLBACK_STATE.read().is_none() {
-        *BOOKMARK_ROLLBACK_STATE.write() = Some(bookmarks.clone());
+    if BOOKMARK_ROLLBACK_STATE.read().data().read().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.read().data().write() = Some(bookmarks.clone());
     }
 
     // Remove the event ID
     bookmarks.retain(|id| id != &event_id);
 
     // Update local state immediately for UI responsiveness
-    *BOOKMARKED_EVENTS.write() = bookmarks.clone();
+    *BOOKMARKED_EVENTS.read().data().write() = bookmarks.clone();
 
     // Debounce relay publish (batches rapid unbookmarks into one publish)
     #[cfg(target_arch = "wasm32")]
@@ -190,7 +205,7 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
         match publish_bookmarks(bookmarks.clone()).await {
             Ok(_) => {
                 // Success - clear rollback state and set status to idle
-                *BOOKMARK_ROLLBACK_STATE.write() = None;
+                *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
                 *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
                 log::info!("Bookmarks published successfully");
             }
@@ -224,13 +239,13 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
                     log::error!("Bookmark publish failed after {} retries: {}", MAX_RETRIES, e);
 
                     // Rollback local state to match persisted state
-                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().clone() {
+                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().data().read().clone() {
                         log::warn!("Automatically rolling back bookmarks to previous state due to publish failure");
-                        *BOOKMARKED_EVENTS.write() = previous_state;
+                        *BOOKMARKED_EVENTS.read().data().write() = previous_state;
                     }
 
                     // Set failed status (rollback state is cleared here)
-                    *BOOKMARK_ROLLBACK_STATE.write() = None;
+                    *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
                     *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Failed {
                         error: e.clone(),
                         retry_count,
@@ -244,10 +259,10 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
 /// Rollback bookmarks to previous state after failed publish
 #[allow(dead_code)]
 pub fn rollback_bookmarks() {
-    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().clone() {
+    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().data().read().clone() {
         log::info!("Rolling back bookmarks to previous state");
-        *BOOKMARKED_EVENTS.write() = previous_state;
-        *BOOKMARK_ROLLBACK_STATE.write() = None;
+        *BOOKMARKED_EVENTS.read().data().write() = previous_state;
+        *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
     } else {
         log::warn!("No rollback state available");
@@ -257,7 +272,7 @@ pub fn rollback_bookmarks() {
 /// Manually retry failed bookmark publish
 #[allow(dead_code)]
 pub async fn retry_bookmark_publish() {
-    let current_bookmarks = BOOKMARKED_EVENTS.read().clone();
+    let current_bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
     log::info!("Manually retrying bookmark publish");
     publish_with_retry(current_bookmarks, 0).await;
 }
@@ -266,7 +281,7 @@ pub async fn retry_bookmark_publish() {
 #[allow(dead_code)]
 pub fn dismiss_bookmark_error() {
     log::info!("Dismissing bookmark sync error, keeping local changes");
-    *BOOKMARK_ROLLBACK_STATE.write() = None;
+    *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
     *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
 }
 
@@ -324,7 +339,7 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 /// * `skip` - Number of bookmarks to skip (for pagination)
 /// * `limit` - Maximum number of bookmarks to fetch (None = fetch all remaining)
 pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>) -> Result<Vec<Event>, String> {
-    let bookmarks = BOOKMARKED_EVENTS.read().clone();
+    let bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
 
     if bookmarks.is_empty() {
         return Ok(Vec::new());
@@ -376,5 +391,5 @@ pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>
 
 /// Get the total number of bookmarks
 pub fn get_bookmarks_count() -> usize {
-    BOOKMARKED_EVENTS.read().len()
+    BOOKMARKED_EVENTS.read().data().read().len()
 }

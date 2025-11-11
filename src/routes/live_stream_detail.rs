@@ -1,344 +1,347 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32, JsonUtil};
-use crate::stores::nostr_client::{self, get_client, fetch_events_aggregated};
-use crate::components::{ClientInitializing, LiveStreamPlayer, LiveChat, ZapModal};
+use nostr_sdk::{Filter, Kind, PublicKey};
+use crate::components::{LiveStreamPlayer, LiveChat};
+use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta, StreamStatus};
+use crate::components::icons::ArrowLeftIcon;
 use crate::routes::Route;
-use crate::components::live_stream_card::{parse_live_stream_event, StreamStatus};
+use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED};
+use crate::stores::profiles;
 use std::time::Duration;
 
 #[component]
 pub fn LiveStreamDetail(note_id: String) -> Element {
-    let mut stream_event = use_signal(|| None::<Event>);
+    // Parse naddr format: "30311:pubkey:dtag" or just use note_id directly
+    let parsed_naddr = use_memo(move || parse_naddr(&note_id));
+
+    // Stream state
+    let mut stream_event = use_signal(|| None::<nostr_sdk::Event>);
+    let mut stream_meta = use_signal(|| None::<LiveStreamMeta>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut show_zap_modal = use_signal(|| false);
 
-    // Parse the note_id to extract pubkey and d_tag
-    // Format: 30311:pubkey:dtag
-    let parts: Vec<&str> = note_id.split(':').collect();
-    let (author_pubkey, d_tag) = if parts.len() == 3 {
-        (parts[1].to_string(), parts[2].to_string())
-    } else {
-        (String::new(), String::new())
-    };
+    // Get author metadata from profile store
+    let author_metadata = use_memo(move || {
+        let (pubkey_str, _) = parsed_naddr.read().clone();
+        profiles::get_profile(&pubkey_str)
+    });
 
-    // Fetch the livestream event
-    use_effect(use_reactive((&note_id, &*nostr_client::CLIENT_INITIALIZED.read()), move |(nid, client_initialized)| {
-        if !client_initialized {
-            return;
-        }
-
-        spawn(async move {
-            loading.set(true);
-            error.set(None);
-
-            // Clear profile cache to prevent stale author metadata
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
-
-            let parts: Vec<&str> = nid.split(':').collect();
-            if parts.len() != 3 {
-                error.set(Some("Invalid stream identifier".to_string()));
-                loading.set(false);
+    // Fetch stream event
+    use_effect(use_reactive(
+        (&*CLIENT_INITIALIZED.read(), &parsed_naddr),
+        move |(client_ready, _naddr)| {
+            if !client_ready {
                 return;
             }
 
-            let kind_str = parts[0];
-            let pubkey_str = parts[1];
-            let d_tag = parts[2];
+            let (author_pk, dtag) = parsed_naddr.read().clone();
 
-            if let Ok(pubkey) = PublicKey::parse(pubkey_str) {
-                if let Ok(kind_num) = kind_str.parse::<u16>() {
-                    let filter = Filter::new()
-                        .kind(Kind::from(kind_num))
-                        .author(pubkey)
-                        .custom_tag(
-                            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                            d_tag
-                        )
-                        .limit(1);
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
 
-                    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            // Select the newest event by created_at (largest timestamp)
-                            if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
-                                stream_event.set(Some(event));
+                // Parse author pubkey
+                let pubkey = match PublicKey::parse(&author_pk) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid public key: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
+
+                // Build filter for Kind 30311 with author + d-tag
+                let filter = Filter::new()
+                    .kind(Kind::from(30311))
+                    .author(pubkey)
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                        &dtag
+                    )
+                    .limit(1);
+
+                // Fetch stream event
+                match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(events) => {
+                        if let Some(event) = events.first() {
+                            // Parse stream metadata
+                            if let Some(meta) = parse_live_stream_event(event) {
+                                stream_meta.set(Some(meta));
+                                stream_event.set(Some(event.clone()));
+                                loading.set(false);
+
+                                // Fetch author metadata
+                                let _ = profiles::fetch_profile(author_pk.clone()).await;
                             } else {
-                                error.set(Some("Stream not found".to_string()));
+                                error.set(Some("Failed to parse stream metadata".to_string()));
+                                loading.set(false);
                             }
-                            loading.set(false);
-                        }
-                        Err(e) => {
-                            error.set(Some(format!("Failed to fetch stream: {}", e)));
+                        } else {
+                            error.set(Some("Stream not found".to_string()));
                             loading.set(false);
                         }
                     }
-                } else {
-                    error.set(Some("Invalid kind number".to_string()));
-                    loading.set(false);
+                    Err(e) => {
+                        error.set(Some(format!("Failed to load stream: {}", e)));
+                        loading.set(false);
+                    }
                 }
-            } else {
-                error.set(Some("Invalid public key".to_string()));
-                loading.set(false);
-            }
-        });
-    }));
-
-    // Fetch author metadata
-    use_effect(use_reactive(&author_pubkey, move |pk| {
-        if pk.is_empty() {
-            return;
+            });
         }
+    ));
+
+    // Handle refresh
+    let handle_refresh = move |_| {
+        loading.set(true);
+        error.set(None);
+
+        let (author_pk, dtag) = parsed_naddr.peek().clone();
 
         spawn(async move {
-            if let Ok(pubkey) = PublicKey::from_bech32(&pk).or_else(|_| PublicKey::parse(&pk)) {
-                if let Some(client) = get_client() {
-                    let filter = Filter::new()
-                        .kind(Kind::Metadata)
-                        .author(pubkey)
-                        .limit(1);
+            if let Ok(pubkey) = PublicKey::parse(&author_pk) {
+                let filter = Filter::new()
+                    .kind(Kind::from(30311))
+                    .author(pubkey)
+                    .custom_tag(
+                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
+                        &dtag
+                    )
+                    .limit(1);
 
-                    match client.fetch_events(filter, Duration::from_secs(5)).await {
-                        Ok(events) => {
-                            if let Some(event) = events.first() {
-                                if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
-                                    author_metadata.set(Some(metadata));
-                                }
+                match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(events) => {
+                        if let Some(event) = events.first() {
+                            if let Some(meta) = parse_live_stream_event(event) {
+                                stream_meta.set(Some(meta));
+                                stream_event.set(Some(event.clone()));
+                                loading.set(false);
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to fetch author metadata: {}", e);
-                        }
+                    }
+                    Err(e) => {
+                        error.set(Some(format!("Failed to refresh: {}", e)));
+                        loading.set(false);
                     }
                 }
             }
         });
-    }));
+    };
 
     rsx! {
         div {
-            class: "min-h-screen bg-background",
+            class: "flex flex-col h-screen overflow-hidden",
 
-            if !*nostr_client::CLIENT_INITIALIZED.read() {
-                ClientInitializing {}
-            } else if *loading.read() {
+            // Header
+            div {
+                class: "flex-shrink-0 bg-background/95 backdrop-blur-sm border-b border-border p-4",
                 div {
-                    class: "flex items-center justify-center h-screen",
-                    div {
-                        class: "w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                    }
-                }
-            } else if let Some(err) = error.read().as_ref() {
-                div {
-                    class: "flex flex-col items-center justify-center h-screen gap-4",
-                    div {
-                        class: "text-xl text-muted-foreground",
-                        "{err}"
-                    }
+                    class: "flex items-center gap-4",
+
+                    // Back button
                     Link {
                         to: Route::VideosLive {},
-                        class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
-                        "← Back to Live Streams"
+                        class: "p-2 hover:bg-accent rounded-lg transition-colors",
+                        ArrowLeftIcon { class: "w-6 h-6".to_string() }
                     }
-                }
-            } else if let Some(event) = stream_event.read().as_ref() {
-                if let Some(stream_meta) = parse_live_stream_event(event) {
-                    div {
-                        class: "h-screen flex flex-col",
 
-                        // Header
-                        div {
-                            class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
+                    // Title and status
+                    div {
+                        class: "flex-1 min-w-0",
+                        if let Some(meta) = stream_meta.read().as_ref() {
                             div {
-                                class: "px-6 py-4 flex items-center gap-4",
-                                Link {
-                                    to: Route::VideosLive {},
-                                    class: "hover:bg-accent p-2 rounded-full transition",
-                                    crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
+                                class: "flex items-center gap-2",
+                                h1 {
+                                    class: "text-xl font-bold truncate",
+                                    "{meta.title.as_deref().unwrap_or(\"Live Stream\")}"
                                 }
-                                div {
-                                    class: "flex-1",
-                                    h1 {
-                                        class: "text-xl font-bold",
-                                        "{stream_meta.title.clone().unwrap_or_else(|| \"Untitled Stream\".to_string())}"
-                                    }
-                                }
-                                if stream_meta.status == StreamStatus::Live {
-                                    div {
-                                        class: "flex items-center gap-2 bg-red-600 text-white text-sm font-bold px-3 py-1 rounded",
-                                        div {
-                                            class: "w-2 h-2 bg-white rounded-full animate-pulse"
-                                        }
-                                        "LIVE"
-                                    }
-                                }
+                                // Status badge
+                                {render_status_badge(&meta.status)}
+                            }
+                        } else {
+                            h1 {
+                                class: "text-xl font-bold",
+                                "Live Stream"
                             }
                         }
+                    }
 
-                        // Main content area: player + chat
+                    // Refresh button
+                    button {
+                        class: "p-2 hover:bg-accent rounded-lg transition-colors",
+                        onclick: handle_refresh,
+                        disabled: *loading.read(),
+                        svg {
+                            class: if *loading.read() { "w-6 h-6 animate-spin" } else { "w-6 h-6" },
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Main content
+            div {
+                class: "flex-1 min-h-0 overflow-hidden",
+
+                // Loading state
+                if *loading.read() && error.read().is_none() {
+                    div {
+                        class: "flex items-center justify-center h-full",
                         div {
-                            class: "flex-1 flex flex-col lg:flex-row overflow-hidden",
-
-                            // Left side: Video player and info
+                            class: "flex flex-col items-center gap-4",
                             div {
-                                class: "flex-1 flex flex-col overflow-y-auto",
+                                class: "w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
+                            }
+                            p {
+                                class: "text-muted-foreground",
+                                "Loading stream..."
+                            }
+                        }
+                    }
+                }
+
+                // Error state
+                else if let Some(error_msg) = error.read().as_ref() {
+                    div {
+                        class: "flex items-center justify-center h-full",
+                        div {
+                            class: "text-center p-6 max-w-md",
+                            svg {
+                                class: "w-16 h-16 text-red-500 mx-auto mb-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                }
+                            }
+                            h2 {
+                                class: "text-2xl font-bold mb-2",
+                                "Error Loading Stream"
+                            }
+                            p {
+                                class: "text-muted-foreground mb-4",
+                                "{error_msg}"
+                            }
+                            button {
+                                class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors",
+                                onclick: handle_refresh,
+                                "Try Again"
+                            }
+                        }
+                    }
+                }
+
+                // Stream content
+                else if let Some(meta) = stream_meta.read().as_ref() {
+                    div {
+                        class: "flex flex-col lg:flex-row h-full overflow-hidden",
+
+                        // Left: Player and info
+                        div {
+                            class: "flex-1 flex flex-col overflow-y-auto min-h-0",
+                            div {
+                                class: "p-4 space-y-4",
 
                                 // Video player
-                                div {
-                                    class: "bg-black",
-                                    if let Some(streaming_url) = &stream_meta.streaming_url {
-                                        if !streaming_url.is_empty() {
-                                            LiveStreamPlayer {
-                                                stream_url: streaming_url.clone()
-                                            }
-                                        } else {
-                                            div {
-                                                class: "aspect-video flex flex-col items-center justify-center text-white gap-3",
-                                                svg {
-                                                    class: "w-16 h-16 text-gray-500",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    fill: "none",
-                                                    view_box: "0 0 24 24",
-                                                    stroke: "currentColor",
-                                                    path {
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        stroke_width: "2",
-                                                        d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                                    }
-                                                }
-                                                div {
-                                                    class: "text-lg",
-                                                    if stream_meta.status == StreamStatus::Planned {
-                                                        "Stream hasn't started yet"
-                                                    } else if stream_meta.status == StreamStatus::Ended {
-                                                        "Stream has ended"
-                                                    } else {
-                                                        "No stream URL available"
-                                                    }
-                                                }
-                                            }
+                                if let Some(stream_url) = &meta.streaming_url {
+                                    if !stream_url.is_empty() {
+                                        LiveStreamPlayer {
+                                            stream_url: stream_url.clone(),
+                                            poster: meta.image.clone(),
+                                            autoplay: true
                                         }
                                     } else {
-                                        div {
-                                            class: "aspect-video flex flex-col items-center justify-center text-white gap-3",
-                                            svg {
-                                                class: "w-16 h-16 text-gray-500",
-                                                xmlns: "http://www.w3.org/2000/svg",
-                                                fill: "none",
-                                                view_box: "0 0 24 24",
-                                                stroke: "currentColor",
-                                                path {
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    stroke_width: "2",
-                                                    d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                                }
-                                            }
-                                            div {
-                                                class: "text-lg",
-                                                if stream_meta.status == StreamStatus::Planned {
-                                                    "Stream hasn't started yet"
-                                                } else if stream_meta.status == StreamStatus::Ended {
-                                                    "Stream has ended"
-                                                } else {
-                                                    "Stream URL not configured"
-                                                }
-                                            }
-                                        }
+                                        {render_no_stream_placeholder(&meta.status)}
                                     }
+                                } else {
+                                    {render_no_stream_placeholder(&meta.status)}
                                 }
 
                                 // Stream info
                                 div {
-                                    class: "p-6 space-y-4",
+                                    class: "space-y-4",
 
-                                    // Author info and actions
-                                    div {
-                                        class: "flex items-start gap-4",
-                                        Link {
-                                            to: Route::Profile { pubkey: author_pubkey.clone() },
-                                            class: "flex-shrink-0",
-                                            if let Some(pic_url) = author_metadata.read().as_ref().and_then(|m| m.picture.clone()) {
-                                                img {
-                                                    src: "{pic_url}",
-                                                    class: "w-12 h-12 rounded-full object-cover",
-                                                    alt: "Avatar",
-                                                    loading: "lazy"
+                                    // Author info
+                                    if let Some(event) = stream_event.read().as_ref() {
+                                        div {
+                                            class: "flex items-center gap-3",
+                                            // Avatar
+                                            if let Some(metadata) = author_metadata.read().as_ref() {
+                                                if let Some(picture) = &metadata.picture {
+                                                    img {
+                                                        src: "{picture}",
+                                                        class: "w-12 h-12 rounded-full object-cover",
+                                                        alt: "Author avatar"
+                                                    }
+                                                } else {
+                                                    div {
+                                                        class: "w-12 h-12 bg-accent rounded-full flex items-center justify-center",
+                                                        span { class: "text-lg", "👤" }
+                                                    }
                                                 }
                                             } else {
                                                 div {
-                                                    class: "w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold",
-                                                    "?"
+                                                    class: "w-12 h-12 bg-accent rounded-full flex items-center justify-center",
+                                                    span { class: "text-lg", "👤" }
                                                 }
                                             }
-                                        }
-                                        div {
-                                            class: "flex-1",
-                                            Link {
-                                                to: Route::Profile { pubkey: author_pubkey.clone() },
-                                                class: "font-semibold hover:underline",
-                                                if let Some(ref metadata) = *author_metadata.read() {
-                                                    "{metadata.display_name.clone().or_else(|| metadata.name.clone()).unwrap_or_else(|| \"Unknown\".to_string())}"
-                                                } else {
-                                                    "Loading..."
-                                                }
-                                            }
-                                            if let Some(viewers) = stream_meta.current_participants {
+
+                                            // Author name and stats
+                                            div {
+                                                class: "flex-1",
                                                 div {
-                                                    class: "text-sm text-muted-foreground flex items-center gap-1 mt-1",
-                                                    svg {
-                                                        class: "w-4 h-4",
-                                                        xmlns: "http://www.w3.org/2000/svg",
-                                                        fill: "none",
-                                                        view_box: "0 0 24 24",
-                                                        stroke: "currentColor",
-                                                        path {
-                                                            stroke_linecap: "round",
-                                                            stroke_linejoin: "round",
-                                                            stroke_width: "2",
-                                                            d: "M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                                    class: "font-semibold",
+                                                    if let Some(metadata) = author_metadata.read().as_ref() {
+                                                        if let Some(name) = &metadata.name {
+                                                            "{name}"
+                                                        } else {
+                                                            "{truncate_pubkey(&event.pubkey.to_string())}"
                                                         }
-                                                        path {
-                                                            stroke_linecap: "round",
-                                                            stroke_linejoin: "round",
-                                                            stroke_width: "2",
-                                                            d: "M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                                                        }
+                                                    } else {
+                                                        "{truncate_pubkey(&event.pubkey.to_string())}"
                                                     }
-                                                    "{viewers} watching"
+                                                }
+                                                if let Some(viewers) = meta.current_participants {
+                                                    div {
+                                                        class: "text-sm text-muted-foreground",
+                                                        "{viewers} watching"
+                                                    }
                                                 }
                                             }
-                                        }
-                                        button {
-                                            class: "px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-lg transition flex items-center gap-2",
-                                            onclick: move |_| show_zap_modal.set(true),
-                                            crate::components::icons::ZapIcon {
-                                                class: "w-4 h-4".to_string(),
-                                                filled: false
-                                            }
-                                            "Zap"
                                         }
                                     }
 
                                     // Description
-                                    if let Some(summary) = &stream_meta.summary {
+                                    if let Some(summary) = &meta.summary {
                                         if !summary.is_empty() {
                                             div {
-                                                class: "text-sm whitespace-pre-wrap",
+                                                class: "text-sm text-foreground",
                                                 "{summary}"
                                             }
                                         }
                                     }
 
                                     // Tags
-                                    if !stream_meta.tags.is_empty() {
+                                    if !meta.tags.is_empty() {
                                         div {
                                             class: "flex flex-wrap gap-2",
-                                            for tag in &stream_meta.tags {
+                                            for tag in meta.tags.iter() {
                                                 Link {
+                                                    key: "{tag}",
                                                     to: Route::VideosLiveTag { tag: tag.clone() },
-                                                    class: "text-sm bg-accent hover:bg-accent/80 text-primary px-3 py-1 rounded transition",
+                                                    class: "px-3 py-1 bg-accent hover:bg-accent/80 rounded-full text-sm transition-colors",
                                                     "#{tag}"
                                                 }
                                             }
@@ -346,40 +349,104 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                     }
                                 }
                             }
+                        }
 
-                            // Right side: Live chat
-                            div {
-                                class: "w-full lg:w-96 h-96 lg:h-auto border-t lg:border-t-0 lg:border-l border-border",
-                                LiveChat {
-                                    stream_author_pubkey: author_pubkey.clone(),
-                                    stream_d_tag: d_tag.clone()
+                        // Right: Chat
+                        div {
+                            class: "lg:w-96 border-t lg:border-t-0 lg:border-l border-border h-full min-h-0",
+                            if let Some(_event) = stream_event.read().as_ref() {
+                                {
+                                    let (author_pk, dtag) = parsed_naddr.peek().clone();
+                                    rsx! {
+                                        LiveChat {
+                                            stream_author_pubkey: author_pk,
+                                            stream_d_tag: dtag
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-
-                    // Zap modal
-                    if *show_zap_modal.read() {
-                        ZapModal {
-                            recipient_pubkey: author_pubkey.clone(),
-                            recipient_name: author_metadata.read().as_ref()
-                                .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-                                .unwrap_or_else(|| "Stream Host".to_string()),
-                            lud16: author_metadata.read().as_ref().and_then(|m| m.lud16.clone()),
-                            lud06: author_metadata.read().as_ref().and_then(|m| m.lud06.clone()),
-                            event_id: Some(event.id.to_string()),
-                            on_close: move |_| {
-                                show_zap_modal.set(false);
-                            }
-                        }
-                    }
-                } else {
-                    div {
-                        class: "text-center py-20 text-muted-foreground",
-                        "Failed to parse stream data"
-                    }
                 }
             }
         }
+    }
+}
+
+/// Parse naddr format "30311:pubkey:dtag" into (pubkey, dtag)
+fn parse_naddr(note_id: &str) -> (String, String) {
+    let parts: Vec<&str> = note_id.split(':').collect();
+
+    if parts.len() >= 3 {
+        // Full naddr format
+        (parts[1].to_string(), parts[2].to_string())
+    } else {
+        // Fallback: treat as pubkey:dtag
+        let parts: Vec<&str> = note_id.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            // Invalid format, return empty
+            (String::new(), String::new())
+        }
+    }
+}
+
+/// Render status badge
+fn render_status_badge(status: &StreamStatus) -> Element {
+    match status {
+        StreamStatus::Live => rsx! {
+            span {
+                class: "px-2 py-1 bg-red-500 text-white text-xs font-bold rounded uppercase",
+                "LIVE"
+            }
+        },
+        StreamStatus::Planned => rsx! {
+            span {
+                class: "px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded uppercase",
+                "Upcoming"
+            }
+        },
+        StreamStatus::Ended => rsx! {
+            span {
+                class: "px-2 py-1 bg-gray-500 text-white text-xs font-bold rounded uppercase",
+                "Ended"
+            }
+        },
+    }
+}
+
+/// Render placeholder when stream URL is not available
+fn render_no_stream_placeholder(status: &StreamStatus) -> Element {
+    let (message, icon) = match status {
+        StreamStatus::Planned => ("Stream has not started yet", "📅"),
+        StreamStatus::Ended => ("Stream has ended", "🎬"),
+        StreamStatus::Live => ("Stream URL not available", "❌"),
+    };
+
+    rsx! {
+        div {
+            class: "relative w-full aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center",
+            div {
+                class: "text-center p-6",
+                div {
+                    class: "text-6xl mb-4",
+                    "{icon}"
+                }
+                p {
+                    class: "text-white text-lg",
+                    "{message}"
+                }
+            }
+        }
+    }
+}
+
+/// Truncate public key for display
+fn truncate_pubkey(pubkey: &str) -> String {
+    if pubkey.len() > 16 {
+        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
+    } else {
+        pubkey.to_string()
     }
 }

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
 use std::time::Duration;

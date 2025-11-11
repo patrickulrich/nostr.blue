@@ -22,7 +22,7 @@ impl StreamStatus {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
     pub d_tag: String,
     pub title: Option<String>,
@@ -37,6 +37,8 @@ pub struct LiveStreamMeta {
 
 /// Parse NIP-53 Kind 30311 live streaming event
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
+    use nostr_sdk::TagKind;
+
     let mut meta = LiveStreamMeta {
         d_tag: String::new(),
         title: None,
@@ -49,71 +51,74 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         tags: Vec::new(),
     };
 
+    log::info!("Parsing live stream event: {}", event.id);
+    log::info!("Total tags: {}", event.tags.len());
+
     for tag in event.tags.iter() {
-        let tag_vec = tag.clone().to_vec();
-        if let Some(tag_name) = tag_vec.first().map(|s| s.as_str()) {
-            match tag_name {
-                "d" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.d_tag = value.to_string();
+        let tag_kind = tag.kind();
+
+        // Handle standard tags with TagKind methods
+        if tag_kind == TagKind::d() {
+            if let Some(value) = tag.content() {
+                meta.d_tag = value.to_string();
+                log::info!("Found d tag: {}", value);
+            }
+        } else if tag_kind == TagKind::t() {
+            if let Some(value) = tag.content() {
+                meta.tags.push(value.to_string());
+            }
+        } else if tag_kind == TagKind::custom("title") {
+            if let Some(value) = tag.content() {
+                meta.title = Some(value.to_string());
+                log::info!("Found title: {}", value);
+            }
+        } else if tag_kind == TagKind::custom("summary") {
+            if let Some(value) = tag.content() {
+                meta.summary = Some(value.to_string());
+            }
+        } else if tag_kind == TagKind::custom("image") {
+            if let Some(value) = tag.content() {
+                meta.image = Some(value.to_string());
+            }
+        } else if tag_kind == TagKind::custom("streaming") {
+            if let Some(value) = tag.content() {
+                let url = value.to_string();
+                log::info!("✅ Found streaming tag with URL: {}", url);
+                meta.streaming_url = Some(url);
+            } else {
+                log::warn!("❌ Found streaming tag but content is None");
+            }
+        } else if tag_kind == TagKind::custom("status") {
+            if let Some(value) = tag.content() {
+                meta.status = StreamStatus::from_str(value);
+                log::info!("Found status: {:?}", meta.status);
+            }
+        } else if tag_kind == TagKind::custom("current_participants") {
+            if let Some(value) = tag.content() {
+                if let Ok(count) = value.parse::<u32>() {
+                    meta.current_participants = Some(count);
+                }
+            }
+        } else if tag_kind == TagKind::custom("starts") {
+            if let Some(value) = tag.content() {
+                if let Ok(ts) = value.parse::<i64>() {
+                    // Validate timestamp is non-negative to avoid wraparound
+                    if ts >= 0 {
+                        meta.starts = Some(Timestamp::from(ts as u64));
+                    } else {
+                        log::warn!("Negative timestamp {} in starts tag, skipping", ts);
                     }
                 }
-                "title" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.title = Some(value.to_string());
-                    }
-                }
-                "summary" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.summary = Some(value.to_string());
-                    }
-                }
-                "image" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.image = Some(value.to_string());
-                    }
-                }
-                "streaming" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.streaming_url = Some(value.to_string());
-                    }
-                }
-                "status" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.status = StreamStatus::from_str(value);
-                    }
-                }
-                "current_participants" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(count) = value.parse::<u32>() {
-                            meta.current_participants = Some(count);
-                        }
-                    }
-                }
-                "starts" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(ts) = value.parse::<i64>() {
-                            // Validate timestamp is non-negative to avoid wraparound
-                            if ts >= 0 {
-                                meta.starts = Some(Timestamp::from(ts as u64));
-                            } else {
-                                log::warn!("Negative timestamp {} in starts tag, skipping", ts);
-                            }
-                        }
-                    }
-                }
-                "t" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.tags.push(value.to_string());
-                    }
-                }
-                _ => {}
             }
         }
     }
 
+    log::info!("📊 Parsed streaming_url: {:?}", meta.streaming_url);
+    log::info!("📊 Parsed d_tag: {}", meta.d_tag);
+
     // Only return if we have a d_tag (required)
     if meta.d_tag.is_empty() {
+        log::warn!("Event {} missing required d tag", event.id);
         None
     } else {
         Some(meta)

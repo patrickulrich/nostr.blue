@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata, nwc_store};
+use crate::stores::nostr_client::RelayPoolStoreStoreExt;
+use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 use crate::components::NwcSetupModal;
 use crate::routes::Route;
 use nostr_sdk::ToBech32;
@@ -1020,19 +1022,19 @@ pub fn Settings() -> Element {
                     }
                     p {
                         class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
-                        "Connected to {relays.len()} relay(s)"
+                        "Connected to {relays.data().read().len()} relay(s)"
                     }
 
                     // Relay list
                     div {
                         class: "space-y-2",
-                        if relays.is_empty() {
+                        if relays.data().read().is_empty() {
                             div {
                                 class: "text-center p-8 text-gray-500 dark:text-gray-400",
                                 "No relays connected"
                             }
                         } else {
-                            for relay in relays.iter() {
+                            for relay in relays.data().read().iter() {
                                 div {
                                     key: "{relay.url}",
                                     class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
@@ -1058,7 +1060,7 @@ pub fn Settings() -> Element {
                                                     nostr_client::RelayStatus::Connected => "Connected",
                                                     nostr_client::RelayStatus::Connecting => "Connecting...",
                                                     nostr_client::RelayStatus::Disconnected => "Disconnected",
-                                                    nostr_client::RelayStatus::Error(e) => e,
+                                                    nostr_client::RelayStatus::Error(e) => &e,
                                                 }
                                             }
                                         }
@@ -1086,7 +1088,7 @@ pub fn Settings() -> Element {
                 // Server list
                 div {
                     class: "space-y-2 mb-4",
-                    for (index, server) in blossom_servers.iter().enumerate() {
+                    for (index, server) in blossom_servers.data().read().iter().enumerate() {
                         div {
                             key: "{server}",
                             class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
@@ -1109,7 +1111,7 @@ pub fn Settings() -> Element {
                                     "{server}"
                                 }
                             }
-                            if blossom_servers.len() > 1 {
+                            if blossom_servers.data().read().len() > 1 {
                                 button {
                                     class: "px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded-lg text-sm transition",
                                     onclick: {

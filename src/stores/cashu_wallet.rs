@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, SecretKey};
 use nostr_sdk::nips::nip60::{WalletEvent, CashuProof, TransactionDirection};
 use crate::stores::{auth_store, nostr_client};
@@ -68,14 +70,28 @@ pub enum WalletStatus {
     Error(String),
 }
 
+/// Store for wallet tokens with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct WalletTokensStore {
+    pub data: Vec<TokenData>,
+}
+
+/// Store for wallet history with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct WalletHistoryStore {
+    pub data: Vec<HistoryItem>,
+}
+
 /// Global signal for wallet state
 pub static WALLET_STATE: GlobalSignal<Option<WalletState>> = Signal::global(|| None);
 
 /// Global signal for tokens
-pub static WALLET_TOKENS: GlobalSignal<Vec<TokenData>> = Signal::global(Vec::new);
+pub static WALLET_TOKENS: GlobalSignal<Store<WalletTokensStore>> =
+    Signal::global(|| Store::new(WalletTokensStore::default()));
 
 /// Global signal for transaction history
-pub static WALLET_HISTORY: GlobalSignal<Vec<HistoryItem>> = Signal::global(Vec::new);
+pub static WALLET_HISTORY: GlobalSignal<Store<WalletHistoryStore>> =
+    Signal::global(|| Store::new(WalletHistoryStore::default()));
 
 /// Global signal for total balance
 pub static WALLET_BALANCE: GlobalSignal<u64> = Signal::global(|| 0);
@@ -362,7 +378,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
             }
 
             log::info!("Loaded {} token events with total balance: {} sats", tokens.len(), total_balance);
-            *WALLET_TOKENS.write() = tokens;
+            *WALLET_TOKENS.read().data().write() = tokens;
             *WALLET_BALANCE.write() = total_balance;
             Ok(())
         }
@@ -503,7 +519,7 @@ pub async fn fetch_history() -> Result<(), String> {
             history.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
             log::info!("Loaded {} history items", history.len());
-            *WALLET_HISTORY.write() = history;
+            *WALLET_HISTORY.read().data().write() = history;
             Ok(())
         }
         Err(e) => {
@@ -1022,7 +1038,9 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     log::info!("Published token event: {}", event_id);
 
     // Update local state
-    let mut tokens = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens = data.write();
     tokens.push(TokenData {
         event_id: event_id.clone(),
         mint: mint_url.clone(),
@@ -1077,7 +1095,9 @@ pub async fn send_tokens(
 
     // Get available proofs for this mint
     let (all_proofs, event_ids_to_delete) = {
-        let tokens = WALLET_TOKENS.read();
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
         let mint_tokens: Vec<_> = tokens.iter()
             .filter(|t| t.mint == mint_url)
             .collect();
@@ -1163,7 +1183,9 @@ pub async fn send_tokens(
 
                     // Get fresh proofs after cleanup
                     let fresh_proofs = {
-                        let tokens = WALLET_TOKENS.read();
+                        let store = WALLET_TOKENS.read();
+                        let data = store.data();
+                        let tokens = data.read();
                         let mut proofs = Vec::new();
 
                         for token in tokens.iter().filter(|t| t.mint == mint_url) {
@@ -1285,7 +1307,9 @@ pub async fn send_tokens(
     }
 
     // Update local state
-    let mut tokens_write = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
 
     // Remove only the specific token events we used (not all tokens for this mint!)
     tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
@@ -1412,7 +1436,9 @@ pub async fn cleanup_spent_proofs(mint_url: String) -> Result<(usize, u64), Stri
 
     // Get all token events and proofs for this mint (scope the read to drop lock early)
     let (cdk_proofs, event_ids_to_delete, all_mint_proofs) = {
-        let tokens = WALLET_TOKENS.read();
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
         let mint_tokens: Vec<_> = tokens.iter()
             .filter(|t| t.mint == mint_url)
             .collect();
@@ -1550,7 +1576,9 @@ pub async fn cleanup_spent_proofs(mint_url: String) -> Result<(usize, u64), Stri
     }
 
     // Update local state
-    let mut tokens_write = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
 
     // Remove old tokens for this mint
     tokens_write.retain(|t| t.mint != mint_url);
@@ -1592,7 +1620,9 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
 
     // Get all token events for this mint (scoped read)
     let (event_ids_to_delete, total_amount, token_count) = {
-        let tokens = WALLET_TOKENS.read();
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
         let mint_tokens: Vec<_> = tokens.iter()
             .filter(|t| t.mint == mint_url)
             .collect();
@@ -1639,7 +1669,9 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
     log::info!("Published deletion event for {} token events", event_ids_to_delete.len());
 
     // Update local state - remove all tokens for this mint
-    let mut tokens_write = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
     tokens_write.retain(|t| t.mint != mint_url);
     drop(tokens_write);
 
@@ -1651,7 +1683,9 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
     drop(state_write);
 
     // Recalculate balance using checked arithmetic
-    let tokens = WALLET_TOKENS.read();
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
     let new_balance: u64 = tokens.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
@@ -1702,11 +1736,25 @@ pub enum QuoteStatus {
     Expired,
 }
 
+/// Store for pending mint quotes with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct PendingMintQuotesStore {
+    pub data: Vec<MintQuoteInfo>,
+}
+
+/// Store for pending melt quotes with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct PendingMeltQuotesStore {
+    pub data: Vec<MeltQuoteInfo>,
+}
+
 /// Global signal for pending mint quotes
-pub static PENDING_MINT_QUOTES: GlobalSignal<Vec<MintQuoteInfo>> = Signal::global(Vec::new);
+pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =
+    Signal::global(|| Store::new(PendingMintQuotesStore::default()));
 
 /// Global signal for pending melt quotes
-pub static PENDING_MELT_QUOTES: GlobalSignal<Vec<MeltQuoteInfo>> = Signal::global(Vec::new);
+pub static PENDING_MELT_QUOTES: GlobalSignal<Store<PendingMeltQuotesStore>> =
+    Signal::global(|| Store::new(PendingMeltQuotesStore::default()));
 
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -1739,7 +1787,7 @@ pub async fn create_mint_quote(
     };
 
     // Store in global state for tracking
-    PENDING_MINT_QUOTES.write().push(quote_info.clone());
+    PENDING_MINT_QUOTES.read().data().write().push(quote_info.clone());
 
     Ok(quote_info)
 }
@@ -1830,7 +1878,7 @@ pub async fn mint_tokens_from_quote(
             }
 
             // Also remove from pending quotes signal
-            PENDING_MINT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+            PENDING_MINT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
             // If the quote lookup fails, it means the shared database lost the quote somehow
             // 1. The quote was already used/issued
@@ -1902,7 +1950,9 @@ pub async fn mint_tokens_from_quote(
     log::info!("Published token event: {}", event_id);
 
     // Update local state
-    let mut tokens = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens = data.write();
     tokens.push(TokenData {
         event_id: event_id.clone(),
         mint: mint_url.clone(),
@@ -1934,7 +1984,7 @@ pub async fn mint_tokens_from_quote(
     ).await?;
 
     // Remove from pending quotes
-    PENDING_MINT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+    PENDING_MINT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
     // Clean up: Remove quote from shared database to prevent reuse
     if let Err(e) = wallet.localstore.remove_mint_quote(&quote_id).await {
@@ -1971,7 +2021,7 @@ pub async fn create_melt_quote(
     };
 
     // Store in global state
-    PENDING_MELT_QUOTES.write().push(quote_info.clone());
+    PENDING_MELT_QUOTES.read().data().write().push(quote_info.clone());
 
     Ok(quote_info)
 }
@@ -2016,7 +2066,7 @@ pub async fn melt_tokens(
     log::info!("Melting tokens to pay invoice via quote: {}", quote_id);
 
     // Get melt quote details
-    let quote_info = PENDING_MELT_QUOTES.read()
+    let quote_info = PENDING_MELT_QUOTES.read().data().read()
         .iter()
         .find(|q| q.quote_id == quote_id)
         .cloned()
@@ -2026,7 +2076,9 @@ pub async fn melt_tokens(
 
     // Get available proofs for this mint
     let (all_proofs, event_ids_to_delete) = {
-        let tokens = WALLET_TOKENS.read();
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
         let mint_tokens: Vec<_> = tokens.iter()
             .filter(|t| t.mint == mint_url)
             .collect();
@@ -2099,7 +2151,9 @@ pub async fn melt_tokens(
 
                     // Get fresh proofs after cleanup
                     let fresh_proofs = {
-                        let tokens = WALLET_TOKENS.read();
+                        let store = WALLET_TOKENS.read();
+                        let data = store.data();
+                        let tokens = data.read();
                         let mut proofs = Vec::new();
 
                         for token in tokens.iter().filter(|t| t.mint == mint_url) {
@@ -2137,7 +2191,7 @@ pub async fn melt_tokens(
                 } else {
                     // Clean up the melt quote on failure to prevent issues with retries
                     log::warn!("Melt failed, cleaning up quote from database");
-                    PENDING_MELT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+                    PENDING_MELT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
                     // Remove from wallet database using dedicated cleanup function
                     if let Err(cleanup_err) = remove_melt_quote_from_db(&quote_id).await {
@@ -2223,7 +2277,9 @@ pub async fn melt_tokens(
     }
 
     // Update local state
-    let mut tokens_write = WALLET_TOKENS.write();
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
     tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
 
     if let Some(ref event_id) = new_event_id {
@@ -2247,7 +2303,9 @@ pub async fn melt_tokens(
     drop(tokens_write);
 
     // Update balance using checked arithmetic
-    let tokens = WALLET_TOKENS.read();
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
     let new_balance: u64 = tokens.iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
@@ -2274,7 +2332,7 @@ pub async fn melt_tokens(
     ).await?;
 
     // Remove from pending quotes
-    PENDING_MELT_QUOTES.write().retain(|q| q.quote_id != quote_id);
+    PENDING_MELT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
     log::info!("Melt complete: paid={}, amount={}, fee={}", paid, quote_info.amount, fee_paid);
 

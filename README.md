@@ -65,7 +65,8 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 ## 🛠 Technology Stack
 
 ### Core Framework
-- **[Dioxus 0.6](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
+- **[Dioxus 0.7.1](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
+- **dioxus-stores** - Advanced state management library for reactive global state
 - **WebAssembly** - Compiled to WASM for near-native browser performance
 - **[Trunk](https://trunkrs.dev/)** - WASM web application bundler
 

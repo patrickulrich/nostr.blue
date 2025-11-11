@@ -1,11 +1,13 @@
 /// NIP-78: Application Data Storage
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
+use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 
 /// App settings stored on Nostr via NIP-78
 /// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
@@ -100,7 +102,7 @@ pub async fn load_settings() -> Result<(), String> {
 
                         // Update Blossom servers
                         if !settings.blossom_servers.is_empty() {
-                            *blossom_store::BLOSSOM_SERVERS.write() = settings.blossom_servers.clone();
+                            *blossom_store::BLOSSOM_SERVERS.read().data().write() = settings.blossom_servers.clone();
                         }
 
                         // Update global settings
@@ -145,7 +147,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
 
     // Create settings with current blossom servers
     let mut settings_to_save = settings.clone();
-    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().clone();
+    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().data().read().clone();
 
     // Serialize settings to JSON
     let content = serde_json::to_string(&settings_to_save)
