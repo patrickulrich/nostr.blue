@@ -312,16 +312,26 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                             // Author name and stats
                                             div {
                                                 class: "flex-1",
-                                                div {
-                                                    class: "font-semibold",
-                                                    if let Some(metadata) = author_metadata.read().as_ref() {
-                                                        if let Some(name) = &metadata.name {
-                                                            "{name}"
-                                                        } else {
-                                                            "{truncate_pubkey(&event.pubkey.to_string())}"
+                                                {
+                                                    // Get creator-aware identifier (use p tag creator if available, otherwise event publisher)
+                                                    let event_pubkey = event.pubkey.to_string();
+                                                    let author_identifier = meta.creator_pubkey.as_ref()
+                                                        .map(|s| s.as_str())
+                                                        .unwrap_or(&event_pubkey);
+
+                                                    rsx! {
+                                                        div {
+                                                            class: "font-semibold",
+                                                            if let Some(metadata) = author_metadata.read().as_ref() {
+                                                                if let Some(name) = &metadata.name {
+                                                                    "{name}"
+                                                                } else {
+                                                                    "{truncate_pubkey(author_identifier)}"
+                                                                }
+                                                            } else {
+                                                                "{truncate_pubkey(author_identifier)}"
+                                                            }
                                                         }
-                                                    } else {
-                                                        "{truncate_pubkey(&event.pubkey.to_string())}"
                                                     }
                                                 }
                                                 if let Some(viewers) = meta.current_participants {

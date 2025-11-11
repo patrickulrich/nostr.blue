@@ -446,6 +446,12 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
+    // Compute pagination from raw events BEFORE filtering
+    let next_until = events.iter()
+        .map(|e| e.created_at.as_secs())
+        .min();
+    let hit_limit = events.len() >= 100;
+
     // Filter events where either the publisher OR the creator (p tag) is followed
     let following_events: Vec<Event> = events.into_iter()
         .filter(|event| {
@@ -471,13 +477,6 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         })
         .collect();
 
-    // Compute next_until from filtered events
-    let next_until = following_events.iter()
-        .map(|e| e.created_at.as_secs())
-        .min();
-
-    // Base has_more on filtered page size
-    let hit_limit = following_events.len() >= 50;
     let filtered_events = filter_by_status(following_events, status);
 
     Ok((filtered_events, next_until, hit_limit))
