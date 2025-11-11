@@ -296,10 +296,11 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     // Extract existing tags and add new event
     let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
 
-    // Check if event is already in the list
+    // Check if event is already in the list (use normalized lowercase hex for comparison)
+    let normalized_event_id = target_event_id.to_hex();
     let already_exists = tags.iter().any(|tag| {
         tag.kind() == nostr_sdk::TagKind::e() &&
-        tag.content().map(|c| c == event_id).unwrap_or(false)
+        tag.content().map(|c| c.eq_ignore_ascii_case(&normalized_event_id)).unwrap_or(false)
     });
 
     if already_exists {
