@@ -34,6 +34,7 @@ pub fn Search(q: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
     let query = use_signal(|| q.clone());
+    let mut search_version = use_signal(|| 0u64);
 
     // Fetch contacts on mount
     use_effect(move || {
@@ -57,6 +58,10 @@ pub fn Search(q: String) -> Element {
         loading.set(true);
         error.set(None);
 
+        // Increment version to invalidate any in-flight searches
+        let current_version = *search_version.read() + 1;
+        search_version.set(current_version);
+
         spawn(async move {
             let search_result = match tab {
                 SearchTab::TextNotes => search_text_notes(&q, 50, &contacts).await,
@@ -65,14 +70,17 @@ pub fn Search(q: String) -> Element {
                 SearchTab::Videos => search_videos(&q, 50, &contacts).await,
             };
 
-            match search_result {
-                Ok(search_results) => {
-                    results.set(search_results);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(format!("Search failed: {}", e)));
-                    loading.set(false);
+            // Only update state if this is still the most recent search
+            if *search_version.read() == current_version {
+                match search_result {
+                    Ok(search_results) => {
+                        results.set(search_results);
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(format!("Search failed: {}", e)));
+                        loading.set(false);
+                    }
                 }
             }
         });
