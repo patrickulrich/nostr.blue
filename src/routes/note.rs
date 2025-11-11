@@ -83,6 +83,9 @@ pub fn Note(note_id: String) -> Element {
             loading_replies.set(true);
             error.set(None);
 
+            // Clear profile cache to prevent stale author metadata when navigating between notes
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
+
             // Parse the note ID
             let event_id = match EventId::from_bech32(&note_id_str)
                 .or_else(|_| EventId::from_hex(&note_id_str)) {
@@ -125,6 +128,21 @@ pub fn Note(note_id: String) -> Element {
                 let count = reply_vec.len();
                 replies.set(reply_vec);
                 log::info!("Loaded {} replies", count);
+            }
+
+            // Prefetch author metadata for all loaded events
+            use crate::utils::profile_prefetch;
+            let mut all_events = Vec::new();
+            if let Some(note) = note_data.read().as_ref() {
+                all_events.push(note.clone());
+            }
+            all_events.extend(parent_events.read().iter().cloned());
+            all_events.extend(replies.read().iter().cloned());
+
+            if !all_events.is_empty() {
+                spawn(async move {
+                    profile_prefetch::prefetch_event_authors(&all_events).await;
+                });
             }
 
             loading.set(false);

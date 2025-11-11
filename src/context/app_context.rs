@@ -33,9 +33,11 @@ use crate::stores::{nostr_client, auth_store, bookmarks, profiles, theme_store, 
 ///     // ...
 /// }
 /// ```
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct AppContext;
 
+#[allow(dead_code)]
 impl AppContext {
     /// Create a new AppContext
     ///

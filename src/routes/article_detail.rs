@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind};
+use nostr_sdk::{Event as NostrEvent, Filter, Kind};
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer, ClientInitializing};
@@ -36,6 +36,9 @@ pub fn ArticleDetail(naddr: String) -> Element {
             loading.set(true);
             error.set(None);
 
+            // Clear profile cache to prevent stale author metadata
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
+
             // Decode the naddr
             match decode_naddr(&naddr_str) {
                 Ok((pubkey, identifier)) => {
@@ -45,24 +48,34 @@ pub fn ArticleDetail(naddr: String) -> Element {
                         identifier
                     ).await {
                         Ok(Some(event)) => {
-                            // Fetch author metadata
-                            if let Ok(pk) = PublicKey::from_hex(&pubkey) {
-                                let filter = Filter::new()
-                                    .author(pk)
-                                    .kind(Kind::Metadata)
-                                    .limit(1);
+                            article.set(Some(event.clone()));
+                            loading.set(false);
 
-                                if let Ok(events) = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                                    if let Some(meta_event) = events.into_iter().next() {
-                                        if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&meta_event.content) {
-                                            author_metadata.set(Some(metadata));
+                            // Prefetch author metadata using optimized utility
+                            use crate::utils::profile_prefetch;
+                            spawn(async move {
+                                profile_prefetch::prefetch_event_authors(&[event]).await;
+
+                                // Update author_metadata signal after prefetch
+                                if let Some(profile) = crate::stores::profiles::get_cached_profile(&pubkey) {
+                                    let mut metadata = nostr_sdk::Metadata::new();
+                                    if let Some(name) = profile.name {
+                                        metadata = metadata.name(name);
+                                    }
+                                    if let Some(display_name) = profile.display_name {
+                                        metadata = metadata.display_name(display_name);
+                                    }
+                                    if let Some(about) = profile.about {
+                                        metadata = metadata.about(about);
+                                    }
+                                    if let Some(picture) = profile.picture {
+                                        if let Ok(url) = nostr_sdk::Url::parse(&picture) {
+                                            metadata = metadata.picture(url);
                                         }
                                     }
+                                    author_metadata.set(Some(metadata));
                                 }
-                            }
-
-                            article.set(Some(event));
-                            loading.set(false);
+                            });
                         }
                         Ok(None) => {
                             error.set(Some("Article not found".to_string()));

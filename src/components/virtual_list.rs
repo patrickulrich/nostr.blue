@@ -62,6 +62,7 @@ impl Default for VirtualScrollConfig {
 }
 
 /// Height information for an item in the virtual list
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 struct ItemHeight {
     /// Measured or estimated height in pixels
@@ -71,6 +72,7 @@ struct ItemHeight {
 }
 
 /// State for virtual scrolling calculations
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct VirtualState {
     /// Scroll offset in pixels
@@ -85,6 +87,7 @@ struct VirtualState {
     config: VirtualScrollConfig,
 }
 
+#[allow(dead_code)]
 impl VirtualState {
     fn new(total_items: usize, config: VirtualScrollConfig) -> Self {
         Self {
@@ -178,6 +181,7 @@ impl VirtualState {
 }
 
 /// Props for VirtualList component
+#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Props, Clone, PartialEq)]
 pub struct VirtualListProps<T: PartialEq + 'static> {
     /// All items in the list (wrapped in Rc for cheap cloning)

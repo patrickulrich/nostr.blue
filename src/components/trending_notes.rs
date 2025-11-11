@@ -16,8 +16,21 @@ pub fn TrendingNotes() -> Element {
 
             match get_trending_notes(Some(10)).await {
                 Ok(notes) => {
-                    trending_notes.set(notes);
+                    trending_notes.set(notes.clone());
                     loading.set(false);
+
+                    // Prefetch author metadata for trending notes to prevent stale cache on navigation
+                    use crate::utils::profile_prefetch;
+                    use nostr_sdk::PublicKey;
+                    let pubkeys: Vec<PublicKey> = notes.iter()
+                        .filter_map(|note| PublicKey::from_hex(&note.event.pubkey).ok())
+                        .collect();
+
+                    if !pubkeys.is_empty() {
+                        spawn(async move {
+                            profile_prefetch::prefetch_pubkeys(pubkeys).await;
+                        });
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to fetch trending notes: {}", e);

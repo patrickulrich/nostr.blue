@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, EventBuilder, Tag, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 
@@ -276,20 +276,26 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 
     log::info!("Publishing {} bookmarks", bookmarks.len());
 
-    // Build tags for bookmark list
-    let mut tags = vec![
-        Tag::identifier("bookmark"), // d tag
-    ];
+    // Parse event IDs
+    use nostr_sdk::EventId;
+    let event_ids: Vec<EventId> = bookmarks
+        .into_iter()
+        .map(|id| EventId::from_hex(&id))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    for event_id in bookmarks {
-        tags.push(Tag::event(
-            nostr_sdk::EventId::from_hex(&event_id)
-                .map_err(|e| format!("Invalid event ID: {}", e))?,
-        ));
-    }
+    // Use NIP-51 Bookmarks struct for type-safe bookmark list construction
+    use nostr_sdk::nips::nip51::Bookmarks;
+    let bookmarks_list = Bookmarks {
+        event_ids,
+        coordinate: Vec::new(),
+        hashtags: Vec::new(),
+        urls: Vec::new(),
+    };
 
-    // Build and publish event
-    let builder = EventBuilder::new(Kind::from(30001), "").tags(tags);
+    // Use EventBuilder::bookmarks_set() for proper NIP-51 compliance
+    // This automatically adds the 'd' tag and properly formats all bookmark entries
+    let builder = EventBuilder::bookmarks_set("bookmark", bookmarks_list);
 
     match client.send_event_builder(builder).await {
         Ok(_) => {
