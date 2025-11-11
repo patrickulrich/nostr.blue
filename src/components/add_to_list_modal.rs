@@ -13,7 +13,7 @@ pub struct AddToListModalProps {
 
 #[component]
 pub fn AddToListModal(props: AddToListModalProps) -> Element {
-    let user_lists = use_lists::use_user_lists();
+    let (lists_signal, lists_loading, lists_error, mut refresh_trigger) = use_lists::use_user_lists();
     let mut selected_list_id = use_signal(|| None::<String>);
     let mut new_list_name = use_signal(|| String::new());
     let mut create_new = use_signal(|| false);
@@ -23,8 +23,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
 
     // Filter for curation lists (kind 30004)
     let curation_lists = use_memo(move || {
-        user_lists
-            .0
+        lists_signal
             .read()
             .iter()
             .filter(|list| list.kind == 30004)
@@ -72,6 +71,9 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     log::info!("Successfully added to list");
                     success.set(true);
                     loading.set(false);
+
+                    // Refresh the lists to show the update
+                    refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
 
                     // Auto-close after success
                     spawn(async move {
@@ -157,7 +159,17 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                     "Select a curation list"
                                 }
 
-                                if curation_lists.read().is_empty() {
+                                if *lists_loading.read() {
+                                    div {
+                                        class: "text-sm text-muted-foreground italic py-2",
+                                        "Loading lists..."
+                                    }
+                                } else if let Some(err) = lists_error.read().as_ref() {
+                                    div {
+                                        class: "text-sm text-red-500 py-2",
+                                        "Error loading lists: {err}"
+                                    }
+                                } else if curation_lists.read().is_empty() {
                                     div {
                                         class: "text-sm text-muted-foreground italic py-2",
                                         "You don't have any curation lists yet. Create one below!"
