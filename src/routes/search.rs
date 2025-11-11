@@ -51,16 +51,23 @@ pub fn Search(q: String) -> Element {
         let contacts = contact_pubkeys.read().clone();
 
         if q.is_empty() {
+            // Increment version to invalidate any in-flight searches (without subscribing)
+            search_version.with_mut(|v| {
+                *v += 1;
+            });
             results.set(Vec::new());
+            loading.set(false);
             return;
         }
 
         loading.set(true);
         error.set(None);
 
-        // Increment version to invalidate any in-flight searches
-        let current_version = *search_version.read() + 1;
-        search_version.set(current_version);
+        // Increment version to invalidate any in-flight searches (without subscribing)
+        let current_version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
 
         spawn(async move {
             let search_result = match tab {
