@@ -96,10 +96,13 @@ pub fn ArticleNew() -> Element {
     });
 
     // Redirect if not authenticated
-    if !*is_authenticated.read() {
-        use_effect(move || {
+    use_effect(move || {
+        if !*is_authenticated.read() {
             navigator.push(crate::routes::Route::Home {});
-        });
+        }
+    });
+
+    if !*is_authenticated.read() {
         return rsx! {
             div { class: "flex items-center justify-center h-screen",
                 "Redirecting..."

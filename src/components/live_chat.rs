@@ -40,6 +40,9 @@ pub fn LiveChat(
     // Make has_signer reactive - read from the store when needed instead of capturing once
     let has_signer = use_memo(move || *HAS_SIGNER.read());
 
+    // Shared metadata cache to avoid N+1 queries
+    let mut metadata_cache = use_signal(|| std::collections::HashMap::<String, nostr_sdk::Metadata>::new());
+
     // Create unique ID for this chat container
     let chat_container_id = use_signal(|| {
         let timestamp = js_sys::Date::now() as u64;
@@ -49,9 +52,8 @@ pub fn LiveChat(
     // Create the 'a' tag for this livestream
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
     let a_tag_for_fetch = a_tag.clone();
-    let a_tag_for_send = a_tag.clone();
-    let a_tag_for_send_keydown = a_tag_for_send.clone();
-    let a_tag_for_send_onclick = a_tag_for_send.clone();
+    let a_tag_for_send_keydown = a_tag.clone();
+    let a_tag_for_send_onclick = a_tag.clone();
 
     // Fetch chat messages
     use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
@@ -163,6 +165,94 @@ pub fn LiveChat(
         }
     });
 
+    // Fetch metadata for unique authors (avoids N+1 problem)
+    use_effect(use_reactive(&messages.read().len(), move |_| {
+        let unique_authors: std::collections::HashSet<String> = messages.read()
+            .iter()
+            .map(|msg| msg.pubkey.to_string())
+            .collect();
+
+        for author_pubkey in unique_authors {
+            // Skip if already cached
+            if metadata_cache.read().contains_key(&author_pubkey) {
+                continue;
+            }
+
+            // Spawn fetch for this author
+            let author_pk = author_pubkey.clone();
+            spawn(async move {
+                if let Ok(pubkey) = PublicKey::from_bech32(&author_pk).or_else(|_| PublicKey::parse(&author_pk)) {
+                    if let Some(client) = get_client() {
+                        let filter = Filter::new()
+                            .kind(Kind::Metadata)
+                            .author(pubkey)
+                            .limit(1);
+
+                        match client.fetch_events(filter, Duration::from_secs(5)).await {
+                            Ok(events) => {
+                                if let Some(event) = events.first() {
+                                    if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
+                                        metadata_cache.write().insert(author_pk.clone(), metadata);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::debug!("Failed to fetch metadata for {}: {}", author_pk, e);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }));
+
+    // Helper to perform the message send (used by both keyboard and button)
+    let perform_send = move |content: String, tag_clone: String| {
+        spawn(async move {
+            match get_client() {
+                Some(client) => {
+                    let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
+                    let builder = EventBuilder::new(Kind::from(1311), content.clone()).tag(tag);
+                    match client.send_event_builder(builder).await {
+                        Ok(event_id) => {
+                            log::info!("Chat message sent: {:?}", event_id);
+                            message_input.set(String::new());
+                            sending.set(false);
+
+                            // Spawn background refetch without blocking the UI
+                            let tag_clone_bg = tag_clone.clone();
+                            spawn(async move {
+                                let parts: Vec<&str> = tag_clone_bg.split(':').collect();
+                                if parts.len() == 3 {
+                                    if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
+                                        let filter = Filter::new()
+                                            .kind(Kind::from(1311))
+                                            .custom_tag(
+                                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                                                tag_clone_bg.as_str()
+                                            )
+                                            .limit(200);
+                                        if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                                            let mut sorted_messages = events;
+                                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                            messages.set(sorted_messages);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to send chat message: {}", e);
+                        }
+                    }
+                }
+                None => {
+                    log::error!("Client not initialized");
+                }
+            }
+            sending.set(false);
+        });
+    };
 
     rsx! {
         div {
@@ -197,7 +287,10 @@ pub fn LiveChat(
                     }
                 } else {
                     for message in messages.read().iter() {
-                        ChatMessage { event: message.clone() }
+                        ChatMessage {
+                            event: message.clone(),
+                            metadata: metadata_cache.read().get(&message.pubkey.to_string()).cloned()
+                        }
                     }
                 }
             }
@@ -222,47 +315,8 @@ pub fn LiveChat(
                                     if content.trim().is_empty() || *sending.read() || !*has_signer.read() {
                                         return;
                                     }
-                                    let tag_clone = a_tag_for_send_keydown.clone();
                                     sending.set(true);
-                                    spawn(async move {
-                                        match get_client() {
-                                            Some(client) => {
-                                                let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
-                                                let builder = EventBuilder::new(Kind::from(1311), content.clone()).tag(tag);
-                                                match client.send_event_builder(builder).await {
-                                                    Ok(event_id) => {
-                                                        log::info!("Chat message sent: {:?}", event_id);
-                                                        message_input.set(String::new());
-                                                        gloo_timers::future::TimeoutFuture::new(1000).await;
-                                                        let parts: Vec<&str> = tag_clone.split(':').collect();
-                                                        if parts.len() == 3 {
-                                                            if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                                                                let filter = Filter::new()
-                                                                    .kind(Kind::from(1311))
-                                                                    .custom_tag(
-                                                                        nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                                                                        tag_clone.as_str()
-                                                                    )
-                                                                    .limit(200);
-                                                                if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                                                                    let mut sorted_messages = events;
-                                                                    sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                                                    messages.set(sorted_messages);
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        log::error!("Failed to send chat message: {}", e);
-                                                    }
-                                                }
-                                            }
-                                            None => {
-                                                log::error!("Client not initialized");
-                                            }
-                                        }
-                                        sending.set(false);
-                                    });
+                                    perform_send(content, a_tag_for_send_keydown.clone());
                                 }
                             }
                         }
@@ -274,47 +328,8 @@ pub fn LiveChat(
                                 if content.trim().is_empty() || *sending.read() || !*has_signer.read() {
                                     return;
                                 }
-                                let tag_clone = a_tag_for_send_onclick.clone();
                                 sending.set(true);
-                                spawn(async move {
-                                    match get_client() {
-                                        Some(client) => {
-                                            let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
-                                            let builder = EventBuilder::new(Kind::from(1311), content.clone()).tag(tag);
-                                            match client.send_event_builder(builder).await {
-                                                Ok(event_id) => {
-                                                    log::info!("Chat message sent: {:?}", event_id);
-                                                    message_input.set(String::new());
-                                                    gloo_timers::future::TimeoutFuture::new(1000).await;
-                                                    let parts: Vec<&str> = tag_clone.split(':').collect();
-                                                    if parts.len() == 3 {
-                                                        if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                                                            let filter = Filter::new()
-                                                                .kind(Kind::from(1311))
-                                                                .custom_tag(
-                                                                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                                                                    tag_clone.as_str()
-                                                                )
-                                                                .limit(200);
-                                                            if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                                                                let mut sorted_messages = events;
-                                                                sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                                                messages.set(sorted_messages);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Failed to send chat message: {}", e);
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            log::error!("Client not initialized");
-                                        }
-                                    }
-                                    sending.set(false);
-                                });
+                                perform_send(content, a_tag_for_send_onclick.clone());
                             },
                             if *sending.read() {
                                 "Sending..."
@@ -335,42 +350,12 @@ pub fn LiveChat(
 }
 
 #[component]
-fn ChatMessage(event: Event) -> Element {
+fn ChatMessage(event: Event, metadata: Option<nostr_sdk::Metadata>) -> Element {
     let author_pubkey = event.pubkey.to_string();
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let content = event.content.clone();
     let timestamp = event.created_at;
 
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // Fetch author metadata
-    use_effect(use_reactive(&author_pubkey_for_fetch, move |pk| {
-        spawn(async move {
-            if let Ok(pubkey) = PublicKey::from_bech32(&pk).or_else(|_| PublicKey::parse(&pk)) {
-                if let Some(client) = get_client() {
-                    let filter = Filter::new()
-                        .kind(Kind::Metadata)
-                        .author(pubkey)
-                        .limit(1);
-
-                    match client.fetch_events(filter, Duration::from_secs(5)).await {
-                        Ok(events) => {
-                            if let Some(event) = events.first() {
-                                if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
-                                    author_metadata.set(Some(metadata));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch author metadata: {}", e);
-                        }
-                    }
-                }
-            }
-        });
-    }));
-
-    let author_name = if let Some(ref metadata) = *author_metadata.read() {
+    let author_name = if let Some(ref metadata) = metadata {
         metadata.display_name.clone()
             .or_else(|| metadata.name.clone())
             .unwrap_or_else(|| format!("{}...", &author_pubkey[..8]))
@@ -378,7 +363,7 @@ fn ChatMessage(event: Event) -> Element {
         format!("{}...", &author_pubkey[..8])
     };
 
-    let author_picture = author_metadata.read().as_ref()
+    let author_picture = metadata.as_ref()
         .and_then(|m| m.picture.clone());
 
     rsx! {

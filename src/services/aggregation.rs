@@ -245,7 +245,12 @@ pub async fn fetch_interaction_counts_batch(
         // Increment appropriate counter
         match event.kind {
             Kind::TextNote => counts.replies += 1,
-            Kind::Reaction => counts.likes += 1,
+            Kind::Reaction => {
+                // Per NIP-25, only count reactions with content != "-" as likes
+                if event.content.trim() != "-" {
+                    counts.likes += 1;
+                }
+            },
             Kind::Repost => counts.reposts += 1,
             Kind::Custom(9735) => {
                 counts.zaps += 1;

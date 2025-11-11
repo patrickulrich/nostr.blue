@@ -40,7 +40,6 @@ reviews:
     - "!**/Cargo.lock"
 
     # Configuration files that rarely need review
-    - "!**/*.toml"
     - "!**/*.md"
     - "!.gitignore"
     - "!LICENSE"

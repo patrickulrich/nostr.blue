@@ -34,6 +34,9 @@ pub fn VoiceMessages() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
+    // Generation token to prevent stale requests from corrupting the feed
+    let mut request_generation = use_signal(|| 0u64);
+
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         // Watch refresh trigger and feed type
@@ -50,6 +53,10 @@ pub fn VoiceMessages() -> Element {
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
+
+        // Increment generation to invalidate any in-flight load_more requests
+        let next_gen = *request_generation.read() + 1;
+        request_generation.set(next_gen);
 
         spawn(async move {
             let result = match current_feed_type {
@@ -91,6 +98,9 @@ pub fn VoiceMessages() -> Element {
         };
         let current_feed_type = *feed_type.read();
 
+        // Capture current generation to detect stale requests
+        let captured_generation = *request_generation.read();
+
         loading.set(true);
 
         spawn(async move {
@@ -98,6 +108,13 @@ pub fn VoiceMessages() -> Element {
                 FeedType::Following => load_following_voice_messages(until).await,
                 FeedType::Global => load_global_voice_messages(until).await,
             };
+
+            // Check if this request is still valid (generation hasn't changed)
+            if captured_generation != *request_generation.read() {
+                log::info!("Dropping stale load_more response (generation mismatch)");
+                loading.set(false);
+                return;
+            }
 
             match result {
                 Ok(mut new_events) => {
