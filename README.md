@@ -13,10 +13,10 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 ## ✨ Features
 
 ### Core Social Features
-- ✅ **Home Feed** - Real-time feed from people you follow with infinite scroll
+- ✅ **Home Feed** - Real-time feed from people you follow with infinite scroll, dual feed types (Following / Following + Replies), and integrated repost display
 - ✅ **Profiles** - View and edit user profiles with follow/unfollow
 - ✅ **Post Composer** - Create text notes with rich content support
-- ✅ **Interactions** - Reactions, reposts, and threaded replies
+- ✅ **Interactions** - Reactions, reposts with attribution display, and threaded replies
 - ✅ **Search** - Find users, notes, and content by hashtags with NIP-50 relay search support
 - ✅ **Notifications** - Track mentions, replies, and interactions
 - ✅ **Explore** - Discover trending content and new users
@@ -237,7 +237,9 @@ nostrbluerust/
 │   │   ├── list_kinds.rs   # NIP-51 list types
 │   │   ├── thread_tree.rs  # Reply threading
 │   │   ├── article_meta.rs # Article metadata
-│   │   └── url_metadata.rs # URL metadata fetching (Open Graph, Twitter Cards)
+│   │   ├── url_metadata.rs # URL metadata fetching (Open Graph, Twitter Cards)
+│   │   ├── repost.rs       # Repost handling and FeedItem enum
+│   │   └── profile_prefetch.rs # Batch profile metadata prefetching
 │   ├── services/           # External services
 │   │   ├── lnurl.rs        # Lightning URL handling
 │   │   ├── wavlake.rs      # Wavlake API integration

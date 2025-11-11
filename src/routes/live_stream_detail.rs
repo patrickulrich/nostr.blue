@@ -33,6 +33,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
             loading.set(true);
             error.set(None);
 
+            // Clear profile cache to prevent stale author metadata
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
+
             let parts: Vec<&str> = nid.split(':').collect();
             if parts.len() != 3 {
                 error.set(Some("Invalid stream identifier".to_string()));

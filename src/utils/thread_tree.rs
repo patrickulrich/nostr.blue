@@ -330,7 +330,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 }
 
 /// Count the total number of replies in a thread tree (including nested replies)
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
     let mut count = 0;
     for node in nodes {
@@ -358,16 +358,4 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
-}
-
-/// Invalidate cached thread trees for multiple root events at once
-pub fn invalidate_thread_tree_cache_batch(root_event_ids: &[EventId]) {
-    {
-        let mut cache = get_thread_tree_cache().lock().unwrap();
-        for event_id in root_event_ids {
-            let root_id_hex = event_id.to_hex();
-            cache.invalidate(&root_id_hex);
-        }
-    }
-    log::debug!("Invalidated thread tree cache for {} threads", root_event_ids.len());
 }

@@ -64,13 +64,17 @@ impl UserList {
 }
 
 /// Hook to fetch all user lists (NIP-51)
-/// Returns (lists, loading, error)
-pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<String>>) {
+/// Returns (lists, loading, error, refresh)
+pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<String>>, Signal<u32>) {
     let mut lists = use_signal(|| Vec::<UserList>::new());
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let refresh_trigger = use_signal(|| 0u32);
 
     use_effect(move || {
+        // Re-run when auth changes OR refresh_trigger changes
+        let _trigger = refresh_trigger.read();
+
         let auth = auth_store::AUTH_STATE.read();
         if !auth.is_authenticated {
             lists.set(Vec::new());
@@ -100,7 +104,7 @@ pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<S
         });
     });
 
-    (lists, loading, error)
+    (lists, loading, error, refresh_trigger)
 }
 
 /// Fetch user lists from relays
@@ -116,12 +120,10 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     log::info!("Fetching lists for {}", pubkey_str);
 
     // Build filter for NIP-51 list kinds
-    let mut filter = Filter::new().author(pubkey);
-
-    // Add all list kinds
-    for &kind in LIST_KINDS {
-        filter = filter.kind(Kind::from(kind));
-    }
+    // Use .kinds() for efficient batch kind filtering instead of loop
+    let filter = Filter::new()
+        .author(pubkey)
+        .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
 
     // Fetch events
     let events = client.fetch_events(filter, Duration::from_secs(10))

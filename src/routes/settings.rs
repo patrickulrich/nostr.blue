@@ -718,6 +718,85 @@ pub fn Settings() -> Element {
                 }
             }
 
+            // Content Moderation section
+            if auth.is_authenticated {
+                div {
+                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div {
+                        class: "flex items-center justify-between mb-4",
+                        h3 {
+                            class: "text-xl font-semibold text-gray-900 dark:text-white",
+                            "🛡️ Content Moderation"
+                        }
+                        span {
+                            class: "text-xs text-gray-500 dark:text-gray-400",
+                            "NIP-51 & NIP-56"
+                        }
+                    }
+                    p {
+                        class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                        "Manage blocked users and muted posts"
+                    }
+
+                    // Links to sub-pages
+                    div {
+                        class: "space-y-2",
+
+                        Link {
+                            to: Route::SettingsBlocklist {},
+                            class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                            div {
+                                class: "flex items-center gap-3",
+                                span {
+                                    class: "text-lg",
+                                    "🚫"
+                                }
+                                div {
+                                    span {
+                                        class: "block font-medium text-gray-900 dark:text-white",
+                                        "Blocked Users"
+                                    }
+                                    span {
+                                        class: "block text-xs text-gray-500 dark:text-gray-400",
+                                        "Manage users you've blocked"
+                                    }
+                                }
+                            }
+                            span {
+                                class: "text-gray-400",
+                                "→"
+                            }
+                        }
+
+                        Link {
+                            to: Route::SettingsMuted {},
+                            class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
+                            div {
+                                class: "flex items-center gap-3",
+                                span {
+                                    class: "text-lg",
+                                    "🔇"
+                                }
+                                div {
+                                    span {
+                                        class: "block font-medium text-gray-900 dark:text-white",
+                                        "Muted Posts"
+                                    }
+                                    span {
+                                        class: "block text-xs text-gray-500 dark:text-gray-400",
+                                        "Manage posts you've muted or reported"
+                                    }
+                                }
+                            }
+                            span {
+                                class: "text-gray-400",
+                                "→"
+                            }
+                        }
+                    }
+                }
+            }
+
             // Relay Management (NIP-65/NIP-17)
             if auth.is_authenticated {
                 div {

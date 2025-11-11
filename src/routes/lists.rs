@@ -6,7 +6,7 @@ use crate::utils::{get_list_type_name, get_list_icon, get_item_count};
 #[component]
 pub fn Lists() -> Element {
     let auth = auth_store::AUTH_STATE.read();
-    let (lists, loading, error) = use_user_lists();
+    let (lists, loading, error, mut refresh_trigger) = use_user_lists();
 
     // Delete confirmation state
     let mut delete_confirm_open = use_signal(|| false);
@@ -23,8 +23,9 @@ pub fn Lists() -> Element {
                         log::info!("List deleted successfully");
                         delete_confirm_open.set(false);
                         list_to_delete.set(None);
-                        // Note: The list will be automatically refreshed when the component remounts
-                        // or when the hook detects the change
+
+                        // Refresh the lists to show the deletion
+                        refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                     }
                     Err(e) => {
                         log::error!("Failed to delete list: {}", e);

@@ -4,6 +4,8 @@ pub mod home;
 pub mod profile;
 pub mod note;
 pub mod settings;
+pub mod settings_blocklist;
+pub mod settings_muted;
 pub mod notifications;
 pub mod bookmarks;
 pub mod dms;
@@ -46,6 +48,8 @@ use home::Home;
 use profile::Profile;
 use note::Note;
 use settings::Settings;
+use settings_blocklist::SettingsBlocklist;
+use settings_muted::SettingsMuted;
 use notifications::Notifications;
 use bookmarks::Bookmarks;
 use dms::DMs;
@@ -203,6 +207,12 @@ pub enum Route {
 
         #[route("/settings")]
         Settings {},
+
+        #[route("/settings/blocklist")]
+        SettingsBlocklist {},
+
+        #[route("/settings/muted")]
+        SettingsMuted {},
 
         #[route("/terms")]
         Terms {},

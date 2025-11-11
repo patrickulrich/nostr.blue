@@ -3,9 +3,9 @@ use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 use crate::components::{NoteCard, NoteComposer, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
-use crate::utils::DataState;
+use crate::utils::{DataState, FeedItem, extract_reposted_event};
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use std::collections::HashMap;
 
@@ -26,8 +26,8 @@ impl FeedType {
 
 #[component]
 pub fn Home() -> Element {
-    // State for feed events using type-state machine pattern
-    let mut feed_state = use_signal(|| DataState::<Vec<Event>>::Pending);
+    // State for feed items using type-state machine pattern
+    let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
     let mut refresh_trigger = use_signal(|| 0);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
@@ -55,34 +55,37 @@ pub fn Home() -> Element {
             oldest_timestamp.set(None);
             has_more.set(true);
 
+            // Clear profile cache to prevent stale author metadata on refresh
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
+
             spawn(async move {
                 match current_feed_type {
                     FeedType::Following => {
                         match load_following_feed(None).await {
-                            Ok((feed_events, raw_count)) => {
+                            Ok((feed_items, raw_count)) => {
                                 // Track oldest timestamp for pagination
-                                if let Some(last_event) = feed_events.last() {
-                                    oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                                if let Some(last_item) = feed_items.last() {
+                                    oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                                 }
 
                                 // Determine if there are more events based on RAW count before filtering
                                 has_more.set(raw_count >= 100);
 
-                                // Show feed immediately with database-cached metadata
-                                feed_state.set(DataState::Loaded(feed_events.clone()));
+                                // Display feed immediately (NoteCard shows fallback until metadata loads)
+                                feed_state.set(DataState::Loaded(feed_items.clone()));
 
                                 // Batch fetch interaction counts for all events (99% query reduction!)
-                                let events_for_counts = feed_events.clone();
+                                let items_for_counts = feed_items.clone();
                                 spawn(async move {
-                                    let event_ids: Vec<_> = events_for_counts.iter().map(|e| e.id).collect();
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     if let Ok(counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
                                         interaction_counts.set(counts);
                                     }
                                 });
 
-                                // Spawn non-blocking background prefetch for missing metadata
+                                // Spawn non-blocking background prefetch for metadata
                                 spawn(async move {
-                                    prefetch_author_metadata(&feed_events).await;
+                                    prefetch_author_metadata(&feed_items).await;
                                 });
                             }
                             Err(e) => {
@@ -92,30 +95,30 @@ pub fn Home() -> Element {
                     }
                     FeedType::FollowingWithReplies => {
                         match load_following_with_replies(None).await {
-                            Ok(feed_events) => {
+                            Ok(feed_items) => {
                                 // Track oldest timestamp for pagination
-                                if let Some(last_event) = feed_events.last() {
-                                    oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                                if let Some(last_item) = feed_items.last() {
+                                    oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                                 }
 
                                 // Determine if there are more events to load
-                                has_more.set(feed_events.len() >= 150);
+                                has_more.set(feed_items.len() >= 150);
 
-                                // Show feed immediately with database-cached metadata
-                                feed_state.set(DataState::Loaded(feed_events.clone()));
+                                // Display feed immediately (NoteCard shows fallback until metadata loads)
+                                feed_state.set(DataState::Loaded(feed_items.clone()));
 
                                 // Batch fetch interaction counts for all events (99% query reduction!)
-                                let events_for_counts = feed_events.clone();
+                                let items_for_counts = feed_items.clone();
                                 spawn(async move {
-                                    let event_ids: Vec<_> = events_for_counts.iter().map(|e| e.id).collect();
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     if let Ok(counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
                                         interaction_counts.set(counts);
                                     }
                                 });
 
-                                // Spawn non-blocking background prefetch for missing metadata
+                                // Spawn non-blocking background prefetch for metadata
                                 spawn(async move {
-                                    prefetch_author_metadata(&feed_events).await;
+                                    prefetch_author_metadata(&feed_items).await;
                                 });
                             }
                             Err(e) => {
@@ -207,7 +210,7 @@ pub fn Home() -> Element {
                 }
 
                 let filter = Filter::new()
-                    .kind(Kind::TextNote)
+                    .kinds(vec![Kind::TextNote, Kind::Repost])
                     .authors(batch_authors.clone())
                     .since(Timestamp::now())
                     .limit(0); // limit=0 means only new events
@@ -237,32 +240,60 @@ pub fn Home() -> Element {
                                         continue;
                                     }
 
-                                    // Check if this matches our feed type
-                                    let should_add = match current_feed_type {
-                                        FeedType::Following => {
-                                            // Only top-level posts (no e tags)
-                                            !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                                    // Process event into FeedItem and check if it matches feed type
+                                    let feed_item_opt = if event.kind == Kind::Repost {
+                                        // Parse repost to extract original event
+                                        match extract_reposted_event(&event) {
+                                            Ok(original) => {
+                                                // Always include reposts (regardless of feed type)
+                                                Some(FeedItem::Repost {
+                                                    original,
+                                                    reposted_by: event.pubkey,
+                                                    repost_timestamp: event.created_at,
+                                                })
+                                            }
+                                            Err(e) => {
+                                                log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                                                None
+                                            }
                                         }
-                                        FeedType::FollowingWithReplies => {
-                                            // All posts including replies
-                                            true
+                                    } else if event.kind == Kind::TextNote {
+                                        // Check if this matches our feed type
+                                        let should_add = match current_feed_type {
+                                            FeedType::Following => {
+                                                // Only top-level posts (no e tags)
+                                                !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                                            }
+                                            FeedType::FollowingWithReplies => {
+                                                // All posts including replies
+                                                true
+                                            }
+                                        };
+
+                                        if should_add {
+                                            Some(FeedItem::OriginalPost((*event).clone()))
+                                        } else {
+                                            None
                                         }
+                                    } else {
+                                        None
                                     };
 
-                                    if should_add {
+                                    if let Some(feed_item) = feed_item_opt {
                                         log::info!("New post received in real-time from batch {}", batch_num);
 
                                         // Only add to feed if we're in Loaded state
                                         let current_state = feed_state.read().clone();
-                                        if let DataState::Loaded(current_events) = current_state {
+                                        if let DataState::Loaded(current_items) = current_state {
                                             // Check if event already exists (avoid duplicates)
-                                            let exists = current_events.iter().any(|e| e.id == event.id);
+                                            let event_id = feed_item.event().id;
+                                            let exists = current_items.iter().any(|item| item.event().id == event_id);
 
                                             if !exists {
                                                 // Prepend to feed
-                                                let mut new_events = vec![(*event).clone()];
-                                                new_events.extend(current_events);
-                                                feed_state.set(DataState::Loaded(new_events));
+                                                let mut new_items = vec![feed_item];
+                                                new_items.extend(current_items);
+                                                feed_state.set(DataState::Loaded(new_items));
                                             }
                                         }
                                     }
@@ -280,40 +311,48 @@ pub fn Home() -> Element {
 
     // Load more function for infinite scroll
     let load_more = move || {
-        if *pagination_loading.read() || !*has_more.read() {
+        log::info!("load_more called - pagination_loading: {}, has_more: {}",
+                   *pagination_loading.peek(), *has_more.peek());
+
+        if *pagination_loading.peek() || !*has_more.peek() {
+            log::info!("load_more blocked by guards");
             return;
         }
 
-        let until = *oldest_timestamp.read();
-        let current_feed_type = *feed_type.read();
-
+        log::info!("load_more setting pagination_loading to true and spawning");
         pagination_loading.set(true);
 
         spawn(async move {
+            // Read signals fresh on each invocation to avoid stale closure bug
+            let until = *oldest_timestamp.read();
+            let current_feed_type = *feed_type.read();
+
+            log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
+
             match current_feed_type {
                 FeedType::Following => {
                     match load_following_feed(until).await {
-                        Ok((mut new_events, raw_count)) => {
-                            // Track oldest timestamp from new events
-                            if let Some(last_event) = new_events.last() {
-                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        Ok((mut new_items, raw_count)) => {
+                            // Track oldest timestamp from new items
+                            if let Some(last_item) = new_items.last() {
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
 
                             // Determine if there are more events based on RAW count before filtering
                             has_more.set(raw_count >= 100);
 
-                            // Append and show new events immediately
-                            let prefetch_events = new_events.clone();
+                            // Append and show new items immediately
+                            let prefetch_items = new_items.clone();
                             let current_state = feed_state.read().clone();
                             if let DataState::Loaded(mut current) = current_state {
-                                current.append(&mut new_events);
+                                current.append(&mut new_items);
                                 feed_state.set(DataState::Loaded(current));
                             }
                             pagination_loading.set(false);
 
                             // Spawn non-blocking background prefetch for missing metadata
                             spawn(async move {
-                                prefetch_author_metadata(&prefetch_events).await;
+                                prefetch_author_metadata(&prefetch_items).await;
                             });
                         }
                         Err(e) => {
@@ -324,27 +363,27 @@ pub fn Home() -> Element {
                 }
                 FeedType::FollowingWithReplies => {
                     match load_following_with_replies(until).await {
-                        Ok(mut new_events) => {
-                            // Track oldest timestamp from new events
-                            if let Some(last_event) = new_events.last() {
-                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        Ok(mut new_items) => {
+                            // Track oldest timestamp from new items
+                            if let Some(last_item) = new_items.last() {
+                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                             }
 
                             // Determine if there are more events to load
-                            has_more.set(new_events.len() >= 150);
+                            has_more.set(new_items.len() >= 150);
 
-                            // Append and show new events immediately
-                            let prefetch_events = new_events.clone();
+                            // Append and show new items immediately
+                            let prefetch_items = new_items.clone();
                             let current_state = feed_state.read().clone();
                             if let DataState::Loaded(mut current) = current_state {
-                                current.append(&mut new_events);
+                                current.append(&mut new_items);
                                 feed_state.set(DataState::Loaded(current));
                             }
                             pagination_loading.set(false);
 
                             // Spawn non-blocking background prefetch for missing metadata
                             spawn(async move {
-                                prefetch_author_metadata(&prefetch_events).await;
+                                prefetch_author_metadata(&prefetch_items).await;
                             });
                         }
                         Err(e) => {
@@ -527,8 +566,8 @@ pub fn Home() -> Element {
                             }
                         }
                     }
-                } else if let Some(events) = feed_state.read().data() {
-                    if events.is_empty() {
+                } else if let Some(feed_items) = feed_state.read().data() {
+                    if feed_items.is_empty() {
                         // Empty state
                         div {
                             class: "p-6 text-center text-gray-500 dark:text-gray-400",
@@ -549,18 +588,29 @@ pub fn Home() -> Element {
                             }
                         }
                     } else {
-                        // Show events (with conditional rendering for articles)
-                        for event in events.iter() {
-                            // Check if this is a long-form article (NIP-23)
-                            if event.kind == Kind::LongFormTextNote {
-                                ArticleCard {
-                                    key: "{event.id}",
-                                    event: event.clone()
-                                }
-                            } else {
-                                NoteCard {
-                                    event: event.clone(),
-                                    precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned()
+                        // Show feed items (with conditional rendering for articles and reposts)
+                        for feed_item in feed_items.iter() {
+                            {
+                                // Get the underlying event and repost info
+                                let event = feed_item.event();
+                                let repost_info = feed_item.repost_info();
+
+                                // Check if this is a long-form article (NIP-23)
+                                if event.kind == Kind::LongFormTextNote {
+                                    rsx! {
+                                        ArticleCard {
+                                            key: "{event.id}",
+                                            event: event.clone()
+                                        }
+                                    }
+                                } else {
+                                    rsx! {
+                                        NoteCard {
+                                            event: event.clone(),
+                                            repost_info: repost_info,
+                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1134,8 +1184,8 @@ fn ProfileSection() -> Element {
 }
 
 // Helper function to load following feed
-// Returns (events, raw_count_before_filtering) tuple
-async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), String> {
+// Returns (feed_items, raw_count_before_filtering) tuple
+async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize), String> {
     // TODO: Consider implementing progressive loading with client.stream_events() for better UX
     // This would display events as they arrive instead of waiting for all results
 
@@ -1181,9 +1231,9 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
         return Ok((global, count));
     }
 
-    // Create filter for posts from followed users
+    // Create filter for posts AND reposts from followed users
     let mut filter = Filter::new()
-        .kind(Kind::TextNote)
+        .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
         .limit(100);
 
@@ -1198,30 +1248,51 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let raw_count = events.len();
-            log::info!("Loaded {} events from following feed", raw_count);
+            log::info!("Loaded {} events (including reposts) from following feed", raw_count);
 
-            // Convert to Vec, filter out replies (posts with e tags), and sort by created_at (newest first)
-            let mut event_vec: Vec<Event> = events.into_iter()
-                .filter(|event| {
-                    // Filter out replies - posts with e tags are replies
+            // Process events into FeedItems
+            let mut feed_items: Vec<FeedItem> = Vec::new();
+
+            for event in events.into_iter() {
+                if event.kind == Kind::Repost {
+                    // Parse repost to extract original event
+                    match extract_reposted_event(&event) {
+                        Ok(original) => {
+                            // Include all reposts (regardless of whether original was a reply)
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                        }
+                    }
+                } else if event.kind == Kind::TextNote {
+                    // Filter out replies - only include top-level posts
                     use nostr_sdk::TagKind;
-                    !event.tags.iter().any(|tag| tag.kind() == TagKind::e())
-                })
-                .collect();
+                    let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+                    if !is_reply {
+                        feed_items.push(FeedItem::OriginalPost(event));
+                    }
+                }
+            }
 
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            // Sort by timestamp (repost time for reposts, created_at for originals)
+            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
 
-            log::info!("After filtering out replies: {} top-level posts (raw: {})", event_vec.len(), raw_count);
+            log::info!("After processing: {} feed items (raw: {})", feed_items.len(), raw_count);
 
             // If no events found, fall back to global feed
-            if event_vec.is_empty() {
-                log::info!("No top-level posts from followed users, showing global feed");
+            if feed_items.is_empty() {
+                log::info!("No posts from followed users, showing global feed");
                 let global = load_global_feed(until).await?;
                 let count = global.len();
                 return Ok((global, count));
             }
 
-            Ok((event_vec, raw_count))
+            Ok((feed_items, raw_count))
         }
         Err(e) => {
             log::error!("Failed to fetch following feed: {}, falling back to global", e);
@@ -1233,7 +1304,7 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<Event>, usize), 
 }
 
 // Helper function to load following feed with replies
-async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -1270,10 +1341,10 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
         return load_global_feed(until).await;
     }
 
-    // Create filter for all kind 1 posts from followed users (including replies)
-    // Unlike load_following_feed, we don't filter out posts with e-tags
+    // Create filter for all posts AND reposts from followed users (including replies)
+    // Unlike load_following_feed, we include ALL posts (even replies)
     let mut filter = Filter::new()
-        .kind(Kind::TextNote)
+        .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
         .limit(150); // Increased limit since we're getting more content
 
@@ -1285,24 +1356,48 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
         filter = filter.since(since);
     }
 
-    log::info!("Fetching all events (including replies) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!("Fetching all events (including replies and reposts) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
     // Fetch events using aggregated pattern (database-first)
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            log::info!("Loaded {} events (including replies) from following feed", events.len());
+            log::info!("Loaded {} events (including replies and reposts) from following feed", events.len());
 
-            // Convert to Vec and sort by created_at (newest first)
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            // Process events into FeedItems
+            let mut feed_items: Vec<FeedItem> = Vec::new();
+
+            for event in events.into_iter() {
+                if event.kind == Kind::Repost {
+                    // Parse repost to extract original event
+                    match extract_reposted_event(&event) {
+                        Ok(original) => {
+                            // Include all reposts (regardless of whether original was a reply)
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                        }
+                    }
+                } else if event.kind == Kind::TextNote {
+                    // Include ALL posts (including replies)
+                    feed_items.push(FeedItem::OriginalPost(event));
+                }
+            }
+
+            // Sort by timestamp (repost time for reposts, created_at for originals)
+            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
 
             // If no events found, fall back to global feed
-            if event_vec.is_empty() {
+            if feed_items.is_empty() {
                 log::info!("No events from followed users, showing global feed");
                 return load_global_feed(until).await;
             }
 
-            Ok(event_vec)
+            Ok(feed_items)
         }
         Err(e) => {
             log::error!("Failed to fetch following feed with replies: {}, falling back to global", e);
@@ -1312,12 +1407,12 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<Event>, S
 }
 
 // Helper function to load global feed
-async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
     log::info!("Loading global feed (until: {:?})...", until);
 
-    // Create filter for recent text notes (kind 1)
+    // Create filter for recent text notes and reposts (kind 1 and kind 6)
     let mut filter = Filter::new()
-        .kind(Kind::TextNote)
+        .kinds(vec![Kind::TextNote, Kind::Repost])
         .limit(50);
 
     // Add until for pagination, or since for initial load
@@ -1335,11 +1430,33 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 
-            // Convert Events to Vec<Event> and sort by created_at (newest first)
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            // Process events into FeedItems
+            let mut feed_items: Vec<FeedItem> = Vec::new();
 
-            Ok(event_vec)
+            for event in events.into_iter() {
+                if event.kind == Kind::Repost {
+                    // Parse repost to extract original event
+                    match extract_reposted_event(&event) {
+                        Ok(original) => {
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                        }
+                    }
+                } else if event.kind == Kind::TextNote {
+                    feed_items.push(FeedItem::OriginalPost(event));
+                }
+            }
+
+            // Sort by timestamp (repost time for reposts, created_at for originals)
+            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+
+            Ok(feed_items)
         }
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
@@ -1348,34 +1465,30 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
     }
 }
 
-/// Batch prefetch author metadata for all events
+/// Batch prefetch author metadata for all feed items
 /// This checks the database first and only fetches missing metadata
-async fn prefetch_author_metadata(events: &[Event]) {
-    use std::collections::HashSet;
-    use crate::stores::profiles;
+/// For reposts, it fetches both the original author AND the reposter
+async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
+    use crate::utils::profile_prefetch;
 
-    // Collect unique author pubkeys as hex strings
-    let pubkeys: Vec<String> = events.iter()
-        .map(|e| e.pubkey.to_hex())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if pubkeys.is_empty() {
-        return;
-    }
-
-    log::info!("Batch fetching profiles for {} unique authors", pubkeys.len());
-
-    // Use the batch fetch function which populates PROFILE_CACHE
-    match profiles::fetch_profiles_batch(pubkeys).await {
-        Ok(profiles_map) => {
-            log::info!("Successfully batch fetched {} profiles into cache", profiles_map.len());
-            // Profiles are now cached in PROFILE_CACHE with LRU eviction
-        }
-        Err(e) => {
-            log::warn!("Failed to batch fetch profiles: {}", e);
-            // Non-fatal - individual components will fetch as needed
+    // Extract all unique pubkeys (original authors + reposters)
+    let mut pubkeys = Vec::new();
+    for item in feed_items {
+        match item {
+            FeedItem::OriginalPost(event) => {
+                pubkeys.push(event.pubkey);
+            }
+            FeedItem::Repost { original, reposted_by, .. } => {
+                pubkeys.push(original.pubkey); // Original author
+                pubkeys.push(*reposted_by);     // Reposter
+            }
         }
     }
+
+    // Deduplicate pubkeys
+    pubkeys.sort();
+    pubkeys.dedup();
+
+    // Use optimized prefetch utility
+    profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }

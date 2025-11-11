@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr_sdk::{Event as NostrEvent, EventId};
 use crate::stores::{nostr_client::HAS_SIGNER, blossom_store};
 use crate::components::{VoiceRecorder, RichContent};
+use crate::utils::thread_tree::invalidate_thread_tree_cache;
 
 #[component]
 pub fn VoiceReplyComposer(
@@ -48,6 +49,26 @@ pub fn VoiceReplyComposer(
         error_message.set(None);
         let event_for_reply = reply_event.clone();
 
+        // Determine the root event ID for cache invalidation
+        let parent_root = event_for_reply.tags.iter().find_map(|tag| {
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.len() >= 4
+                && tag_vec[0] == "e"
+                && tag_vec[3] == "root" {
+                Some(tag_vec[1].clone())
+            } else {
+                None
+            }
+        });
+
+        let thread_root_id = if let Some(root_id) = parent_root {
+            // This is a nested reply - use the existing root
+            root_id
+        } else {
+            // This is a direct reply - the parent IS the root
+            event_for_reply.id.to_hex()
+        };
+
         spawn(async move {
             // Upload to Blossom with actual MIME type from recorder
             match blossom_store::upload_audio(bytes, mime_type.clone()).await {
@@ -64,6 +85,13 @@ pub fn VoiceReplyComposer(
                     ).await {
                         Ok(event_id) => {
                             log::info!("Voice reply published successfully: {}", event_id);
+
+                            // Invalidate thread tree cache to ensure fresh data on next view
+                            if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
+                                invalidate_thread_tree_cache(&root_event_id);
+                                log::debug!("Invalidated thread tree cache for root: {}", thread_root_id);
+                            }
+
                             audio_data.set(None);
                             error_message.set(None);
                             is_publishing.set(false);
