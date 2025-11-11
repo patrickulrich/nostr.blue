@@ -27,6 +27,7 @@ pub mod article_new;
 pub mod photo_new;
 pub mod video_new_landscape;
 pub mod video_new_portrait;
+pub mod search;
 
 // Placeholder modules for missing routes
 mod lists;
@@ -85,6 +86,7 @@ use terms::Terms;
 use privacy::Privacy;
 use cookies::Cookies;
 use about::About;
+use search::Search;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -99,6 +101,9 @@ pub enum Route {
 
         #[route("/trending")]
         Trending {},
+
+        #[route("/search?:q")]
+        Search { q: String },
 
         #[route("/articles")]
         Articles {},
