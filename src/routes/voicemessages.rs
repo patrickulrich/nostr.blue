@@ -84,7 +84,11 @@ pub fn VoiceMessages() -> Element {
             return;
         }
 
-        let until = *oldest_timestamp.read();
+        // Use exclusive boundary by subtracting 1 to avoid duplicate fetches
+        let until = {
+            let timestamp_opt = *oldest_timestamp.read();
+            timestamp_opt.map(|t| t.saturating_sub(1))
+        };
         let current_feed_type = *feed_type.read();
 
         loading.set(true);

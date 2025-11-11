@@ -107,20 +107,29 @@ pub async fn upload_image(
             client
                 .upload_blob(final_data, Some(content_type), auth_options, Some(&keys))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
             client
                 .upload_blob(final_data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             client
                 .upload_blob(final_data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
     };
 
@@ -235,20 +244,29 @@ pub async fn upload_audio(
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(&keys))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
     };
 

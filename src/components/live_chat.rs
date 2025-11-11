@@ -93,23 +93,19 @@ pub fn LiveChat(
     }));
 
     // Auto-refresh messages every 5 seconds with cancellable polling
-    let mut should_poll = use_signal(|| true);
+    // Track the spawned polling task so we can cancel it when needed
+    let mut poll_task = use_signal(|| None::<Task>);
 
     use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
-        // Signal the old loop to stop
-        should_poll.set(false);
+        // Cancel the previous polling task if it exists
+        if let Some(task) = poll_task.read().as_ref() {
+            task.cancel();
+        }
 
-        // Start new polling loop
-        should_poll.set(true);
-
-        spawn(async move {
-            while *should_poll.read() {
+        // Start new polling loop and store its handle
+        let new_task = spawn(async move {
+            loop {
                 gloo_timers::future::TimeoutFuture::new(5000).await;
-
-                // Check again after timeout in case we were cancelled
-                if !*should_poll.read() {
-                    break;
-                }
 
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 {
@@ -134,6 +130,8 @@ pub fn LiveChat(
                 }
             }
         });
+
+        poll_task.set(Some(new_task));
     }));
 
     // Scroll to bottom on initial load
@@ -158,9 +156,11 @@ pub fn LiveChat(
         });
     }));
 
-    // Stop polling on unmount
+    // Stop polling on unmount by canceling the task
     use_drop(move || {
-        should_poll.set(false);
+        if let Some(task) = poll_task.read().as_ref() {
+            task.cancel();
+        }
     });
 
 
