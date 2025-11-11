@@ -4,6 +4,7 @@ use crate::stores::nostr_client;
 use crate::utils::list_kinds::get_item_count;
 use nostr_sdk::{EventBuilder, Kind, Tag, EventId};
 use uuid::Uuid;
+use gloo_timers::future::TimeoutFuture;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AddToListModalProps {
@@ -259,6 +260,18 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
         return Err("No signer attached".to_string());
     }
 
+    // Validate list name
+    const MAX_LIST_NAME_LENGTH: usize = 100;
+    let name = name.trim();
+
+    if name.is_empty() {
+        return Err("List name cannot be empty".to_string());
+    }
+
+    if name.len() > MAX_LIST_NAME_LENGTH {
+        return Err(format!("List name cannot exceed {} characters", MAX_LIST_NAME_LENGTH));
+    }
+
     // Parse event ID
     let target_event_id = EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
@@ -270,7 +283,7 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     // Create curation list (kind 30004) with this event
     let tags = vec![
         Tag::identifier(&unique_id),  // Use UUID for d tag to prevent collisions
-        Tag::custom(nostr_sdk::TagKind::Name, vec![name.clone()]),  // Human-readable name
+        Tag::custom(nostr_sdk::TagKind::Name, vec![name.to_string()]),  // Human-readable name
         Tag::event(target_event_id),
     ];
 
@@ -297,10 +310,19 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     let list_id = EventId::from_hex(&list_event_id)
         .map_err(|e| format!("Invalid list ID: {}", e))?;
 
-    // Fetch the existing list event
-    let list_event = client.database().event_by_id(&list_id).await
-        .map_err(|e| format!("Failed to fetch list: {}", e))?
-        .ok_or("List not found")?;
+    // Fetch the existing list event with timeout
+    let list_event = {
+        tokio::select! {
+            result = client.database().event_by_id(&list_id) => {
+                result
+                    .map_err(|e| format!("Failed to fetch list: {}", e))?
+                    .ok_or("List not found")?
+            }
+            _ = TimeoutFuture::new(5_000) => {
+                return Err("Database fetch timeout (5s)".to_string());
+            }
+        }
+    };
 
     // Preserve the existing content before consuming the event
     let existing_content = list_event.content.clone();

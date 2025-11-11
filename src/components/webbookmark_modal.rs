@@ -28,6 +28,9 @@ pub fn WebBookmarkModal(
     let mut tags_input = use_signal(|| String::new());
     let mut published_at_input = use_signal(|| String::new());
 
+    // Track reserved tags (favorite, archived) to preserve them on save
+    let mut reserved_tags = use_signal(|| Vec::<String>::new());
+
     // UI state
     let mut is_fetching_metadata = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
@@ -52,12 +55,20 @@ pub fn WebBookmarkModal(
                     image_input.set(image);
                 }
 
-                let hashtags = get_hashtags(evt)
+                // Separate reserved tags from user-editable tags
+                let all_hashtags = get_hashtags(evt);
+                let reserved: Vec<String> = all_hashtags
+                    .iter()
+                    .filter(|tag| *tag == "favorite" || *tag == "archived")
+                    .cloned()
+                    .collect();
+                let user_tags: Vec<String> = all_hashtags
                     .into_iter()
                     .filter(|tag| tag != "favorite" && tag != "archived")
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                tags_input.set(hashtags);
+                    .collect();
+
+                reserved_tags.set(reserved);
+                tags_input.set(user_tags.join(", "));
 
                 if let Some(published_ts) = get_published_at(evt) {
                     // Format timestamp as YYYY-MM-DD for date input
@@ -182,11 +193,24 @@ pub fn WebBookmarkModal(
         }
 
         // Parse tags (comma-separated)
-        let hashtags: Vec<String> = tags_str
+        let mut hashtags: Vec<String> = tags_str
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+
+        // Merge reserved tags back in (for Edit mode)
+        if mode == BookmarkModalMode::Edit {
+            for reserved_tag in reserved_tags.read().iter() {
+                if !hashtags.contains(reserved_tag) {
+                    hashtags.push(reserved_tag.clone());
+                }
+            }
+        }
+
+        // Deduplicate tags
+        hashtags.sort();
+        hashtags.dedup();
 
         // Parse published date to timestamp
         let published_ts = if !published_date.is_empty() {

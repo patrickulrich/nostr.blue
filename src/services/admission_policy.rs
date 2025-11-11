@@ -43,21 +43,7 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
                 return Ok(AdmitStatus::rejected("Invalid event signature"));
             }
 
-            // 3. Block known spam event kinds
-            // Kind 9999 is commonly used for spam/testing
-            match event.kind.as_u16() {
-                9999 => {
-                    log::info!(
-                        "Rejected spam kind 9999 event {} from {}",
-                        event.id,
-                        event.pubkey
-                    );
-                    return Ok(AdmitStatus::rejected("Spam event kind blocked"));
-                }
-                _ => {}
-            }
-
-            // 4. Future enhancements could include:
+            // 3. Future enhancements could include:
             // - Web of Trust filtering (check if author is in contact list or WoT graph)
             // - Content-based filtering (keywords, regex patterns)
             // - Rate limiting per pubkey
