@@ -9,13 +9,13 @@ use std::time::Duration;
 
 // Helper functions for parallel loading
 
-async fn fetch_main_note(event_id: EventId) -> Result<NostrEvent, String> {
+async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     events.into_iter().next().ok_or("Event not found".to_string())
 }
 
-async fn fetch_parent_notes(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     // First get the main note to extract parent IDs
     let main_note = fetch_main_note(event_id).await?;
 
@@ -47,7 +47,7 @@ async fn fetch_parent_notes(event_id: EventId) -> Result<Vec<NostrEvent>, String
     nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
 }
 
-async fn fetch_replies(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     let filter = Filter::new()
         .kind(Kind::TextNote)
         .event(event_id)

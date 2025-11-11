@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::Client;
 use nostr_sdk::prelude::*;
 use nostr::Url;
@@ -45,7 +46,13 @@ pub struct RelayInfo {
 }
 
 /// Global relay pool state
-pub static RELAY_POOL: GlobalSignal<Vec<RelayInfo>> = Signal::global(Vec::new);
+/// Store for relay pool with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct RelayPoolStore {
+    pub data: Vec<RelayInfo>,
+}
+
+pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> = Signal::global(|| Store::new(RelayPoolStore::default()));
 
 /// Default relays to connect to
 const DEFAULT_RELAYS: &[&str] = &[
@@ -57,7 +64,7 @@ const DEFAULT_RELAYS: &[&str] = &[
 ];
 
 /// Initialize the Nostr client and connect to relays
-pub async fn initialize_client() -> Result<Arc<Client>, String> {
+pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     log::info!("Initializing Nostr client with IndexedDB...");
 
     // Configure relay options for better performance
@@ -126,7 +133,7 @@ pub async fn initialize_client() -> Result<Arc<Client>, String> {
         }
     }
 
-    RELAY_POOL.write().clone_from(&relay_infos);
+    RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
     log::debug!("Connecting to relays...");
     client.connect().await;
@@ -155,7 +162,7 @@ pub fn get_signer() -> Option<SignerType> {
 }
 
 /// Initialize client with a signer (enables publishing)
-pub async fn set_signer(signer: SignerType) -> Result<(), String> {
+pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     log::info!("Setting signer: {}", signer.backend_name());
 
     // Get existing client - don't recreate!
@@ -186,7 +193,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
 }
 
 /// Apply user's relay lists to the client connections
-async fn apply_relay_lists_to_client(client: Arc<Client>) -> Result<(), String> {
+async fn apply_relay_lists_to_client(client: Arc<Client>) -> std::result::Result<(), String> {
     let metadata = relay_metadata::USER_RELAY_METADATA
         .read()
         .clone()
@@ -233,14 +240,14 @@ async fn apply_relay_lists_to_client(client: Arc<Client>) -> Result<(), String> 
     }
 
     log::info!("Updating RELAY_POOL with {} total connected relays", relay_infos.len());
-    RELAY_POOL.write().clone_from(&relay_infos);
+    RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
     log::info!("Relay lists applied successfully");
     Ok(())
 }
 
 /// Switch to read-only mode (removes signer)
-pub async fn set_read_only() -> Result<(), String> {
+pub async fn set_read_only() -> std::result::Result<(), String> {
     log::info!("Switching to read-only mode");
 
     // Get existing client
@@ -258,7 +265,7 @@ pub async fn set_read_only() -> Result<(), String> {
 
 /// Add a custom relay
 #[allow(dead_code)]
-pub async fn add_relay(relay_url: &str) -> Result<(), String> {
+pub async fn add_relay(relay_url: &str) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
@@ -266,7 +273,9 @@ pub async fn add_relay(relay_url: &str) -> Result<(), String> {
     client.add_relay(url).await.map_err(|e| e.to_string())?;
 
     // Update relay pool state
-    let mut relays = RELAY_POOL.write();
+    let store = RELAY_POOL.read();
+    let mut data = store.data();
+    let mut relays = data.write();
     relays.push(RelayInfo {
         url: relay_url.to_string(),
         status: RelayStatus::Connecting,
@@ -278,7 +287,7 @@ pub async fn add_relay(relay_url: &str) -> Result<(), String> {
 
 /// Remove a relay
 #[allow(dead_code)]
-pub async fn remove_relay(relay_url: &str) -> Result<(), String> {
+pub async fn remove_relay(relay_url: &str) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
@@ -286,7 +295,9 @@ pub async fn remove_relay(relay_url: &str) -> Result<(), String> {
     client.remove_relay(url).await.map_err(|e| e.to_string())?;
 
     // Update relay pool state
-    let mut relays = RELAY_POOL.write();
+    let store = RELAY_POOL.read();
+    let mut data = store.data();
+    let mut relays = data.write();
     relays.retain(|r| r.url != relay_url);
 
     log::info!("Removed relay: {}", relay_url);
@@ -320,7 +331,7 @@ pub async fn reconnect() {
 pub async fn fetch_events_aggregated(
     filter: Filter,
     timeout: Duration,
-) -> Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     // Try database first (fast)
@@ -360,7 +371,7 @@ pub async fn fetch_events_aggregated(
 pub async fn fetch_events_aggregated_outbox(
     filter: Filter,
     timeout: Duration,
-) -> Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     // Use gossip for automatic relay routing
@@ -370,7 +381,7 @@ pub async fn fetch_events_aggregated_outbox(
 }
 
 /// Publish a text note (kind 1 event)
-pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> Result<String, String> {
+pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -479,7 +490,7 @@ pub async fn publish_reaction(
     event_id: String,
     event_author: String,
     content: String,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -548,7 +559,7 @@ pub async fn publish_reaction(
 
 /// Fetch a user's contact list (kind 3 event)
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
-pub async fn fetch_contacts(pubkey_str: String) -> Result<Vec<String>, String> {
+pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
     log::info!("Fetching contacts for: {}", pubkey_str);
 
     // Parse pubkey
@@ -593,7 +604,7 @@ pub async fn fetch_contacts(pubkey_str: String) -> Result<Vec<String>, String> {
 
 /// Publish a contact list (kind 3 event)
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
-pub async fn publish_contacts(contacts: Vec<String>) -> Result<String, String> {
+pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -636,7 +647,7 @@ pub async fn publish_contacts(contacts: Vec<String>) -> Result<String, String> {
 }
 
 /// Follow a user (adds to contact list and publishes)
-pub async fn follow_user(pubkey_to_follow: String) -> Result<(), String> {
+pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), String> {
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_follow)?;
 
@@ -662,7 +673,7 @@ pub async fn follow_user(pubkey_to_follow: String) -> Result<(), String> {
 }
 
 /// Unfollow a user (removes from contact list and publishes)
-pub async fn unfollow_user(pubkey_to_unfollow: String) -> Result<(), String> {
+pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<(), String> {
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_unfollow)?;
 
@@ -688,7 +699,7 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> Result<(), String> {
 }
 
 /// Check if current user is following a specific pubkey
-pub async fn is_following(pubkey: String) -> Result<bool, String> {
+pub async fn is_following(pubkey: String) -> std::result::Result<bool, String> {
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
 
@@ -701,7 +712,7 @@ pub async fn is_following(pubkey: String) -> Result<bool, String> {
 
 /// Fetch the mute list (kind 10000) from relays
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
-async fn fetch_mute_list() -> Result<Option<nostr::Event>, String> {
+async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> {
     let _client = get_client().ok_or("Client not initialized")?;
 
     let current_pubkey = crate::stores::auth_store::get_pubkey()
@@ -726,7 +737,7 @@ async fn fetch_mute_list() -> Result<Option<nostr::Event>, String> {
 }
 
 /// Get all muted event IDs
-pub async fn get_muted_posts() -> Result<Vec<String>, String> {
+pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
             let mut muted_posts = Vec::new();
@@ -744,7 +755,7 @@ pub async fn get_muted_posts() -> Result<Vec<String>, String> {
 }
 
 /// Get all blocked user pubkeys
-pub async fn get_blocked_users() -> Result<Vec<String>, String> {
+pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
             let mut blocked_users = Vec::new();
@@ -762,13 +773,13 @@ pub async fn get_blocked_users() -> Result<Vec<String>, String> {
 }
 
 /// Check if a post is muted
-pub async fn is_post_muted(event_id: String) -> Result<bool, String> {
+pub async fn is_post_muted(event_id: String) -> std::result::Result<bool, String> {
     let muted_posts = get_muted_posts().await?;
     Ok(muted_posts.contains(&event_id))
 }
 
 /// Check if a user is blocked
-pub async fn is_user_blocked(pubkey: String) -> Result<bool, String> {
+pub async fn is_user_blocked(pubkey: String) -> std::result::Result<bool, String> {
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     let blocked_users = get_blocked_users().await?;
     Ok(blocked_users.contains(&normalized_pubkey))
@@ -776,7 +787,7 @@ pub async fn is_user_blocked(pubkey: String) -> Result<bool, String> {
 
 /// Mute a post (add to mute list kind 10000)
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
-pub async fn mute_post(event_id: String) -> Result<(), String> {
+pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -877,7 +888,7 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
 }
 
 /// Unmute a post (remove from mute list)
-pub async fn unmute_post(event_id: String) -> Result<(), String> {
+pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -973,7 +984,7 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
 
 /// Block a user (add to mute list kind 10000)
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
-pub async fn block_user(pubkey: String) -> Result<(), String> {
+pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1075,7 +1086,7 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
 }
 
 /// Unblock a user (remove from mute list)
-pub async fn unblock_user(pubkey: String) -> Result<(), String> {
+pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1177,7 +1188,7 @@ pub async fn report_post(
     author_pubkey: String,
     report_type: String,
     details: Option<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1225,7 +1236,7 @@ pub async fn publish_repost(
     event_id: String,
     _event_author: String,
     relay_url: Option<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1270,7 +1281,7 @@ pub async fn publish_repost(
 pub async fn fetch_articles(
     limit: usize,
     until: Option<u64>,
-) -> Result<Vec<nostr::Event>, String> {
+) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     log::info!("Fetching articles with limit: {}", limit);
@@ -1303,7 +1314,7 @@ pub async fn fetch_articles(
 pub async fn fetch_article_by_coordinate(
     pubkey: String,
     identifier: String,
-) -> Result<Option<nostr::Event>, String> {
+) -> std::result::Result<Option<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     log::info!("Fetching article {}:{}", pubkey, identifier);
@@ -1334,7 +1345,7 @@ pub async fn fetch_article_by_coordinate(
 /// Publish profile metadata (Kind 0)
 ///
 /// Updates the user's Nostr profile with the provided metadata
-pub async fn publish_metadata(metadata: Metadata) -> Result<String, String> {
+pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String, String> {
     let client = NOSTR_CLIENT.read();
     let client = client.as_ref().ok_or("Client not initialized")?;
 
@@ -1377,7 +1388,7 @@ pub async fn publish_metadata(metadata: Metadata) -> Result<String, String> {
 
 /// Update just the profile picture
 #[allow(dead_code)]
-pub async fn update_profile_picture(url: String) -> Result<(), String> {
+pub async fn update_profile_picture(url: String) -> std::result::Result<(), String> {
     // Fetch current metadata
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -1401,7 +1412,7 @@ pub async fn update_profile_picture(url: String) -> Result<(), String> {
 
 /// Update just the profile banner
 #[allow(dead_code)]
-pub async fn update_profile_banner(url: String) -> Result<(), String> {
+pub async fn update_profile_banner(url: String) -> std::result::Result<(), String> {
     // Fetch current metadata
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -1432,7 +1443,7 @@ pub async fn publish_article(
     identifier: String,
     cover_image: String,
     hashtags: Vec<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1562,7 +1573,7 @@ pub async fn publish_picture(
     image_urls: Vec<String>,
     hashtags: Vec<String>,
     location: String,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1632,7 +1643,7 @@ pub async fn publish_video(
     thumbnail_url: String,
     hashtags: Vec<String>,
     is_portrait: bool,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1710,7 +1721,7 @@ pub async fn publish_voice_message(
     waveform: Vec<u8>,
     hashtags: Vec<String>,
     mime_type: Option<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1779,7 +1790,7 @@ pub async fn publish_voice_message_reply(
     waveform: Vec<u8>,
     reply_to: nostr::Event,
     mime_type: Option<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1945,7 +1956,7 @@ pub async fn publish_voice_message_reply(
 }
 
 /// Get the current user's public key
-pub async fn get_user_pubkey() -> Result<PublicKey, String> {
+pub async fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
     let signer = get_signer().ok_or("No signer available")?;
     signer.public_key().await
         .map_err(|e| format!("Failed to get public key: {}", e))
@@ -1956,7 +1967,7 @@ pub async fn get_user_pubkey() -> Result<PublicKey, String> {
 pub async fn publish_poll_vote(
     poll_id: nostr::EventId,
     response: nostr::nips::nip88::PollResponse,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2000,7 +2011,7 @@ pub async fn publish_poll(
     relays: Vec<String>,
     ends_at: Option<nostr::Timestamp>,
     hashtags: Vec<String>,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {

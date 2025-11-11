@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_blossom::prelude::*;
 use nostr_sdk::Url;
 use sha2::{Sha256, Digest};
@@ -10,14 +11,22 @@ use crate::stores::nostr_client;
 pub const DEFAULT_SERVER: &str = "https://blossom.primal.net";
 
 /// Global signal for the list of configured Blossom servers
-pub static BLOSSOM_SERVERS: GlobalSignal<Vec<String>> = Signal::global(|| vec![DEFAULT_SERVER.to_string()]);
+/// Store for blossom servers with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct BlossomServersStore {
+    pub data: Vec<String>,
+}
+
+pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| { let mut store = BlossomServersStore::default(); store.data = vec![DEFAULT_SERVER.to_string()]; Store::new(store) });
 
 /// Global signal for upload progress (0-100)
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
 
 /// Add a custom Blossom server
 pub fn add_server(url: String) {
-    let mut servers = BLOSSOM_SERVERS.write();
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut servers = data.write();
     if !servers.contains(&url) {
         servers.push(url);
     }
@@ -25,7 +34,9 @@ pub fn add_server(url: String) {
 
 /// Remove a Blossom server
 pub fn remove_server(url: &str) {
-    let mut servers = BLOSSOM_SERVERS.write();
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut servers = data.write();
     servers.retain(|s| s != url);
 
     // Ensure we always have at least one server
@@ -36,7 +47,7 @@ pub fn remove_server(url: &str) {
 
 /// Get the first server from the list (primary upload target)
 pub fn get_primary_server() -> String {
-    BLOSSOM_SERVERS.read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string())
+    BLOSSOM_SERVERS.read().data().read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string())
 }
 
 /// Upload media (image or video) to Blossom with optional compression

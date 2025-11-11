@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu_wallet::{self as cashu_wallet, WalletHistoryStoreStoreExt};
 use crate::utils::format_sats_with_separator;
 use nostr_sdk::nips::nip60::TransactionDirection;
 
@@ -7,7 +7,7 @@ use nostr_sdk::nips::nip60::TransactionDirection;
 pub fn TransactionHistory() -> Element {
     let history = cashu_wallet::WALLET_HISTORY.read();
 
-    if history.is_empty() {
+    if history.data().read().is_empty() {
         return rsx! {
             div {
                 class: "bg-card border border-border rounded-lg p-8 text-center",
@@ -34,7 +34,7 @@ pub fn TransactionHistory() -> Element {
             // Timeline of transactions
             div {
                 class: "divide-y divide-border",
-                for (_i, item) in history.iter().enumerate() {
+                for (_i, item) in history.data().read().iter().enumerate() {
                     {
                         let is_incoming = matches!(item.direction, TransactionDirection::In);
                         let direction_icon = if is_incoming { "⬇️" } else { "⬆️" };

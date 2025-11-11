@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, TokenData};
+use crate::stores::cashu_wallet::{self, TokenData, WalletTokensStoreStoreExt};
 use crate::utils::format_sats_with_separator;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -253,7 +253,7 @@ pub fn TokenList() -> Element {
     let tokens = cashu_wallet::WALLET_TOKENS.read();
     let mut expanded_mints = use_signal(|| std::collections::HashSet::<String>::new());
 
-    if tokens.is_empty() {
+    if tokens.data().read().is_empty() {
         return rsx! {
             div {
                 class: "bg-card border border-border rounded-lg p-8 text-center",
@@ -276,10 +276,12 @@ pub fn TokenList() -> Element {
     // Memoize the grouping and sorting to avoid recomputation on every render
     let grouped_mints = use_memo(move || {
         let tokens = cashu_wallet::WALLET_TOKENS.read();
+        let data = tokens.data();
+        let tokens_data = data.read();
 
         // Group tokens by mint
         let mut tokens_by_mint: HashMap<String, Vec<TokenData>> = HashMap::new();
-        for token in tokens.iter() {
+        for token in tokens_data.iter() {
             tokens_by_mint.entry(token.mint.clone())
                 .or_insert_with(Vec::new)
                 .push(token.clone());

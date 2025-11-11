@@ -6,7 +6,7 @@
 /// Based on Phase 3.2 of performance.md - adopting Notedeck's context pattern
 /// to eliminate prop drilling and create cleaner component interfaces.
 
-use dioxus::prelude::Readable;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::Client;
 use std::sync::Arc;
 use crate::stores::{nostr_client, auth_store, bookmarks, profiles, theme_store, signer};

@@ -1,10 +1,27 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32, EventBuilder, Tag, JsonUtil};
+use dioxus_core::Task;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, EventBuilder, Tag};
 use nostr::{TagKind};
 use crate::stores::nostr_client::{get_client, fetch_events_aggregated, HAS_SIGNER};
+use crate::stores::profiles;
+use crate::utils::profile_prefetch;
 use crate::routes::Route;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
+
+/// Guard struct that cancels polling task on drop
+#[derive(Clone)]
+struct PollTaskGuard {
+    task: Signal<Option<Task>>,
+}
+
+impl Drop for PollTaskGuard {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.read().as_ref() {
+            task.cancel();
+        }
+    }
+}
 
 #[wasm_bindgen(inline_js = r#"
 export function scrollChatToBottom(elementId) {
@@ -22,10 +39,15 @@ export function isScrolledNearBottom(elementId, threshold) {
     const clientHeight = element.clientHeight;
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
+
+export function isPageVisible() {
+    return !document.hidden;
+}
 "#)]
 extern "C" {
     fn scrollChatToBottom(element_id: &str);
     fn isScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
+    fn isPageVisible() -> bool;
 }
 
 #[component]
@@ -40,23 +62,23 @@ pub fn LiveChat(
     // Make has_signer reactive - read from the store when needed instead of capturing once
     let has_signer = use_memo(move || *HAS_SIGNER.read());
 
-    // Shared metadata cache to avoid N+1 queries
-    let mut metadata_cache = use_signal(|| std::collections::HashMap::<String, nostr_sdk::Metadata>::new());
-
-    // Create unique ID for this chat container
-    let chat_container_id = use_signal(|| {
+    // Create unique ID for this chat container (plain value, not a signal to avoid reactive tracking)
+    let chat_container_id = {
         let timestamp = js_sys::Date::now() as u64;
         format!("live-chat-messages-{}", timestamp)
-    });
+    };
 
-    // Create the 'a' tag for this livestream
+    // Create the 'a' tag for this livestream (for send operations only)
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
-    let a_tag_for_fetch = a_tag.clone();
     let a_tag_for_send_keydown = a_tag.clone();
-    let a_tag_for_send_onclick = a_tag.clone();
+    let a_tag_for_send_click = a_tag.clone();
 
-    // Fetch chat messages
-    use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
+    // Clone chat_container_id for auto-scroll effect
+    let chat_id_for_auto_scroll = chat_container_id.clone();
+
+    // Fetch chat messages - depends on stream props
+    use_effect(use_reactive((&stream_author_pubkey, &stream_d_tag), move |(author, dtag)| {
+        let tag = format!("30311:{}:{}", author, dtag);
         spawn(async move {
             loading.set(true);
 
@@ -98,16 +120,23 @@ pub fn LiveChat(
     // Track the spawned polling task so we can cancel it when needed
     let mut poll_task = use_signal(|| None::<Task>);
 
-    use_effect(use_reactive(&a_tag_for_fetch, move |tag| {
+    use_effect(use_reactive((&stream_author_pubkey, &stream_d_tag), move |(author, dtag)| {
         // Cancel the previous polling task if it exists
-        if let Some(task) = poll_task.read().as_ref() {
+        // Use peek() to avoid creating reactive dependency on poll_task
+        if let Some(task) = poll_task.peek().as_ref() {
             task.cancel();
         }
 
+        let tag = format!("30311:{}:{}", author, dtag);
         // Start new polling loop and store its handle
         let new_task = spawn(async move {
             loop {
                 gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                // Only poll if page is visible (optimization)
+                if !isPageVisible() {
+                    continue;
+                }
 
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 {
@@ -136,75 +165,50 @@ pub fn LiveChat(
         poll_task.set(Some(new_task));
     }));
 
-    // Scroll to bottom on initial load
-    use_effect(use_reactive(&*chat_container_id.read(), move |container_id| {
-        spawn(async move {
-            // Wait for DOM to render
-            gloo_timers::future::TimeoutFuture::new(100).await;
-            scrollChatToBottom(&container_id);
-        });
-    }));
+    // Track if this is the first load to force scroll to bottom
+    let mut is_first_load = use_signal(|| true);
 
-    // Auto-scroll to bottom when messages change (if user is already near bottom)
-    use_effect(use_reactive(&messages.read().len(), move |_| {
-        let container_id = chat_container_id.read().clone();
+    // Auto-scroll to bottom when messages change
+    use_effect(move || {
+        // Track messages length reactively
+        let msg_count = messages.read().len();
+        let container_id = chat_id_for_auto_scroll.clone();
+
         // Small delay to ensure DOM has updated with new messages
         spawn(async move {
             gloo_timers::future::TimeoutFuture::new(50).await;
-            // Only auto-scroll if user is already near the bottom (within 150px)
-            if isScrolledNearBottom(&container_id, 150.0) {
+
+            // On first load with messages, always scroll to bottom
+            if *is_first_load.peek() && msg_count > 0 {
+                scrollChatToBottom(&container_id);
+                is_first_load.set(false);
+            }
+            // Otherwise, only auto-scroll if user is already near the bottom (within 100px)
+            else if isScrolledNearBottom(&container_id, 100.0) {
                 scrollChatToBottom(&container_id);
             }
         });
-    }));
-
-    // Stop polling on unmount by canceling the task
-    use_drop(move || {
-        if let Some(task) = poll_task.read().as_ref() {
-            task.cancel();
-        }
     });
 
-    // Fetch metadata for unique authors (avoids N+1 problem)
-    use_effect(use_reactive(&messages.read().len(), move |_| {
-        let unique_authors: std::collections::HashSet<String> = messages.read()
-            .iter()
-            .map(|msg| msg.pubkey.to_string())
-            .collect();
+    // Cancel polling task on unmount using use_hook with Drop
+    use_hook(move || PollTaskGuard { task: poll_task });
 
-        for author_pubkey in unique_authors {
-            // Skip if already cached
-            if metadata_cache.read().contains_key(&author_pubkey) {
-                continue;
+    // Fetch profiles for chat message authors using batch prefetch
+    use_effect(move || {
+        let msg_count = messages.read().len();
+
+        spawn(async move {
+            if msg_count == 0 {
+                return;
             }
 
-            // Spawn fetch for this author
-            let author_pk = author_pubkey.clone();
-            spawn(async move {
-                if let Ok(pubkey) = PublicKey::from_bech32(&author_pk).or_else(|_| PublicKey::parse(&author_pk)) {
-                    if let Some(client) = get_client() {
-                        let filter = Filter::new()
-                            .kind(Kind::Metadata)
-                            .author(pubkey)
-                            .limit(1);
+            // Get current messages snapshot (non-reactive)
+            let current_messages = messages.peek().clone();
 
-                        match client.fetch_events(filter, Duration::from_secs(5)).await {
-                            Ok(events) => {
-                                if let Some(event) = events.first() {
-                                    if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
-                                        metadata_cache.write().insert(author_pk.clone(), metadata);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log::debug!("Failed to fetch metadata for {}: {}", author_pk, e);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }));
+            // Use optimized batch prefetch for all message authors
+            profile_prefetch::prefetch_event_authors(&current_messages).await;
+        });
+    });
 
     // Helper to perform the message send (used by both keyboard and button)
     let perform_send = move |content: String, tag_clone: String| {
@@ -269,8 +273,8 @@ pub fn LiveChat(
 
             // Messages container
             div {
-                id: "{chat_container_id.read()}",
-                class: "flex-1 overflow-y-auto p-4 space-y-3",
+                id: "{chat_container_id}",
+                class: "flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar",
                 if *loading.read() {
                     div {
                         class: "flex items-center justify-center h-full text-muted-foreground",
@@ -288,8 +292,7 @@ pub fn LiveChat(
                 } else {
                     for message in messages.read().iter() {
                         ChatMessage {
-                            event: message.clone(),
-                            metadata: metadata_cache.read().get(&message.pubkey.to_string()).cloned()
+                            event: message.clone()
                         }
                     }
                 }
@@ -329,7 +332,7 @@ pub fn LiveChat(
                                     return;
                                 }
                                 sending.set(true);
-                                perform_send(content, a_tag_for_send_onclick.clone());
+                                perform_send(content, a_tag_for_send_click.clone());
                             },
                             if *sending.read() {
                                 "Sending..."
@@ -350,29 +353,43 @@ pub fn LiveChat(
 }
 
 #[component]
-fn ChatMessage(event: Event, metadata: Option<nostr_sdk::Metadata>) -> Element {
+fn ChatMessage(event: Event) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let content = event.content.clone();
     let timestamp = event.created_at;
 
-    let author_name = if let Some(ref metadata) = metadata {
-        metadata.display_name.clone()
-            .or_else(|| metadata.name.clone())
-            .unwrap_or_else(|| format!("{}...", &author_pubkey[..8]))
-    } else {
-        format!("{}...", &author_pubkey[..8])
-    };
+    // Clone author_pubkey for closures
+    let author_pk_for_metadata = author_pubkey.clone();
+    let author_pk_for_name = author_pubkey.clone();
+    let author_pk_for_display = author_pubkey.clone();
 
-    let author_picture = metadata.as_ref()
-        .and_then(|m| m.picture.clone());
+    // Get metadata from centralized profiles store
+    let metadata = use_memo(move || {
+        profiles::get_profile(&author_pk_for_metadata)
+    });
+
+    let author_name = use_memo(move || {
+        if let Some(ref meta) = *metadata.read() {
+            meta.display_name.clone()
+                .or_else(|| meta.name.clone())
+                .unwrap_or_else(|| format!("{}...", &author_pk_for_name[..8]))
+        } else {
+            format!("{}...", &author_pk_for_name[..8])
+        }
+    });
+
+    let author_picture = use_memo(move || {
+        metadata.read().as_ref()
+            .and_then(|m| m.picture.clone())
+    });
 
     rsx! {
         div {
             class: "flex gap-3",
             Link {
-                to: Route::Profile { pubkey: author_pubkey.clone() },
+                to: Route::Profile { pubkey: author_pk_for_display.clone() },
                 class: "flex-shrink-0",
-                if let Some(pic_url) = author_picture {
+                if let Some(pic_url) = author_picture.read().as_ref() {
                     img {
                         src: "{pic_url}",
                         class: "w-8 h-8 rounded-full object-cover",
@@ -382,7 +399,11 @@ fn ChatMessage(event: Event, metadata: Option<nostr_sdk::Metadata>) -> Element {
                 } else {
                     div {
                         class: "w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold",
-                        "{author_name.chars().next().unwrap_or('?').to_uppercase()}"
+                        {
+                            let name = author_name.read();
+                            let first_char = name.chars().next().unwrap_or('?').to_uppercase().to_string();
+                            rsx! { "{first_char}" }
+                        }
                     }
                 }
             }
@@ -391,9 +412,9 @@ fn ChatMessage(event: Event, metadata: Option<nostr_sdk::Metadata>) -> Element {
                 div {
                     class: "flex items-baseline gap-2",
                     Link {
-                        to: Route::Profile { pubkey: author_pubkey.clone() },
+                        to: Route::Profile { pubkey: author_pk_for_display.clone() },
                         class: "font-semibold text-sm hover:underline truncate",
-                        "{author_name}"
+                        "{author_name.read()}"
                     }
                     span {
                         class: "text-xs text-muted-foreground",

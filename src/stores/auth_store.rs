@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr::{Keys, PublicKey};
 use nostr_sdk::ToBech32;
 use gloo_storage::{LocalStorage, Storage};

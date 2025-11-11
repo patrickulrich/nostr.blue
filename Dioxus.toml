@@ -19,5 +19,5 @@ script = []
 style = []
 script = []
 
-[[web.proxy]]
-backend = "http://localhost:8000"
+# [[web.proxy]]
+# backend = "http://localhost:8000/api"

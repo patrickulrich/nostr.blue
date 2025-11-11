@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use dioxus::prelude::Event as DioxusEvent;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;

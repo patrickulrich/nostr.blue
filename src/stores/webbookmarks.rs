@@ -1,11 +1,18 @@
 use dioxus::prelude::*;
+use dioxus_stores::Store;
 use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey, Timestamp};
 use nostr::prelude::{WebBookmark, TagStandard, TagKind};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 
 /// Global signal to track web bookmarks (kind 39701)
-pub static WEB_BOOKMARKS: GlobalSignal<Vec<Event>> = Signal::global(|| Vec::new());
+/// Store for web bookmarks with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct WebBookmarksStore {
+    pub data: Vec<Event>,
+}
+
+pub static WEB_BOOKMARKS: GlobalSignal<Store<WebBookmarksStore>> = Signal::global(|| Store::new(WebBookmarksStore::default()));
 
 /// Add a new web bookmark
 ///
@@ -121,9 +128,9 @@ pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
             log::info!("Web bookmark deleted");
 
             // Remove from local state immediately
-            let mut bookmarks = WEB_BOOKMARKS.read().clone();
+            let mut bookmarks = WEB_BOOKMARKS.read().data().read().clone();
             bookmarks.retain(|e| e.id != event.id);
-            *WEB_BOOKMARKS.write() = bookmarks;
+            *WEB_BOOKMARKS.read().data().write() = bookmarks;
 
             Ok(())
         }

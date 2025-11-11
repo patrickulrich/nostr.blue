@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{Filter, Kind, SubscriptionId, PublicKey, FromBech32};
 use gloo_storage::{LocalStorage, Storage};
 use crate::stores::{auth_store, nostr_client, settings_store};
