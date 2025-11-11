@@ -17,7 +17,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Profiles** - View and edit user profiles with follow/unfollow
 - ✅ **Post Composer** - Create text notes with rich content support
 - ✅ **Interactions** - Reactions, reposts with attribution display, and threaded replies
-- ✅ **Search** - Find users, notes, and content by hashtags with NIP-50 relay search support
+- ✅ **Search** - Comprehensive NIP-50 search with profile autocomplete and tabbed content search (posts, articles, photos, videos) with contact prioritization
 - ✅ **Notifications** - Track mentions, replies, and interactions
 - ✅ **Explore** - Discover trending content and new users
 - ✅ **Polls (NIP-88)** - Create and vote on single-choice and multiple-choice polls with real-time results, countdown timers, and hashtag support
@@ -348,7 +348,7 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
 | [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (remote Lightning wallet) | ✅ |
-| [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (relay-based search, GIF search) | ✅ |
+| [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (profiles, posts, articles, photos, videos, GIFs) | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
 | [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live activities (livestreaming) | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
