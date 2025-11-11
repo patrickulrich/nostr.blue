@@ -3,6 +3,7 @@ use crate::hooks::use_lists;
 use crate::stores::nostr_client;
 use crate::utils::list_kinds::get_item_count;
 use nostr_sdk::{EventBuilder, Kind, Tag, EventId};
+use uuid::Uuid;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AddToListModalProps {
@@ -250,10 +251,14 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     let target_event_id = EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
+    // Generate a unique identifier for the d tag (independent of the display name)
+    // This prevents name collisions from overwriting existing lists
+    let unique_id = Uuid::new_v4().to_string();
+
     // Create curation list (kind 30004) with this event
     let tags = vec![
-        Tag::identifier(&name),
-        Tag::custom(nostr_sdk::TagKind::Name, vec![name.clone()]),
+        Tag::identifier(&unique_id),  // Use UUID for d tag to prevent collisions
+        Tag::custom(nostr_sdk::TagKind::Name, vec![name.clone()]),  // Human-readable name
         Tag::event(target_event_id),
     ];
 

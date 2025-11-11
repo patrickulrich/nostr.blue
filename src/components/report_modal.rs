@@ -16,6 +16,11 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     let mut error_msg = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
 
+    // Extract props fields before closures to avoid moving entire props struct
+    let event_id = props.event_id.clone();
+    let author_pubkey = props.author_pubkey.clone();
+    let on_close = props.on_close.clone();
+
     // Report types from NIP-56
     let report_types = vec![
         ("spam", "Spam"),
@@ -28,8 +33,9 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     ];
 
     let handle_report = move |_| {
-        let event_id = props.event_id.clone();
-        let author_pubkey = props.author_pubkey.clone();
+        let event_id = event_id.clone();
+        let author_pubkey = author_pubkey.clone();
+        let on_close = on_close.clone();
         let report_type = selected_type.read().clone();
         let report_details = details.read().clone();
 
@@ -52,7 +58,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                     // Auto-close after success
                     spawn(async move {
                         gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
-                        props.on_close.call(());
+                        on_close.call(());
                     });
                 }
                 Err(e) => {
@@ -68,7 +74,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
         // Modal overlay
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-            onclick: move |_| props.on_close.call(()),
+            onclick: move |_| on_close.call(()),
 
             // Modal content
             div {
@@ -84,7 +90,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                     }
                     button {
                         class: "text-muted-foreground hover:text-foreground",
-                        onclick: move |_| props.on_close.call(()),
+                        onclick: move |_| on_close.call(()),
                         "✕"
                     }
                 }
@@ -151,7 +157,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                             button {
                                 class: "px-4 py-2 text-sm text-muted-foreground hover:text-foreground",
                                 disabled: *loading.read(),
-                                onclick: move |_| props.on_close.call(()),
+                                onclick: move |_| on_close.call(()),
                                 "Cancel"
                             }
                             button {

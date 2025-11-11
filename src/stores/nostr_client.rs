@@ -798,6 +798,7 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
     let mut blocked_users = Vec::new();
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
+    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
 
     if let Some(event) = mute_event {
         // Extract existing muted posts, blocked users, hashtags, and words
@@ -824,6 +825,9 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
                 if let Some(word) = tag.content() {
                     words.push(word.to_string());
                 }
+            } else {
+                // Preserve all other tags (e.g., 'a' address tags, future extensions)
+                other_tags.push(tag.clone());
             }
         }
     }
@@ -833,16 +837,33 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
         muted_posts.push(target_event_id);
     }
 
-    // Use SDK's MuteList struct for proper NIP-51 compliance
-    use nostr_sdk::nips::nip51::MuteList;
-    let mute_list = MuteList {
-        public_keys: blocked_users,
-        hashtags,
-        event_ids: muted_posts,
-        words,
-    };
+    // Build tags manually to preserve all custom tags
+    let mut all_tags = Vec::new();
 
-    let builder = nostr::EventBuilder::mute_list(mute_list);
+    // Add e tags for muted posts
+    for event_id in muted_posts {
+        all_tags.push(nostr::Tag::event(event_id));
+    }
+
+    // Add p tags for blocked users
+    for pubkey in blocked_users {
+        all_tags.push(nostr::Tag::public_key(pubkey));
+    }
+
+    // Add t tags for hashtags
+    for hashtag in hashtags {
+        all_tags.push(nostr::Tag::hashtag(hashtag));
+    }
+
+    // Add word tags
+    for word in words {
+        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
+    }
+
+    // Re-attach preserved tags
+    all_tags.extend(other_tags);
+
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -875,6 +896,7 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
     let mut blocked_users = Vec::new();
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
+    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
 
     for tag in mute_event.tags.iter() {
         if tag.kind() == nostr::TagKind::e() {
@@ -901,19 +923,39 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
             if let Some(word) = tag.content() {
                 words.push(word.to_string());
             }
+        } else {
+            // Preserve all other tags (e.g., 'a' address tags, future extensions)
+            other_tags.push(tag.clone());
         }
     }
 
-    // Use SDK's MuteList struct
-    use nostr_sdk::nips::nip51::MuteList;
-    let mute_list = MuteList {
-        public_keys: blocked_users,
-        hashtags,
-        event_ids: muted_posts,
-        words,
-    };
+    // Build tags manually to preserve all custom tags
+    let mut all_tags = Vec::new();
 
-    let builder = nostr::EventBuilder::mute_list(mute_list);
+    // Add e tags for muted posts
+    for event_id in muted_posts {
+        all_tags.push(nostr::Tag::event(event_id));
+    }
+
+    // Add p tags for blocked users
+    for pubkey in blocked_users {
+        all_tags.push(nostr::Tag::public_key(pubkey));
+    }
+
+    // Add t tags for hashtags
+    for hashtag in hashtags {
+        all_tags.push(nostr::Tag::hashtag(hashtag));
+    }
+
+    // Add word tags
+    for word in words {
+        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
+    }
+
+    // Re-attach preserved tags
+    all_tags.extend(other_tags);
+
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -947,6 +989,7 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
     let mut blocked_users = Vec::new();
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
+    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
 
     if let Some(event) = mute_event {
         // Extract existing muted posts, blocked users, hashtags, and words
@@ -973,6 +1016,9 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
                 if let Some(word) = tag.content() {
                     words.push(word.to_string());
                 }
+            } else {
+                // Preserve all other tags (e.g., 'a' address tags, future extensions)
+                other_tags.push(tag.clone());
             }
         }
     }
@@ -982,16 +1028,33 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
         blocked_users.push(target_pubkey);
     }
 
-    // Use SDK's MuteList struct
-    use nostr_sdk::nips::nip51::MuteList;
-    let mute_list = MuteList {
-        public_keys: blocked_users,
-        hashtags,
-        event_ids: muted_posts,
-        words,
-    };
+    // Build tags manually to preserve all custom tags
+    let mut all_tags = Vec::new();
 
-    let builder = nostr::EventBuilder::mute_list(mute_list);
+    // Add e tags for muted posts
+    for event_id in muted_posts {
+        all_tags.push(nostr::Tag::event(event_id));
+    }
+
+    // Add p tags for blocked users
+    for pubkey in blocked_users {
+        all_tags.push(nostr::Tag::public_key(pubkey));
+    }
+
+    // Add t tags for hashtags
+    for hashtag in hashtags {
+        all_tags.push(nostr::Tag::hashtag(hashtag));
+    }
+
+    // Add word tags
+    for word in words {
+        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
+    }
+
+    // Re-attach preserved tags
+    all_tags.extend(other_tags);
+
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -1025,6 +1088,7 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
     let mut blocked_users = Vec::new();
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
+    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
 
     for tag in mute_event.tags.iter() {
         if tag.kind() == nostr::TagKind::e() {
@@ -1051,19 +1115,39 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
             if let Some(word) = tag.content() {
                 words.push(word.to_string());
             }
+        } else {
+            // Preserve all other tags (e.g., 'a' address tags, future extensions)
+            other_tags.push(tag.clone());
         }
     }
 
-    // Use SDK's MuteList struct
-    use nostr_sdk::nips::nip51::MuteList;
-    let mute_list = MuteList {
-        public_keys: blocked_users,
-        hashtags,
-        event_ids: muted_posts,
-        words,
-    };
+    // Build tags manually to preserve all custom tags
+    let mut all_tags = Vec::new();
 
-    let builder = nostr::EventBuilder::mute_list(mute_list);
+    // Add e tags for muted posts
+    for event_id in muted_posts {
+        all_tags.push(nostr::Tag::event(event_id));
+    }
+
+    // Add p tags for blocked users
+    for pubkey in blocked_users {
+        all_tags.push(nostr::Tag::public_key(pubkey));
+    }
+
+    // Add t tags for hashtags
+    for hashtag in hashtags {
+        all_tags.push(nostr::Tag::hashtag(hashtag));
+    }
+
+    // Add word tags
+    for word in words {
+        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
+    }
+
+    // Re-attach preserved tags
+    all_tags.extend(other_tags);
+
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;

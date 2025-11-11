@@ -51,14 +51,14 @@ impl<T> DataState<T> {
         matches!(self, DataState::Loading)
     }
 
-    /// Returns true if state is Loaded
-    #[allow(dead_code)]
+    /// Returns true if state is Loaded (test helper)
+    #[cfg(test)]
     pub fn is_loaded(&self) -> bool {
         matches!(self, DataState::Loaded(_))
     }
 
-    /// Returns true if state is Error
-    #[allow(dead_code)]
+    /// Returns true if state is Error (test helper)
+    #[cfg(test)]
     pub fn is_error(&self) -> bool {
         matches!(self, DataState::Error(_))
     }
@@ -79,8 +79,8 @@ impl<T> DataState<T> {
         }
     }
 
-    /// Consumes self and returns the data if loaded, None otherwise
-    #[allow(dead_code)]
+    /// Consumes self and returns the data if loaded, None otherwise (test helper)
+    #[cfg(test)]
     pub fn into_data(self) -> Option<T> {
         match self {
             DataState::Loaded(data) => Some(data),
@@ -88,8 +88,8 @@ impl<T> DataState<T> {
         }
     }
 
-    /// Maps the data using a function if in Loaded state
-    #[allow(dead_code)]
+    /// Maps the data using a function if in Loaded state (test helper)
+    #[cfg(test)]
     pub fn map<U, F>(self, f: F) -> DataState<U>
     where
         F: FnOnce(T) -> U,
@@ -102,8 +102,8 @@ impl<T> DataState<T> {
         }
     }
 
-    /// Maps the data using a function that returns a Result
-    #[allow(dead_code)]
+    /// Maps the data using a function that returns a Result (test helper)
+    #[cfg(test)]
     pub fn and_then<U, F>(self, f: F) -> DataState<U>
     where
         F: FnOnce(T) -> Result<U, String>,
