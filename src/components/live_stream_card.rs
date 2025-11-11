@@ -33,6 +33,8 @@ pub struct LiveStreamMeta {
     pub current_participants: Option<u32>,
     pub starts: Option<Timestamp>,
     pub tags: Vec<String>,
+    /// The actual creator/streamer (from p tag), if present
+    pub creator_pubkey: Option<String>,
 }
 
 /// Parse NIP-53 Kind 30311 live streaming event
@@ -49,6 +51,7 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         current_participants: None,
         starts: None,
         tags: Vec::new(),
+        creator_pubkey: None,
     };
 
     log::info!("Parsing live stream event: {}", event.id);
@@ -62,6 +65,14 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
             if let Some(value) = tag.content() {
                 meta.d_tag = value.to_string();
                 log::info!("Found d tag: {}", value);
+            }
+        } else if tag_kind == TagKind::p() {
+            // Get the first p tag as the creator/streamer
+            if meta.creator_pubkey.is_none() {
+                if let Some(value) = tag.content() {
+                    meta.creator_pubkey = Some(value.to_string());
+                    log::info!("Found creator p tag: {}", value);
+                }
             }
         } else if tag_kind == TagKind::t() {
             if let Some(value) = tag.content() {
@@ -133,13 +144,15 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     };
 
     // Clone values for closures
-    let author_pubkey = event.pubkey.to_string();
+    // Use creator pubkey from p tag if available, otherwise fall back to event publisher
+    let author_pubkey = stream_meta.creator_pubkey.clone()
+        .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let author_pubkey_display = author_pubkey.clone();
     let created_at = event.created_at;
 
-    // Create naddr for the livestream
-    let naddr = format!("30311:{}:{}", author_pubkey, stream_meta.d_tag);
+    // Create naddr for the livestream (still uses event publisher for fetching)
+    let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
 
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);

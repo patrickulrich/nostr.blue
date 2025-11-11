@@ -234,15 +234,20 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
 
                         // Custom emojis tab (if user has any)
                         if !custom_emojis.data().read().is_empty() {
-                            button {
-                                key: "{\"custom\"}",
-                                class: if *selected_category.read() == EmojiCategory::Custom {
+                            {
+                                let tab_key = "custom";
+                                rsx! {
+                                    button {
+                                        key: "{tab_key}",
+                                        class: if *selected_category.read() == EmojiCategory::Custom {
                                     "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap"
                                 } else {
                                     "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap"
                                 },
-                                onclick: move |_| selected_category.set(EmojiCategory::Custom),
-                                "⭐ Custom"
+                                        onclick: move |_| selected_category.set(EmojiCategory::Custom),
+                                        "⭐ Custom"
+                                    }
+                                }
                             }
                         }
 
@@ -324,7 +329,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                             },
                             EmojiCategory::Set(identifier) => {
-                                let set = emoji_sets.data().read().iter().find(|s| s.identifier == identifier).cloned();
+                                let sets_data = emoji_sets.data();
+                                let sets_guard = sets_data.read();
+                                let set = sets_guard.iter().find(|s| s.identifier == identifier);
                                 let set_id = identifier.clone();
                                 rsx! {
                                     div {

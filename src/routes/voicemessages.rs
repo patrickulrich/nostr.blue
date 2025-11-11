@@ -57,12 +57,18 @@ pub fn VoiceMessages() -> Element {
         // Increment generation to invalidate any in-flight load_more requests
         let next_gen = *request_generation.read() + 1;
         request_generation.set(next_gen);
+        let captured_gen = next_gen; // Capture for the async task
 
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_voice_messages(None).await,
                 FeedType::Global => load_global_voice_messages(None).await,
             };
+
+            // Check if this request is still current before updating state
+            if *request_generation.read() != captured_gen {
+                return; // Abort - a newer request has been started
+            }
 
             match result {
                 Ok(voice_events) => {

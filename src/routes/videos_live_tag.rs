@@ -7,6 +7,8 @@ use std::time::Duration;
 use wasm_bindgen::JsCast;
 
 /// Guard struct that removes scroll listener on drop
+/// Note: Clone is required by use_hook but should not be manually called.
+/// The Signal ensures cleanup happens correctly even if cloned by the hook.
 #[derive(Clone)]
 struct ScrollListenerGuard {
     callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,

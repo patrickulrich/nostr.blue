@@ -32,6 +32,8 @@ pub struct LiveStreamMeta {
     pub current_participants: Option<u32>,
     pub starts: Option<nostr_sdk::Timestamp>,
     pub tags: Vec<String>,
+    /// The actual creator/streamer (from p tag), if present
+    pub creator_pubkey: Option<String>,
 }
 
 /// Parse NIP-53 Kind 30311 live streaming event
@@ -46,6 +48,7 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         current_participants: None,
         starts: None,
         tags: Vec::new(),
+        creator_pubkey: None,
     };
 
     for tag in event.tags.iter() {
@@ -55,6 +58,14 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
                 "d" => {
                     if let Some(value) = tag_vec.get(1) {
                         meta.d_tag = value.to_string();
+                    }
+                }
+                "p" => {
+                    // Get the first p tag as the creator/streamer
+                    if meta.creator_pubkey.is_none() {
+                        if let Some(value) = tag_vec.get(1) {
+                            meta.creator_pubkey = Some(value.to_string());
+                        }
                     }
                 }
                 "title" => {
@@ -128,10 +139,13 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     };
 
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let author_pubkey = event.pubkey.to_string();
 
-    // Create naddr for the livestream
-    let naddr = format!("30311:{}:{}", author_pubkey, stream_meta.d_tag);
+    // Use creator pubkey from p tag if available, otherwise fall back to event publisher
+    let author_pubkey = stream_meta.creator_pubkey.clone()
+        .unwrap_or_else(|| event.pubkey.to_string());
+
+    // Create naddr for the livestream (still uses event publisher for fetching)
+    let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
 
     // Fetch author metadata
     use_effect(use_reactive(&author_pubkey, move |pubkey_str| {

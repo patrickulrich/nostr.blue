@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind, PublicKey};
+use nostr_sdk::{Filter, Kind, PublicKey, FromBech32};
 use crate::components::{LiveStreamPlayer, LiveChat};
 use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta, StreamStatus};
 use crate::components::icons::ArrowLeftIcon;
@@ -19,8 +19,15 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Get author metadata from profile store
+    // Get author metadata from profile store (use creator from p tag if available)
     let author_metadata = use_memo(move || {
+        if let Some(meta) = stream_meta.read().as_ref() {
+            // Use creator_pubkey from p tag if available
+            if let Some(creator_pk) = &meta.creator_pubkey {
+                return profiles::get_profile(creator_pk);
+            }
+        }
+        // Fall back to event publisher
         let (pubkey_str, _) = parsed_naddr.read().clone();
         profiles::get_profile(&pubkey_str)
     });
@@ -65,12 +72,16 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                         if let Some(event) = events.first() {
                             // Parse stream metadata
                             if let Some(meta) = parse_live_stream_event(event) {
+                                // Fetch creator profile (use p tag if available, otherwise publisher)
+                                let profile_to_fetch = meta.creator_pubkey.clone()
+                                    .unwrap_or_else(|| author_pk.clone());
+
                                 stream_meta.set(Some(meta));
                                 stream_event.set(Some(event.clone()));
                                 loading.set(false);
 
-                                // Fetch author metadata
-                                let _ = profiles::fetch_profile(author_pk.clone()).await;
+                                // Fetch creator/author metadata
+                                let _ = profiles::fetch_profile(profile_to_fetch).await;
                             } else {
                                 error.set(Some("Failed to parse stream metadata".to_string()));
                                 loading.set(false);
@@ -373,12 +384,20 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     }
 }
 
-/// Parse naddr format "30311:pubkey:dtag" into (pubkey, dtag)
+/// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
 fn parse_naddr(note_id: &str) -> (String, String) {
+    // First try to decode as NIP-19 bech32 naddr
+    if let Ok(nip19) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
+        if let nostr_sdk::nips::nip19::Nip19::Coordinate(coord) = nip19 {
+            return (coord.public_key.to_hex(), coord.identifier.clone());
+        }
+    }
+
+    // Fall back to colon-split logic for non-bech32 formats
     let parts: Vec<&str> = note_id.split(':').collect();
 
     if parts.len() >= 3 {
-        // Full naddr format
+        // Full naddr format: "30311:pubkey:dtag"
         (parts[1].to_string(), parts[2].to_string())
     } else {
         // Fallback: treat as pubkey:dtag
