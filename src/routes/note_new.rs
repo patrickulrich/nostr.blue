@@ -10,8 +10,6 @@ pub fn NoteNew() -> Element {
     let mut content = use_signal(|| String::new());
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);
-    let mut show_emoji_picker = use_signal(|| false);
-    let mut show_gif_picker = use_signal(|| false);
 
     // Check if user is authenticated
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -77,7 +75,6 @@ pub fn NoteNew() -> Element {
         let mut current = content.read().clone();
         current.push_str(&emoji);
         content.set(current);
-        show_emoji_picker.set(false);
     };
 
     // Handler when GIF is selected
@@ -88,7 +85,6 @@ pub fn NoteNew() -> Element {
         }
         current.push_str(&gif_url);
         content.set(current);
-        show_gif_picker.set(false);
     };
 
     // Redirect if not authenticated - effect must be called unconditionally
@@ -172,26 +168,6 @@ pub fn NoteNew() -> Element {
                             }
                         }
                     }
-
-                    // Emoji picker
-                    if *show_emoji_picker.read() {
-                        div {
-                            class: "mt-4",
-                            EmojiPicker {
-                                on_emoji_selected: handle_emoji_selected,
-                            }
-                        }
-                    }
-
-                    // GIF picker
-                    if *show_gif_picker.read() {
-                        div {
-                            class: "mt-4",
-                            GifPicker {
-                                on_gif_selected: handle_gif_selected,
-                            }
-                        }
-                    }
                 }
 
                 // Footer
@@ -213,26 +189,16 @@ pub fn NoteNew() -> Element {
                             crate::components::icons::CameraIcon { class: "w-5 h-5".to_string() }
                         }
 
-                        // Emoji button
-                        button {
-                            class: "p-2 rounded-full hover:bg-accent transition",
-                            title: "Add emoji",
-                            onclick: move |_| {
-                                let current = *show_emoji_picker.read();
-                                show_emoji_picker.set(!current);
-                            },
-                            "😀"
+                        // Emoji picker (opens directly)
+                        EmojiPicker {
+                            on_emoji_selected: handle_emoji_selected,
+                            icon_only: true
                         }
 
-                        // GIF button
-                        button {
-                            class: "p-2 rounded-full hover:bg-accent transition text-sm font-bold",
-                            title: "Add GIF",
-                            onclick: move |_| {
-                                let current = *show_gif_picker.read();
-                                show_gif_picker.set(!current);
-                            },
-                            "GIF"
+                        // GIF picker (opens directly)
+                        GifPicker {
+                            on_gif_selected: handle_gif_selected,
+                            icon_only: true
                         }
                     }
 

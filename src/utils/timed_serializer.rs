@@ -23,11 +23,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A debouncer that delays execution until a quiet period
+#[allow(dead_code)]
 pub struct Debouncer {
     timeout: Rc<RefCell<Option<Timeout>>>,
     delay_ms: u32,
 }
 
+#[allow(dead_code)]
 impl Debouncer {
     /// Create a new debouncer with specified delay in milliseconds
     pub fn new(delay_ms: u32) -> Self {
@@ -76,11 +78,13 @@ impl Clone for Debouncer {
 /// Timed serializer that debounces save operations
 ///
 /// Generic over the data type T which must be serializable
+#[allow(dead_code)]
 pub struct TimedSerializer<T: Clone + 'static> {
     debouncer: Debouncer,
     pending_data: Rc<RefCell<Option<T>>>,
 }
 
+#[allow(dead_code)]
 impl<T: Clone + 'static> TimedSerializer<T> {
     /// Create a new timed serializer with default 1 second delay
     pub fn new() -> Self {
@@ -161,6 +165,7 @@ impl<T: Clone + 'static> Clone for TimedSerializer<T> {
 /// debounced_save(); // Previous cancelled, new scheduled
 /// // Only one save happens after 1 second
 /// ```
+#[allow(dead_code)]
 pub fn create_debounced<F>(delay_ms: u32, callback: F) -> impl Fn()
 where
     F: Fn() + 'static,

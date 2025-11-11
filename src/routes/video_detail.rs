@@ -38,6 +38,9 @@ pub fn VideoDetail(video_id: String) -> Element {
         loading.set(true);
         error.set(None);
 
+        // Clear profile cache to prevent stale author metadata
+        crate::stores::profiles::PROFILE_CACHE.write().clear();
+
         spawn(async move {
             match load_video_by_id(&id).await {
                 Ok(event) => {

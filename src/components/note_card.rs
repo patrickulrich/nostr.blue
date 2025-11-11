@@ -1,8 +1,7 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, ToBech32};
-use nostr_sdk::prelude::NostrDatabaseExt;
+use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_reaction, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_reaction, publish_repost};
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
@@ -14,6 +13,7 @@ use std::time::Duration;
 #[component]
 pub fn NoteCard(
     event: NostrEvent,
+    #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
 ) -> Element {
     // Clone values that will be used in multiple closures
@@ -43,6 +43,11 @@ pub fn NoteCard(
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
+    // State for muted/blocked content
+    let mut is_muted = use_signal(|| false);
+    let mut is_author_blocked = use_signal(|| false);
+    let mut show_hidden_anyway = use_signal(|| false);
+
     // State for counts
     let mut reply_count = use_signal(|| 0usize);
     let mut like_count = use_signal(|| 0usize);
@@ -51,6 +56,9 @@ pub fn NoteCard(
 
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+
+    // State for reposter profile (if this is a repost)
+    let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // Initialize counts from precomputed data if available (batch optimization)
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
@@ -212,32 +220,163 @@ pub fn NoteCard(
 
     // Fetch author's profile metadata - only run once per pubkey
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
+        // Clear old metadata immediately when author changes to prevent stale data
+        author_metadata.set(None);
+
         spawn(async move {
-            // Parse pubkey
-            let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
+            // Check PROFILE_CACHE first (instant, respects cache clears)
+            if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&pubkey_str) {
+                // Convert Profile to nostr_sdk::Metadata
+                let mut metadata = nostr_sdk::Metadata::new();
+                if let Some(name) = &cached_profile.name {
+                    metadata = metadata.name(name);
+                }
+                if let Some(display_name) = &cached_profile.display_name {
+                    metadata = metadata.display_name(display_name);
+                }
+                if let Some(about) = &cached_profile.about {
+                    metadata = metadata.about(about);
+                }
+                if let Some(picture) = &cached_profile.picture {
+                    if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                        metadata = metadata.picture(url);
+                    }
+                }
+                if let Some(banner) = &cached_profile.banner {
+                    if let Ok(url) = nostr_sdk::Url::parse(banner) {
+                        metadata = metadata.banner(url);
+                    }
+                }
+                if let Some(website) = &cached_profile.website {
+                    if let Ok(url) = nostr_sdk::Url::parse(website) {
+                        metadata = metadata.website(url);
+                    }
+                }
+                if let Some(nip05) = &cached_profile.nip05 {
+                    metadata = metadata.nip05(nip05);
+                }
+                if let Some(lud16) = &cached_profile.lud16 {
+                    metadata = metadata.lud16(lud16);
+                }
 
-            // Get client
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
                 author_metadata.set(Some(metadata));
                 return;
             }
 
-            // If not in database, fetch from relays (auto-caches to database)
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
+            // Not in cache - fetch using profile system (will populate cache)
+            match crate::stores::profiles::fetch_profile(pubkey_str.clone()).await {
+                Ok(profile) => {
+                    // Convert Profile to Metadata
+                    let mut metadata = nostr_sdk::Metadata::new();
+                    if let Some(name) = &profile.name {
+                        metadata = metadata.name(name);
+                    }
+                    if let Some(display_name) = &profile.display_name {
+                        metadata = metadata.display_name(display_name);
+                    }
+                    if let Some(about) = &profile.about {
+                        metadata = metadata.about(about);
+                    }
+                    if let Some(picture) = &profile.picture {
+                        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                            metadata = metadata.picture(url);
+                        }
+                    }
+                    if let Some(banner) = &profile.banner {
+                        if let Ok(url) = nostr_sdk::Url::parse(banner) {
+                            metadata = metadata.banner(url);
+                        }
+                    }
+                    if let Some(website) = &profile.website {
+                        if let Ok(url) = nostr_sdk::Url::parse(website) {
+                            metadata = metadata.website(url);
+                        }
+                    }
+                    if let Some(nip05) = &profile.nip05 {
+                        metadata = metadata.nip05(nip05);
+                    }
+                    if let Some(lud16) = &profile.lud16 {
+                        metadata = metadata.lud16(lud16);
+                    }
+
+                    author_metadata.set(Some(metadata));
+                }
+                Err(e) => {
+                    log::debug!("Failed to fetch profile for {}: {}", pubkey_str, e);
+                }
             }
         });
     }));
+
+    // Fetch reposter's profile metadata if this is a repost
+    use_effect(use_reactive(&repost_info, move |info_opt| {
+        // Clear old metadata immediately
+        reposter_metadata.set(None);
+
+        if let Some((reposter_pubkey, _timestamp)) = info_opt {
+            let reposter_pubkey_str = reposter_pubkey.to_string();
+            spawn(async move {
+                // Check PROFILE_CACHE first
+                if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&reposter_pubkey_str) {
+                    let mut metadata = nostr_sdk::Metadata::new();
+                    if let Some(name) = &cached_profile.name {
+                        metadata = metadata.name(name);
+                    }
+                    if let Some(display_name) = &cached_profile.display_name {
+                        metadata = metadata.display_name(display_name);
+                    }
+                    if let Some(picture) = &cached_profile.picture {
+                        if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                            metadata = metadata.picture(url);
+                        }
+                    }
+                    reposter_metadata.set(Some(metadata));
+                    return;
+                }
+
+                // Not in cache - fetch using profile system
+                match crate::stores::profiles::fetch_profile(reposter_pubkey_str.clone()).await {
+                    Ok(profile) => {
+                        let mut metadata = nostr_sdk::Metadata::new();
+                        if let Some(name) = &profile.name {
+                            metadata = metadata.name(name);
+                        }
+                        if let Some(display_name) = &profile.display_name {
+                            metadata = metadata.display_name(display_name);
+                        }
+                        if let Some(picture) = &profile.picture {
+                            if let Ok(url) = nostr_sdk::Url::parse(picture) {
+                                metadata = metadata.picture(url);
+                            }
+                        }
+                        reposter_metadata.set(Some(metadata));
+                    }
+                    Err(e) => {
+                        log::debug!("Failed to fetch reposter profile: {}", e);
+                    }
+                }
+            });
+        }
+    }));
+
+    // Check if post is muted or author is blocked
+    let event_id_mute_check = event_id.clone();
+    let author_pubkey_block_check = author_pubkey.clone();
+    use_effect(move || {
+        let event_id = event_id_mute_check.clone();
+        let author_pubkey = author_pubkey_block_check.clone();
+        spawn(async move {
+            // Check if post is muted
+            if let Ok(muted) = nostr_client::is_post_muted(event_id).await {
+                is_muted.set(muted);
+            }
+
+            // Check if author is blocked
+            if let Ok(blocked) = nostr_client::is_user_blocked(author_pubkey).await {
+                is_author_blocked.set(blocked);
+            }
+        });
+    });
 
     // Format timestamp
     let timestamp = format_timestamp(created_at.as_secs());
@@ -281,6 +420,19 @@ pub fn NoteCard(
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
 
+    // Get reposter info if this is a repost
+    let reposter_display_info = repost_info.map(|(reposter_pubkey, repost_timestamp)| {
+        let reposter_pubkey_str = reposter_pubkey.to_string();
+        let reposter_display = reposter_metadata.read().as_ref()
+            .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+            .unwrap_or_else(|| format!("{}...{}",
+                &reposter_pubkey_str[..8],
+                &reposter_pubkey_str[reposter_pubkey_str.len()-8..]
+            ));
+        let repost_time = format_timestamp(repost_timestamp.as_secs());
+        (reposter_pubkey_str, reposter_display, repost_time)
+    });
+
     // Compute dynamic class strings
     let like_button_class = if *is_liked.read() {
         "flex items-center text-red-500 transition"
@@ -309,19 +461,66 @@ pub fn NoteCard(
     let nav = use_navigator();
     let event_id_nav = event_id.clone();
 
+    // Check if content should be hidden
+    let is_hidden = (*is_muted.read() || *is_author_blocked.read()) && !*show_hidden_anyway.read();
+
     rsx! {
         article {
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_| {
-                nav.push(Route::Note { note_id: event_id_nav.clone() });
+                if !is_hidden {
+                    nav.push(Route::Note { note_id: event_id_nav.clone() });
+                }
             },
 
-            div {
-                class: "flex gap-3",
-
-                // Avatar
+            // Show hidden state if muted or blocked
+            if is_hidden {
                 div {
-                    class: "flex-shrink-0",
+                    class: "flex items-center gap-3 py-4",
+                    div {
+                        class: "flex-1 text-muted-foreground text-sm",
+                        if *is_author_blocked.read() {
+                            "Post from blocked user"
+                        } else if *is_muted.read() {
+                            "Muted post"
+                        }
+                    }
+                    button {
+                        class: "px-3 py-1 text-sm text-primary hover:underline",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            show_hidden_anyway.set(true);
+                        },
+                        "Show anyway"
+                    }
+                }
+            } else {
+                // Repost indicator (if this is a repost)
+                if let Some((reposter_pubkey_str, reposter_display, repost_time)) = &reposter_display_info {
+                    div {
+                        class: "flex items-center gap-2 text-sm text-muted-foreground mb-2",
+                        Repeat2Icon { class: "w-4 h-4" }
+                        Link {
+                            to: Route::Profile { pubkey: reposter_pubkey_str.clone() },
+                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                            class: "hover:underline font-medium text-muted-foreground",
+                            "{reposter_display} reposted"
+                        }
+                        span {
+                            "·"
+                        }
+                        span {
+                            "{repost_time}"
+                        }
+                    }
+                }
+
+                div {
+                    class: "flex gap-3",
+
+                    // Avatar
+                    div {
+                        class: "flex-shrink-0",
                     Link {
                         to: Route::Profile { pubkey: author_pubkey.clone() },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -607,6 +806,7 @@ pub fn NoteCard(
                         }
                     }
                 }
+            }
             }
         }
 

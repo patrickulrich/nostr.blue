@@ -116,12 +116,10 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     log::info!("Fetching lists for {}", pubkey_str);
 
     // Build filter for NIP-51 list kinds
-    let mut filter = Filter::new().author(pubkey);
-
-    // Add all list kinds
-    for &kind in LIST_KINDS {
-        filter = filter.kind(Kind::from(kind));
-    }
+    // Use .kinds() for efficient batch kind filtering instead of loop
+    let filter = Filter::new()
+        .author(pubkey)
+        .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
 
     // Fetch events
     let events = client.fetch_events(filter, Duration::from_secs(10))

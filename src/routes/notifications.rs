@@ -1005,36 +1005,23 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
 
 /// Batch prefetch author metadata for notification authors
 async fn prefetch_notification_authors(notifications: &[NotificationType]) {
-    use std::collections::HashSet;
+    use crate::utils::profile_prefetch;
 
-    // Collect unique author pubkeys from notification events
-    let pubkeys: Vec<String> = notifications.iter()
-        .filter_map(|notif| {
-            match notif {
-                NotificationType::Mention(e) => Some(e.pubkey.to_hex()),
-                NotificationType::Reply(e) => Some(e.pubkey.to_hex()),
-                NotificationType::Reaction(e) => Some(e.pubkey.to_hex()),
-                NotificationType::Repost(e) => Some(e.pubkey.to_hex()),
-                NotificationType::Zap(e) => Some(e.pubkey.to_hex()),
-            }
-        })
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if pubkeys.is_empty() {
+    if notifications.is_empty() {
         return;
     }
 
-    log::info!("Batch fetching profiles for {} notification authors", pubkeys.len());
+    // Extract pubkeys directly without string conversion
+    let pubkeys = profile_prefetch::extract_pubkeys(notifications, |notif| {
+        match notif {
+            NotificationType::Mention(e) => e.pubkey,
+            NotificationType::Reply(e) => e.pubkey,
+            NotificationType::Reaction(e) => e.pubkey,
+            NotificationType::Repost(e) => e.pubkey,
+            NotificationType::Zap(e) => e.pubkey,
+        }
+    });
 
-    // Use the batch fetch function which populates PROFILE_CACHE
-    match profiles::fetch_profiles_batch(pubkeys).await {
-        Ok(profiles_map) => {
-            log::info!("Successfully batch fetched {} notification author profiles", profiles_map.len());
-        }
-        Err(e) => {
-            log::warn!("Failed to batch fetch notification author profiles: {}", e);
-        }
-    }
+    // Use optimized prefetch utility - no string conversions, direct database queries
+    profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }

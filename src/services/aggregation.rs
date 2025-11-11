@@ -112,6 +112,7 @@ impl CountsCache {
     /// Invalidate (remove) cached counts for an event
     ///
     /// Useful when user publishes a new interaction (like, repost, etc.)
+    #[allow(dead_code)]
     fn invalidate(&mut self, event_id: &str) {
         self.cache.pop(event_id);
     }
@@ -284,6 +285,7 @@ pub async fn fetch_interaction_counts_batch(
 /// publish_reaction(event_id, content).await?;
 /// invalidate_interaction_counts(&event_id);
 /// ```
+#[allow(dead_code)]
 pub fn invalidate_interaction_counts(event_id: &str) {
     {
         let mut cache = get_counts_cache().lock().unwrap();
@@ -293,6 +295,7 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 }
 
 /// Invalidate cached counts for multiple events at once
+#[allow(dead_code)]
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
         let mut cache = get_counts_cache().lock().unwrap();

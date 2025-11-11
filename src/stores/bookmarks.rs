@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, EventBuilder, Tag, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 
@@ -88,6 +88,11 @@ pub fn is_bookmarked(event_id: &str) -> bool {
 
 /// Add event to bookmarks
 pub async fn bookmark_event(event_id: String) -> Result<(), String> {
+    // Validate event ID early to prevent invalid IDs from being stored
+    use nostr_sdk::EventId;
+    EventId::from_hex(&event_id)
+        .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
+
     let mut bookmarks = BOOKMARKED_EVENTS.read().clone();
 
     // Don't add if already bookmarked
@@ -276,20 +281,30 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 
     log::info!("Publishing {} bookmarks", bookmarks.len());
 
-    // Build tags for bookmark list
-    let mut tags = vec![
-        Tag::identifier("bookmark"), // d tag
-    ];
-
-    for event_id in bookmarks {
-        tags.push(Tag::event(
-            nostr_sdk::EventId::from_hex(&event_id)
-                .map_err(|e| format!("Invalid event ID: {}", e))?,
-        ));
+    // Parse event IDs with better error messages
+    use nostr_sdk::EventId;
+    let mut event_ids = Vec::new();
+    for id in bookmarks.into_iter() {
+        match EventId::from_hex(&id) {
+            Ok(event_id) => event_ids.push(event_id),
+            Err(e) => {
+                return Err(format!("Invalid event ID '{}': {}", id, e));
+            }
+        }
     }
 
-    // Build and publish event
-    let builder = EventBuilder::new(Kind::from(30001), "").tags(tags);
+    // Use NIP-51 Bookmarks struct for type-safe bookmark list construction
+    use nostr_sdk::nips::nip51::Bookmarks;
+    let bookmarks_list = Bookmarks {
+        event_ids,
+        coordinate: Vec::new(),
+        hashtags: Vec::new(),
+        urls: Vec::new(),
+    };
+
+    // Use EventBuilder::bookmarks_set() for proper NIP-51 compliance
+    // This automatically adds the 'd' tag and properly formats all bookmark entries
+    let builder = EventBuilder::bookmarks_set("bookmark", bookmarks_list);
 
     match client.send_event_builder(builder).await {
         Ok(_) => {

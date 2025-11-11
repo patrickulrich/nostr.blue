@@ -144,6 +144,7 @@ impl ThreadTreeCache {
     /// Invalidate (remove) cached thread tree for a root event
     ///
     /// Useful when a new reply is posted to the thread
+    #[allow(dead_code)]
     fn invalidate(&mut self, root_event_id: &str) {
         self.cache.pop(root_event_id);
     }
@@ -351,6 +352,7 @@ pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
 /// publish_reply(root_event_id, content).await?;
 /// invalidate_thread_tree_cache(&root_event_id);
 /// ```
+#[allow(dead_code)]
 pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
     let root_id_hex = root_event_id.to_hex();
     {
@@ -361,6 +363,7 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
 }
 
 /// Invalidate cached thread trees for multiple root events at once
+#[allow(dead_code)]
 pub fn invalidate_thread_tree_cache_batch(root_event_ids: &[EventId]) {
     {
         let mut cache = get_thread_tree_cache().lock().unwrap();

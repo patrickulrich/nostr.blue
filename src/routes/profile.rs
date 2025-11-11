@@ -202,6 +202,9 @@ pub fn Profile(pubkey: String) -> Element {
 
         loading_events.set(true);
 
+        // Clear profile cache to prevent stale author metadata when switching tabs
+        crate::stores::profiles::PROFILE_CACHE.write().clear();
+
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, None).await {
                 Ok(outcome) => {
@@ -1414,29 +1417,8 @@ fn get_empty_state_icon(tab: &ProfileTab) -> &'static str {
 
 /// Batch prefetch author metadata for all events
 async fn prefetch_author_metadata(events: &[NostrEvent]) {
-    use std::collections::HashSet;
-    use crate::stores::profiles;
+    use crate::utils::profile_prefetch;
 
-    // Collect unique author pubkeys as hex strings
-    let pubkeys: Vec<String> = events.iter()
-        .map(|e| e.pubkey.to_hex())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if pubkeys.is_empty() {
-        return;
-    }
-
-    log::info!("Batch fetching profiles for {} unique authors", pubkeys.len());
-
-    // Use the batch fetch function which populates PROFILE_CACHE
-    match profiles::fetch_profiles_batch(pubkeys).await {
-        Ok(profiles_map) => {
-            log::info!("Successfully batch fetched {} profiles into cache", profiles_map.len());
-        }
-        Err(e) => {
-            log::warn!("Failed to batch fetch profiles: {}", e);
-        }
-    }
+    // Use optimized prefetch utility - no string conversions, direct database queries
+    profile_prefetch::prefetch_event_authors(events).await;
 }
