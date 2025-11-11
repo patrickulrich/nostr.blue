@@ -799,8 +799,12 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
     let mut other_tags = Vec::new(); // Preserve unknown/custom tags
+    let mut existing_content = String::new(); // Preserve existing content
 
     if let Some(event) = mute_event {
+        // Preserve the existing content before consuming the event
+        existing_content = event.content.clone();
+
         // Extract existing muted posts, blocked users, hashtags, and words
         for tag in event.tags.iter() {
             if tag.kind() == nostr::TagKind::e() {
@@ -863,7 +867,7 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
     // Re-attach preserved tags
     all_tags.extend(other_tags);
 
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -890,6 +894,9 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
     // Fetch current mute list
     let mute_event = fetch_mute_list().await?
         .ok_or("No mute list found")?;
+
+    // Preserve the existing content before consuming the event
+    let existing_content = mute_event.content.clone();
 
     // Build new mute list without the target post
     let mut muted_posts = Vec::new();
@@ -955,7 +962,7 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
     // Re-attach preserved tags
     all_tags.extend(other_tags);
 
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -990,8 +997,12 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
     let mut hashtags = Vec::new();
     let mut words = Vec::new();
     let mut other_tags = Vec::new(); // Preserve unknown/custom tags
+    let mut existing_content = String::new(); // Preserve existing content
 
     if let Some(event) = mute_event {
+        // Preserve the existing content before consuming the event
+        existing_content = event.content.clone();
+
         // Extract existing muted posts, blocked users, hashtags, and words
         for tag in event.tags.iter() {
             if tag.kind() == nostr::TagKind::e() {
@@ -1054,7 +1065,7 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
     // Re-attach preserved tags
     all_tags.extend(other_tags);
 
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
@@ -1082,6 +1093,9 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
     // Fetch current mute list
     let mute_event = fetch_mute_list().await?
         .ok_or("No mute list found")?;
+
+    // Preserve the existing content before consuming the event
+    let existing_content = mute_event.content.clone();
 
     // Build new mute list without the target user
     let mut muted_posts = Vec::new();
@@ -1147,7 +1161,7 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
     // Re-attach preserved tags
     all_tags.extend(other_tags);
 
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), "").tags(all_tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;

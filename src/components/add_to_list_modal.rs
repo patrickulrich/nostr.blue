@@ -290,6 +290,9 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
         .map_err(|e| format!("Failed to fetch list: {}", e))?
         .ok_or("List not found")?;
 
+    // Preserve the existing content before consuming the event
+    let existing_content = list_event.content.clone();
+
     // Extract existing tags and add new event
     let mut tags: Vec<Tag> = list_event.tags.into_iter().collect();
 
@@ -306,8 +309,8 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     // Add new event tag
     tags.push(Tag::event(target_event_id));
 
-    // Publish updated list
-    let builder = EventBuilder::new(Kind::from(30004), "").tags(tags);
+    // Publish updated list with preserved content
+    let builder = EventBuilder::new(Kind::from(30004), existing_content).tags(tags);
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to update list: {}", e))?;
