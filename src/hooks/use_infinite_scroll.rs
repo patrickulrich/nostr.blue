@@ -92,14 +92,48 @@ where
     // Setup observer once on mount with retries to find DOM element
     // Don't subscribe to signals - let callback guards handle enabled/disabled state
     #[cfg(target_family = "wasm")]
-    use_hook(move || {
-        use wasm_bindgen::prelude::*;
-        use wasm_bindgen::JsCast;
+    {
+        // Create a cleanup guard with a shared cleanup flag
+        #[derive(Clone)]
+        struct ObserverCleanup {
+            handles: Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>>>,
+            cleaned: Rc<RefCell<bool>>,
+        }
 
-        log::info!("[InfiniteScroll] Setting up IntersectionObserver (one-time)");
+        impl Drop for ObserverCleanup {
+            fn drop(&mut self) {
+                // Only cleanup once, when the last reference is dropped
+                if Rc::strong_count(&self.handles) == 1 && !*self.cleaned.borrow() {
+                    if let Some((observer, _closure)) = self.handles.borrow_mut().take() {
+                        observer.disconnect();
+                        *self.cleaned.borrow_mut() = true;
+                        log::info!("[InfiniteScroll] Cleaned up observer and closure on unmount");
+                    }
+                }
+            }
+        }
 
-        let id = id_for_effect.clone();
-        let mut trigger_clone = trigger.clone();
+        let observer_handles = use_hook(|| {
+            Rc::new(RefCell::new(None::<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>))
+        });
+
+        // Store cleanup handler in hook so it lives for component lifetime
+        use_hook(|| {
+            ObserverCleanup {
+                handles: observer_handles.clone(),
+                cleaned: Rc::new(RefCell::new(false)),
+            }
+        });
+
+        use_hook(move || {
+            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::JsCast;
+
+            log::info!("[InfiniteScroll] Setting up IntersectionObserver (one-time)");
+
+            let id = id_for_effect.clone();
+            let mut trigger_clone = trigger.clone();
+            let observer_handles_clone = observer_handles.clone();
 
         spawn(async move {
             log::info!("[InfiniteScroll] Async task started");
@@ -199,14 +233,14 @@ where
             observer.observe(&element);
             log::info!("[InfiniteScroll] IntersectionObserver now watching sentinel element - setup complete");
 
-            // Keep observer and callback alive for component lifetime
-            std::mem::forget(observer);
-            callback.forget();
+            // Store observer and callback for cleanup on unmount
+            *observer_handles_clone.borrow_mut() = Some((observer, callback));
         });
 
         // Return unit for use_hook
         ()
-    });
+        });
+    }
 
     sentinel_id
 }

@@ -4,6 +4,8 @@ use crate::stores::gif_store::{GIF_RESULTS, GIF_LOADING, RECENT_GIFS, load_initi
 #[derive(Props, Clone, PartialEq)]
 pub struct GifPickerProps {
     pub on_gif_selected: EventHandler<String>,
+    #[props(default = false)]
+    pub icon_only: bool,
 }
 
 #[component]
@@ -49,7 +51,12 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
             // GIF button
             button {
                 id: "{button_id}",
-                class: "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition",
+                class: if props.icon_only {
+                    "p-2 rounded-full hover:bg-accent transition text-sm font-bold"
+                } else {
+                    "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                },
+                title: if props.icon_only { "Add GIF" } else { "" },
                 onclick: move |_| {
                     let current = *show_picker.read();
                     show_picker.set(!current);
@@ -112,7 +119,11 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
                 },
-                "🎬 GIF"
+                if props.icon_only {
+                    "GIF"
+                } else {
+                    "🎬 GIF"
+                }
             }
 
             // GIF picker popover

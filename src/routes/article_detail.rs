@@ -36,12 +36,12 @@ pub fn ArticleDetail(naddr: String) -> Element {
             loading.set(true);
             error.set(None);
 
-            // Clear profile cache to prevent stale author metadata
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
-
             // Decode the naddr
             match decode_naddr(&naddr_str) {
                 Ok((pubkey, identifier)) => {
+                    // Clear only this author's profile from cache to prevent stale metadata
+                    crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
+
                     // Fetch the article
                     match crate::stores::nostr_client::fetch_article_by_coordinate(
                         pubkey.clone(),

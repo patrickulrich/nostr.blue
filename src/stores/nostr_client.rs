@@ -796,9 +796,11 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
     // Build new mute list
     let mut muted_posts = Vec::new();
     let mut blocked_users = Vec::new();
+    let mut hashtags = Vec::new();
+    let mut words = Vec::new();
 
     if let Some(event) = mute_event {
-        // Extract existing muted posts and blocked users
+        // Extract existing muted posts, blocked users, hashtags, and words
         for tag in event.tags.iter() {
             if tag.kind() == nostr::TagKind::e() {
                 if let Some(id) = tag.content() {
@@ -811,6 +813,16 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
                     if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
                         blocked_users.push(pubkey);
                     }
+                }
+            } else if tag.kind() == nostr::TagKind::t() {
+                // Hashtag tag
+                if let Some(hashtag) = tag.content() {
+                    hashtags.push(hashtag.to_string());
+                }
+            } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+                // Word tag
+                if let Some(word) = tag.content() {
+                    words.push(word.to_string());
                 }
             }
         }
@@ -825,9 +837,9 @@ pub async fn mute_post(event_id: String) -> Result<(), String> {
     use nostr_sdk::nips::nip51::MuteList;
     let mute_list = MuteList {
         public_keys: blocked_users,
-        hashtags: Vec::new(),
+        hashtags,
         event_ids: muted_posts,
-        words: Vec::new(),
+        words,
     };
 
     let builder = nostr::EventBuilder::mute_list(mute_list);
@@ -861,6 +873,8 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
     // Build new mute list without the target post
     let mut muted_posts = Vec::new();
     let mut blocked_users = Vec::new();
+    let mut hashtags = Vec::new();
+    let mut words = Vec::new();
 
     for tag in mute_event.tags.iter() {
         if tag.kind() == nostr::TagKind::e() {
@@ -877,6 +891,16 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
                     blocked_users.push(pubkey);
                 }
             }
+        } else if tag.kind() == nostr::TagKind::t() {
+            // Hashtag tag
+            if let Some(hashtag) = tag.content() {
+                hashtags.push(hashtag.to_string());
+            }
+        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+            // Word tag
+            if let Some(word) = tag.content() {
+                words.push(word.to_string());
+            }
         }
     }
 
@@ -884,9 +908,9 @@ pub async fn unmute_post(event_id: String) -> Result<(), String> {
     use nostr_sdk::nips::nip51::MuteList;
     let mute_list = MuteList {
         public_keys: blocked_users,
-        hashtags: Vec::new(),
+        hashtags,
         event_ids: muted_posts,
-        words: Vec::new(),
+        words,
     };
 
     let builder = nostr::EventBuilder::mute_list(mute_list);
@@ -921,9 +945,11 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
     // Build new mute list
     let mut muted_posts = Vec::new();
     let mut blocked_users = Vec::new();
+    let mut hashtags = Vec::new();
+    let mut words = Vec::new();
 
     if let Some(event) = mute_event {
-        // Extract existing muted posts and blocked users
+        // Extract existing muted posts, blocked users, hashtags, and words
         for tag in event.tags.iter() {
             if tag.kind() == nostr::TagKind::e() {
                 if let Some(id) = tag.content() {
@@ -936,6 +962,16 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
                     if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
                         blocked_users.push(pubkey);
                     }
+                }
+            } else if tag.kind() == nostr::TagKind::t() {
+                // Hashtag tag
+                if let Some(hashtag) = tag.content() {
+                    hashtags.push(hashtag.to_string());
+                }
+            } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+                // Word tag
+                if let Some(word) = tag.content() {
+                    words.push(word.to_string());
                 }
             }
         }
@@ -950,9 +986,9 @@ pub async fn block_user(pubkey: String) -> Result<(), String> {
     use nostr_sdk::nips::nip51::MuteList;
     let mute_list = MuteList {
         public_keys: blocked_users,
-        hashtags: Vec::new(),
+        hashtags,
         event_ids: muted_posts,
-        words: Vec::new(),
+        words,
     };
 
     let builder = nostr::EventBuilder::mute_list(mute_list);
@@ -987,6 +1023,8 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
     // Build new mute list without the target user
     let mut muted_posts = Vec::new();
     let mut blocked_users = Vec::new();
+    let mut hashtags = Vec::new();
+    let mut words = Vec::new();
 
     for tag in mute_event.tags.iter() {
         if tag.kind() == nostr::TagKind::e() {
@@ -1003,6 +1041,16 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
                     }
                 }
             }
+        } else if tag.kind() == nostr::TagKind::t() {
+            // Hashtag tag
+            if let Some(hashtag) = tag.content() {
+                hashtags.push(hashtag.to_string());
+            }
+        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+            // Word tag
+            if let Some(word) = tag.content() {
+                words.push(word.to_string());
+            }
         }
     }
 
@@ -1010,9 +1058,9 @@ pub async fn unblock_user(pubkey: String) -> Result<(), String> {
     use nostr_sdk::nips::nip51::MuteList;
     let mute_list = MuteList {
         public_keys: blocked_users,
-        hashtags: Vec::new(),
+        hashtags,
         event_ids: muted_posts,
-        words: Vec::new(),
+        words,
     };
 
     let builder = nostr::EventBuilder::mute_list(mute_list);

@@ -32,7 +32,6 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_report = event_id.clone();
     let event_id_modal_report = event_id.clone();
     let event_id_modal_list = event_id.clone();
-    let event_id_report_on_close = event_id.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -236,11 +235,6 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 author_pubkey: author_pubkey_modal.clone(),
                 on_close: move |_| {
                     show_report_modal.set(false);
-                    // Also mute the reported post
-                    let event_id = event_id_report_on_close.clone();
-                    spawn(async move {
-                        let _ = nostr_client::mute_post(event_id).await;
-                    });
                 }
             }
         }

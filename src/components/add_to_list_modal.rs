@@ -31,8 +31,13 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
             .collect::<Vec<_>>()
     });
 
+    // Clone needed fields before creating the move closure
+    let event_id = props.event_id.clone();
+    let on_close = props.on_close.clone();
+
     let handle_add_to_list = move |_| {
-        let event_id = props.event_id.clone();
+        let event_id = event_id.clone();
+        let on_close = on_close.clone();
 
         loading.set(true);
         error_msg.set(None);
@@ -70,7 +75,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     // Auto-close after success
                     spawn(async move {
                         gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
-                        props.on_close.call(());
+                        on_close.call(());
                     });
                 }
                 Err(e) => {
