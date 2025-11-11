@@ -119,6 +119,9 @@ pub fn Polls() -> Element {
                         return;
                     }
 
+                    // Capture raw count before deduping to determine has_more
+                    let raw_count = new_events.len();
+
                     // First, deduplicate to get unique new events
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = events.read();
@@ -142,8 +145,8 @@ pub fn Polls() -> Element {
                         last_event_id.set(Some(last_event.id));
                     }
 
-                    // Determine if there are more events to load based on unique count
-                    has_more.set(unique_new.len() >= 50);
+                    // Determine if there are more events to load based on raw count (before deduping)
+                    has_more.set(raw_count >= 50);
 
                     // Append only unique new events
                     events.with_mut(|current| {
@@ -336,7 +339,7 @@ pub fn Polls() -> Element {
 }
 
 /// Load polls from followed users
-async fn load_following_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
+async fn load_following_polls(until: Option<u64>, _last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated. Please sign in to view your following feed.")?;
 
@@ -372,16 +375,12 @@ async fn load_following_polls(until: Option<u64>, last_event_id: Option<nostr_sd
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    // Filter out the last seen event ID to avoid duplicates
-    if let Some(last_id) = last_event_id {
-        event_vec.retain(|e| e.id != last_id);
-    }
-
+    // Return full page - deduplication is handled by the caller
     Ok(event_vec)
 }
 
 /// Load polls from everyone (global feed)
-async fn load_global_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
+async fn load_global_polls(until: Option<u64>, _last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
     // Create filter for polls
     let mut filter = Filter::new()
         .kind(Kind::Poll)
@@ -400,10 +399,6 @@ async fn load_global_polls(until: Option<u64>, last_event_id: Option<nostr_sdk::
     let mut event_vec: Vec<Event> = events.into_iter().collect();
     event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    // Filter out the last seen event ID to avoid duplicates
-    if let Some(last_id) = last_event_id {
-        event_vec.retain(|e| e.id != last_id);
-    }
-
+    // Return full page - deduplication is handled by the caller
     Ok(event_vec)
 }

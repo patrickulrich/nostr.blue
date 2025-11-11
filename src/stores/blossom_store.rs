@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_blossom::prelude::*;
 use nostr_sdk::Url;
 use sha2::{Sha256, Digest};
@@ -10,14 +11,22 @@ use crate::stores::nostr_client;
 pub const DEFAULT_SERVER: &str = "https://blossom.primal.net";
 
 /// Global signal for the list of configured Blossom servers
-pub static BLOSSOM_SERVERS: GlobalSignal<Vec<String>> = Signal::global(|| vec![DEFAULT_SERVER.to_string()]);
+/// Store for blossom servers with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct BlossomServersStore {
+    pub data: Vec<String>,
+}
+
+pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| { let mut store = BlossomServersStore::default(); store.data = vec![DEFAULT_SERVER.to_string()]; Store::new(store) });
 
 /// Global signal for upload progress (0-100)
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
 
 /// Add a custom Blossom server
 pub fn add_server(url: String) {
-    let mut servers = BLOSSOM_SERVERS.write();
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut servers = data.write();
     if !servers.contains(&url) {
         servers.push(url);
     }
@@ -25,7 +34,9 @@ pub fn add_server(url: String) {
 
 /// Remove a Blossom server
 pub fn remove_server(url: &str) {
-    let mut servers = BLOSSOM_SERVERS.write();
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut servers = data.write();
     servers.retain(|s| s != url);
 
     // Ensure we always have at least one server
@@ -36,7 +47,7 @@ pub fn remove_server(url: &str) {
 
 /// Get the first server from the list (primary upload target)
 pub fn get_primary_server() -> String {
-    BLOSSOM_SERVERS.read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string())
+    BLOSSOM_SERVERS.read().data().read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string())
 }
 
 /// Upload media (image or video) to Blossom with optional compression
@@ -62,9 +73,10 @@ pub async fn upload_image(
     // Reset progress
     UPLOAD_PROGRESS.write().replace(0.0);
 
-    // Get signer for authentication
-    let signer = nostr_client::get_signer()
-        .ok_or("Not authenticated. Please sign in to upload media.")?;
+    // Check authentication early (before compression)
+    if nostr_client::get_signer().is_none() {
+        return Err("Not authenticated. Please sign in to upload media.".to_string());
+    }
 
     // Compress image if quality < 100 and not a video
     let final_data = if !is_video && quality < 100 {
@@ -82,59 +94,12 @@ pub async fn upload_image(
     log::info!("Final {} size: {} bytes", media_type, final_data.len());
     UPLOAD_PROGRESS.write().replace(50.0);
 
-    // Get primary server
-    let server_url = get_primary_server();
-    let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
-
-    // Create Blossom client
-    let client = BlossomClient::new(url);
-
-    // Upload blob with authentication
-    log::info!("Uploading to {} with authentication", server_url);
-    UPLOAD_PROGRESS.write().replace(75.0);
-
-    // Create authorization options for the upload
-    let auth_options = Some(BlossomAuthorizationOptions {
-        content: Some(format!("Upload {} via nostr.blue", media_type)),
-        expiration: None, // No expiration
-        action: None, // Default action (upload)
-        scope: None, // No specific scope restriction
-    });
-
-    // Upload with proper authentication based on signer type
-    let descriptor = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            client
-                .upload_blob(final_data, Some(content_type), auth_options, Some(&keys))
-                .await
-                .map_err(|e| format!("Upload failed: {}", e))?
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            client
-                .upload_blob(final_data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
-                .await
-                .map_err(|e| format!("Upload failed: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            client
-                .upload_blob(final_data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
-                .await
-                .map_err(|e| format!("Upload failed: {}", e))?
-        }
-    };
-
-    UPLOAD_PROGRESS.write().replace(100.0);
-
-    log::info!("Upload successful: {}", descriptor.url);
-
-    // Clear progress after a short delay
-    spawn(async move {
-        gloo_timers::future::TimeoutFuture::new(1000).await;
-        *UPLOAD_PROGRESS.write() = None;
-    });
-
-    Ok(descriptor.url.to_string())
+    upload_blob_with_auth(
+        final_data,
+        content_type,
+        format!("Upload {} via nostr.blue", media_type),
+        50.0,
+    ).await
 }
 
 /// Compress an image to the specified quality level
@@ -187,29 +152,27 @@ async fn compress_image(
     Ok(compressed_data)
 }
 
-/// Upload audio to Blossom (no compression)
+/// Internal helper to upload a blob with authentication
 ///
 /// # Arguments
-/// * `data` - Raw audio bytes
-/// * `content_type` - MIME type (e.g., "audio/mp4", "audio/webm", "audio/ogg")
+/// * `data` - Raw blob bytes
+/// * `content_type` - MIME type
+/// * `auth_content` - Authorization message content
+/// * `start_progress` - Progress value to set at upload start (after any pre-processing)
 ///
 /// # Returns
-/// URL of the uploaded audio
-#[allow(dead_code)]
-pub async fn upload_audio(
+/// URL of the uploaded blob
+async fn upload_blob_with_auth(
     data: Vec<u8>,
     content_type: String,
+    auth_content: String,
+    start_progress: f32,
 ) -> Result<String, String> {
-    log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
-
-    // Reset progress
-    UPLOAD_PROGRESS.write().replace(0.0);
-
     // Get signer for authentication
     let signer = nostr_client::get_signer()
-        .ok_or("Not authenticated. Please sign in to upload audio.")?;
+        .ok_or("Not authenticated. Please sign in to upload.")?;
 
-    UPLOAD_PROGRESS.write().replace(25.0);
+    UPLOAD_PROGRESS.write().replace(start_progress);
 
     // Get primary server
     let server_url = get_primary_server();
@@ -219,11 +182,11 @@ pub async fn upload_audio(
     let client = BlossomClient::new(url);
 
     log::info!("Uploading to {} with authentication", server_url);
-    UPLOAD_PROGRESS.write().replace(50.0);
+    UPLOAD_PROGRESS.write().replace(start_progress + 25.0);
 
     // Create authorization options for the upload
     let auth_options = Some(BlossomAuthorizationOptions {
-        content: Some("Upload voice message via nostr.blue".to_string()),
+        content: Some(auth_content),
         expiration: None, // No expiration
         action: None, // Default action (upload)
         scope: None, // No specific scope restriction
@@ -235,26 +198,35 @@ pub async fn upload_audio(
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(&keys))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             client
                 .upload_blob(data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
                 .await
-                .map_err(|e| format!("Upload failed: {}", e))?
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
         }
     };
 
     UPLOAD_PROGRESS.write().replace(100.0);
 
-    log::info!("Audio upload successful: {}", descriptor.url);
+    log::info!("Upload successful: {}", descriptor.url);
 
     // Clear progress after a short delay
     spawn(async move {
@@ -263,6 +235,31 @@ pub async fn upload_audio(
     });
 
     Ok(descriptor.url.to_string())
+}
+
+/// Upload audio to Blossom (no compression)
+///
+/// # Arguments
+/// * `data` - Raw audio bytes
+/// * `content_type` - MIME type (e.g., "audio/mp4", "audio/webm", "audio/ogg")
+///
+/// # Returns
+/// URL of the uploaded audio
+pub async fn upload_audio(
+    data: Vec<u8>,
+    content_type: String,
+) -> Result<String, String> {
+    log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
+
+    // Reset progress
+    UPLOAD_PROGRESS.write().replace(0.0);
+
+    upload_blob_with_auth(
+        data,
+        content_type,
+        "Upload voice message via nostr.blue".to_string(),
+        25.0,
+    ).await
 }
 
 /// Calculate SHA-256 hash of data

@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus_stores::Store;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 
 /// Custom emoji from Nostr (NIP-30 format)
@@ -18,8 +20,20 @@ pub struct EmojiSet {
 }
 
 /// Global state for custom emojis from Nostr
-pub static CUSTOM_EMOJIS: GlobalSignal<Vec<CustomEmoji>> = Signal::global(Vec::new);
-pub static EMOJI_SETS: GlobalSignal<Vec<EmojiSet>> = Signal::global(Vec::new);
+/// Store for custom emojis with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct CustomEmojisStore {
+    pub data: Vec<CustomEmoji>,
+}
+
+/// Store for emoji sets with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct EmojiSetsStore {
+    pub data: Vec<EmojiSet>,
+}
+
+pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> = Signal::global(|| Store::new(CustomEmojisStore::default()));
+pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| Store::new(EmojiSetsStore::default()));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
 
 /// Fetch user's custom emojis (kind 10030) and emoji sets (kind 30030)
@@ -165,8 +179,8 @@ pub async fn fetch_custom_emojis(pubkey: String) {
     log::info!("Loaded {} emoji sets with emojis", emoji_sets.len());
 
     // Update global state
-    *CUSTOM_EMOJIS.write() = custom_emojis;
-    *EMOJI_SETS.write() = emoji_sets;
+    *CUSTOM_EMOJIS.read().data().write() = custom_emojis;
+    *EMOJI_SETS.read().data().write() = emoji_sets;
     *EMOJI_FETCH_TIME.write() = Some(Timestamp::now());
 }
 

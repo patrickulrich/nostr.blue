@@ -7,6 +7,9 @@ use once_cell::sync::Lazy;
 #[component]
 pub fn PollNew() -> Element {
     let navigator = navigator();
+    let nav_close = navigator.clone();
+    let nav_publish = navigator.clone();
+    let nav_effect = navigator.clone();
 
     // Form state
     let mut poll_question = use_signal(|| String::new());
@@ -44,7 +47,7 @@ pub fn PollNew() -> Element {
 
     // Handle close
     let handle_close = move |_| {
-        navigator.go_back();
+        nav_close.go_back();
     };
 
     // Handle options change
@@ -68,6 +71,7 @@ pub fn PollNew() -> Element {
         is_publishing.set(true);
         error_message.set(None);
 
+        let nav_spawn = nav_publish.clone();
         spawn(async move {
             // Calculate end time
             let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
@@ -99,7 +103,7 @@ pub fn PollNew() -> Element {
                 Ok(event_id) => {
                     log::info!("Poll published successfully: {}", event_id);
                     is_publishing.set(false);
-                    navigator.push(crate::routes::Route::Polls {});
+                    nav_spawn.push(crate::routes::Route::Polls {});
                 }
                 Err(e) => {
                     log::error!("Failed to publish poll: {}", e);
@@ -113,7 +117,7 @@ pub fn PollNew() -> Element {
     // Redirect if not authenticated - hoist use_effect to maintain hook order
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            nav_effect.push(crate::routes::Route::Home {});
         }
     });
 

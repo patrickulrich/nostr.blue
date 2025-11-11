@@ -1032,7 +1032,7 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 
 // Helper function to load events based on tab type
 // Fetches enough events to return approximately 50 items for the specific tab
-async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<LoadOutcome, String> {
+async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))

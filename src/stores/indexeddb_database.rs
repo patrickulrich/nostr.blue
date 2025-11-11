@@ -284,7 +284,8 @@ impl IndexedDbDatabase {
 }
 
 // Implement WalletDatabase trait for IndexedDbDatabase
-#[async_trait::async_trait(?Send)]
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl WalletDatabase for IndexedDbDatabase {
     type Err = database::Error;
 

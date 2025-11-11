@@ -46,10 +46,9 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_following_streams(None, current_status).await {
-                Ok((events, hit_limit)) => {
-                    if let Some(last_event) = events.last() {
-                        oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
-                    }
+                Ok((events, next_until, hit_limit)) => {
+                    // Set cursor from raw data, not filtered results
+                    oldest_timestamp_following.set(next_until);
 
                     has_more_following.set(hit_limit);
                     following_streams.set(events);
@@ -78,10 +77,9 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_global_streams(None, current_status).await {
-                Ok((events, hit_limit)) => {
-                    if let Some(last_event) = events.last() {
-                        oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
-                    }
+                Ok((events, next_until, hit_limit)) => {
+                    // Set cursor from raw data, not filtered results
+                    oldest_timestamp_global.set(next_until);
 
                     has_more_global.set(hit_limit);
                     global_streams.set(events);
@@ -108,7 +106,7 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_following_streams(until, current_status).await {
-                Ok((new_events, hit_limit)) => {
+                Ok((new_events, next_until, hit_limit)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -118,9 +116,8 @@ pub fn VideosLive() -> Element {
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
-                    if let Some(last_event) = unique_events.last() {
-                        oldest_timestamp_following.set(Some(last_event.created_at.as_secs()));
-                    }
+                    // Set cursor from raw data, not filtered results
+                    oldest_timestamp_following.set(next_until);
 
                     has_more_following.set(hit_limit);
 
@@ -152,7 +149,7 @@ pub fn VideosLive() -> Element {
 
         spawn(async move {
             match load_global_streams(until, current_status).await {
-                Ok((new_events, hit_limit)) => {
+                Ok((new_events, next_until, hit_limit)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = global_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -162,9 +159,8 @@ pub fn VideosLive() -> Element {
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
-                    if let Some(last_event) = unique_events.last() {
-                        oldest_timestamp_global.set(Some(last_event.created_at.as_secs()));
-                    }
+                    // Set cursor from raw data, not filtered results
+                    oldest_timestamp_global.set(next_until);
 
                     has_more_global.set(hit_limit);
 
@@ -407,7 +403,7 @@ pub fn VideosLive() -> Element {
 
 // Helper functions to load streams
 
-async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, bool), String> {
+async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool), String> {
     let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone()
         .ok_or("Not authenticated")?;
 
@@ -425,24 +421,22 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         return load_global_streams(until, status).await;
     }
 
-    // Parse contact pubkeys
-    let mut authors = Vec::new();
-    for contact in contacts.iter() {
-        if let Ok(pk) = PublicKey::parse(contact) {
-            authors.push(pk);
-        }
-    }
+    // Parse contact pubkeys into a HashSet for efficient lookup
+    let followed_pubkeys: std::collections::HashSet<String> = contacts
+        .iter()
+        .filter_map(|contact| PublicKey::parse(contact).ok().map(|pk| pk.to_string()))
+        .collect();
 
-    if authors.is_empty() {
+    if followed_pubkeys.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
         return load_global_streams(until, status).await;
     }
 
-    // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
+    // Fetch all recent livestream events (we'll filter client-side)
+    // We need to fetch more than just author-filtered to catch streams where the creator is in p tag
     let mut filter = Filter::new()
         .kind(Kind::Custom(30311))
-        .authors(authors)
-        .limit(50);
+        .limit(100); // Fetch more since we'll filter client-side
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -452,14 +446,43 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
-    // Base has_more on raw page size, not filtered results
-    let hit_limit = events.len() >= 50;
-    let filtered_events = filter_by_status(events, status);
+    // Compute pagination from raw events BEFORE filtering
+    let next_until = events.iter()
+        .map(|e| e.created_at.as_secs())
+        .min();
+    let hit_limit = events.len() >= 100;
 
-    Ok((filtered_events, hit_limit))
+    // Filter events where either the publisher OR the creator (p tag) is followed
+    let following_events: Vec<Event> = events.into_iter()
+        .filter(|event| {
+            // Check if publisher is followed
+            if followed_pubkeys.contains(&event.pubkey.to_string()) {
+                return true;
+            }
+
+            // Check if creator (first p tag) is followed
+            for tag in event.tags.iter() {
+                let tag_vec = tag.clone().to_vec();
+                if tag_vec.first().map(|s| s.as_str()) == Some("p") {
+                    if let Some(creator_pk) = tag_vec.get(1) {
+                        if followed_pubkeys.contains(creator_pk) {
+                            return true;
+                        }
+                    }
+                    break; // Only check first p tag
+                }
+            }
+
+            false
+        })
+        .collect();
+
+    let filtered_events = filter_by_status(following_events, status);
+
+    Ok((filtered_events, next_until, hit_limit))
 }
 
-async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, bool), String> {
+async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool), String> {
     // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
     let mut filter = Filter::new()
         .kind(Kind::Custom(30311))
@@ -473,11 +496,16 @@ async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
+    // Compute next_until from raw events BEFORE filtering
+    let next_until = events.iter()
+        .map(|e| e.created_at.as_secs())
+        .min();
+
     // Base has_more on raw page size, not filtered results
     let hit_limit = events.len() >= 50;
     let filtered_events = filter_by_status(events, status);
 
-    Ok((filtered_events, hit_limit))
+    Ok((filtered_events, next_until, hit_limit))
 }
 
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {

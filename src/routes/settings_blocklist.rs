@@ -9,9 +9,11 @@ pub fn SettingsBlocklist() -> Element {
     let mut user_profiles = use_signal(|| HashMap::<String, profiles::Profile>::new());
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
+    let refresh_trigger = use_signal(|| 0);
 
-    // Fetch blocked users on mount
-    use_effect(move || {
+    // Fetch blocked users on mount and when refresh_trigger changes
+    use_effect(use_reactive(&*refresh_trigger.read(), move |_| {
+        loading.set(true);
         spawn(async move {
             match nostr_client::get_blocked_users().await {
                 Ok(users) => {
@@ -37,7 +39,7 @@ pub fn SettingsBlocklist() -> Element {
                 }
             }
         });
-    });
+    }));
 
     let handle_unblock = move |pubkey: String| {
         let pubkey_clone = pubkey.clone();

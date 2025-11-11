@@ -8,7 +8,8 @@ license = "MIT"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.6", features = ["web", "router"] }
+dioxus = { version = "0.7.1", features = ["web", "router"] }
+dioxus-stores = "0.7.1"
 
 # Nostr protocol
 nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60"] }
@@ -136,3 +137,13 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 0
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

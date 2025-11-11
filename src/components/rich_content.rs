@@ -143,12 +143,12 @@ fn MentionRenderer(mention: String) -> Element {
         nostr_sdk::PublicKey::from_bech32(identifier).ok()
     };
 
-    if let Some(pubkey) = pubkey_result {
-        let pubkey_str = pubkey.to_hex();
-        let mut metadata = use_signal(|| None::<Metadata>);
+    // Always call hooks unconditionally
+    let mut metadata = use_signal(|| None::<Metadata>);
 
-        // Fetch profile metadata
-        use_effect(move || {
+    // Fetch profile metadata
+    use_effect(move || {
+        if let Some(pubkey) = pubkey_result {
             spawn(async move {
                 let metadata_filter = Filter::new()
                     .author(pubkey)
@@ -166,7 +166,11 @@ fn MentionRenderer(mention: String) -> Element {
                     }
                 }
             });
-        });
+        }
+    });
+
+    if let Some(pubkey) = pubkey_result {
+        let pubkey_str = pubkey.to_hex();
 
         // Display name logic
         let display = if let Some(meta) = metadata.read().as_ref() {
@@ -233,12 +237,13 @@ fn EventMentionRenderer(mention: String) -> Element {
         };
     }
 
-    if let Some(event_id) = event_id_result {
-        let mut embedded_event = use_signal(|| None::<Event>);
-        let mut author_metadata = use_signal(|| None::<Metadata>);
+    // Always call hooks unconditionally
+    let mut embedded_event = use_signal(|| None::<Event>);
+    let mut author_metadata = use_signal(|| None::<Metadata>);
 
-        // Fetch the referenced event
-        use_effect(move || {
+    // Fetch the referenced event
+    use_effect(move || {
+        if let Some(event_id) = event_id_result {
             spawn(async move {
                 let event_filter = Filter::new()
                     .id(event_id)
@@ -271,8 +276,10 @@ fn EventMentionRenderer(mention: String) -> Element {
                     }
                 }
             });
-        });
+        }
+    });
 
+    if let Some(event_id) = event_id_result {
         // Render embedded note card
         let has_event = embedded_event.read().is_some();
         let event_clone = embedded_event.read().clone();
@@ -607,21 +614,24 @@ fn ArticleMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:naddr..." or just "naddr..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
-    // Parse the naddr coordinate
-    if let Ok(nip19_coord) = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier) {
-        let pubkey_str = nip19_coord.public_key.to_hex();
-        let identifier_str = nip19_coord.identifier.clone();
-        let naddr_for_link = identifier.to_string();
+    // Parse the naddr coordinate and extract data we need
+    let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
+        .ok()
+        .map(|coord| (coord.public_key.to_hex(), coord.identifier.clone()));
 
-        let mut article_event = use_signal(|| None::<Event>);
-        let mut author_metadata = use_signal(|| None::<Metadata>);
-        let mut loading = use_signal(|| true);
+    // Always call hooks unconditionally
+    let mut article_event = use_signal(|| None::<Event>);
+    let mut author_metadata = use_signal(|| None::<Metadata>);
+    let mut loading = use_signal(|| true);
 
-        // Fetch the article
-        use_effect(move || {
-            let pubkey = pubkey_str.clone();
-            let ident = identifier_str.clone();
+    // Clone for use in effect
+    let coord_data_for_effect = coord_data.clone();
 
+    // Fetch the article
+    use_effect(move || {
+        if let Some((ref pubkey, ref ident)) = coord_data_for_effect {
+            let pubkey = pubkey.clone();
+            let ident = ident.clone();
             spawn(async move {
                 loading.set(true);
 
@@ -661,7 +671,11 @@ fn ArticleMentionRenderer(mention: String) -> Element {
 
                 loading.set(false);
             });
-        });
+        }
+    });
+
+    if let Some(_) = coord_data {
+        let naddr_for_link = identifier.to_string();
 
         // Render embedded article preview
         let has_article = article_event.read().is_some();
@@ -1141,6 +1155,9 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
         }
     });
 
+    // Always call hooks unconditionally
+    let nav = use_navigator();
+
     match artist_resource.read_unchecked().as_ref() {
         // Loading state
         None => rsx! {
@@ -1170,7 +1187,6 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
         },
         // Success state - render artist card
         Some(Ok(artist)) => {
-        let nav = use_navigator();
 
         rsx! {
             div {

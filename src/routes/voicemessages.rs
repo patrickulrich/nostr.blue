@@ -34,13 +34,11 @@ pub fn VoiceMessages() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
-    // Load feed on mount and when refresh is triggered or feed type changes
-    use_effect(move || {
-        // Watch refresh trigger and feed type
-        let _ = refresh_trigger.read();
-        let current_feed_type = *feed_type.read();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+    // Generation token to prevent stale requests from corrupting the feed
+    let mut request_generation = use_signal(|| 0u64);
 
+    // Load feed on mount and when refresh is triggered or feed type changes
+    use_effect(use_reactive((&*refresh_trigger.read(), &*feed_type.read(), &*nostr_client::CLIENT_INITIALIZED.read()), move |(_, current_feed_type, client_initialized)| {
         // Only load if client is initialized
         if !client_initialized {
             return;
@@ -51,11 +49,23 @@ pub fn VoiceMessages() -> Element {
         oldest_timestamp.set(None);
         has_more.set(true);
 
+        // Increment generation to invalidate any in-flight load_more requests
+        let next_gen = request_generation.with_mut(|gen| {
+            *gen += 1;
+            *gen
+        });
+        let captured_gen = next_gen; // Capture for the async task
+
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_voice_messages(None).await,
                 FeedType::Global => load_global_voice_messages(None).await,
             };
+
+            // Check if this request is still current before updating state
+            if *request_generation.read() != captured_gen {
+                return; // Abort - a newer request has been started
+            }
 
             match result {
                 Ok(voice_events) => {
@@ -76,7 +86,7 @@ pub fn VoiceMessages() -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Load more function for infinite scroll
     let load_more = move || {
@@ -84,8 +94,15 @@ pub fn VoiceMessages() -> Element {
             return;
         }
 
-        let until = *oldest_timestamp.read();
+        // Use exclusive boundary by subtracting 1 to avoid duplicate fetches
+        let until = {
+            let timestamp_opt = *oldest_timestamp.read();
+            timestamp_opt.map(|t| t.saturating_sub(1))
+        };
         let current_feed_type = *feed_type.read();
+
+        // Capture current generation to detect stale requests
+        let captured_generation = *request_generation.read();
 
         loading.set(true);
 
@@ -94,6 +111,13 @@ pub fn VoiceMessages() -> Element {
                 FeedType::Following => load_following_voice_messages(until).await,
                 FeedType::Global => load_global_voice_messages(until).await,
             };
+
+            // Check if this request is still valid (generation hasn't changed)
+            if captured_generation != *request_generation.read() {
+                log::info!("Dropping stale load_more response (generation mismatch)");
+                loading.set(false);
+                return;
+            }
 
             match result {
                 Ok(mut new_events) => {

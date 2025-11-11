@@ -113,13 +113,13 @@ pub fn Videos() -> Element {
             };
 
             match result {
-                Ok(video_events) => {
+                Ok((video_events, page_has_more)) => {
                     if let Some(last_event) = video_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // Lower threshold since we fetch videos and livestreams separately
-                    has_more.set(video_events.len() >= 20);
+                    // Use the has_more flag from the loader which checks if either query hit its limit
+                    has_more.set(page_has_more);
                     feed_events.set(video_events);
                     loading_feed.set(false);
                 }
@@ -149,7 +149,7 @@ pub fn Videos() -> Element {
             };
 
             match result {
-                Ok(new_events) => {
+                Ok((new_events, page_has_more)) => {
                     // Filter out duplicates by checking existing event IDs
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = feed_events.read();
@@ -171,8 +171,8 @@ pub fn Videos() -> Element {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
 
-                        // Lower threshold since we fetch videos and livestreams separately
-                        has_more.set(unique_events.len() >= 20);
+                        // Use the has_more flag from the loader which checks if either query hit its limit
+                        has_more.set(page_has_more);
 
                         // Append only unique events
                         let mut current = feed_events.read().clone();
@@ -851,7 +851,8 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
 }
 
 // Helper function to load following videos (Kind 21 & 22 from followed users)
-async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
+// Returns (events, has_more) where has_more is true if either query hit its limit
+async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
@@ -916,9 +917,12 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
     );
 
     let mut all_events = Vec::new();
+    let mut video_hit_limit = false;
+    let mut stream_hit_limit = false;
 
     match video_result {
         Ok(videos) => {
+            video_hit_limit = videos.len() >= 40;
             log::info!("Loaded {} video events from following", videos.len());
             all_events.extend(videos);
         }
@@ -929,6 +933,7 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     match stream_result {
         Ok(streams) => {
+            stream_hit_limit = streams.len() >= 10;
             log::info!("Loaded {} livestream events from following", streams.len());
             all_events.extend(streams);
         }
@@ -947,11 +952,15 @@ async fn load_following_videos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     log::info!("Loaded total of {} events from following", all_events.len());
 
-    Ok(all_events)
+    // has_more is true if either query hit its limit
+    let has_more = video_hit_limit || stream_hit_limit;
+
+    Ok((all_events, has_more))
 }
 
 // Helper function to load global videos (Kind 21, 22) and livestreams (Kind 30311) from everyone
-async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
+// Returns (events, has_more) where has_more is true if either query hit its limit
+async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
 
     // Fetch videos (Kind 21, 22) separately to ensure they're included
@@ -981,9 +990,12 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
     );
 
     let mut all_events = Vec::new();
+    let mut video_hit_limit = false;
+    let mut stream_hit_limit = false;
 
     match video_result {
         Ok(videos) => {
+            video_hit_limit = videos.len() >= 40;
             log::info!("Loaded {} video events (Kind 21, 22)", videos.len());
             all_events.extend(videos);
         }
@@ -994,6 +1006,7 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     match stream_result {
         Ok(streams) => {
+            stream_hit_limit = streams.len() >= 10;
             log::info!("Loaded {} livestream events (Kind 30311)", streams.len());
             all_events.extend(streams);
         }
@@ -1011,5 +1024,8 @@ async fn load_global_videos(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Loaded total of {} events", all_events.len());
 
-    Ok(all_events)
+    // has_more is true if either query hit its limit
+    let has_more = video_hit_limit || stream_hit_limit;
+
+    Ok((all_events, has_more))
 }

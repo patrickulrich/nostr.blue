@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::gif_store::{GIF_RESULTS, GIF_LOADING, RECENT_GIFS, load_initial_gifs, load_more_gifs, add_recent_gif, search_gifs};
+use crate::stores::gif_store::{GIF_RESULTS, GIF_LOADING, RECENT_GIFS, load_initial_gifs, load_more_gifs, add_recent_gif, search_gifs, GifResultsStoreStoreExt, RecentGifsStoreStoreExt};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct GifPickerProps {
@@ -179,7 +179,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         style: "max-height: 500px;",
 
                         // Recent GIFs section (if any and no active search)
-                        if !recent_gifs.is_empty() && search_query.read().is_empty() {
+                        if !recent_gifs.data().read().is_empty() && search_query.read().is_empty() {
                             div {
                                 class: "p-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-750 dark:to-gray-800",
                                 h4 {
@@ -189,7 +189,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 }
                                 div {
                                     class: "flex gap-3 overflow-x-auto pb-2",
-                                    for (idx, gif) in recent_gifs.iter().take(10).enumerate() {
+                                    for (idx, gif) in recent_gifs.data().read().iter().take(10).enumerate() {
                                         {
                                             let gif_url = gif.url.clone();
                                             let gif_url_for_click = gif.url.clone();
@@ -225,7 +225,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             class: "p-4",
 
                             // Loading state
-                            if *gif_loading && gif_results.is_empty() {
+                            if *gif_loading && gif_results.data().read().is_empty() {
                                 div {
                                     class: "flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400",
                                     div {
@@ -243,7 +243,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             }
 
                             // Empty state
-                            if !*gif_loading && gif_results.is_empty() {
+                            if !*gif_loading && gif_results.data().read().is_empty() {
                                 div {
                                     class: "flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400",
                                     span {
@@ -262,10 +262,10 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             }
 
                             // GIF grid
-                            if !gif_results.is_empty() {
+                            if !gif_results.data().read().is_empty() {
                                 div {
                                     class: "grid grid-cols-6 gap-2",
-                                    for (idx, gif) in gif_results.iter().enumerate() {
+                                    for (idx, gif) in gif_results.data().read().iter().enumerate() {
                                         {
                                             let gif_url = gif.url.clone();
                                             let gif_url_for_click = gif.url.clone();
@@ -307,7 +307,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                     }
 
                     // Footer with Load More button
-                    if !gif_results.is_empty() {
+                    if !gif_results.data().read().is_empty() {
                         div {
                             class: "p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-b-xl",
                             button {

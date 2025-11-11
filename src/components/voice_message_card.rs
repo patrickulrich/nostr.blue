@@ -61,8 +61,13 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
             })
         });
 
-    // Fetch author profile
-    use_effect(use_reactive(&author_pubkey, move |pubkey| {
+    // Fetch author profile - reactive to both pubkey and client initialization
+    use_effect(use_reactive((&author_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey, client_ready)| {
+        // Only fetch if client is ready
+        if !client_ready {
+            return;
+        }
+
         spawn(async move {
             match PublicKey::parse(&pubkey) {
                 Ok(pk) => {

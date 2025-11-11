@@ -6,6 +6,27 @@ use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
+/// Guard struct that removes scroll listener on drop
+/// Note: Clone is required by use_hook but should not be manually called.
+/// The Signal ensures cleanup happens correctly even if cloned by the hook.
+#[derive(Clone)]
+struct ScrollListenerGuard {
+    callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
+}
+
+impl Drop for ScrollListenerGuard {
+    fn drop(&mut self) {
+        if let Some(callback) = self.callback.write().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window.remove_event_listener_with_callback(
+                    "scroll",
+                    callback.as_ref().unchecked_ref()
+                );
+            }
+        }
+    }
+}
+
 #[component]
 pub fn VideosLiveTag(tag: String) -> Element {
     let mut stream_events = use_signal(|| Vec::<Event>::new());
@@ -131,14 +152,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
         scroll_callback.set(Some(callback));
     }));
 
-    // Cleanup scroll listener on unmount
-    use_drop(move || {
-        if let Some(callback) = scroll_callback.write().take() {
-            if let Some(window) = web_sys::window() {
-                window.remove_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref()).ok();
-            }
-        }
-    });
+    // Cleanup scroll listener on unmount using use_hook with Drop
+    use_hook(move || ScrollListenerGuard { callback: scroll_callback });
 
     rsx! {
         div {

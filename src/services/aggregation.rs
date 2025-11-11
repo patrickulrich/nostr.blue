@@ -219,6 +219,11 @@ pub async fn fetch_interaction_counts_batch(
     // Aggregate counts by event_id for uncached events only
     let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
 
+    // Build set of requested event IDs for filtering
+    let requested_ids: std::collections::HashSet<String> = uncached_ids.iter()
+        .map(|id| id.to_hex())
+        .collect();
+
     // Initialize uncached event IDs with zero counts
     for event_id in &uncached_ids {
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
@@ -226,21 +231,26 @@ pub async fn fetch_interaction_counts_batch(
 
     // Count interactions
     for event in events {
-        // Get the event this interaction is referencing
-        let referenced_event_id = match extract_referenced_event(&event) {
+        // Get the event this interaction is referencing, only if it's one we requested
+        let referenced_event_id = match extract_referenced_event(&event, &requested_ids) {
             Some(id) => id,
             None => continue,
         };
 
         let event_key = referenced_event_id.to_hex();
 
-        // Get or create counts entry
+        // Get or create counts entry (should already exist from initialization)
         let counts = freshly_fetched.entry(event_key).or_default();
 
         // Increment appropriate counter
         match event.kind {
             Kind::TextNote => counts.replies += 1,
-            Kind::Reaction => counts.likes += 1,
+            Kind::Reaction => {
+                // Per NIP-25, only count reactions with content != "-" as likes
+                if event.content.trim() != "-" {
+                    counts.likes += 1;
+                }
+            },
             Kind::Repost => counts.reposts += 1,
             Kind::Custom(9735) => {
                 counts.zaps += 1;
@@ -307,11 +317,20 @@ pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
 }
 
 /// Extract the event ID being referenced by an interaction event
-fn extract_referenced_event(event: &Event) -> Option<EventId> {
+/// Only returns the event ID if it matches one of the requested IDs
+/// If requested_ids is empty, returns the first 'e' tag found (for trending/all events)
+fn extract_referenced_event(event: &Event, requested_ids: &std::collections::HashSet<String>) -> Option<EventId> {
     // Check for 'e' tags (most interactions use this)
     for tag in event.tags.iter() {
         if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
-            return Some(*event_id);
+            // If no filter set (empty), return first tag
+            if requested_ids.is_empty() {
+                return Some(*event_id);
+            }
+            // Only return if this event ID was requested
+            if requested_ids.contains(&event_id.to_hex()) {
+                return Some(*event_id);
+            }
         }
     }
     None
@@ -405,9 +424,11 @@ pub async fn fetch_trending_interactions(
         .map_err(|e| format!("Failed to fetch trending interactions: {}", e))?;
 
     let mut counts_map: HashMap<String, InteractionCounts> = HashMap::new();
+    // Use empty set to accept all event IDs (trending mode)
+    let empty_filter = std::collections::HashSet::new();
 
     for event in events {
-        let referenced_event_id = match extract_referenced_event(&event) {
+        let referenced_event_id = match extract_referenced_event(&event, &empty_filter) {
             Some(id) => id,
             None => continue,
         };

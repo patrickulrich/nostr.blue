@@ -1,236 +1,376 @@
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
-use url::Url;
-use std::rc::Rc;
-use std::cell::Cell;
 
-#[wasm_bindgen(inline_js = r#"
-export function initVideoJs(videoId, streamUrl) {
-    // Wait for video.js to be loaded
-    if (typeof window.videojs === 'undefined') {
-        console.error('video.js not loaded');
-        return null;
-    }
+/// Cleanup guard that destroys player on drop
+#[derive(Clone)]
+struct CleanupGuard {
+    video_id: String,
+}
 
-    try {
-        const player = window.videojs(videoId, {
-            controls: true,
-            autoplay: false,
-            preload: 'auto',
-            fluid: true,
-            liveui: true,
-            html5: {
-                vhs: {
-                    overrideNative: true,
-                    enableLowInitialPlaylist: true
-                },
-                nativeAudioTracks: false,
-                nativeVideoTracks: false
-            }
-        });
-
-        // Set the source after player creation
-        player.src({
-            src: streamUrl,
-            type: 'application/x-mpegURL'
-        });
-
-        // Handle errors more gracefully
-        player.on('error', function() {
-            const error = player.error();
-            if (error) {
-                console.warn('VideoJS playback error:', error.code, error.message, 'URL:', streamUrl);
-                // Check if it's a network error vs format error
-                if (error.code === 4) {
-                    console.warn('Media source not supported or stream not available. This may be due to:');
-                    console.warn('- Stream is not currently broadcasting');
-                    console.warn('- Invalid HLS URL');
-                    console.warn('- CORS issues');
-                    console.warn('- Network connectivity problems');
-                }
-            }
-        });
-
-        player.on('loadedmetadata', function() {
-            console.log('Stream metadata loaded successfully');
-        });
-
-        return videoId;
-    } catch (e) {
-        console.error('Failed to initialize video.js:', e);
-        return null;
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        destroyVideoJsPlayer(&self.video_id);
     }
 }
 
-export function disposeVideoJs(videoId) {
-    if (typeof window.videojs === 'undefined') {
+/// Props for the LiveStreamPlayer component
+#[derive(Props, Clone, PartialEq)]
+pub struct LiveStreamPlayerProps {
+    /// The stream URL (HLS, MP4, WebM, etc.)
+    pub stream_url: String,
+    /// Optional poster image URL
+    #[props(default = None)]
+    pub poster: Option<String>,
+    /// Auto-play the stream (default: true)
+    #[props(default = true)]
+    pub autoplay: bool,
+}
+
+// Inline JavaScript for Video.js integration
+#[wasm_bindgen(inline_js = r#"
+// Store for Video.js player instances
+window.videojsPlayers = window.videojsPlayers || new Map();
+
+// Load Video.js from CDN if not already loaded
+export async function loadVideoJs() {
+    if (window.videojs) {
         return;
     }
 
-    try {
-        const player = window.videojs.getPlayer(videoId);
-        if (player) {
+    return new Promise((resolve, reject) => {
+        // Load CSS
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://vjs.zencdn.net/8.10.0/video-js.css';
+        document.head.appendChild(link);
+
+        // Load JS
+        const script = document.createElement('script');
+        script.src = 'https://vjs.zencdn.net/8.10.0/video.min.js';
+        script.onload = () => {
+            console.log('Video.js loaded successfully');
+            resolve();
+        };
+        script.onerror = () => reject(new Error('Failed to load Video.js'));
+        document.head.appendChild(script);
+    });
+}
+
+// Detect MIME type from URL
+function detectSourceType(url) {
+    const urlLower = url.toLowerCase();
+
+    if (urlLower.includes('.m3u8')) {
+        return 'application/x-mpegURL';
+    } else if (urlLower.includes('.mpd')) {
+        return 'application/dash+xml';
+    } else if (urlLower.includes('.mp4')) {
+        return 'video/mp4';
+    } else if (urlLower.includes('.webm')) {
+        return 'video/webm';
+    } else if (urlLower.includes('.ogg')) {
+        return 'video/ogg';
+    }
+
+    // Default to mp4
+    return 'video/mp4';
+}
+
+// Initialize Video.js player
+export async function initVideoJsPlayer(videoId, url, autoplay) {
+    const videoElement = document.getElementById(videoId);
+    if (!videoElement) {
+        throw new Error('Video element not found: ' + videoId);
+    }
+
+    // Clean up any existing player
+    destroyVideoJsPlayer(videoId);
+
+    // Load Video.js library
+    await loadVideoJs();
+
+    if (!window.videojs) {
+        throw new Error('Video.js failed to load');
+    }
+
+    console.log('Initializing Video.js player for:', url);
+
+    // Initialize Video.js with options
+    const player = window.videojs(videoId, {
+        controls: true,
+        autoplay: autoplay,
+        preload: 'auto',
+        fluid: true,
+        responsive: true,
+        html5: {
+            vhs: {
+                // Video.js HTTP Streaming (VHS) options for HLS
+                enableLowInitialPlaylist: true,
+                smoothQualityChange: true,
+                overrideNative: !window.videojs.browser.IS_SAFARI,
+            },
+            nativeAudioTracks: false,
+            nativeVideoTracks: false,
+        },
+        liveui: true,
+    });
+
+    // Set source
+    player.src({
+        src: url,
+        type: detectSourceType(url),
+    });
+
+    // Error handling
+    player.on('error', function() {
+        const error = player.error();
+        console.error('Video.js player error:', error);
+    });
+
+    // Ready event
+    player.on('ready', function() {
+        console.log('Video.js player ready');
+    });
+
+    // Store player instance
+    window.videojsPlayers.set(videoId, player);
+
+    return player;
+}
+
+// Destroy Video.js player
+export function destroyVideoJsPlayer(videoId) {
+    const player = window.videojsPlayers.get(videoId);
+
+    if (player) {
+        console.log('Destroying Video.js player:', videoId);
+        try {
             player.dispose();
+        } catch (e) {
+            console.warn('Error disposing player:', e);
         }
-    } catch (e) {
-        console.error('Failed to dispose video.js player:', e);
+        window.videojsPlayers.delete(videoId);
     }
 }
 "#)]
 extern "C" {
     #[wasm_bindgen(catch)]
-    fn initVideoJs(video_id: &str, stream_url: &str) -> Result<JsValue, JsValue>;
+    async fn initVideoJsPlayer(video_id: &str, url: &str, autoplay: bool) -> Result<JsValue, JsValue>;
 
-    fn disposeVideoJs(video_id: &str);
+    fn destroyVideoJsPlayer(video_id: &str);
 }
 
-/// Validates and sanitizes a stream URL before passing to JS
-fn validate_stream_url(url_str: &str) -> Result<String, String> {
-    if url_str.is_empty() {
-        return Err("URL is empty".to_string());
-    }
-
-    // Parse the URL to ensure it's well-formed
-    let parsed_url = Url::parse(url_str)
-        .map_err(|e| format!("Invalid URL: {}", e))?;
-
-    // Only allow http and https schemes
-    let scheme = parsed_url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(format!("Unsafe URL scheme '{}'. Only http and https are allowed", scheme));
-    }
-
-    // Ensure URL is absolute
-    if !parsed_url.has_host() {
-        return Err("URL must be absolute with a valid host".to_string());
-    }
-
-    // Reject URLs with embedded credentials
-    if parsed_url.username() != "" || parsed_url.password().is_some() {
-        return Err("URLs with embedded credentials are not allowed".to_string());
-    }
-
-    // Return the canonicalized URL
-    Ok(parsed_url.to_string())
-}
-
+/// LiveStreamPlayer component - Universal video player using Video.js
+///
+/// Supports HLS, DASH, MP4, WebM, and more
 #[component]
-pub fn LiveStreamPlayer(stream_url: String) -> Element {
-    let video_id = use_signal(|| {
-        let timestamp = js_sys::Date::now() as u64;
-        let random = (js_sys::Math::random() * 1000000.0) as u64;
-        format!("live-stream-player-{}-{}", timestamp, random)
+pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
+    let stream_url = props.stream_url.clone();
+    let poster = props.poster.clone();
+    let autoplay = props.autoplay;
+
+    // Validate stream URL
+    let stream_url_for_validation = stream_url.clone();
+    let url_valid = use_memo(move || validate_stream_url(&stream_url_for_validation));
+
+    // Generate stable video ID
+    let stream_url_for_id = stream_url.clone();
+    let video_id = use_memo(move || {
+        let hash = simple_hash(&stream_url_for_id);
+        format!("videojs-player-{}", hash)
     });
-    let mut player_initialized = use_signal(|| false);
 
-    // Mounted flag to track component lifecycle
-    let mounted = use_signal(|| Rc::new(Cell::new(true)));
+    // Player state
+    let mut error = use_signal(|| None::<String>);
+    let mut loading = use_signal(|| true);
+    let mut mounted = use_signal(|| false);
 
-    // Compute the video ID once for the reactive dependency
-    let vid = video_id.read().clone();
+    // Store cleanup guard to keep it alive
+    let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
 
-    // Initialize video.js player
-    use_effect(use_reactive((&stream_url, &vid), move |(url, vid)| {
-        if url.is_empty() {
-            return;
-        }
+    // Initialize player
+    let video_id_str = video_id.read().clone();
+    let stream_url_for_effect = stream_url.clone();
+    use_effect(move || {
+        let video_id = video_id_str.clone();
+        let stream_url = stream_url_for_effect.clone();
 
-        // Validate the URL before passing to JS
-        let validated_url = match validate_stream_url(&url) {
-            Ok(safe_url) => safe_url,
-            Err(e) => {
-                log::error!("Invalid stream URL: {}", e);
-                return;
-            }
-        };
+        // Check if URL is valid and initialize
+        if *url_valid.read() {
+            mounted.set(true);
 
-        // Clone mounted flag for async task
-        let mounted_flag = mounted.read().clone();
+            // Initialize player after DOM is ready
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(300).await;
 
-        // Retry logic to wait for video.js to load (due to defer attribute)
-        spawn(async move {
-            let max_retries = 10;
-            let mut retry_count = 0;
-
-            loop {
-                // Check if component is still mounted before attempting
-                if !mounted_flag.get() {
-                    log::debug!("Component unmounted, aborting video.js initialization");
-                    break;
+                if !*mounted.peek() {
+                    return;
                 }
 
-                // Wait before attempting
-                gloo_timers::future::TimeoutFuture::new(100 * (retry_count + 1)).await;
+                match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                    Ok(_) => {
+                        loading.set(false);
+                        error.set(None);
 
-                match initVideoJs(&vid, &validated_url) {
-                    Ok(js_val) => {
-                        // Check if the returned value is null or undefined
-                        if js_val.is_null() || js_val.is_undefined() {
-                            retry_count += 1;
-                            if retry_count >= max_retries {
-                                log::error!("Failed to initialize video.js player after {} retries: videojs is not present or returned null/undefined", max_retries);
-                                break;
-                            }
-                            log::debug!("video.js not ready yet, retrying ({}/{})", retry_count, max_retries);
-                            continue;
-                        } else {
-                            // Check if component is still mounted after successful init
-                            if !mounted_flag.get() {
-                                log::debug!("Component unmounted after init, disposing player immediately");
-                                disposeVideoJs(&vid);
-                                break;
-                            }
-                            player_initialized.set(true);
-                            log::info!("video.js player initialized successfully");
-                            break;
-                        }
+                        // Store cleanup guard after successful init
+                        cleanup_guard.set(Some(CleanupGuard {
+                            video_id: video_id.clone(),
+                        }));
                     }
                     Err(e) => {
-                        retry_count += 1;
-                        if retry_count >= max_retries {
-                            log::error!("Failed to initialize video.js player after {} retries: {:?}", max_retries, e);
-                            break;
-                        }
-                        log::debug!("video.js initialization error, retrying ({}/{}): {:?}", retry_count, max_retries, e);
-                        continue;
+                        let error_msg = format!("Failed to load stream: {:?}", e);
+                        log::error!("{}", error_msg);
+                        error.set(Some(error_msg));
+                        loading.set(false);
                     }
+                }
+            });
+        } else {
+            error.set(Some("Invalid stream URL".to_string()));
+            loading.set(false);
+        }
+    });
+
+    // Handle retry
+    let handle_retry = move |_| {
+        error.set(None);
+        loading.set(true);
+
+        let video_id = video_id.peek().clone();
+        let stream_url = stream_url.clone();
+
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(100).await;
+
+            match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                Ok(_) => {
+                    loading.set(false);
+                    error.set(None);
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to load stream: {:?}", e);
+                    log::error!("{}", error_msg);
+                    error.set(Some(error_msg));
+                    loading.set(false);
                 }
             }
         });
-    }));
+    };
 
-    // Cleanup on unmount
-    let video_id_clone = video_id.clone();
-    let player_initialized_clone = player_initialized.clone();
-    let mounted_clone = mounted.clone();
-    use_drop(move || {
-        // Mark component as unmounted
-        mounted_clone.read().set(false);
-
-        // Dispose player if it was initialized
-        if *player_initialized_clone.read() {
-            disposeVideoJs(&video_id_clone.read());
-        }
-    });
+    // Check if URL is invalid
+    if !*url_valid.read() {
+        return rsx! {
+            div {
+                class: "relative w-full aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center",
+                div {
+                    class: "text-center p-6",
+                    p { class: "text-white text-lg", "Invalid stream URL" }
+                }
+            }
+        };
+    }
 
     rsx! {
         div {
-            class: "w-full bg-black",
-            video {
-                id: "{video_id.read()}",
-                class: "video-js vjs-default-skin vjs-big-play-centered",
+            class: "relative w-full aspect-video bg-black rounded-lg overflow-hidden",
 
-                // Fallback text for browsers without JavaScript or video.js
-                p {
-                    class: "vjs-no-js text-white p-4",
-                    "To view this video please enable JavaScript, and consider upgrading to a web browser that "
-                    a {
-                        href: "https://videojs.com/html5-video-support/",
-                        target: "_blank",
-                        "supports HTML5 video"
+            // Video.js video element
+            video {
+                id: "{video_id}",
+                class: "video-js vjs-big-play-centered vjs-fluid",
+                poster: poster.as_deref().unwrap_or(""),
+                playsinline: true,
+
+                // Fallback message
+                p { class: "vjs-no-js",
+                    "To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video"
+                }
+            }
+
+            // Loading overlay
+            if *loading.read() && error.read().is_none() {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none z-10",
+                    div {
+                        class: "flex flex-col items-center gap-4",
+                        div {
+                            class: "w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
+                        }
+                        p {
+                            class: "text-white text-lg",
+                            "Loading stream..."
+                        }
+                    }
+                }
+            }
+
+            // Error overlay
+            if let Some(error_msg) = error.read().as_ref() {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-10",
+                    div {
+                        class: "flex flex-col items-center gap-4 p-6 max-w-md text-center",
+                        // Error icon
+                        svg {
+                            class: "w-16 h-16 text-red-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                            }
+                        }
+                        h3 {
+                            class: "text-xl font-bold text-white",
+                            "Stream Unavailable"
+                        }
+                        p {
+                            class: "text-gray-300 text-sm",
+                            "{error_msg}"
+                        }
+                        button {
+                            class: "px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors",
+                            onclick: handle_retry,
+                            "Retry"
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// Validates a stream URL
+fn validate_stream_url(url_str: &str) -> bool {
+    if url_str.is_empty() {
+        return false;
+    }
+
+    match url::Url::parse(url_str) {
+        Ok(url) => {
+            let scheme = url.scheme();
+            if scheme != "http" && scheme != "https" {
+                return false;
+            }
+
+            // Reject URLs with embedded credentials
+            if url.username() != "" || url.password().is_some() {
+                return false;
+            }
+
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Generates a simple hash for a string (for creating stable IDs)
+fn simple_hash(s: &str) -> u32 {
+    s.bytes().fold(0u32, |hash, byte| {
+        hash.wrapping_mul(31).wrapping_add(byte as u32)
+    })
 }
