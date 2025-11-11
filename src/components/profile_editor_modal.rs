@@ -168,7 +168,8 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                                 img {
                                     class: "w-24 h-24 rounded-full object-cover",
                                     src: "{picture}",
-                                    alt: "Profile picture"
+                                    alt: "Profile picture",
+                                    loading: "lazy"
                                 }
                                 button {
                                     class: "px-3 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400",
@@ -209,7 +210,8 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                                 img {
                                     class: "w-full h-32 rounded-lg object-cover",
                                     src: "{banner}",
-                                    alt: "Banner"
+                                    alt: "Banner",
+                                    loading: "lazy"
                                 }
                                 button {
                                     class: "px-3 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400",

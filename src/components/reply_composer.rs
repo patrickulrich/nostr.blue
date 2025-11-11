@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete};
+use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::prelude::*;
 
@@ -155,6 +156,15 @@ pub fn ReplyComposer(
                 }
             });
 
+            // Determine the root event ID for cache invalidation
+            let thread_root_id = if let Some(root_id) = &parent_root {
+                // This is a nested reply - use the existing root
+                root_id.clone()
+            } else {
+                // This is a direct reply - the parent IS the root
+                event_id.clone()
+            };
+
             if let Some(root_id) = parent_root {
                 // This is a nested reply (replying to a reply)
                 // Add root marker for the thread root
@@ -186,6 +196,13 @@ pub fn ReplyComposer(
             match publish_note(content_value, tags).await {
                 Ok(event_id) => {
                     log::info!("Reply published successfully: {}", event_id);
+
+                    // Invalidate thread tree cache to ensure fresh data on next view
+                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
+                        invalidate_thread_tree_cache(&root_event_id);
+                        log::debug!("Invalidated thread tree cache for root: {}", thread_root_id);
+                    }
+
                     content.set(String::new());
                     uploaded_media.set(Vec::new());
                     is_publishing.set(false);

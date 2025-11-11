@@ -181,7 +181,8 @@ pub fn PersistentMusicPlayer() -> Element {
                             img {
                                 src: "{art_url}",
                                 alt: "Album art",
-                                class: "w-full h-full object-cover"
+                                class: "w-full h-full object-cover",
+                                loading: "lazy"
                             }
                         }
                     }

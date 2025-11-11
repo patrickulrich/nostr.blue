@@ -202,6 +202,9 @@ pub fn Profile(pubkey: String) -> Element {
 
         loading_events.set(true);
 
+        // Clear profile cache to prevent stale author metadata when switching tabs
+        crate::stores::profiles::PROFILE_CACHE.write().clear();
+
         spawn(async move {
             match load_tab_events(&pubkey_str, &tab, None).await {
                 Ok(outcome) => {
@@ -219,7 +222,7 @@ pub fn Profile(pubkey: String) -> Element {
                     // Update the tab's data - clone the map, modify, and set to trigger reactivity
                     let mut data_map = tab_data.read().clone();
                     data_map.insert(tab.clone(), TabData {
-                        events: outcome.events,
+                        events: outcome.events.clone(),
                         oldest_timestamp: oldest_ts,
                         has_more,
                         loaded: true,
@@ -229,6 +232,11 @@ pub fn Profile(pubkey: String) -> Element {
                     // Update has_more signal for infinite scroll
                     log::info!("Setting current_tab_has_more to {} after initial load", has_more);
                     current_tab_has_more.set(has_more);
+
+                    // Spawn non-blocking background prefetch for missing metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&outcome.events).await;
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to load events: {}", e);
@@ -407,7 +415,7 @@ pub fn Profile(pubkey: String) -> Element {
                     // Append new events to the current tab's data - clone, modify, set to trigger reactivity
                     let mut data_map = tab_data.read().clone();
                     if let Some(data) = data_map.get_mut(&tab) {
-                        data.events.extend(outcome.events);
+                        data.events.extend(outcome.events.clone());
                         data.oldest_timestamp = oldest_ts;
                         data.has_more = has_more_val;
 
@@ -420,6 +428,11 @@ pub fn Profile(pubkey: String) -> Element {
 
                     // Update has_more signal for infinite scroll to continue working
                     current_tab_has_more.set(has_more_val);
+
+                    // Spawn non-blocking background prefetch for missing metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&outcome.events).await;
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
@@ -1019,7 +1032,7 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 
 // Helper function to load events based on tab type
 // Fetches enough events to return approximately 50 items for the specific tab
-async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> Result<LoadOutcome, String> {
+async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
@@ -1400,4 +1413,12 @@ fn get_empty_state_icon(tab: &ProfileTab) -> &'static str {
         ProfileTab::Media(MediaSubTab::Verts) => "📱",
         ProfileTab::Likes => "❤️",
     }
+}
+
+/// Batch prefetch author metadata for all events
+async fn prefetch_author_metadata(events: &[NostrEvent]) {
+    use crate::utils::profile_prefetch;
+
+    // Use optimized prefetch utility - no string conversions, direct database queries
+    profile_prefetch::prefetch_event_authors(events).await;
 }

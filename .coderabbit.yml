@@ -1,0 +1,248 @@
+# CodeRabbit configuration for nostr.blue
+# A Nostr protocol client built with Rust and Dioxus
+
+# Global settings
+language: "en"
+early_access: false
+
+# Customize AI personality and expertise
+tone_instructions: "Expert in Rust, Dioxus, Nostr SDK, CDK, and WASM. Provide thorough, technical feedback on correctness, security, and performance. Be direct and constructive."
+
+reviews:
+  # Use assertive profile for more thorough feedback
+  profile: assertive
+
+  # Disables the workflow where CodeRabbit requests changes
+  request_changes_workflow: false
+
+  # Enables a high-level summary on pull requests
+  high_level_summary: true
+
+  # Generates a poem about the changes
+  poem: true
+
+  # Adds a review status comment
+  review_status: true
+
+  # Keeps the detailed file-by-file walkthrough expanded
+  collapse_walkthrough: false
+
+  # Abort review if PR is closed during review
+  abort_on_close: true
+
+  # Filters to exclude files from review
+  path_filters:
+    # Build artifacts and dependencies
+    - "!**/target/**"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!**/package-lock.json"
+    - "!**/Cargo.lock"
+
+    # Configuration files that rarely need review
+    - "!**/*.md"
+    - "!.gitignore"
+    - "!LICENSE"
+    - "!**/.env*"
+    - "!**/tailwind.config.js"
+
+    # C bindings (if any) and build scripts
+    - "!**/*.c"
+    - "!**/CMakeLists.txt"
+    - "!**/build.rs"
+
+    # Generated files
+    - "!**/public/tailwind.css"
+
+  # Provides specific instructions for matching paths
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        You are reviewing Rust code for a Nostr client built with Dioxus and WebAssembly.
+        You have deep expertise in:
+        - **Nostr Protocol**: NIPs (Nostr Implementation Possibilities), event types, relay communication, and cryptographic signatures
+        - **nostr-sdk**: Rust SDK for Nostr protocol implementation
+        - **WebAssembly (WASM)**: Browser-based Rust applications, WASM-bindgen patterns, and performance considerations
+        - **Dioxus Framework**: Component patterns, reactive state management, hooks (use_signal, use_memo, use_effect), routing, and SSR
+        - **Async Rust**: Tokio runtime, async/await patterns, futures, and concurrency primitives
+        - **Cashu/Ecash Protocol**: CDK (Cashu Development Kit) integration, mint/melt operations, quote lifecycle, blind signatures, and proof management
+        - **Browser Storage**: IndexedDB patterns for persistent state, atomic transactions, and database trait implementations
+
+        Thoroughly review the code snippets and suggest improvements for these key areas:
+          - **Logic**: Flaws in program logic, edge cases, and algorithmic correctness.
+          - **Security**: Vulnerabilities, especially:
+            - Nostr event validation and signature verification
+            - XSS risks in user-generated content rendering (use the ammonia crate for HTML sanitization)
+            - Relay communication and untrusted data handling
+            - Cryptographic operations and key management
+            - LocalStorage/IndexedDB data exposure
+            - Private key handling and secure storage
+          - **Performance**: Bottlenecks, inefficient algorithms, or unnecessary allocations, especially:
+            - WASM binary size optimizations (avoid bloat from unused dependencies)
+            - Unnecessary clones or allocations (use references where possible)
+            - Database query efficiency (nostr-indexeddb and IndexedDB for CDK wallet)
+            - Rendering performance in Dioxus components (minimize re-renders)
+            - Atomic IndexedDB transactions for wallet operations
+            - Lazy loading and code splitting strategies
+          - **Concurrency**: Potential data races, deadlocks, improper use of async/await, or channel misuse.
+          - **Nostr Protocol Compliance**: Correct implementation of NIPs, event structure, and relay communication patterns.
+          - **Cashu Protocol Compliance**:
+            - Proper CDK trait implementations (WalletDatabase)
+            - Quote lifecycle management (create → poll → mint/melt → cleanup)
+            - Keyset counter atomicity and persistence to prevent duplicate blinded messages
+            - Blind signature handling
+            - Proof management and deletion according to NIP-60
+          - **Database Correctness**:
+            - Atomic transactions for wallet operations
+            - Proper quote cleanup on both success and failure
+            - Counter persistence across page refresh
+            - Race condition prevention in concurrent operations
+          - **WASM Best Practices**:
+            - Efficient JavaScript interop
+            - Memory management (avoiding leaks)
+            - Avoiding panics (use proper error handling)
+            - Send+Sync safety in single-threaded WASM contexts
+            - Console logging for debugging
+          - **Dioxus Patterns**:
+            - Proper use of hooks (use_signal for state, use_memo for derived state)
+            - Component lifecycle and re-render optimization
+            - Event handlers and user interactions
+            - Router integration and navigation
+            - Props and component composition
+          - **Error Handling**:
+            - Proper use of Result/Option types
+            - Error propagation with ? operator
+            - Quote cleanup on failures
+            - User-facing error messages (clear and actionable)
+            - Logging for debugging
+          - **Maintainability & Modularity**:
+            - Code that is overly complex, monolithic, or violates separation of concerns
+            - Clear module organization
+            - Proper separation between UI and business logic
+          - **Best Practices**:
+            - Adherence to Rust idioms (ownership, lifetimes, zero-cost abstractions)
+            - SOLID/KISS principles
+            - Proper documentation for complex logic
+            - Testing considerations
+
+        Please **do not** comment on:
+          - Trivial code style issues or formatting (handled by rustfmt)
+          - Missing comments unless they obscure critical logic
+          - Naming conventions unless they're misleading
+
+        Focus on identifying and solving significant problems that improve code quality, security, and performance.
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Review Rust dependency configurations:
+          - Check for outdated or vulnerable dependencies (especially crypto-related crates)
+          - Verify feature flags are minimal and necessary (affects WASM binary size)
+          - Ensure profile settings (release/dev) are optimal for WASM builds
+          - Flag any suspicious or unnecessary dependencies
+          - Check for duplicate dependencies with different versions
+          - Verify nostr-sdk and CDK versions are compatible
+        Only comment on significant issues, not minor version updates.
+
+    - path: "**/*.js"
+      instructions: |
+        Review JavaScript configuration and interop files:
+          - Check for security issues in build configurations
+          - Verify WASM loading and initialization patterns
+          - Check for proper error handling in JS-Rust interop
+          - Verify paths and settings are correct
+          - Flag any unnecessary complexity or performance issues
+        Keep comments minimal and focus on actual issues.
+
+    - path: "**/index.html"
+      instructions: |
+        Review HTML entry point for WASM application:
+          - Security: CSP headers, script integrity, XSS prevention
+          - Performance: Resource loading strategy, critical CSS, WASM loading
+          - Accessibility: Semantic HTML, ARIA attributes
+          - SEO: Meta tags, Open Graph, Nostr NIP-05 metadata
+          - PWA considerations: manifest, service worker
+
+    - path: "**/*.css"
+      instructions: |
+        Review CSS and Tailwind styles:
+          - Check for performance issues (overly specific selectors, excessive animations)
+          - Verify responsive design patterns
+          - Check for accessibility issues (color contrast, focus styles)
+          - Flag unused or redundant styles
+
+  # Auto-review configuration
+  auto_review:
+    # Enable auto-review for pull requests
+    enabled: true
+
+    # Do not review PRs with these keywords in the title
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "DRAFT"
+      - "POC"
+      - "EXPERIMENT"
+
+    # Do not review draft pull requests
+    drafts: false
+
+    # Auto-review PRs targeting these base branches (regex patterns)
+    base_branches:
+      - "main"
+      - "master"
+      - "develop"
+      - "^feature/.*"
+      - "^up/.*"
+      - "^release/.*"
+      - "^hotfix/.*"
+
+  # Configure analysis tools
+  tools:
+    # Rust linter - critical for Rust projects
+    clippy:
+      enabled: true
+
+    # YAML linting for configs
+    yamllint:
+      enabled: true
+
+    # Markdown linting for documentation
+    markdownlint:
+      enabled: true
+
+    # Security scanning for secrets and credentials
+    gitleaks:
+      enabled: true
+
+    # Shell script linting (if any build scripts)
+    shellcheck:
+      enabled: true
+
+    # GitHub Actions workflow validation
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+
+    # Language/grammar checking for docs and comments
+    languagetool:
+      enabled: false  # Can be noisy, enable if desired
+      enabled_only: false
+      level: default
+
+chat:
+  # Allow CodeRabbit to auto-reply in chat
+  auto_reply: true
+
+# Configure knowledge base for project-specific context
+knowledge_base:
+  # Enable CodeRabbit to learn from this repository and issues
+  learnings:
+    scope: auto  # Uses local for public repos, global for private
+
+  # Learn from related issues
+  issues:
+    scope: auto
+
+  # Code guidelines - CodeRabbit will automatically scan these files
+  code_guidelines:
+    enabled: true

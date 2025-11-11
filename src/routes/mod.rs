@@ -4,6 +4,8 @@ pub mod home;
 pub mod profile;
 pub mod note;
 pub mod settings;
+pub mod settings_blocklist;
+pub mod settings_muted;
 pub mod notifications;
 pub mod bookmarks;
 pub mod dms;
@@ -13,6 +15,10 @@ pub mod hashtag;
 pub mod nip19;
 pub mod videos;
 pub mod video_detail;
+pub mod videos_live;
+pub mod videos_live_tag;
+pub mod live_stream_detail;
+pub mod live_stream_new;
 pub mod articles;
 pub mod article_detail;
 pub mod music;
@@ -21,11 +27,19 @@ pub mod article_new;
 pub mod photo_new;
 pub mod video_new_landscape;
 pub mod video_new_portrait;
+pub mod search;
 
 // Placeholder modules for missing routes
 mod lists;
 pub mod photos;
 pub mod photo_detail;
+pub mod voicemessages;
+pub mod voice_message_new;
+pub mod webbookmarks;
+pub mod polls;
+pub mod poll_view;
+pub mod poll_new;
+pub mod cashu_wallet;
 pub mod terms;
 pub mod privacy;
 pub mod cookies;
@@ -35,6 +49,8 @@ use home::Home;
 use profile::Profile;
 use note::Note;
 use settings::Settings;
+use settings_blocklist::SettingsBlocklist;
+use settings_muted::SettingsMuted;
 use notifications::Notifications;
 use bookmarks::Bookmarks;
 use dms::DMs;
@@ -44,11 +60,22 @@ use hashtag::Hashtag;
 use nip19::Nip19Handler;
 use videos::Videos;
 use video_detail::VideoDetail;
+use videos_live::VideosLive;
+use videos_live_tag::VideosLiveTag;
+use live_stream_detail::LiveStreamDetail;
+use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
 use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
 use photos::Photos;
 use photo_detail::PhotoDetail;
+use voicemessages::VoiceMessages;
+use voice_message_new::VoiceMessageNew;
+use webbookmarks::WebBookmarks;
+use polls::Polls;
+use poll_view::PollView;
+use poll_new::PollNew;
+use cashu_wallet::CashuWallet;
 use note_new::NoteNew;
 use article_new::ArticleNew;
 use photo_new::PhotoNew;
@@ -59,6 +86,7 @@ use terms::Terms;
 use privacy::Privacy;
 use cookies::Cookies;
 use about::About;
+use search::Search;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -74,6 +102,9 @@ pub enum Route {
         #[route("/trending")]
         Trending {},
 
+        #[route("/search?:q")]
+        Search { q: String },
+
         #[route("/articles")]
         Articles {},
 
@@ -85,6 +116,18 @@ pub enum Route {
 
         #[route("/videos/:video_id")]
         VideoDetail { video_id: String },
+
+        #[route("/videos/live")]
+        VideosLive {},
+
+        #[route("/videos/live/tag/:tag")]
+        VideosLiveTag { tag: String },
+
+        #[route("/videos/live/new")]
+        LiveStreamNew {},
+
+        #[route("/videos/live/:note_id")]
+        LiveStreamDetail { note_id: String },
 
         #[route("/music")]
         MusicHome {},
@@ -115,6 +158,27 @@ pub enum Route {
 
         #[route("/photos/:photo_id")]
         PhotoDetail { photo_id: String },
+
+        #[route("/voicemessages")]
+        VoiceMessages {},
+
+        #[route("/voicemessages/new")]
+        VoiceMessageNew {},
+
+        #[route("/webbookmarks")]
+        WebBookmarks {},
+
+        #[route("/polls")]
+        Polls {},
+
+        #[route("/polls/new")]
+        PollNew {},
+
+        #[route("/polls/:noteid")]
+        PollView { noteid: String },
+
+        #[route("/cashuwallet")]
+        CashuWallet {},
 
         #[route("/notes/new")]
         NoteNew {},
@@ -149,6 +213,12 @@ pub enum Route {
         #[route("/settings")]
         Settings {},
 
+        #[route("/settings/blocklist")]
+        SettingsBlocklist {},
+
+        #[route("/settings/muted")]
+        SettingsMuted {},
+
         #[route("/terms")]
         Terms {},
 
@@ -174,9 +244,10 @@ fn Layout() -> Element {
     let current_route = use_route::<Route>();
     let navigator = navigator();
 
-    // Check if we're on the DMs or Videos pages (hide right sidebar)
+    // Check if we're on the DMs, Videos, or Wallet pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
-    let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. });
+    let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
+    let is_wallet_page = matches!(current_route, Route::CashuWallet {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -186,6 +257,7 @@ fn Layout() -> Element {
         | Route::PhotoNew {}
         | Route::VideoNewLandscape {}
         | Route::VideoNewPortrait {}
+        | Route::LiveStreamNew {}
     );
 
     // Check if we're on home page for home button styling
@@ -303,6 +375,23 @@ fn Layout() -> Element {
                                     label: "Videos"
                                 }
                                 NavLink {
+                                    to: Route::VideosLive {},
+                                    icon: rsx! {
+                                        svg {
+                                            class: "w-7 h-7",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            fill: "none",
+                                            view_box: "0 0 24 24",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+                                        }
+                                    },
+                                    label: "Live"
+                                }
+                                NavLink {
                                     to: Route::Notifications {},
                                     icon: rsx! { crate::components::icons::BellIcon { class: "w-7 h-7" } },
                                     label: "Notifications",
@@ -357,6 +446,98 @@ fn Layout() -> Element {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
+                                            if auth.is_authenticated {
+                                                Link {
+                                                    to: Route::CashuWallet {},
+                                                    onclick: move |_| more_menu_open.set(false),
+                                                    class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                    svg {
+                                                        class: "w-5 h-5",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        width: "24",
+                                                        height: "24",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                        path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                        path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                    }
+                                                    span {
+                                                        "Wallet"
+                                                    }
+                                                }
+                                            }
+                                            Link {
+                                                to: Route::VoiceMessages {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                                                    path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                                                    line { x1: "12", x2: "12", y1: "19", y2: "22" }
+                                                }
+                                                span {
+                                                    "Voice Messages"
+                                                }
+                                            }
+                                            Link {
+                                                to: Route::Polls {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                    line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                    line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                }
+                                                span {
+                                                    "Polls"
+                                                }
+                                            }
+                                            Link {
+                                                to: Route::WebBookmarks {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
+                                                }
+                                                span {
+                                                    "Web Bookmarks"
+                                                }
+                                            }
                                             a {
                                                 href: "https://nostrcal.com",
                                                 target: "_blank",
@@ -412,6 +593,14 @@ fn Layout() -> Element {
                                     on_video_portrait_click: move |_| {
                                         radial_menu_open.set(false);
                                         navigator.push(Route::VideoNewPortrait {});
+                                    },
+                                    on_voice_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::VoiceMessageNew {});
+                                    },
+                                    on_poll_click: move |_| {
+                                        radial_menu_open.set(false);
+                                        navigator.push(Route::PollNew {});
                                     },
                                 }
                             }
@@ -524,6 +713,26 @@ fn Layout() -> Element {
                                         div {
                                             onclick: move |_| sidebar_open.set(false),
                                             NavLink {
+                                                to: Route::VideosLive {},
+                                                icon: rsx! {
+                                                    svg {
+                                                        class: "w-7 h-7",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        fill: "none",
+                                                        view_box: "0 0 24 24",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+                                                    }
+                                                },
+                                                label: "Live"
+                                            }
+                                        }
+                                        div {
+                                            onclick: move |_| sidebar_open.set(false),
+                                            NavLink {
                                                 to: Route::Notifications {},
                                                 icon: rsx! { crate::components::icons::BellIcon { class: "w-7 h-7" } },
                                                 label: "Notifications",
@@ -616,6 +825,110 @@ fn Layout() -> Element {
                                                 class: "absolute left-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                                 div {
                                                     class: "flex flex-col",
+                                                    if auth.is_authenticated {
+                                                        Link {
+                                                            to: Route::CashuWallet {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                                path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                                path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                            }
+                                                            span {
+                                                                "Wallet"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::VoiceMessages {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                                                                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                                                                line { x1: "12", x2: "12", y1: "19", y2: "22" }
+                                                            }
+                                                            span {
+                                                                "Voice Messages"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::Polls {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                                                line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                                                                line { x1: "9", y1: "21", x2: "9", y2: "9" }
+                                                            }
+                                                            span {
+                                                                "Polls"
+                                                            }
+                                                        }
+                                                        Link {
+                                                            to: Route::WebBookmarks {},
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                            svg {
+                                                                class: "w-5 h-5",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                width: "24",
+                                                                height: "24",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
+                                                            }
+                                                            span {
+                                                                "Web Bookmarks"
+                                                            }
+                                                        }
+                                                    }
                                                     a {
                                                         href: "https://nostrcal.com",
                                                         target: "_blank",
@@ -644,7 +957,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_creation_page {
+                    class: if is_dms_page || is_videos_page || is_wallet_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -674,8 +987,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs and Videos pages
-                if !is_dms_page && !is_videos_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, and Wallet pages
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -763,6 +1076,13 @@ fn NavLink(
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
+        (Route::VideosLive {}, Route::VideosLive {}) |
+        (Route::VideosLive {}, Route::VideosLiveTag { .. }) |
+        (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
+        (Route::VideosLiveTag { tag: t1 }, Route::VideosLiveTag { tag: t2 }) => t1 == t2,
+        (Route::LiveStreamDetail { note_id: n1 }, Route::LiveStreamDetail { note_id: n2 }) => n1 == n2,
+        (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
+        (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
         _ => false,

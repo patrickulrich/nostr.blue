@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet};
 use std::time::Duration;
 
@@ -15,11 +17,25 @@ pub struct GifMetadata {
     pub created_at: Timestamp,
 }
 
+/// Store for GIF search results with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct GifResultsStore {
+    pub data: Vec<GifMetadata>,
+}
+
+/// Store for recent GIFs with fine-grained reactivity
+#[derive(Clone, Debug, Default, Store)]
+pub struct RecentGifsStore {
+    pub data: Vec<GifMetadata>,
+}
+
 /// Global state for GIF search results
-pub static GIF_RESULTS: GlobalSignal<Vec<GifMetadata>> = Signal::global(Vec::new);
+pub static GIF_RESULTS: GlobalSignal<Store<GifResultsStore>> =
+    Signal::global(|| Store::new(GifResultsStore::default()));
 pub static GIF_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static GIF_OLDEST_TIMESTAMP: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
-pub static RECENT_GIFS: GlobalSignal<Vec<GifMetadata>> = Signal::global(Vec::new);
+pub static RECENT_GIFS: GlobalSignal<Store<RecentGifsStore>> =
+    Signal::global(|| Store::new(RecentGifsStore::default()));
 pub static CURRENT_SEARCH_QUERY: GlobalSignal<String> = Signal::global(String::new);
 pub static GIF_SEARCH_SEQ: GlobalSignal<u64> = Signal::global(|| 0);
 
@@ -222,7 +238,7 @@ pub async fn load_initial_gifs() {
                 *GIF_OLDEST_TIMESTAMP.write() = Some(oldest.created_at);
             }
 
-            *GIF_RESULTS.write() = gifs;
+            *GIF_RESULTS.read().data().write() = gifs;
         }
         Err(e) => {
             log::error!("Failed to load initial GIFs: {}", e);
@@ -260,7 +276,7 @@ pub async fn search_gifs(query: String) {
                 *GIF_OLDEST_TIMESTAMP.write() = Some(oldest.created_at);
             }
 
-            *GIF_RESULTS.write() = gifs;
+            *GIF_RESULTS.read().data().write() = gifs;
         }
         Err(e) => {
             log::error!("Failed to search GIFs: {}", e);
@@ -318,7 +334,9 @@ pub async fn load_more_gifs() {
             }
 
             // Append to existing results
-            let mut current = GIF_RESULTS.write();
+            let store = GIF_RESULTS.read();
+            let mut data = store.data();
+            let mut current = data.write();
             current.extend(deduplicated_gifs);
         }
         Err(e) => {
@@ -331,7 +349,9 @@ pub async fn load_more_gifs() {
 
 /// Add a GIF to recent list
 pub fn add_recent_gif(gif: GifMetadata) {
-    let mut recent = RECENT_GIFS.write();
+    let store = RECENT_GIFS.read();
+    let mut data = store.data();
+    let mut recent = data.write();
 
     // Remove if already exists (to move to front)
     recent.retain(|g| g.url != gif.url);

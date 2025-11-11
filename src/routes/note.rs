@@ -9,13 +9,13 @@ use std::time::Duration;
 
 // Helper functions for parallel loading
 
-async fn fetch_main_note(event_id: EventId) -> Result<NostrEvent, String> {
+async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
     events.into_iter().next().ok_or("Event not found".to_string())
 }
 
-async fn fetch_parent_notes(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     // First get the main note to extract parent IDs
     let main_note = fetch_main_note(event_id).await?;
 
@@ -47,7 +47,7 @@ async fn fetch_parent_notes(event_id: EventId) -> Result<Vec<NostrEvent>, String
     nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
 }
 
-async fn fetch_replies(event_id: EventId) -> Result<Vec<NostrEvent>, String> {
+async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     let filter = Filter::new()
         .kind(Kind::TextNote)
         .event(event_id)
@@ -82,6 +82,9 @@ pub fn Note(note_id: String) -> Element {
             loading_parents.set(true);
             loading_replies.set(true);
             error.set(None);
+
+            // Clear profile cache to prevent stale author metadata when navigating between notes
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
 
             // Parse the note ID
             let event_id = match EventId::from_bech32(&note_id_str)
@@ -125,6 +128,21 @@ pub fn Note(note_id: String) -> Element {
                 let count = reply_vec.len();
                 replies.set(reply_vec);
                 log::info!("Loaded {} replies", count);
+            }
+
+            // Prefetch author metadata for all loaded events
+            use crate::utils::profile_prefetch;
+            let mut all_events = Vec::new();
+            if let Some(note) = note_data.read().as_ref() {
+                all_events.push(note.clone());
+            }
+            all_events.extend(parent_events.read().iter().cloned());
+            all_events.extend(replies.read().iter().cloned());
+
+            if !all_events.is_empty() {
+                spawn(async move {
+                    profile_prefetch::prefetch_event_authors(&all_events).await;
+                });
             }
 
             loading.set(false);

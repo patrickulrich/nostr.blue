@@ -4,6 +4,7 @@
 //! Unified signer management for all authentication methods
 
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use nostr::{Keys, PublicKey};
 use serde::{Deserialize, Serialize};

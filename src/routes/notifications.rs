@@ -84,8 +84,13 @@ pub fn Notifications() -> Element {
                         let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
-                        notifications.set(notifs);
+                        notifications.set(notifs.clone());
                         has_more.set(len >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&notifs).await;
+                        });
                     } else {
                         has_more.set(false);
                     }
@@ -114,8 +119,13 @@ pub fn Notifications() -> Element {
                         let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
-                        notifications.set(notifs);
+                        notifications.set(notifs.clone());
                         has_more.set(len >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&notifs).await;
+                        });
                     }
                 }
                 Err(e) => {
@@ -147,6 +157,11 @@ pub fn Notifications() -> Element {
                         notifications.set(current);
 
                         has_more.set(new_notifs.len() >= 100);
+
+                        // Spawn non-blocking background prefetch for notification authors
+                        spawn(async move {
+                            prefetch_notification_authors(&new_notifs).await;
+                        });
                     } else {
                         has_more.set(false);
                     }
@@ -986,4 +1001,27 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
 
     log::info!("Loaded {} notifications", all_notifications.len());
     Ok(all_notifications)
+}
+
+/// Batch prefetch author metadata for notification authors
+async fn prefetch_notification_authors(notifications: &[NotificationType]) {
+    use crate::utils::profile_prefetch;
+
+    if notifications.is_empty() {
+        return;
+    }
+
+    // Extract pubkeys directly without string conversion
+    let pubkeys = profile_prefetch::extract_pubkeys(notifications, |notif| {
+        match notif {
+            NotificationType::Mention(e) => e.pubkey,
+            NotificationType::Reply(e) => e.pubkey,
+            NotificationType::Reaction(e) => e.pubkey,
+            NotificationType::Repost(e) => e.pubkey,
+            NotificationType::Zap(e) => e.pubkey,
+        }
+    });
+
+    // Use optimized prefetch utility - no string conversions, direct database queries
+    profile_prefetch::prefetch_pubkeys(pubkeys).await;
 }

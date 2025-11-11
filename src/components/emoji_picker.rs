@@ -1,9 +1,11 @@
 use dioxus::prelude::*;
-use crate::stores::emoji_store::{CUSTOM_EMOJIS, EMOJI_SETS};
+use crate::stores::emoji_store::{CUSTOM_EMOJIS, EMOJI_SETS, CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct EmojiPickerProps {
     pub on_emoji_selected: EventHandler<String>,
+    #[props(default = false)]
+    pub icon_only: bool,
 }
 
 /// Comprehensive emoji categories with extensive emoji coverage
@@ -27,7 +29,7 @@ const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
     ("👍 Hands", &[
         "👍", "👎", "👌", "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇",
         "☝️", "🫵", "👋", "🤚", "🖐", "✋", "🖖", "🫱", "🫲", "🫳", "🫴", "👏", "🙌",
-        "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻"
+        "👐", "🤲", "🤝", "🙏", "🫂", "✍️", "💅", "🤳", "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻"
     ]),
 
     // Emotions & Faces (expanded)
@@ -58,7 +60,8 @@ const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
         "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐", "🍈", "🍒", "🍑", "🥭",
         "🍍", "🥥", "🥝", "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️", "🫑", "🌽", "🥕", "🫒",
         "🧄", "🧅", "🥔", "🍠", "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳", "🧈", "🥞",
-        "🧇", "🥓", "🥩", "🍗", "🍖", "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆", "🌮"
+        "🧇", "🥓", "🥩", "🍗", "🍖", "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆", "🌮",
+        "☕"
     ]),
 
     // Activities & Sports (expanded)
@@ -82,7 +85,9 @@ const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
         "⌚", "📱", "📲", "💻", "⌨️", "🖥️", "🖨️", "🖱️", "🖲️", "🕹️", "🗜️", "💾", "💿", "📀",
         "📼", "📷", "📸", "📹", "🎥", "📽️", "🎞️", "📞", "☎️", "📟", "📠", "📺", "📻", "🎙️",
         "🎚️", "🎛️", "🧭", "⏱️", "⏲️", "⏰", "🕰️", "⌛", "⏳", "📡", "🔋", "🪫", "🔌", "💡",
-        "🔦", "🕯️", "🪔", "🧯", "🛢️", "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳", "🧾"
+        "🔦", "🕯️", "🪔", "🧯", "🛢️", "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳", "🧾",
+        "🔑", "🛡️", "🎤", "🔊", "📝", "📖", "📰", "📚", "📋", "📌", "🔖", "🖼️", "🗳️", "🗨️",
+        "💭", "💬"
     ]),
 
     // Symbols (expanded)
@@ -90,7 +95,8 @@ const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
         "⚡", "🔥", "💯", "✅", "☑️", "✔️", "❌", "❎", "➕", "➖", "➗", "✖️", "🟰", "💲",
         "💱", "™️", "©️", "®️", "〰️", "➰", "➿", "🔚", "🔙", "🔛", "🔝", "🔜", "✳️", "✴️",
         "❇️", "‼️", "⁉️", "❓", "❔", "❕", "❗", "〽️", "⚠️", "🚸", "🔱", "⚜️", "🔰", "♻️",
-        "⭐", "🌟", "✨", "⚡", "💫", "💥", "💢", "💦", "💨", "🕊️", "🚀", "💎", "🔔", "🔕"
+        "⭐", "🌟", "✨", "⚡", "💫", "💥", "💢", "💦", "💨", "🕊️", "🚀", "💎", "🔔", "🔕",
+        "🔁", "📤", "🔴", "🌐"
     ]),
 
     // Flags (popular countries)
@@ -130,7 +136,12 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             // Emoji button
             button {
                 id: "{button_id}",
-                class: "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition",
+                class: if props.icon_only {
+                    "p-2 rounded-full hover:bg-accent transition"
+                } else {
+                    "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                },
+                title: if props.icon_only { "Add emoji" } else { "" },
                 onclick: move |_| {
                     let current = *show_picker.read();
                     show_picker.set(!current);
@@ -171,7 +182,11 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         }
                     }
                 },
-                "😀 Emoji"
+                if props.icon_only {
+                    "😀"
+                } else {
+                    "😀 Emoji"
+                }
             }
 
             // Emoji picker popover
@@ -218,21 +233,26 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         }
 
                         // Custom emojis tab (if user has any)
-                        if !custom_emojis.is_empty() {
-                            button {
-                                key: "custom",
-                                class: if *selected_category.read() == EmojiCategory::Custom {
+                        if !custom_emojis.data().read().is_empty() {
+                            {
+                                let tab_key = "custom";
+                                rsx! {
+                                    button {
+                                        key: "{tab_key}",
+                                        class: if *selected_category.read() == EmojiCategory::Custom {
                                     "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap"
                                 } else {
                                     "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap"
                                 },
-                                onclick: move |_| selected_category.set(EmojiCategory::Custom),
-                                "⭐ Custom"
+                                        onclick: move |_| selected_category.set(EmojiCategory::Custom),
+                                        "⭐ Custom"
+                                    }
+                                }
                             }
                         }
 
                         // Emoji set tabs
-                        for set in emoji_sets.iter() {
+                        for set in emoji_sets.data().read().iter() {
                             {
                                 let identifier = set.identifier.clone();
                                 let identifier_for_key = identifier.clone();
@@ -280,7 +300,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             EmojiCategory::Custom => rsx! {
                                 div {
                                     class: "grid grid-cols-5 gap-2",
-                                    for (emoji_idx, custom_emoji) in custom_emojis.iter().enumerate() {
+                                    for (emoji_idx, custom_emoji) in custom_emojis.data().read().iter().enumerate() {
                                         {
                                             let shortcode = custom_emoji.shortcode.clone();
                                             let url = custom_emoji.image_url.clone();
@@ -299,7 +319,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     img {
                                                         src: "{url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-8 h-8 object-contain"
+                                                        class: "w-8 h-8 object-contain",
+                                                        loading: "lazy"
                                                     }
                                                 }
                                             }
@@ -308,7 +329,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                             },
                             EmojiCategory::Set(identifier) => {
-                                let set = emoji_sets.iter().find(|s| s.identifier == identifier);
+                                let sets_data = emoji_sets.data();
+                                let sets_guard = sets_data.read();
+                                let set = sets_guard.iter().find(|s| s.identifier == identifier);
                                 let set_id = identifier.clone();
                                 rsx! {
                                     div {
@@ -333,7 +356,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             img {
                                                                 src: "{url}",
                                                                 alt: "{alt_text}",
-                                                                class: "w-8 h-8 object-contain"
+                                                                class: "w-8 h-8 object-contain",
+                                                                loading: "lazy"
                                                             }
                                                         }
                                                     }

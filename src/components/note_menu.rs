@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
+use crate::components::{ReportModal, AddToListModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 
 #[derive(Props, Clone, PartialEq)]
@@ -16,16 +17,21 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_following = use_signal(|| false);
     let mut is_loading_follow_state = use_signal(|| true);
     let mut is_updating_follow = use_signal(|| false);
+    let mut show_report_modal = use_signal(|| false);
+    let mut show_add_to_list_modal = use_signal(|| false);
 
     // Clone props for use in closures
     let author_pubkey = props.author_pubkey.clone();
     let author_pubkey_follow_check = author_pubkey.clone();
     let author_pubkey_follow_action = author_pubkey.clone();
     let author_pubkey_block = author_pubkey.clone();
+    let author_pubkey_modal = author_pubkey.clone();
     let event_id = props.event_id.clone();
     let event_id_list = event_id.clone();
     let event_id_mute = event_id.clone();
     let event_id_report = event_id.clone();
+    let event_id_modal_report = event_id.clone();
+    let event_id_modal_list = event_id.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -145,8 +151,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-                            // TODO: Implement add to list
                             log::info!("Add to list: {}", event_id_list);
+                            show_add_to_list_modal.set(true);
                             is_open.set(false);
                         },
                         span {
@@ -165,9 +171,16 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-                            // TODO: Implement mute post
                             log::info!("Mute post: {}", event_id_mute);
                             is_open.set(false);
+
+                            let event_id = event_id_mute.clone();
+                            spawn(async move {
+                                match nostr_client::mute_post(event_id).await {
+                                    Ok(_) => log::info!("Post muted successfully"),
+                                    Err(e) => log::error!("Failed to mute post: {}", e),
+                                }
+                            });
                         },
                         span {
                             class: "text-sm",
@@ -180,9 +193,16 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-                            // TODO: Implement block user
                             log::info!("Block user: {}", author_pubkey_block);
                             is_open.set(false);
+
+                            let pubkey = author_pubkey_block.clone();
+                            spawn(async move {
+                                match nostr_client::block_user(pubkey).await {
+                                    Ok(_) => log::info!("User blocked successfully"),
+                                    Err(e) => log::error!("Failed to block user: {}", e),
+                                }
+                            });
                         },
                         span {
                             class: "text-sm",
@@ -195,8 +215,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-red-500 hover:text-red-600",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-                            // TODO: Implement report post
                             log::info!("Report post: {}", event_id_report);
+                            show_report_modal.set(true);
                             is_open.set(false);
                         },
                         span {
@@ -205,6 +225,25 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         }
                     }
                 }
+            }
+        }
+
+        // Report Modal
+        if *show_report_modal.read() {
+            ReportModal {
+                event_id: event_id_modal_report.clone(),
+                author_pubkey: author_pubkey_modal.clone(),
+                on_close: move |_| {
+                    show_report_modal.set(false);
+                }
+            }
+        }
+
+        // Add to List Modal
+        if *show_add_to_list_modal.read() {
+            AddToListModal {
+                event_id: event_id_modal_list.clone(),
+                on_close: move |_| show_add_to_list_modal.set(false)
             }
         }
     }

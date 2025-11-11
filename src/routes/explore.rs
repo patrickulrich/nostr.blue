@@ -29,6 +29,9 @@ pub fn Explore() -> Element {
         error.set(None);
         oldest_timestamp.set(None);
 
+        // Clear profile cache to prevent stale author metadata on refresh
+        crate::stores::profiles::PROFILE_CACHE.write().clear();
+
         spawn(async move {
             match load_global_feed(None).await {
                 Ok(feed_events) => {
@@ -36,8 +39,15 @@ pub fn Explore() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
                     has_more.set(feed_events.len() >= 50);
-                    events.set(feed_events);
+
+                    // Display events immediately (NoteCard shows fallback until metadata loads)
+                    events.set(feed_events.clone());
                     loading.set(false);
+
+                    // Spawn non-blocking background prefetch for metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&feed_events).await;
+                    });
                 }
                 Err(e) => {
                     error.set(Some(e));
@@ -49,16 +59,25 @@ pub fn Explore() -> Element {
 
     // Load more function
     let load_more = move || {
-        if *loading.read() || !*has_more.read() {
+        log::info!("explore load_more called - loading: {}, has_more: {}",
+                   *loading.peek(), *has_more.peek());
+
+        if *loading.peek() || !*has_more.peek() {
+            log::info!("explore load_more blocked by guards");
             return;
         }
 
-        let until = *oldest_timestamp.read();
+        log::info!("explore load_more setting loading to true and spawning");
         loading.set(true);
 
         spawn(async move {
+            // Read signals fresh on each invocation to avoid stale closure bug
+            let until = *oldest_timestamp.read();
+
+            log::info!("explore load_more spawn executing - until: {:?}", until);
+
             match load_global_feed(until).await {
-                Ok(mut new_events) => {
+                Ok(new_events) => {
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
@@ -66,9 +85,14 @@ pub fn Explore() -> Element {
 
                     // Append new events
                     let mut current = events.read().clone();
-                    current.append(&mut new_events);
+                    current.extend(new_events.clone());
                     events.set(current);
                     loading.set(false);
+
+                    // Spawn non-blocking background prefetch for missing metadata
+                    spawn(async move {
+                        prefetch_author_metadata(&new_events).await;
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
@@ -240,4 +264,12 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
             Err(format!("Failed to fetch events: {}", e))
         }
     }
+}
+
+/// Batch prefetch author metadata for all events
+async fn prefetch_author_metadata(events: &[Event]) {
+    use crate::utils::profile_prefetch;
+
+    // Use optimized prefetch utility - no string conversions, direct database queries
+    profile_prefetch::prefetch_event_authors(events).await;
 }

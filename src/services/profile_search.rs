@@ -159,7 +159,7 @@ pub async fn search_profiles(
     query: &str,
     limit: usize,
     query_relays: bool,
-) -> Result<Vec<ProfileSearchResult>, String> {
+) -> std::result::Result<Vec<ProfileSearchResult>, String> {
     if query.is_empty() {
         return Ok(Vec::new());
     }

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::events::FormData;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 use crate::stores::blossom_store;
@@ -35,20 +36,18 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         spawn(async move {
             error.set(None);
 
-            if let Some(file_engine) = evt.files() {
-                let files = file_engine.files();
-
-                if let Some(file_name) = files.get(0) {
-                    // Read file data
-                    match read_file_as_bytes(&file_name, &input_id).await {
-                        Ok((data, mime_type)) => {
-                            log::info!("File selected: {} ({} bytes)", file_name, data.len());
-                            selected_file.set(Some((file_name.clone(), data, mime_type)));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to read file: {}", e);
-                            error.set(Some(format!("Failed to read file: {}", e)));
-                        }
+            let files = evt.files();
+            if let Some(file_data) = files.first() {
+                let file_name = file_data.name();
+                // Read file data using web-sys directly
+                match read_file_as_bytes(&file_name, &input_id).await {
+                    Ok((data, mime_type)) => {
+                        log::info!("File selected: {} ({} bytes)", file_name, data.len());
+                        selected_file.set(Some((file_name, data, mime_type)));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read file: {}", e);
+                        error.set(Some(format!("Failed to read file: {}", e)));
                     }
                 }
             }

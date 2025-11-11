@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use dioxus::prelude::Event as DioxusEvent;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
@@ -504,6 +505,7 @@ fn render_dropdown(
                                                 src: "{picture}",
                                                 class: "w-8 h-8 rounded-full",
                                                 alt: "{profile.get_display_name()}",
+                                                loading: "lazy"
                                             }
                                         } else {
                                             div {

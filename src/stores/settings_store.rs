@@ -1,11 +1,13 @@
 /// NIP-78: Application Data Storage
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
+use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 
 /// App settings stored on Nostr via NIP-78
 /// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
@@ -18,6 +20,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub sync_notifications: bool, // Sync notification read status across devices via NIP-78
     #[serde(default)]
+    pub payment_method_preference: String, // "nwc_first", "webln_first", "manual_only", "always_ask"
+    #[serde(default)]
     pub version: u32, // Settings schema version
 }
 
@@ -28,7 +32,8 @@ impl Default for AppSettings {
             // relay_urls removed - now using kind 10002/10050 (NIP-65/NIP-17)
             blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
             sync_notifications: false, // Privacy-first: opt-in by default
-            version: 2, // Incremented for breaking change (removed relay_urls)
+            payment_method_preference: "nwc_first".to_string(), // Default to NWC if connected
+            version: 3, // Incremented for payment_method_preference addition
         }
     }
 }
@@ -97,7 +102,7 @@ pub async fn load_settings() -> Result<(), String> {
 
                         // Update Blossom servers
                         if !settings.blossom_servers.is_empty() {
-                            *blossom_store::BLOSSOM_SERVERS.write() = settings.blossom_servers.clone();
+                            *blossom_store::BLOSSOM_SERVERS.read().data().write() = settings.blossom_servers.clone();
                         }
 
                         // Update global settings
@@ -142,7 +147,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
 
     // Create settings with current blossom servers
     let mut settings_to_save = settings.clone();
-    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().clone();
+    settings_to_save.blossom_servers = blossom_store::BLOSSOM_SERVERS.read().data().read().clone();
 
     // Serialize settings to JSON
     let content = serde_json::to_string(&settings_to_save)
@@ -192,5 +197,16 @@ pub async fn update_notification_sync(enabled: bool) {
     // Save to Nostr
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save notification sync setting: {}", e);
+    }
+}
+
+/// Update payment method preference and save to Nostr
+pub async fn update_payment_method_preference(preference: String) {
+    let mut settings = SETTINGS.read().clone();
+    settings.payment_method_preference = preference;
+
+    // Save to Nostr
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save payment method preference: {}", e);
     }
 }

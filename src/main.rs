@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, nostr_client, theme_store, music_player};
+use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store};
 
 // Modules
 mod components;
+mod context;
 mod hooks;
 mod routes;
 mod services;
@@ -41,6 +42,9 @@ fn App() -> Element {
                     log::info!("Nostr client initialized");
                     // Restore signer from stored credentials
                     auth_store::restore_session_async().await;
+
+                    // Restore NWC connection from LocalStorage
+                    nwc_store::restore_connection().await;
                 }
                 Err(e) => {
                     log::error!("Failed to initialize client: {}", e);

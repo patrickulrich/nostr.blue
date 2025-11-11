@@ -1,8 +1,11 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
 use std::time::Duration;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
+use lru::LruCache;
 use chrono::{DateTime, Utc};
 
 /// User profile metadata from Kind 0 events
@@ -70,15 +73,16 @@ impl Profile {
 }
 
 /// Global signal to cache profiles (pubkey -> Profile)
-pub static PROFILE_CACHE: GlobalSignal<HashMap<String, Profile>> =
-    Signal::global(|| HashMap::new());
+/// LRU cache with max capacity of 1000 profiles to prevent unbounded memory growth
+pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
+    Signal::global(|| LruCache::new(NonZeroUsize::new(1000).unwrap()));
 
 /// Cache TTL in seconds (5 minutes)
 const CACHE_TTL_SECONDS: i64 = 300;
 
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
-    PROFILE_CACHE.read().get(pubkey).map(|profile| {
+    PROFILE_CACHE.read().peek(pubkey).map(|profile| {
         let mut metadata = nostr_sdk::Metadata::new();
         if let Some(name) = &profile.name {
             metadata = metadata.name(name);
@@ -117,7 +121,7 @@ pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
 /// Fetch a profile from relays by pubkey
 pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     // Check cache first
-    if let Some(cached_profile) = PROFILE_CACHE.read().get(&pubkey) {
+    if let Some(cached_profile) = PROFILE_CACHE.read().peek(&pubkey) {
         let age = Utc::now().signed_duration_since(cached_profile.fetched_at);
         if age.num_seconds() < CACHE_TTL_SECONDS {
             log::debug!("Using cached profile for {}", pubkey);
@@ -143,7 +147,7 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 let profile = parse_profile_event(&event)?;
 
                 // Cache the profile
-                PROFILE_CACHE.write().insert(pubkey.clone(), profile.clone());
+                PROFILE_CACHE.write().put(pubkey.clone(), profile.clone());
 
                 Ok(profile)
             } else {
@@ -162,7 +166,7 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 };
 
                 // Cache the empty profile to avoid re-fetching
-                PROFILE_CACHE.write().insert(pubkey, profile.clone());
+                PROFILE_CACHE.write().put(pubkey, profile.clone());
 
                 Ok(profile)
             }
@@ -211,7 +215,7 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
 
 /// Get a profile from cache (if available)
 pub fn get_cached_profile(pubkey: &str) -> Option<Profile> {
-    PROFILE_CACHE.read().get(pubkey).cloned()
+    PROFILE_CACHE.read().peek(pubkey).cloned()
 }
 
 /// Fetch multiple profiles in a single query (much more efficient than individual fetches)
@@ -226,7 +230,7 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
 
     // Check cache first
     for pk in &pubkeys {
-        if let Some(cached) = PROFILE_CACHE.read().get(pk) {
+        if let Some(cached) = PROFILE_CACHE.read().peek(pk) {
             let age = Utc::now().signed_duration_since(cached.fetched_at);
             if age.num_seconds() < CACHE_TTL_SECONDS {
                 results.insert(pk.clone(), cached.clone());
@@ -264,7 +268,7 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
         Ok(events) => {
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {
-                    PROFILE_CACHE.write().insert(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
                     results.insert(profile.pubkey.clone(), profile);
                 }
             }
@@ -286,4 +290,99 @@ pub async fn prefetch_profiles(pubkeys: Vec<String>) {
             let _ = fetch_profile(pubkey).await;
         });
     }
+}
+
+/// Optimized batch profile fetcher that works with PublicKey directly
+///
+/// This function is optimized to:
+/// 1. Work with PublicKey natively (no string conversions)
+/// 2. Use single lock for cache lookups
+/// 3. Query database directly before hitting relays
+/// 4. Only fetch from relays what's truly missing
+pub async fn fetch_profiles_batch_native(pubkeys: HashSet<PublicKey>) -> Result<HashMap<PublicKey, Profile>, String> {
+    if pubkeys.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut results = HashMap::new();
+    let mut missing = Vec::new();
+
+    // Single lock acquisition for all cache lookups
+    {
+        let cache = PROFILE_CACHE.read();
+        for &pk in &pubkeys {
+            let pk_str = pk.to_string();
+            if let Some(cached) = cache.peek(&pk_str) {
+                let age = Utc::now().signed_duration_since(cached.fetched_at);
+                if age.num_seconds() < CACHE_TTL_SECONDS {
+                    results.insert(pk, cached.clone());
+                    continue;
+                }
+            }
+            missing.push(pk);
+        }
+    }
+
+    if missing.is_empty() {
+        return Ok(results);
+    }
+
+    log::info!("Batch fetching {} profiles (optimized path)", missing.len());
+
+    // Get client once
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Step 1: SINGLE batch query to database for all missing profiles (5-10x faster than individual queries)
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .authors(missing.iter().copied());
+
+    match client.database().query(filter).await {
+        Ok(database_events) => {
+            // Process all database results at once
+            for event in database_events {
+                if let Ok(profile) = parse_profile_event(&event) {
+                    let pk = event.pubkey;
+                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                    results.insert(pk, profile);
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("Database batch query failed: {}, will query relays for all", e);
+        }
+    }
+
+    // Identify profiles still missing (not in database)
+    let found_pubkeys: HashSet<PublicKey> = results.keys().copied().collect();
+    let still_missing: Vec<PublicKey> = missing.into_iter()
+        .filter(|pk| !found_pubkeys.contains(pk))
+        .collect();
+
+    // Step 2: Only query relays for profiles not in database
+    if !still_missing.is_empty() {
+        log::info!("Querying relays for {} profiles not in database", still_missing.len());
+
+        let filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(still_missing.iter().copied());
+
+        match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+            Ok(events) => {
+                for event in events {
+                    if let Ok(profile) = parse_profile_event(&event) {
+                        let pk = event.pubkey;
+                        PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                        results.insert(pk, profile);
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to fetch profiles from relays: {}", e);
+                // Don't return error - we got some results from cache/database
+            }
+        }
+    }
+
+    Ok(results)
 }

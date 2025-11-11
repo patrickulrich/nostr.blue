@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use dioxus_stores::Store;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
@@ -45,9 +47,15 @@ pub struct Conversation {
     pub unread_count: usize,
 }
 
-/// Global signal to track DM conversations
-pub static CONVERSATIONS: GlobalSignal<HashMap<String, Conversation>> =
-    Signal::global(|| HashMap::new());
+/// Store for DM conversations with fine-grained reactivity
+#[derive(Clone, Debug, PartialEq, Default, Store)]
+pub struct ConversationsStore {
+    pub data: HashMap<String, Conversation>,
+}
+
+/// Global store to track DM conversations
+pub static CONVERSATIONS: GlobalSignal<Store<ConversationsStore>> =
+    Signal::global(|| Store::new(ConversationsStore::default()));
 
 /// Initialize DMs by fetching conversations from relays
 pub async fn init_dms() -> Result<(), String> {
@@ -202,7 +210,7 @@ pub async fn init_dms() -> Result<(), String> {
     }
 
     log::info!("Organized into {} conversations", conversations.len());
-    *CONVERSATIONS.write() = conversations;
+    *CONVERSATIONS.read().data().write() = conversations;
 
     Ok(())
 }
@@ -342,12 +350,12 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
 
 /// Get a specific conversation
 pub fn get_conversation(pubkey: &str) -> Option<Conversation> {
-    CONVERSATIONS.read().get(pubkey).cloned()
+    CONVERSATIONS.read().data().read().get(pubkey).cloned()
 }
 
 /// Get all conversations sorted by last message time
 pub fn get_conversations_sorted() -> Vec<Conversation> {
-    let mut convos: Vec<Conversation> = CONVERSATIONS.read().values().cloned().collect();
+    let mut convos: Vec<Conversation> = CONVERSATIONS.read().data().read().values().cloned().collect();
 
     // Sort by most recent message (uses actual rumor timestamp for NIP-17)
     convos.sort_by(|a, b| {

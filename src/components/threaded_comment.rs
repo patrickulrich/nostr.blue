@@ -7,6 +7,7 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
+use crate::utils::format_sats_compact;
 use nostr_sdk::{Metadata, Filter, Kind};
 use nostr_sdk::prelude::NostrDatabaseExt;
 use std::time::Duration;
@@ -226,7 +227,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 img {
                                     class: "w-8 h-8 rounded-full flex-shrink-0",
                                     src: "{picture}",
-                                    alt: "Avatar"
+                                    alt: "Avatar",
+                                    loading: "lazy"
                                 }
                             } else {
                                 div {
@@ -449,7 +451,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 {
                                                     let amount = *zap_amount_sats.read();
                                                     if amount > 0 {
-                                                        format_sats(amount)
+                                                        format_sats_compact(amount)
                                                     } else {
                                                         "".to_string()
                                                     }
@@ -576,14 +578,3 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     }
 }
 
-
-/// Helper function to format sats amounts
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{}M", sats / 1_000_000)
-    } else if sats >= 1_000 {
-        format!("{}k", sats / 1_000)
-    } else {
-        sats.to_string()
-    }
-}

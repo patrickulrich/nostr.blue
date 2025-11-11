@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.5.10"
+version = "0.6.0"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -8,24 +8,32 @@ license = "MIT"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.6", features = ["web", "router"] }
+dioxus = { version = "0.7.1", features = ["web", "router"] }
+dioxus-stores = "0.7.1"
 
 # Nostr protocol
-nostr = { version = "0.44", default-features = false, features = ["nip57"] }
-nostr-sdk = { version = "0.44", default-features = false, features = ["nip59", "nip57"] }
+nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60"] }
+nostr-sdk = { version = "0.44", default-features = false, features = ["nip44", "nip59", "nip57"] }
 nostr-database = { version = "0.44", default-features = false }
 nostr-indexeddb = { version = "0.44" }
 nostr-browser-signer = { version = "0.44" }
 nostr-blossom = { version = "0.44" }
 nostr-connect = { version = "0.44" }
 nostr-gossip-memory = { version = "0.44" }
+nostr-relay-pool = { version = "0.44" }
+nwc = { version = "0.44" }
+
+# Cashu ecash protocol
+cdk = { version = "0.13.4", default-features = false, features = ["wallet"] }
+cdk-common = { version = "0.13.4", default-features = false, features = ["wallet"] }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sha2 = "0.10"
 
 # Async runtime for WASM
-tokio = { version = "1", features = ["sync", "macros"], default-features = false }
+tokio = { version = "1", features = ["sync", "macros", "time"], default-features = false }
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -36,6 +44,7 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+indexed_db_futures = "0.5"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -63,6 +72,30 @@ web-sys = { version = "0.3", features = [
     "FileReader",
     "Event",
     "EventTarget",
+    # MediaRecorder API for voice messages
+    "MediaStream",
+    "MediaRecorder",
+    "MediaDevices",
+    "MediaStreamConstraints",
+    "BlobEvent",
+    # Intersection Observer for infinite scroll
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
+    # Virtual scrolling
+    "ScrollBehavior",
+    "HtmlDivElement",
+    # IndexedDB for keyset counter persistence
+    "IdbFactory",
+    "IdbDatabase",
+    "IdbOpenDbRequest",
+    "IdbObjectStore",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbVersionChangeEvent",
+    "IdbCursorWithValue",
+    "IdbKeyRange",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -78,12 +111,18 @@ anyhow = "1.0"
 regex = "1.10"
 urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "js"] }
+url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 gloo-net = "0.5"
 bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
 hex = "0.4"
+lru = "0.12"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+rand = { version = "0.8", features = ["getrandom"] }
+getrandom = { version = "0.2", features = ["js"] }
+once_cell = "1.19"
 
 # Markdown rendering
 pulldown-cmark = "0.12"
@@ -98,3 +137,13 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 0
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

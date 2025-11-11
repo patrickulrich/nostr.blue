@@ -383,7 +383,8 @@ pub fn VideoCard(event: Event) -> Element {
                         img {
                             src: "{pic_url}",
                             class: "w-12 h-12 rounded-full object-cover",
-                            alt: "Avatar"
+                            alt: "Avatar",
+                            loading: "lazy"
                         }
                     } else {
                         div {

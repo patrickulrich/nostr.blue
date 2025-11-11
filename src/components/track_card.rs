@@ -67,7 +67,8 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 img {
                     src: "{track.album_art_url}",
                     alt: "Album art",
-                    class: "w-14 h-14 rounded object-cover"
+                    class: "w-14 h-14 rounded object-cover",
+                    loading: "lazy"
                 }
 
                 // Play button overlay

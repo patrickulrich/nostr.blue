@@ -5,9 +5,9 @@
 /// It implements the Outbox model for intelligent relay routing.
 
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use nostr_sdk::{Client, EventBuilder, Filter, Kind, PublicKey, Tag, TagKind};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,10 +29,6 @@ pub struct RelayListMetadata {
     pub dm_relays: Vec<String>,        // kind 10050 - DM inbox relays
     pub updated_at: u64,               // timestamp of last update
 }
-
-/// Cache for relay lists by pubkey (24 hour TTL)
-pub static RELAY_LIST_CACHE: GlobalSignal<HashMap<String, RelayListMetadata>> =
-    Signal::global(HashMap::new);
 
 /// Current user's relay metadata
 pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> =
@@ -199,7 +195,6 @@ pub async fn fetch_relay_list(pubkey: PublicKey, client: Arc<Client>) -> Result<
     })
 }
 
-/// Fetch relay list with caching (24 hour TTL)
 /// Publish relay list (kind 10002) using rust-nostr's EventBuilder
 pub async fn publish_relay_list(relays: Vec<RelayConfig>, client: Arc<Client>) -> Result<String, String> {
     log::info!("Publishing relay list with {} relays", relays.len());
@@ -282,10 +277,7 @@ pub async fn sync_relay_lists_on_login(client: Arc<Client>) -> Result<(), String
     };
 
     if should_update {
-        *USER_RELAY_METADATA.write() = Some(remote.clone());
-
-        // Update cache
-        RELAY_LIST_CACHE.write().insert(user_pubkey.to_hex(), remote);
+        *USER_RELAY_METADATA.write() = Some(remote);
 
         log::info!("Relay lists synced successfully");
     }

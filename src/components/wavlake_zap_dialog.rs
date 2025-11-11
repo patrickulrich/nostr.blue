@@ -270,7 +270,8 @@ pub fn WavlakeZapDialog() -> Element {
                                     img {
                                         src: "{qr_url}",
                                         alt: "Invoice QR Code",
-                                        class: "w-64 h-64"
+                                        class: "w-64 h-64",
+                                        loading: "lazy"
                                     }
                                 }
                             }

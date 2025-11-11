@@ -33,8 +33,11 @@ where
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
 
-    #[cfg_attr(not(target_family = "wasm"), allow(unused_mut, unused_variables))]
-    let mut last_check = use_signal(|| 0u64);
+    #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
+    let last_check = use_signal(|| 0u64);
+
+    // Trigger signal to communicate from IntersectionObserver (JS context) to Dioxus effect (Rust context)
+    let trigger = use_signal(|| 0u64);
 
     // Store callback in hook so it persists across renders
     #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
@@ -44,82 +47,200 @@ where
     #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
 
+    // Effect to call the callback when trigger changes
+    // This runs in Dioxus context, so spawn() is available
     use_effect(move || {
-        // Read signals to track them as dependencies
-        let enabled = *has_more.read() && !*loading.read();
+        let trigger_value = *trigger.read();
 
-        if !enabled {
-            log::debug!("Infinite scroll disabled: has_more={}, loading={}", has_more.read(), loading.read());
+        log::info!("[InfiniteScroll] Trigger effect running - trigger value: {}", trigger_value);
+
+        // Skip first render (trigger is 0)
+        if trigger_value == 0 {
+            log::info!("[InfiniteScroll] Skipping first render (trigger is 0)");
             return;
         }
 
-        log::debug!("Infinite scroll enabled, starting polling loop");
+        // Check if we should actually call the callback
+        // This prevents infinite loops when loading state changes
+        // Use peek() to avoid subscribing to these signals as dependencies
+        let is_loading = *loading.peek();
+        let has_more_items = *has_more.peek();
 
-        #[cfg(target_family = "wasm")]
-        {
+        log::info!("[InfiniteScroll] Guard check - is_loading: {}, has_more: {}", is_loading, has_more_items);
+
+        if is_loading {
+            log::info!("[InfiniteScroll] Trigger ignored - already loading");
+            return;
+        }
+
+        if !has_more_items {
+            log::info!("[InfiniteScroll] Trigger ignored - no more items");
+            return;
+        }
+
+        log::info!("[InfiniteScroll] Trigger passed guards - calling callback");
+
+        // Call the callback within Dioxus context
+        if let Ok(mut callback) = cb.try_borrow_mut() {
+            log::info!("[InfiniteScroll] Executing callback now");
+            callback();
+        } else {
+            log::warn!("[InfiniteScroll] Callback already executing, skipping this trigger");
+        }
+    });
+
+    // Setup observer once on mount with retries to find DOM element
+    // Don't subscribe to signals - let callback guards handle enabled/disabled state
+    #[cfg(target_family = "wasm")]
+    {
+        // Create a cleanup guard with a shared cleanup flag
+        #[derive(Clone)]
+        struct ObserverCleanup {
+            handles: Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>>>,
+            cleaned: Rc<RefCell<bool>>,
+        }
+
+        impl Drop for ObserverCleanup {
+            fn drop(&mut self) {
+                // Only cleanup once, when the last reference is dropped
+                if Rc::strong_count(&self.handles) == 1 && !*self.cleaned.borrow() {
+                    if let Some((observer, _closure)) = self.handles.borrow_mut().take() {
+                        observer.disconnect();
+                        *self.cleaned.borrow_mut() = true;
+                        log::info!("[InfiniteScroll] Cleaned up observer and closure on unmount");
+                    }
+                }
+            }
+        }
+
+        let observer_handles = use_hook(|| {
+            Rc::new(RefCell::new(None::<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>))
+        });
+
+        // Store cleanup handler in hook so it lives for component lifetime
+        use_hook(|| {
+            ObserverCleanup {
+                handles: observer_handles.clone(),
+                cleaned: Rc::new(RefCell::new(false)),
+            }
+        });
+
+        use_hook(move || {
+            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::JsCast;
+
+            log::info!("[InfiniteScroll] Setting up IntersectionObserver (one-time)");
+
             let id = id_for_effect.clone();
-            let cb_clone = cb.clone();
+            let mut trigger_clone = trigger.clone();
+            let observer_handles_clone = observer_handles.clone();
 
-            spawn(async move {
-                loop {
-                    // Sleep for 300ms between checks
-                    gloo_timers::future::TimeoutFuture::new(300).await;
+        spawn(async move {
+            log::info!("[InfiniteScroll] Async task started");
 
-                    // Check if element is in viewport
-                    let should_load = {
-                        use wasm_bindgen::JsCast;
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    log::error!("[InfiniteScroll] Failed to get window");
+                    return;
+                }
+            };
 
-                        if let Some(window) = web_sys::window() {
-                            if let Some(document) = window.document() {
-                                if let Some(element) = document.get_element_by_id(&id) {
-                                    if let Ok(html_element) = element.dyn_into::<web_sys::HtmlElement>() {
-                                        let rect = html_element.get_bounding_client_rect();
-                                        let window_height = window.inner_height()
-                                            .ok()
-                                            .and_then(|h| h.as_f64())
-                                            .unwrap_or(0.0);
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    log::error!("[InfiniteScroll] Failed to get document");
+                    return;
+                }
+            };
 
-                                        // Check if element is in viewport (with 300px threshold)
-                                        let is_visible = rect.top() < window_height + 300.0 && rect.bottom() >= 0.0;
+            // Retry finding the element with exponential backoff
+            let mut element = None;
+            for attempt in 1..=10 {
+                gloo_timers::future::TimeoutFuture::new(attempt * 100).await;
 
-                                        if is_visible {
-                                            log::debug!("Sentinel visible: top={}, window_height={}", rect.top(), window_height);
-                                        }
+                if let Some(el) = document.get_element_by_id(&id) {
+                    log::info!("[InfiniteScroll] Found sentinel element on attempt {}", attempt);
+                    element = Some(el);
+                    break;
+                }
+                log::debug!("[InfiniteScroll] Sentinel not found on attempt {}, retrying...", attempt);
+            }
 
-                                        is_visible
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    // Element not found - might be removed because has_more became false
-                                    // Break the loop so effect can restart if conditions change
-                                    log::debug!("Sentinel element not found, stopping loop");
-                                    return;
-                                }
+            let element = match element {
+                Some(e) => e,
+                None => {
+                    log::warn!("[InfiniteScroll] Sentinel element never found after 10 attempts: {}", id);
+                    return;
+                }
+            };
+
+            // Create IntersectionObserver callback
+            let mut last_check_for_callback = last_check.clone();
+
+            let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
+                log::info!("[InfiniteScroll] IntersectionObserver callback fired, checking {} entries", entries.length());
+                // Check if any entry is intersecting
+                for i in 0..entries.length() {
+                    if let Some(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>().ok() {
+                        let is_intersecting = entry.is_intersecting();
+                        log::info!("[InfiniteScroll] Entry {} intersecting: {}", i, is_intersecting);
+
+                        if is_intersecting {
+                            // Debounce - only trigger once per second
+                            let now = js_sys::Date::now() as u64;
+                            let last = *last_check_for_callback.read();
+
+                            log::info!("[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}", now, last, now - last);
+
+                            if now - last > 1000 {
+                                log::info!("[InfiniteScroll] Debounce passed - updating trigger signal to {}", now);
+                                last_check_for_callback.set(now);
+
+                                // Update trigger signal to invoke callback in Dioxus context
+                                trigger_clone.set(now);
+                                log::info!("[InfiniteScroll] Trigger signal updated successfully");
                             } else {
-                                false
+                                log::info!("[InfiniteScroll] Debounce blocked - too soon after last trigger");
                             }
-                        } else {
-                            false
-                        }
-                    };
-
-                    if should_load {
-                        // Debounce - only trigger once per second
-                        let now = js_sys::Date::now() as u64;
-                        let last = *last_check.read();
-
-                        if now - last > 1000 {
-                            log::info!("Infinite scroll triggered - calling load_more callback");
-                            last_check.set(now);
-                            cb_clone.borrow_mut()();
-                            // Continue polling to detect when more content should load
+                            break;
                         }
                     }
                 }
-            });
-        }
-    });
+            }) as Box<dyn FnMut(js_sys::Array)>);
+
+            log::info!("[InfiniteScroll] Creating IntersectionObserver with 300px root margin");
+
+            // Create IntersectionObserver with root margin for early triggering
+            let options = web_sys::IntersectionObserverInit::new();
+            options.set_root_margin("300px"); // Trigger 300px before element enters viewport
+
+            let observer = match web_sys::IntersectionObserver::new_with_options(
+                callback.as_ref().unchecked_ref(),
+                &options
+            ) {
+                Ok(obs) => {
+                    log::info!("[InfiniteScroll] IntersectionObserver created successfully");
+                    obs
+                },
+                Err(e) => {
+                    log::error!("[InfiniteScroll] Failed to create IntersectionObserver: {:?}", e);
+                    return;
+                }
+            };
+
+            // Start observing the sentinel element
+            observer.observe(&element);
+            log::info!("[InfiniteScroll] IntersectionObserver now watching sentinel element - setup complete");
+
+            // Store observer and callback for cleanup on unmount
+            *observer_handles_clone.borrow_mut() = Some((observer, callback));
+        });
+
+        // Return unit for use_hook
+        ()
+        });
+    }
 
     sentinel_id
 }
