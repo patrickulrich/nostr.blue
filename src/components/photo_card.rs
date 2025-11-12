@@ -189,18 +189,25 @@ pub fn PhotoCard(event: Event) -> Element {
                 // Get current user's pubkey to check if they've already liked
                 let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
                 let mut user_has_liked = false;
+                let mut positive_likes = 0;
 
-                // Check if current user has liked
+                // Check if current user has liked and count only positive reactions
                 if let Some(ref user_pk) = current_user_pubkey {
                     for like in likes.iter() {
-                        if like.pubkey.to_string() == *user_pk {
-                            user_has_liked = true;
-                            break;
+                        // Per NIP-25, only count reactions with content != "-" as likes
+                        if like.content.trim() != "-" {
+                            positive_likes += 1;
+                            if like.pubkey.to_string() == *user_pk {
+                                user_has_liked = true;
+                            }
                         }
                     }
+                } else {
+                    // If no user logged in, still count only positive reactions
+                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
                 }
 
-                like_count.set(likes.len());
+                like_count.set(positive_likes);
                 is_liked.set(user_has_liked);
             }
 
