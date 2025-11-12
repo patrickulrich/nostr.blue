@@ -1,348 +1,279 @@
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use js_sys::{Reflect, Uint8Array};
-use web_sys::{Blob, MediaStream, MediaRecorder};
+use js_sys::Reflect;
 use gloo_timers::future::TimeoutFuture;
+use uuid::Uuid;
 
 const MAX_DURATION_SECONDS: f64 = 60.0;
 
 #[derive(Clone, PartialEq)]
 enum RecorderState {
     Idle,
-    RequestingPermission,
-    Recording { started_at: f64, chunks: Vec<Blob> },
-    Stopped { blob_url: String, duration: f64 },
+    Recording { started_at: f64 },
+    Stopped { duration: f64 },
     Error { message: String },
 }
 
 #[component]
 pub fn VoiceRecorder(
-    on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>, String)>, // Added MIME type
+    on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>, String)>,
 ) -> Element {
     let mut state = use_signal(|| RecorderState::Idle);
     let mut current_time = use_signal(|| 0.0);
-    let mut waveform_data = use_signal(|| Vec::<u8>::new());
-    let mime_type = use_signal(|| String::from("audio/webm")); // Store MIME type
-    let mut is_playing_preview = use_signal(|| false);
     let is_mounted = use_signal(|| true);
-    let mut is_stopping = use_signal(|| false);
+    let mut is_playing_preview = use_signal(|| false);
+    let mut blob_url_cache = use_signal(|| None::<String>);
 
-    // Generate a unique namespace for this instance to avoid data leakage
-    let namespace = use_signal(|| {
-        // Generate a cryptographically secure random namespace using browser crypto API
-        let random_bytes = match (|| -> Option<Vec<u8>> {
-            // Use JavaScript to access crypto.getRandomValues
-            let script = r#"
-                (function() {
-                    try {
-                        const arr = new Uint8Array(16);
-                        window.crypto.getRandomValues(arr);
-                        return Array.from(arr);
-                    } catch(e) {
-                        console.error('Crypto API failed:', e);
-                        return null;
-                    }
-                })()
-            "#;
+    // Generate a unique recorder ID for this instance (only once, persists across renders)
+    let recorder_id = use_signal(|| Uuid::new_v4().to_string());
 
-            let result = js_sys::eval(script).ok()?;
-            if result.is_null() || result.is_undefined() {
-                return None;
-            }
-
-            let array = js_sys::Array::from(&result);
-            let bytes: Vec<u8> = array.iter()
-                .filter_map(|v| v.as_f64().map(|f| f as u8))
-                .collect();
-
-            if bytes.len() == 16 {
-                Some(bytes)
-            } else {
-                None
-            }
-        })() {
-            Some(bytes) => bytes,
-            None => {
-                log::warn!("Failed to use crypto API, falling back to less secure random");
-                // Fallback: use Math.random if crypto API fails
-                (0..16)
-                    .map(|_| (js_sys::Math::random() * 256.0) as u8)
-                    .collect()
-            }
-        };
-
-        let namespace = format!("__voiceRecorder_{}",
-            random_bytes.iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>()
-        );
-        log::debug!("VoiceRecorder instance created with namespace: {}", namespace);
-        namespace
-    });
-
-    // Set up cleanup on drop
-    let namespace_for_cleanup = namespace.read().clone();
-    use_hook(|| {
-        #[derive(Clone)]
-        struct CleanupOnDrop {
-            is_mounted: Signal<bool>,
-            namespace: String,
-        }
-        impl Drop for CleanupOnDrop {
-            fn drop(&mut self) {
-                self.is_mounted.set(false);
-                log::debug!("VoiceRecorder unmounted, cleaning up namespace: {}", self.namespace);
-
-                // Clean up MediaStream, MediaRecorder, and blob URLs
-                let cleanup_script = format!(
-                    r#"
-                    (function() {{
-                        const ns = window['{}'];
-                        if (!ns) return;
-
-                        // Stop and remove MediaStream tracks
-                        if (ns.stream && ns.stream.getTracks) {{
-                            ns.stream.getTracks().forEach(track => {{
-                                track.stop();
-                                console.log('Stopped media track');
-                            }});
-                            ns.stream = null;
-                        }}
-
-                        // Stop MediaRecorder if recording
-                        if (ns.recorder && ns.recorder.state !== 'inactive') {{
-                            try {{
-                                ns.recorder.stop();
-                                console.log('Stopped MediaRecorder');
-                            }} catch (e) {{
-                                console.error('Error stopping recorder:', e);
-                            }}
-                        }}
-                        ns.recorder = null;
-
-                        // Revoke all created blob URLs
-                        if (ns.blob_urls && Array.isArray(ns.blob_urls)) {{
-                            ns.blob_urls.forEach(url => {{
-                                try {{
-                                    URL.revokeObjectURL(url);
-                                    console.log('Revoked blob URL');
-                                }} catch (e) {{
-                                    console.error('Error revoking URL:', e);
-                                }}
-                            }});
-                            ns.blob_urls = [];
-                        }}
-
-                        // Clear the namespace
-                        delete window['{}'];
-                        console.log('Namespace {} cleaned up');
-                    }})();
-                    "#,
-                    self.namespace, self.namespace, self.namespace
-                );
-
-                if let Err(e) = js_sys::eval(&cleanup_script) {
-                    log::error!("Failed to execute cleanup script: {:?}", e);
-                }
-            }
-        }
-        CleanupOnDrop { is_mounted, namespace: namespace_for_cleanup }
-    });
+    // Set up cleanup to run only when component unmounts
+    // We do NOT use the Drop trait approach as it gets triggered on re-renders with use_hook
+    // Instead, we'll handle cleanup manually when needed and rely on browser cleanup
 
     // Start recording handler
-    let namespace_for_recording = namespace.read().clone();
     let start_recording_handler = {
-        let namespace_for_recording = namespace_for_recording.clone();
+        let recorder_id = recorder_id.read().clone();
         move |_| {
-            state.set(RecorderState::RequestingPermission);
-            let ns = namespace_for_recording.clone();
+            let recorder_id = recorder_id.clone();
+            log::info!("Start recording button clicked, recorder_id: {}", recorder_id);
+
+            state.set(RecorderState::Recording {
+                started_at: js_sys::Date::now() / 1000.0
+            });
+            log::debug!("State set to Recording");
 
             spawn(async move {
-            match request_microphone_permission().await {
-                Ok(stream) => {
-                    log::info!("Microphone permission granted");
+                // Call the JavaScript manager to start recording
+                let start_script = format!(
+                    r#"
+                    (async function() {{
+                        if (!window.voiceRecorderManager) {{
+                            return {{ success: false, error: 'Voice recorder not initialized' }};
+                        }}
+                        return await window.voiceRecorderManager.startRecording('{}');
+                    }})()
+                    "#,
+                    recorder_id
+                );
 
-                    // Create and configure MediaRecorder
-                    let ns_for_cleanup = ns.clone();
-                    match setup_media_recorder(stream, state, current_time, waveform_data, mime_type, is_mounted, is_stopping, ns).await {
-                        Ok(recorder) => {
-                            log::info!("MediaRecorder setup complete");
-
-                            let started_at = js_sys::Date::now() / 1000.0;
-                            state.set(RecorderState::Recording {
-                                started_at,
-                                chunks: Vec::new()
-                            });
-
-                            // Start recording
-                            if let Err(e) = recorder.start() {
-                                log::error!("Failed to start recording: {:?}", e);
-
-                                // Clean up MediaStream before returning
-                                let cleanup_script = format!(
-                                    r#"
-                                    (function() {{
-                                        const ns = window['{}'];
-                                        if (ns && ns.stream && ns.stream.getTracks) {{
-                                            ns.stream.getTracks().forEach(track => {{
-                                                track.stop();
-                                                console.log('Stopped media track after start failure');
-                                            }});
-                                            ns.stream = null;
-                                        }}
-                                    }})();
-                                    "#,
-                                    ns_for_cleanup
-                                );
-                                if let Err(cleanup_err) = js_sys::eval(&cleanup_script) {
-                                    log::error!("Failed to cleanup MediaStream: {:?}", cleanup_err);
+                match js_sys::eval(&start_script) {
+                    Ok(promise_val) => {
+                        let promise = js_sys::Promise::from(promise_val);
+                        match wasm_bindgen_futures::JsFuture::from(promise).await {
+                            Ok(result) => {
+                                // Check if start was successful
+                                if let Ok(success) = Reflect::get(&result, &JsValue::from_str("success")) {
+                                    if !success.as_bool().unwrap_or(false) {
+                                        if let Ok(error) = Reflect::get(&result, &JsValue::from_str("error")) {
+                                            let error_msg = error.as_string().unwrap_or_else(|| "Unknown error".to_string());
+                                            log::error!("Failed to start recording: {}", error_msg);
+                                            state.set(RecorderState::Error {
+                                                message: error_msg
+                                            });
+                                            return;
+                                        }
+                                    }
                                 }
 
+                                log::info!("Recording started successfully");
+
+                                // Monitor duration and auto-stop at 60 seconds
+                                // Clone signals and recorder_id for the monitoring loop
+                                let monitor_recorder_id = recorder_id.clone();
+                                let mut monitor_current_time = current_time.clone();
+                                let monitor_state = state.clone();
+                                let monitor_is_mounted = is_mounted.clone();
+
+                                spawn(async move {
+                                    let started_at = js_sys::Date::now() / 1000.0;
+                                    log::info!("Monitoring loop started at: {}", started_at);
+
+                                    loop {
+                                        TimeoutFuture::new(100).await;
+
+                                        // Check if component is still mounted
+                                        if !*monitor_is_mounted.read() {
+                                            log::debug!("Component unmounted, stopping monitoring loop");
+                                            break;
+                                        }
+
+                                        let current_state = monitor_state.read().clone();
+                                        if let RecorderState::Recording { .. } = current_state {
+                                            let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
+                                            monitor_current_time.set(elapsed);
+
+                                            // Log every second
+                                            if (elapsed * 10.0) as u32 % 10 == 0 {
+                                                log::debug!("Recording time: {:.1}s", elapsed);
+                                            }
+
+                                            if elapsed >= MAX_DURATION_SECONDS {
+                                                log::info!("Max duration reached, stopping recording");
+
+                                                // Stop via JavaScript manager
+                                                let stop_script = format!(
+                                                    "window.voiceRecorderManager.stopRecording('{}')",
+                                                    monitor_recorder_id
+                                                );
+                                                match js_sys::eval(&stop_script) {
+                                                    Ok(_) => log::debug!("Auto-stop requested"),
+                                                    Err(e) => log::error!("Failed to auto-stop: {:?}", e),
+                                                }
+                                                break;
+                                            }
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                log::error!("Failed to start recording: {:?}", e);
                                 state.set(RecorderState::Error {
                                     message: format!("Failed to start recording: {:?}", e)
                                 });
-                                return;
                             }
-
-                            // Monitor duration and auto-stop at 60 seconds
-                            spawn(async move {
-                                loop {
-                                    TimeoutFuture::new(100).await;
-
-                                    // Check if component is still mounted
-                                    if !*is_mounted.read() {
-                                        log::debug!("Component unmounted, stopping monitoring loop");
-                                        break;
-                                    }
-
-                                    let current_state = state.read().clone();
-                                    if let RecorderState::Recording { started_at, .. } = current_state {
-                                        let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
-                                        current_time.set(elapsed);
-
-                                        if elapsed >= MAX_DURATION_SECONDS {
-                                            log::info!("Max duration reached, stopping recording");
-                                            // Handle the stop result properly
-                                            match recorder.stop() {
-                                                Ok(_) => {
-                                                    log::info!("Auto-stop successful, awaiting onstop handler");
-                                                    // State will be updated by the onstop handler in setup_media_recorder
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Auto-stop failed: {:?}", e);
-                                                    state.set(RecorderState::Error {
-                                                        message: format!("Failed to stop recording at max duration: {:?}", e)
-                                                    });
-                                                    is_stopping.set(false);
-                                                }
-                                            }
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to setup MediaRecorder: {}", e);
-                            state.set(RecorderState::Error {
-                                message: format!("Failed to setup recorder: {}", e)
-                            });
                         }
                     }
+                    Err(e) => {
+                        log::error!("Failed to eval start script: {:?}", e);
+                        state.set(RecorderState::Error {
+                            message: "Failed to initialize recording".to_string()
+                        });
+                    }
                 }
-                Err(e) => {
-                    log::error!("Microphone permission denied: {:?}", e);
-                    state.set(RecorderState::Error {
-                        message: "Microphone permission denied. Please allow microphone access.".to_string()
-                    });
-                }
-            }
             });
         }
     };
 
-    // Stop recording
-    let namespace_for_stop = namespace.read().clone();
-    let mut stop_recording = move |_| {
-        // Guard against repeated stop attempts
-        if *is_stopping.read() {
-            log::debug!("Stop already in progress, ignoring");
-            return;
-        }
+    // Stop recording and poll for result
+    let stop_recording = {
+        let recorder_id = recorder_id.read().clone();
+        move |_| {
+            let recorder_id = recorder_id.clone();
+            let duration = *current_time.read();
 
-        is_stopping.set(true);
-        let duration = *current_time.read();
-        let ns = namespace_for_stop.clone();
+            spawn(async move {
+                // Stop via JavaScript manager
+                let stop_script = format!(
+                    "window.voiceRecorderManager.stopRecording('{}')",
+                    recorder_id
+                );
 
-        spawn(async move {
-            // Store duration in the instance's namespace for the onstop handler
-            let script = format!("window['{}'].duration = {};", ns, duration);
-            match js_sys::eval(&script) {
-                Ok(_) => log::debug!("Duration stored: {}s", duration),
-                Err(e) => {
-                    log::error!("Failed to store duration: {:?}", e);
-                    state.set(RecorderState::Error {
-                        message: format!("Failed to stop recording: {:?}", e)
-                    });
-                    is_stopping.set(false);
-                    return;
-                }
-            }
+                match js_sys::eval(&stop_script) {
+                    Ok(_) => {
+                        log::info!("Stop recording requested");
 
-            // Call stop on the recorder via JavaScript with safety check
-            let stop_script = format!(
-                r#"
-                (function() {{
-                    const ns = window['{}'];
-                    if (ns && ns.recorder) {{
-                        try {{
-                            ns.recorder.stop();
-                            return true;
-                        }} catch (e) {{
-                            console.error("Stop error:", e);
-                            return false;
-                        }}
-                    }} else {{
-                        console.warn("Recorder not found in namespace {}");
-                        return false;
-                    }}
-                }})()
-                "#,
-                ns, ns
-            );
+                        // Poll for result
+                        let mut attempts = 0;
+                        const MAX_ATTEMPTS: u32 = 50; // 10 seconds max wait
 
-            match js_sys::eval(&stop_script) {
-                Ok(result) => {
-                    if result.as_bool() == Some(true) {
-                        log::info!("Stop recording requested, duration: {}s", duration);
-                    } else {
-                        log::error!("Failed to stop recorder or recorder not found");
+                        loop {
+                            TimeoutFuture::new(200).await;
+                            attempts += 1;
+
+                            if attempts > MAX_ATTEMPTS {
+                                log::error!("Timeout waiting for recording result");
+                                state.set(RecorderState::Error {
+                                    message: "Timeout waiting for recording".to_string()
+                                });
+                                break;
+                            }
+
+                            let get_result_script = format!(
+                                "window.voiceRecorderManager.getResult('{}')",
+                                recorder_id
+                            );
+
+                            if let Ok(result) = js_sys::eval(&get_result_script) {
+                                if !result.is_null() && !result.is_undefined() {
+                                    // Check if successful
+                                    if let Ok(success) = Reflect::get(&result, &JsValue::from_str("success")) {
+                                        if success.as_bool().unwrap_or(false) {
+                                            // Extract duration
+                                            let dur = if let Ok(dur_val) = Reflect::get(&result, &JsValue::from_str("duration")) {
+                                                dur_val.as_f64().unwrap_or(duration)
+                                            } else {
+                                                duration
+                                            };
+
+                                            log::info!("Recording completed: {}s", dur);
+                                            state.set(RecorderState::Stopped { duration: dur });
+
+                                            // Create blob URL once and cache it
+                                            let create_blob_script = format!(
+                                                r#"
+                                                (function() {{
+                                                    const result = window.voiceRecorderManager.getResult('{}');
+                                                    if (result && result.bytes) {{
+                                                        const blob = new Blob([result.bytes], {{ type: result.mimeType || 'audio/webm' }});
+                                                        const url = URL.createObjectURL(blob);
+                                                        console.log('[VoiceRecorder] Created blob URL for preview:', url);
+                                                        return url;
+                                                    }}
+                                                    console.warn('[VoiceRecorder] No result or bytes available for preview');
+                                                    return null;
+                                                }})()
+                                                "#,
+                                                recorder_id
+                                            );
+
+                                            if let Ok(url_val) = js_sys::eval(&create_blob_script) {
+                                                if let Some(url) = url_val.as_string() {
+                                                    blob_url_cache.set(Some(url));
+                                                }
+                                            }
+
+                                            break;
+                                        } else {
+                                            // Error case
+                                            if let Ok(error) = Reflect::get(&result, &JsValue::from_str("error")) {
+                                                let error_msg = error.as_string().unwrap_or_else(|| "Unknown error".to_string());
+                                                log::error!("Recording error: {}", error_msg);
+                                                state.set(RecorderState::Error {
+                                                    message: error_msg
+                                                });
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to stop recording: {:?}", e);
                         state.set(RecorderState::Error {
-                            message: "Failed to stop recording: recorder not available".to_string()
+                            message: format!("Failed to stop recording: {:?}", e)
                         });
-                        is_stopping.set(false);
                     }
                 }
-                Err(e) => {
-                    log::error!("Failed to execute stop script: {:?}", e);
-                    state.set(RecorderState::Error {
-                        message: format!("Failed to stop recording: {:?}", e)
-                    });
-                    is_stopping.set(false);
-                }
-            }
-        });
+            });
+        }
     };
 
     // Discard recording
     let mut discard_recording = move |_| {
+        let recorder_id = recorder_id.read().clone();
+
+        // Revoke blob URL if it exists
+        if let Some(url) = blob_url_cache.read().clone() {
+            let revoke_script = format!("URL.revokeObjectURL('{}')", url);
+            let _ = js_sys::eval(&revoke_script);
+        }
+        blob_url_cache.set(None);
+
+        // Cleanup the recording
+        let cleanup_script = format!(
+            "if (window.voiceRecorderManager) {{ window.voiceRecorderManager.cleanup('{}'); }}",
+            recorder_id
+        );
+        let _ = js_sys::eval(&cleanup_script);
+
         state.set(RecorderState::Idle);
         current_time.set(0.0);
-        waveform_data.set(Vec::new());
-        is_stopping.set(false);
+        is_playing_preview.set(false);
     };
 
     // Re-record handler
@@ -359,73 +290,29 @@ pub fn VoiceRecorder(
         let is_playing = *is_playing_preview.read();
 
         if let RecorderState::Stopped { .. } = state.read().clone() {
+            log::info!("Toggle preview clicked, is_playing: {}", is_playing);
             spawn(async move {
                 let audio_id = "voice-preview-audio";
 
-                // Only flip state after successful play/pause, and add event listeners to keep state in sync
                 let script = format!(
                     r#"
                     (function() {{
                         let audio = document.getElementById('{}');
                         if (!audio) {{
-                            console.error('Audio element not found');
-                            return;
+                            console.error('[VoiceRecorder] Audio element not found - blob URL may not be ready');
+                            return false;
                         }}
 
-                        // Remove old listeners to prevent duplicates
-                        if (audio._preview_listeners_attached) {{
-                            return; // Listeners already attached, just toggle
-                        }}
-
-                        // Add event listeners to sync state with actual playback
-                        audio.addEventListener('play', () => {{
-                            console.log('Audio play event');
-                            window.__voice_preview_playing = true;
-                        }});
-
-                        audio.addEventListener('playing', () => {{
-                            console.log('Audio playing event');
-                            window.__voice_preview_playing = true;
-                        }});
-
-                        audio.addEventListener('pause', () => {{
-                            console.log('Audio pause event');
-                            window.__voice_preview_playing = false;
-                        }});
-
-                        audio.addEventListener('ended', () => {{
-                            console.log('Audio ended event');
-                            window.__voice_preview_playing = false;
-                        }});
-
-                        audio.addEventListener('error', (e) => {{
-                            console.error('Audio error event:', e);
-                            window.__voice_preview_playing = false;
-                        }});
-
-                        audio._preview_listeners_attached = true;
-                    }})();
-                    "#,
-                    audio_id
-                );
-                let _ = js_sys::eval(&script);
-
-                // Now toggle playback
-                let toggle_script = format!(
-                    r#"
-                    (function() {{
-                        let audio = document.getElementById('{}');
-                        if (!audio) return false;
+                        console.log('[VoiceRecorder] Audio element found, src:', audio.src);
 
                         if ({}) {{
-                            // Try to play
                             audio.play()
                                 .then(() => {{
-                                    console.log('Play succeeded');
+                                    console.log('[VoiceRecorder] Play succeeded');
                                     window.__voice_preview_playing = true;
                                 }})
                                 .catch(e => {{
-                                    console.error('Play failed:', e);
+                                    console.error('[VoiceRecorder] Play failed:', e);
                                     window.__voice_preview_playing = false;
                                 }});
                         }} else {{
@@ -439,41 +326,106 @@ pub fn VoiceRecorder(
                     !is_playing
                 );
 
-                if let Ok(result) = js_sys::eval(&toggle_script) {
-                    if result.as_bool() == Some(true) {
-                        // Wait a bit for the play promise to resolve
-                        TimeoutFuture::new(100).await;
+                match js_sys::eval(&script) {
+                    Ok(result) => {
+                        if result.as_bool() == Some(true) {
+                            TimeoutFuture::new(100).await;
 
-                        // Check actual playback state
-                        let check_script = "window.__voice_preview_playing === true";
-                        if let Ok(playing) = js_sys::eval(check_script) {
-                            let actual_playing = playing.as_bool().unwrap_or(false);
-                            is_playing_preview.set(actual_playing);
+                            let check_script = "window.__voice_preview_playing === true";
+                            if let Ok(playing) = js_sys::eval(check_script) {
+                                let actual_playing = playing.as_bool().unwrap_or(false);
+                                is_playing_preview.set(actual_playing);
+                                log::debug!("Preview playback state updated: {}", actual_playing);
+                            }
+                        } else {
+                            log::error!("Preview toggle failed - audio element not found or blob URL not ready");
                         }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to execute preview toggle script: {:?}", e);
                     }
                 }
             });
+        } else {
+            log::warn!("Preview clicked but state is not Stopped");
         }
     };
 
     // Use recording (convert to bytes and call callback)
     let use_recording = move |_| {
-        if let RecorderState::Stopped { blob_url, duration } = state.read().clone() {
-            let waveform = waveform_data.read().clone();
-            let mime = mime_type.read().clone();
+        let recorder_id = recorder_id.read().clone();
 
+        if let RecorderState::Stopped { duration } = state.read().clone() {
+            log::info!("Use recording clicked, retrieving data for recorder: {}", recorder_id);
             spawn(async move {
-                match blob_url_to_bytes(&blob_url).await {
-                    Ok(bytes) => {
-                        log::info!("Recording ready: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
-                            bytes.len(), duration, waveform.len(), mime);
-                        on_recording_complete.call((bytes, duration, waveform, mime));
+                // Get the result from JavaScript manager
+                let get_result_script = format!(
+                    "window.voiceRecorderManager.getResult('{}')",
+                    recorder_id
+                );
+
+                match js_sys::eval(&get_result_script) {
+                    Ok(result) => {
+                        if result.is_null() || result.is_undefined() {
+                            log::error!("getResult returned null/undefined for recorder: {}", recorder_id);
+                            return;
+                        }
+
+                        // Extract all the data
+                        match Reflect::get(&result, &JsValue::from_str("bytes")) {
+                            Ok(bytes_val) => {
+                                match bytes_val.dyn_into::<js_sys::Uint8Array>() {
+                                    Ok(bytes_array) => {
+                                        let bytes = bytes_array.to_vec();
+
+                                        // Extract waveform
+                                        let waveform = if let Ok(wf_val) = Reflect::get(&result, &JsValue::from_str("waveform")) {
+                                            let arr = js_sys::Array::from(&wf_val).to_vec().into_iter()
+                                                .map(|v| v.as_f64().unwrap_or(0.0) as u8)
+                                                .collect::<Vec<_>>();
+                                            arr
+                                        } else {
+                                            log::warn!("Failed to extract waveform, using placeholder");
+                                            vec![0u8; 100]
+                                        };
+
+                                        // Extract MIME type
+                                        let mime_type = if let Ok(mime_val) = Reflect::get(&result, &JsValue::from_str("mimeType")) {
+                                            mime_val.as_string().unwrap_or_else(|| "audio/webm".to_string())
+                                        } else {
+                                            log::warn!("Failed to extract MIME type, using default");
+                                            "audio/webm".to_string()
+                                        };
+
+                                        log::info!("Recording ready: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
+                                            bytes.len(), duration, waveform.len(), mime_type);
+
+                                        // Revoke blob URL before calling callback
+                                        if let Some(url) = blob_url_cache.read().clone() {
+                                            let revoke_script = format!("URL.revokeObjectURL('{}')", url);
+                                            let _ = js_sys::eval(&revoke_script);
+                                        }
+                                        blob_url_cache.set(None);
+
+                                        on_recording_complete.call((bytes, duration, waveform, mime_type));
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to convert bytes to Uint8Array: {:?}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to get bytes from result: {:?}", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        log::error!("Failed to convert recording to bytes: {}", e);
+                        log::error!("Failed to execute getResult script: {:?}", e);
                     }
                 }
             });
+        } else {
+            log::warn!("Use recording clicked but state is not Stopped");
         }
     };
 
@@ -487,6 +439,9 @@ pub fn VoiceRecorder(
     let remaining_time = MAX_DURATION_SECONDS - *current_time.read();
     let progress_percent = (*current_time.read() / MAX_DURATION_SECONDS * 100.0).min(100.0);
 
+    // Use cached blob URL for preview
+    let blob_url = blob_url_cache.read().clone();
+
     rsx! {
         div {
             class: "bg-muted/30 rounded-lg p-6 space-y-4",
@@ -499,12 +454,6 @@ pub fn VoiceRecorder(
                         div {
                             class: "text-muted-foreground",
                             "Ready to record voice message"
-                        }
-                    },
-                    RecorderState::RequestingPermission => rsx! {
-                        div {
-                            class: "text-primary",
-                            "Requesting microphone permission..."
                         }
                     },
                     RecorderState::Recording { .. } => rsx! {
@@ -536,7 +485,7 @@ pub fn VoiceRecorder(
                             }
                         }
                     },
-                    RecorderState::Stopped { duration, .. } => rsx! {
+                    RecorderState::Stopped { duration } => rsx! {
                         div {
                             class: "text-green-600",
                             "Recording complete: {format_time(duration)}"
@@ -551,7 +500,7 @@ pub fn VoiceRecorder(
                 }
             }
 
-            // Waveform visualization (placeholder for now)
+            // Waveform visualization
             div {
                 class: "h-20 bg-muted rounded flex items-center justify-center",
                 match state.read().clone() {
@@ -567,16 +516,24 @@ pub fn VoiceRecorder(
                             }
                         }
                     },
-                    RecorderState::Stopped { blob_url, .. } => rsx! {
-                        audio {
-                            id: "voice-preview-audio",
-                            src: "{blob_url}",
-                            preload: "metadata",
-                            style: "display: none;",
-                        }
-                        div {
-                            class: "text-muted-foreground",
-                            "🎵 Recording ready for preview"
+                    RecorderState::Stopped { .. } => {
+                        let audio_src = blob_url.as_ref().map(|s| s.as_str()).unwrap_or("");
+                        rsx! {
+                            // Always render audio element, even if blob URL is not ready yet
+                            audio {
+                                id: "voice-preview-audio",
+                                src: "{audio_src}",
+                                preload: "metadata",
+                                style: "display: none;",
+                            }
+                            div {
+                                class: "text-muted-foreground",
+                                if blob_url.is_some() {
+                                    "Recording ready for preview"
+                                } else {
+                                    "Processing recording..."
+                                }
+                            }
                         }
                     },
                     _ => rsx! {
@@ -627,9 +584,9 @@ pub fn VoiceRecorder(
                             class: "px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-full transition",
                             onclick: move |_| toggle_preview(()),
                             if *is_playing_preview.read() {
-                                "⏸ Pause"
+                                "Pause"
                             } else {
-                                "▶️ Preview"
+                                "Preview"
                             }
                         }
 
@@ -640,427 +597,25 @@ pub fn VoiceRecorder(
                                 let mut handler = re_record.clone();
                                 move |_| handler(())
                             },
-                            "🔄 Re-record"
+                            "Re-record"
                         }
 
                         // Use recording button
                         button {
                             class: "px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-full font-bold transition",
                             onclick: move |_| use_recording(()),
-                            "✓ Use Recording"
+                            "Use Recording"
                         }
 
                         // Discard button
                         button {
                             class: "px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition",
                             onclick: move |_| discard_recording(()),
-                            "✕ Discard"
+                            "Discard"
                         }
                     },
-                    _ => rsx! {
-                        div {
-                            class: "text-muted-foreground",
-                            "Initializing..."
-                        }
-                    }
                 }
             }
         }
     }
-}
-
-// Helper functions for MediaRecorder API
-
-async fn request_microphone_permission() -> Result<MediaStream, JsValue> {
-    let window = web_sys::window().ok_or("No window")?;
-    let navigator = window.navigator();
-    let media_devices = navigator.media_devices()?;
-
-    let constraints = web_sys::MediaStreamConstraints::new();
-    constraints.set_audio(&JsValue::from_bool(true));
-    constraints.set_video(&JsValue::from_bool(false));
-
-    let promise = media_devices.get_user_media_with_constraints(&constraints)?;
-    let result = wasm_bindgen_futures::JsFuture::from(promise).await?;
-    let stream: MediaStream = result.dyn_into()?;
-
-    Ok(stream)
-}
-
-async fn setup_media_recorder(
-    stream: MediaStream,
-    mut state: Signal<RecorderState>,
-    _current_time: Signal<f64>,
-    mut waveform_data: Signal<Vec<u8>>,
-    mut mime_type: Signal<String>,
-    is_mounted: Signal<bool>,
-    mut is_stopping: Signal<bool>,
-    namespace: String,
-) -> Result<MediaRecorder, String> {
-    // Use JavaScript to set up MediaRecorder with all event handlers in the unique namespace
-    // This is simpler than trying to handle all the WASM bindings
-    let script = format!(
-        r#"
-        (function() {{
-            if (!window['{}']) {{
-                window['{}'] = {{}};
-            }}
-            const ns = window['{}'];
-
-            // Try MIME types in order of preference
-            const mimeTypes = [
-                'audio/mp4',
-                'audio/webm;codecs=opus',
-                'audio/webm',
-                'audio/ogg;codecs=opus'
-            ];
-
-            let selectedMime = 'audio/webm'; // fallback
-            for (const mime of mimeTypes) {{
-                if (MediaRecorder.isTypeSupported(mime)) {{
-                    selectedMime = mime;
-                    console.log('Selected MIME type:', selectedMime);
-                    break;
-                }}
-            }}
-
-            ns.chunks = [];
-            ns.selectedMime = selectedMime;
-            ns.blob_urls = []; // Track blob URLs for cleanup
-
-            return {{mime: selectedMime, ready: true}};
-        }})();
-        "#,
-        namespace, namespace, namespace
-    );
-
-    let _ = js_sys::eval(&script)
-        .map_err(|e| format!("Failed to setup recorder: {:?}", e))?;
-
-    // Create MediaRecorder with MIME type via JavaScript to avoid web-sys limitations
-    let create_recorder_script = format!(
-        r#"
-        (function() {{
-            const ns = window['{}'];
-            const mimeType = ns.selectedMime;
-            const options = {{ mimeType: mimeType }};
-            ns.tempRecorder = new MediaRecorder(arguments[0], options);
-            return ns.tempRecorder;
-        }})
-        "#,
-        namespace
-    );
-
-    let recorder_js = js_sys::Function::new_with_args(
-        "stream",
-        &create_recorder_script
-    ).call1(&wasm_bindgen::JsValue::NULL, &stream.clone().into())
-        .map_err(|e| format!("Failed to create MediaRecorder: {:?}", e))?;
-
-    let recorder: MediaRecorder = recorder_js.dyn_into()
-        .map_err(|_| "Failed to convert to MediaRecorder")?;
-
-    // Store the MediaStream in the namespace for cleanup
-    let store_stream_script = format!(
-        r#"
-        (function(stream) {{
-            window['{}'].stream = stream;
-            console.log('MediaStream stored in namespace for cleanup');
-        }})(arguments[0]);
-        "#,
-        namespace
-    );
-    let _ = js_sys::Function::new_with_args("stream", &store_stream_script)
-        .call1(&JsValue::NULL, &stream.clone().into())
-        .map_err(|e| format!("Failed to store stream: {:?}", e))?;
-
-    // Set up event handlers using JavaScript with namespace
-    let setup_handlers_script = format!(
-        r#"
-        (function(recorder) {{
-            const ns = window['{}'];
-            ns.chunks = [];
-            ns.recorder = recorder; // Store reference for stop button
-
-            recorder.ondataavailable = function(e) {{
-                if (e.data.size > 0) {{
-                    ns.chunks.push(e.data);
-                    console.log('Chunk recorded:', e.data.size, 'bytes');
-                }}
-            }};
-
-            recorder.onstop = async function() {{
-                console.log('Recording stopped, chunks:', ns.chunks.length);
-
-                const blob = new Blob(
-                    ns.chunks,
-                    {{ type: ns.selectedMime }}
-                );
-
-                const url = URL.createObjectURL(blob);
-                // Track blob URL for cleanup
-                ns.blob_urls.push(url);
-
-                const duration = ns.duration || 0;
-                const mimeType = ns.selectedMime || 'audio/webm';
-
-                // Extract real waveform from audio data
-                const waveformResult = await extractWaveform(blob);
-
-                ns.result = {{
-                    url: url,
-                    duration: duration,
-                    waveform: waveformResult.waveform,
-                    waveformError: waveformResult.error,
-                    mimeType: mimeType
-                }};
-
-                // Trigger Rust callback via global flag
-                ns.ready = true;
-
-                console.log('Recording ready:', url, duration + 's', 'MIME:', mimeType, 'waveform points:', waveformResult.waveform.length, 'error:', waveformResult.error);
-            }};
-
-            async function extractWaveform(blob) {{
-                try {{
-                    // Decode the blob to get raw audio samples
-                    const arrayBuffer = await blob.arrayBuffer();
-                    const audioContext = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
-                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-                    // Get the raw audio samples from the first channel
-                    const samples = audioBuffer.getChannelData(0);
-                    const numBuckets = 100;
-                    const bucketSize = Math.floor(samples.length / numBuckets);
-
-                    const waveform = [];
-
-                    // Calculate RMS amplitude for each bucket
-                    for (let i = 0; i < numBuckets; i++) {{
-                        const start = i * bucketSize;
-                        const end = Math.min(start + bucketSize, samples.length);
-
-                        // Compute RMS (root mean square) for this bucket
-                        let sumSquares = 0;
-                        for (let j = start; j < end; j++) {{
-                            sumSquares += samples[j] * samples[j];
-                        }}
-                        const rms = Math.sqrt(sumSquares / (end - start));
-
-                        // Normalize to 0-100 range (audio samples are typically -1 to 1)
-                        // Apply slight amplification for better visualization
-                        const normalized = Math.min(100, Math.floor(rms * 200));
-                        waveform.push(normalized);
-                    }}
-
-                    console.log('Extracted waveform from audio data, peak:', Math.max(...waveform));
-                    return {{ waveform: waveform, error: false }};
-                }} catch (err) {{
-                    console.error('Failed to extract waveform from audio:', err);
-                    // Return zeros with error flag on failure
-                    return {{ waveform: Array(100).fill(0), error: true }};
-                }}
-            }}
-
-            recorder.onerror = function(e) {{
-                console.error('MediaRecorder error:', e);
-                // Propagate error to Rust via namespace state
-                const errorMsg = e.error?.message || e.message || 'Unknown MediaRecorder error';
-                ns.error = errorMsg;
-                ns.ready = true;
-            }};
-        }})(arguments[0]);
-        "#,
-        namespace
-    );
-
-    let _ = js_sys::Function::new_with_args("recorder", &setup_handlers_script)
-        .call1(&JsValue::NULL, &recorder)
-        .map_err(|e| format!("Failed to setup handlers: {:?}", e))?;
-
-    // Monitor for completion with timeout and unique ID to prevent race conditions
-    let namespace_for_monitor = namespace.clone();
-
-    // Generate a unique monitoring loop ID
-    let loop_id: u64 = (js_sys::Math::random() * 1_000_000_000.0) as u64;
-
-    // Store the loop ID in the namespace to identify the active monitor
-    let set_loop_id_script = format!(
-        r#"
-        (function() {{
-            const ns = window['{}'];
-            if (ns) {{
-                ns.activeMonitorId = {};
-                console.log('Set active monitor ID:', {});
-            }}
-        }})();
-        "#,
-        namespace_for_monitor, loop_id, loop_id
-    );
-    let _ = js_sys::eval(&set_loop_id_script);
-
-    spawn(async move {
-        const MAX_POLL_DURATION_MS: u64 = 65_000; // 65 seconds timeout (slightly more than max recording)
-        const POLL_INTERVAL_MS: u32 = 200;
-        let start_time = js_sys::Date::now();
-
-        loop {
-            TimeoutFuture::new(POLL_INTERVAL_MS).await;
-
-            // Check if component is still mounted
-            if !*is_mounted.read() {
-                log::debug!("Component unmounted, stopping completion monitoring loop {}", loop_id);
-                break;
-            }
-
-            // Check if this monitor is still active (not replaced by a newer one)
-            let is_active_script = format!(
-                r#"
-                (function() {{
-                    const ns = window['{}'];
-                    return ns && ns.activeMonitorId === {} ? true : false;
-                }})()
-                "#,
-                namespace_for_monitor, loop_id
-            );
-
-            if let Ok(is_active) = js_sys::eval(&is_active_script) {
-                if is_active.as_bool() != Some(true) {
-                    log::debug!("Monitor loop {} is no longer active, stopping", loop_id);
-                    break;
-                }
-            }
-
-            // Timeout check to prevent infinite polling
-            let elapsed = js_sys::Date::now() - start_time;
-            if elapsed > MAX_POLL_DURATION_MS as f64 {
-                log::error!("Monitor loop {} timed out after {}ms", loop_id, elapsed);
-                state.set(RecorderState::Error {
-                    message: "Recording monitoring timed out".to_string()
-                });
-                is_stopping.set(false);
-                break;
-            }
-
-            // First check for errors
-            let error_check_script = format!(
-                r#"
-                (function() {{
-                    const ns = window['{}'];
-                    return (ns && ns.ready && ns.error) ? ns.error : null;
-                }})()
-                "#,
-                namespace_for_monitor
-            );
-
-            if let Ok(error_val) = js_sys::eval(&error_check_script) {
-                if !error_val.is_null() && !error_val.is_undefined() {
-                    if let Some(error_msg) = error_val.as_string() {
-                        log::error!("MediaRecorder error in loop {}: {}", loop_id, error_msg);
-                        state.set(RecorderState::Error {
-                            message: format!("Recording error: {}", error_msg)
-                        });
-                        is_stopping.set(false);
-                        // Clear error state
-                        let clear_script = format!("window['{}'].ready = false; window['{}'].error = null;", namespace_for_monitor, namespace_for_monitor);
-                        let _ = js_sys::eval(&clear_script);
-                        break;
-                    }
-                }
-            }
-
-            // Then check for successful result
-            let check_script = format!(
-                r#"
-                (function() {{
-                    const ns = window['{}'];
-                    return (ns && ns.ready && ns.result) ? ns.result : null;
-                }})()
-                "#,
-                namespace_for_monitor
-            );
-
-            if let Ok(result) = js_sys::eval(&check_script) {
-                if !result.is_null() && !result.is_undefined() {
-                    // Extract result
-                    if let Ok(url) = Reflect::get(&result, &JsValue::from_str("url")) {
-                        if let Some(url_str) = url.as_string() {
-                            if let Ok(duration) = Reflect::get(&result, &JsValue::from_str("duration")) {
-                                let dur = duration.as_f64().unwrap_or(0.0);
-
-                                // Extract waveform and check for errors
-                                if let Ok(wf) = Reflect::get(&result, &JsValue::from_str("waveform")) {
-                                    let arr = js_sys::Array::from(&wf).to_vec().into_iter()
-                                        .map(|v| v.as_f64().unwrap_or(0.0) as u8)
-                                        .collect::<Vec<_>>();
-
-                                    // Check if waveform extraction had an error
-                                    let waveform_error = if let Ok(err_flag) = Reflect::get(&result, &JsValue::from_str("waveformError")) {
-                                        err_flag.as_bool().unwrap_or(false)
-                                    } else {
-                                        false
-                                    };
-
-                                    if waveform_error {
-                                        log::warn!("Waveform extraction failed in loop {}, using placeholder data", loop_id);
-                                        // Could set a UI flag here to show waveform error indicator
-                                    }
-
-                                    waveform_data.set(arr);
-                                }
-
-                                // Extract MIME type
-                                if let Ok(mime) = Reflect::get(&result, &JsValue::from_str("mimeType")) {
-                                    if let Some(mime_str) = mime.as_string() {
-                                        mime_type.set(mime_str);
-                                    }
-                                }
-
-                                log::debug!("Monitor loop {} successfully processed recording", loop_id);
-                                state.set(RecorderState::Stopped {
-                                    blob_url: url_str,
-                                    duration: dur,
-                                });
-
-                                is_stopping.set(false);
-
-                                // Clear setup
-                                let clear_script = format!("window['{}'].ready = false; window['{}'].result = null;", namespace_for_monitor, namespace_for_monitor);
-                                let _ = js_sys::eval(&clear_script);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    Ok(recorder)
-}
-
-async fn blob_url_to_bytes(blob_url: &str) -> Result<Vec<u8>, String> {
-    let script = format!(
-        r#"
-        (async function() {{
-            const response = await fetch('{}');
-            const blob = await response.blob();
-            const arrayBuffer = await blob.arrayBuffer();
-            return new Uint8Array(arrayBuffer);
-        }})()
-        "#,
-        blob_url
-    );
-
-    let promise = js_sys::eval(&script)
-        .map_err(|e| format!("Failed to eval script: {:?}", e))?;
-
-    let result = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
-        .await
-        .map_err(|e| format!("Failed to fetch blob: {:?}", e))?;
-
-    let uint8_array: Uint8Array = result.dyn_into()
-        .map_err(|e| format!("Failed to convert to Uint8Array: {:?}", e))?;
-
-    Ok(uint8_array.to_vec())
 }

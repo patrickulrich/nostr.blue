@@ -1314,7 +1314,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "generational-box",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.1",
  "serde",
  "serde_json",
  "tracing",
@@ -1465,7 +1465,7 @@ dependencies = [
  "futures-util",
  "generational-box",
  "keyboard-types",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.1",
  "rustversion",
  "tracing",
 ]
@@ -1489,7 +1489,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83ab170d89308399205f8ad3d43d8d419affe317016b41ca0695186f7593cba2"
 dependencies = [
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.1",
  "rustc-hash 2.1.1",
  "sledgehammer_bindgen",
  "sledgehammer_utils",
@@ -1508,6 +1508,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-wasm",
+]
+
+[[package]]
+name = "dioxus-primitives"
+version = "0.0.1"
+source = "git+https://github.com/DioxusLabs/components#98067ce2da493651b0c089db91e9903714c211f7"
+dependencies = [
+ "dioxus",
+ "dioxus-time",
+ "lazy-js-bundle 0.6.2",
+ "num-integer",
+ "time",
+ "tracing",
 ]
 
 [[package]]
@@ -1597,6 +1610,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-time"
+version = "0.7.0"
+source = "git+https://github.com/ealmloff/dioxus-std?branch=0.7#8c868ac1d60e3232e3f16f6195d6deb3c016de17"
+dependencies = [
+ "dioxus",
+ "futures",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
 name = "dioxus-web"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1616,7 +1640,7 @@ dependencies = [
  "generational-box",
  "gloo-timers",
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.1",
  "rustc-hash 2.1.1",
  "send_wrapper",
  "serde",
@@ -2608,6 +2632,12 @@ dependencies = [
 
 [[package]]
 name = "lazy-js-bundle"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e49596223b9d9d4947a14a25c142a6e7d8ab3f27eb3ade269d238bb8b5c267e2"
+
+[[package]]
+name = "lazy-js-bundle"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "409273b42d0e3ae7c8ce6b8cfbc6a27b7c7d83bbb94fc7f93f22cc9b90eea078"
@@ -3171,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -3183,6 +3213,7 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "dioxus",
+ "dioxus-primitives",
  "dioxus-stores",
  "getrandom 0.2.16",
  "gloo-net 0.5.0",

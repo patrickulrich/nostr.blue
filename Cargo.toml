@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -128,6 +128,7 @@ once_cell = "1.19"
 pulldown-cmark = "0.12"
 ammonia = "4.0"
 maplit = "1.0"
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
 
 [profile.release]
 opt-level = "z"
