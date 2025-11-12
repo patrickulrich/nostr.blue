@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
-use crate::stores::{nostr_client, auth_store};
+use crate::stores::{nostr_client, auth_store, dms};
 use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
+use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, TagKind};
+use nostr_sdk::nips::nip19::ToBech32;
 use std::time::Duration;
 use std::collections::HashMap;
 use wasm_bindgen::JsCast;
@@ -90,6 +92,15 @@ pub fn Profile(pubkey: String) -> Element {
     // Profile editor modal
     let mut show_profile_modal = use_signal(|| false);
 
+    // DM dialog state
+    let mut show_dm_dialog = use_signal(|| false);
+    let mut dm_message = use_signal(|| String::new());
+    let mut dm_sending = use_signal(|| false);
+    let mut dm_error = use_signal(|| None::<String>);
+
+    // Info dialog state (npub/lightning)
+    let mut show_info_dialog = use_signal(|| false);
+
     // Clone pubkey for various uses
     let pubkey_for_metadata = pubkey.clone();
     let pubkey_for_events = pubkey.clone();
@@ -99,6 +110,8 @@ pub fn Profile(pubkey: String) -> Element {
     let pubkey_for_follows_you = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_load_more = pubkey.clone();
+    let pubkey_for_dm = pubkey.clone();
+    let pubkey_for_info = pubkey.clone();
 
     // Parse pubkey once for comparisons
     let parsed_pubkey = PublicKey::from_bech32(&pubkey)
@@ -542,7 +555,24 @@ pub fn Profile(pubkey: String) -> Element {
 
                 // Buttons aligned to the right
                 div {
-                    class: "flex justify-end pt-4 mb-16",
+                    class: "flex justify-end gap-2 pt-4 mb-16",
+
+                    // Info button (all profiles)
+                    button {
+                        class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                        onclick: move |_| show_info_dialog.set(true),
+                        "Info"
+                    }
+
+                    // Message button (other users' profiles only)
+                    if !is_own_profile && auth.is_authenticated {
+                        button {
+                            class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                            onclick: move |_| show_dm_dialog.set(true),
+                            "Message"
+                        }
+                    }
+
                     if is_own_profile {
                         button {
                             class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
@@ -875,6 +905,213 @@ pub fn Profile(pubkey: String) -> Element {
 
         // Profile Editor Modal
         ProfileEditorModal { show: show_profile_modal }
+
+        // DM Dialog
+        DialogRoot {
+            open: *show_dm_dialog.read(),
+            div {
+                class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
+                onclick: move |_| {
+                    if !*dm_sending.read() {
+                        show_dm_dialog.set(false);
+                        dm_message.set(String::new());
+                        dm_error.set(None);
+                    }
+                },
+                div {
+                    class: "bg-card border border-border rounded-lg shadow-xl p-6 max-w-md w-full",
+                    onclick: move |e| e.stop_propagation(),
+
+                    DialogTitle {
+                        class: "text-xl font-semibold mb-2",
+                        if let Some(metadata) = profile_data.read().as_ref() {
+                            "Send message to {metadata.name.as_deref().unwrap_or(\"user\")}"
+                        } else {
+                            "Send message"
+                        }
+                    }
+
+                    DialogDescription {
+                        class: "text-sm text-muted-foreground mb-4",
+                        "This message will be encrypted and sent privately."
+                    }
+
+                    textarea {
+                        class: "w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        rows: "4",
+                        placeholder: "Type your message...",
+                        value: "{dm_message.read()}",
+                        oninput: move |e| dm_message.set(e.value()),
+                        disabled: *dm_sending.read()
+                    }
+
+                    if let Some(err) = dm_error.read().as_ref() {
+                        div {
+                            class: "mt-2 text-sm text-red-500",
+                            "{err}"
+                        }
+                    }
+
+                    div {
+                        class: "flex justify-end gap-2 mt-4",
+                        button {
+                            class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
+                            onclick: move |_| {
+                                show_dm_dialog.set(false);
+                                dm_message.set(String::new());
+                                dm_error.set(None);
+                            },
+                            disabled: *dm_sending.read(),
+                            "Cancel"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50",
+                            disabled: dm_message.read().trim().is_empty() || *dm_sending.read(),
+                            onclick: move |_| {
+                                let message = dm_message.read().clone();
+                                let recipient = pubkey_for_dm.clone();
+                                dm_sending.set(true);
+                                dm_error.set(None);
+
+                                spawn(async move {
+                                    // Convert pubkey to proper format
+                                    let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&recipient) {
+                                        pk.to_hex()
+                                    } else if let Ok(pk) = PublicKey::from_hex(&recipient) {
+                                        pk.to_hex()
+                                    } else {
+                                        dm_error.set(Some("Invalid public key".to_string()));
+                                        dm_sending.set(false);
+                                        return;
+                                    };
+
+                                    match dms::send_dm(hex_pubkey, message).await {
+                                        Ok(_) => {
+                                            show_dm_dialog.set(false);
+                                            dm_message.set(String::new());
+                                            dm_error.set(None);
+                                            // Stay on profile page
+                                        }
+                                        Err(e) => {
+                                            dm_error.set(Some(format!("Failed to send message: {}", e)));
+                                        }
+                                    }
+                                    dm_sending.set(false);
+                                });
+                            },
+                            if *dm_sending.read() {
+                                "Sending..."
+                            } else {
+                                "Send"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Info Dialog (npub/lightning)
+        DialogRoot {
+            open: *show_info_dialog.read(),
+            div {
+                class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
+                onclick: move |_| show_info_dialog.set(false),
+                div {
+                    class: "bg-card border border-border rounded-lg shadow-xl p-6 max-w-md w-full",
+                    onclick: move |e| e.stop_propagation(),
+
+                    DialogTitle {
+                        class: "text-xl font-semibold mb-2",
+                        "Profile Information"
+                    }
+
+                    DialogDescription {
+                        class: "text-sm text-muted-foreground mb-4",
+                        "Copy the public key or lightning address"
+                    }
+
+                    div {
+                        class: "space-y-4",
+
+                        // npub
+                        div {
+                            label {
+                                class: "block text-sm font-medium mb-1",
+                                "Public Key (npub)"
+                            }
+                            div {
+                                class: "flex items-center gap-2",
+                                div {
+                                    class: "flex-1 p-2 bg-muted rounded border border-border text-sm font-mono break-all",
+                                    {
+                                        if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
+                                            .or_else(|_| PublicKey::from_hex(&pubkey_for_info)) {
+                                            pk.to_bech32().unwrap_or_else(|_| pubkey_for_info.clone())
+                                        } else {
+                                            pubkey_for_info.clone()
+                                        }
+                                    }
+                                }
+                                button {
+                                    class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
+                                    onclick: move |_| {
+                                        if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
+                                            .or_else(|_| PublicKey::from_hex(&pubkey_for_info)) {
+                                            let npub = pk.to_bech32().unwrap();
+                                            if let Some(window) = web_sys::window() {
+                                                let _ = window.navigator().clipboard().write_text(&npub);
+                                            }
+                                        }
+                                    },
+                                    "Copy"
+                                }
+                            }
+                        }
+
+                        // Lightning address
+                        if let Some(metadata) = profile_data.read().as_ref() {
+                            if let Some(lud16) = &metadata.lud16 {
+                                div {
+                                    label {
+                                        class: "block text-sm font-medium mb-1",
+                                        "Lightning Address"
+                                    }
+                                    div {
+                                        class: "flex items-center gap-2",
+                                        div {
+                                            class: "flex-1 p-2 bg-muted rounded border border-border text-sm break-all",
+                                            "{lud16}"
+                                        }
+                                        button {
+                                            class: "px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition",
+                                            onclick: move |_| {
+                                                if let Some(metadata) = profile_data.read().as_ref() {
+                                                    if let Some(lud16) = &metadata.lud16 {
+                                                        if let Some(window) = web_sys::window() {
+                                                            let _ = window.navigator().clipboard().write_text(lud16);
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "Copy"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    div {
+                        class: "flex justify-end mt-6",
+                        button {
+                            class: "px-4 py-2 bg-accent rounded-lg hover:bg-accent/80 transition",
+                            onclick: move |_| show_info_dialog.set(false),
+                            "Close"
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

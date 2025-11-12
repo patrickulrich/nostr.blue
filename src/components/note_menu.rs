@@ -2,6 +2,10 @@ use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{ReportModal, AddToListModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
+use nostr_sdk::prelude::*;
+use nostr_sdk::nips::nip19::ToBech32;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NoteMenuProps {
@@ -20,6 +24,9 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut show_report_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
 
+    // Get toast API at component level
+    let toast = consume_toast();
+
     // Clone props for use in closures
     let author_pubkey = props.author_pubkey.clone();
     let author_pubkey_follow_check = author_pubkey.clone();
@@ -32,6 +39,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_report = event_id.clone();
     let event_id_modal_report = event_id.clone();
     let event_id_modal_list = event_id.clone();
+    let event_id_copy = event_id.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -158,6 +166,41 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         span {
                             class: "text-sm",
                             "Add to list"
+                        }
+                    }
+
+                    // Copy Note ID
+                    button {
+                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            is_open.set(false);
+
+                            let event_id = event_id_copy.clone();
+                            let toast_api = toast.clone();
+
+                            // Convert event ID to note1... format
+                            if let Ok(event_id_parsed) = EventId::from_hex(&event_id) {
+                                let note_bech32 = event_id_parsed.to_bech32().unwrap();
+                                // Copy to clipboard
+                                if let Some(window) = web_sys::window() {
+                                    let clipboard = window.navigator().clipboard();
+                                    let _ = clipboard.write_text(&note_bech32);
+
+                                    // Show toast notification
+                                    toast_api.success(
+                                        "Copied!".to_string(),
+                                        ToastOptions::new()
+                                            .description("Note ID copied to clipboard")
+                                            .duration(Duration::from_secs(2))
+                                            .permanent(false),
+                                    );
+                                }
+                            }
+                        },
+                        span {
+                            class: "text-sm",
+                            "Copy Note ID"
                         }
                     }
 

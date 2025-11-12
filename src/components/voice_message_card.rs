@@ -1,9 +1,11 @@
 use dioxus::prelude::*;
 use dioxus::events::MediaData;
 use dioxus::web::WebEventExt;
-use nostr_sdk::{Event as NostrEvent, PublicKey};
+use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, EventId};
 use crate::routes::Route;
 use crate::stores::{nostr_client, voice_messages_store};
+use crate::stores::nostr_client::get_client;
+use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ZapModal, VoiceReplyComposer};
 use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
 use wasm_bindgen::JsCast;
@@ -29,6 +31,15 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     let mut show_zap_modal = use_signal(|| false);
     let mut is_liking = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
+
+    // Reaction counts and states
+    let mut reply_count = use_signal(|| 0usize);
+    let mut like_count = use_signal(|| 0usize);
+    let mut repost_count = use_signal(|| 0usize);
+    let mut zap_amount_sats = use_signal(|| 0u64);
+    let mut is_liked = use_signal(|| false);
+    let mut is_reposted = use_signal(|| false);
+    let mut is_zapped = use_signal(|| false);
 
     // Audio element ID
     let audio_id = format!("voice-audio-{}", event_id_str);
@@ -80,6 +91,135 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 Err(e) => {
                     log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
                 }
+            }
+        });
+    }));
+
+    // Fetch reaction counts
+    use_effect(use_reactive(&event_id_str, move |event_id_for_counts| {
+        spawn(async move {
+            let client = match get_client() {
+                Some(c) => c,
+                None => return,
+            };
+
+            let event_id_parsed = match EventId::from_hex(&event_id_for_counts) {
+                Ok(id) => id,
+                Err(_) => return,
+            };
+
+            // Fetch reply count (kind 1 replies)
+            let reply_filter = Filter::new()
+                .kind(Kind::TextNote)
+                .event(event_id_parsed)
+                .limit(500);
+
+            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
+                reply_count.set(replies.len());
+            }
+
+            // Fetch like count (kind 7 reactions)
+            let like_filter = Filter::new()
+                .kind(Kind::Reaction)
+                .event(event_id_parsed)
+                .limit(500);
+
+            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_liked = false;
+
+                if let Some(ref user_pk) = current_user_pubkey {
+                    for like in likes.iter() {
+                        if like.pubkey.to_string() == *user_pk {
+                            user_has_liked = true;
+                            break;
+                        }
+                    }
+                }
+
+                like_count.set(likes.len());
+                is_liked.set(user_has_liked);
+            }
+
+            // Fetch repost count (kind 6 reposts)
+            let repost_filter = Filter::new()
+                .kind(Kind::Repost)
+                .event(event_id_parsed)
+                .limit(500);
+
+            if let Ok(reposts) = client.fetch_events(repost_filter, Duration::from_secs(5)).await {
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_reposted = false;
+
+                if let Some(ref user_pk) = current_user_pubkey {
+                    for repost in reposts.iter() {
+                        if repost.pubkey.to_string() == *user_pk {
+                            user_has_reposted = true;
+                            break;
+                        }
+                    }
+                }
+
+                repost_count.set(reposts.len());
+                is_reposted.set(user_has_reposted);
+            }
+
+            // Fetch zap receipts (kind 9735)
+            let zap_filter = Filter::new()
+                .kind(Kind::from(9735))
+                .event(event_id_parsed)
+                .limit(500);
+
+            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
+                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let mut user_has_zapped = false;
+
+                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
+                    // Check if this zap is from the current user
+                    if let Some(ref user_pk) = current_user_pubkey {
+                        let zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                Some(tag_vec.get(1)?.as_str().to_string())
+                            } else {
+                                None
+                            }
+                        });
+
+                        if let Some(zap_sender) = zap_sender_pubkey {
+                            if zap_sender == *user_pk {
+                                user_has_zapped = true;
+                            }
+                        }
+                    }
+
+                    // Parse zap amount from description tag
+                    zap_event.tags.iter().find_map(|tag| {
+                        let tag_vec = tag.clone().to_vec();
+                        if tag_vec.first()?.as_str() == "description" {
+                            let zap_request_json = tag_vec.get(1)?.as_str();
+                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                    for tag_array in tags {
+                                        if let Some(tag_vals) = tag_array.as_array() {
+                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
+                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
+                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                        return Some(millisats / 1000);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })
+                }).sum();
+
+                zap_amount_sats.set(total_sats);
+                is_zapped.set(user_has_zapped);
             }
         });
     }));
@@ -195,7 +335,12 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         is_liking.set(true);
         spawn(async move {
             match nostr_client::publish_reaction(event_id_copy, event_author_copy, "+".to_string()).await {
-                Ok(_) => log::info!("Like published successfully"),
+                Ok(_) => {
+                    log::info!("Like published successfully");
+                    is_liked.set(true);
+                    let current_count = *like_count.read();
+                    like_count.set(current_count + 1);
+                }
                 Err(e) => log::error!("Failed to publish like: {}", e),
             }
             is_liking.set(false);
@@ -209,7 +354,12 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         is_reposting.set(true);
         spawn(async move {
             match nostr_client::publish_repost(event_id_copy, event_author_copy, None).await {
-                Ok(_) => log::info!("Repost published successfully"),
+                Ok(_) => {
+                    log::info!("Repost published successfully");
+                    is_reposted.set(true);
+                    let current_count = *repost_count.read();
+                    repost_count.set(current_count + 1);
+                }
                 Err(e) => log::error!("Failed to publish repost: {}", e),
             }
             is_reposting.set(false);
@@ -374,32 +524,59 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
                 // Reply button
                 button {
-                    class: "flex items-center gap-2 hover:text-primary transition group",
+                    class: "flex items-center gap-1 hover:text-blue-500 transition group",
                     onclick: move |_| show_reply_modal.set(true),
                     MessageCircleIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
+                    if *reply_count.read() > 0 {
+                        span { class: "text-sm", "{reply_count.read()}" }
+                    }
                 }
 
                 // Repost button
                 button {
-                    class: "flex items-center gap-2 hover:text-green-500 transition group",
+                    class: if *is_reposted.read() {
+                        "flex items-center gap-1 text-green-500 transition group"
+                    } else {
+                        "flex items-center gap-1 hover:text-green-500 transition group"
+                    },
                     onclick: handle_repost,
-                    disabled: *is_reposting.read(),
+                    disabled: *is_reposting.read() || *is_reposted.read(),
                     Repeat2Icon { class: "w-4 h-4 group-hover:scale-110 transition" }
+                    if *repost_count.read() > 0 {
+                        span { class: "text-sm", "{repost_count.read()}" }
+                    }
                 }
 
                 // Like button
                 button {
-                    class: "flex items-center gap-2 hover:text-red-500 transition group",
+                    class: if *is_liked.read() {
+                        "flex items-center gap-1 text-red-500 transition group"
+                    } else {
+                        "flex items-center gap-1 hover:text-red-500 transition group"
+                    },
                     onclick: handle_like,
-                    disabled: *is_liking.read(),
-                    HeartIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
+                    disabled: *is_liking.read() || *is_liked.read(),
+                    HeartIcon {
+                        class: "w-4 h-4 group-hover:scale-110 transition",
+                        filled: *is_liked.read()
+                    }
+                    if *like_count.read() > 0 {
+                        span { class: "text-sm", "{like_count.read()}" }
+                    }
                 }
 
                 // Zap button
                 button {
-                    class: "flex items-center gap-2 hover:text-yellow-500 transition group",
+                    class: if *is_zapped.read() {
+                        "flex items-center gap-1 text-yellow-500 transition group"
+                    } else {
+                        "flex items-center gap-1 hover:text-yellow-500 transition group"
+                    },
                     onclick: move |_| show_zap_modal.set(true),
                     ZapIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
+                    if *zap_amount_sats.read() > 0 {
+                        span { class: "text-sm", "{zap_amount_sats.read()}" }
+                    }
                 }
             }
 

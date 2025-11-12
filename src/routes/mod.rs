@@ -446,31 +446,6 @@ fn Layout() -> Element {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
-                                            if auth.is_authenticated {
-                                                Link {
-                                                    to: Route::CashuWallet {},
-                                                    onclick: move |_| more_menu_open.set(false),
-                                                    class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                    svg {
-                                                        class: "w-5 h-5",
-                                                        xmlns: "http://www.w3.org/2000/svg",
-                                                        width: "24",
-                                                        height: "24",
-                                                        view_box: "0 0 24 24",
-                                                        fill: "none",
-                                                        stroke: "currentColor",
-                                                        stroke_width: "2",
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                                                        path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                                                        path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                                                    }
-                                                    span {
-                                                        "Wallet"
-                                                    }
-                                                }
-                                            }
                                             Link {
                                                 to: Route::VoiceMessages {},
                                                 onclick: move |_| more_menu_open.set(false),

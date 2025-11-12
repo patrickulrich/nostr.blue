@@ -12,6 +12,8 @@ mod services;
 mod stores;
 mod utils;
 
+use components::toast::ToastProvider;
+
 fn main() {
     // Initialize panic hook for better error messages in browser console
     #[cfg(target_arch = "wasm32")]
@@ -57,7 +59,9 @@ fn App() -> Element {
     });
 
     rsx! {
-        Router::<routes::Route> {}
+        ToastProvider {
+            Router::<routes::Route> {}
+        }
     }
 }
 
