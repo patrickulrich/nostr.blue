@@ -152,8 +152,10 @@ pub async fn restore_session_async() {
                                 Ok(_) => {
                                     match nostr_client::set_signer(signer_type).await {
                                         Ok(_) => {
-                                            // Run post-login initialization
-                                            run_post_login_init().await;
+                                            // Run post-login initialization in background (non-blocking)
+                                            spawn(async {
+                                                run_post_login_init().await;
+                                            });
                                             log::info!("Successfully restored remote signer session");
                                         }
                                         Err(e) => {
@@ -220,8 +222,10 @@ pub async fn login_with_nsec(nsec: &str) -> Result<(), String> {
 
     log::info!("Successfully logged in with pubkey: {}", pubkey);
 
-    // Run post-login initialization
-    run_post_login_init().await;
+    // Run post-login initialization in background (non-blocking)
+    spawn(async {
+        run_post_login_init().await;
+    });
 
     Ok(())
 }
@@ -289,8 +293,10 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
 
         log::info!("Successfully logged in via browser extension with pubkey: {}", pubkey_str);
 
-        // Run post-login initialization
-        run_post_login_init().await;
+        // Run post-login initialization in background (non-blocking)
+        spawn(async {
+            run_post_login_init().await;
+        });
 
         Ok(())
     }
@@ -363,20 +369,29 @@ async fn restore_nostr_connect(bunker_uri: &str, app_keys_str: &str) -> Result<N
 
 /// Run post-login initialization steps (notifications, subscriptions, emoji fetch)
 /// This should be called after any successful login or session restoration
+///
+/// Operations are run in parallel to reduce startup time.
 async fn run_post_login_init() {
-    log::info!("Running post-login initialization...");
+    log::info!("Running post-login initialization in parallel...");
 
-    // Load notification checked_at timestamp from localStorage
+    // Load notification checked_at timestamp from localStorage (synchronous, runs immediately)
     crate::stores::notifications::load_checked_at();
 
-    // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
-    crate::stores::notifications::fetch_and_merge_from_nip78().await;
+    // Run expensive operations in parallel to avoid blocking
+    tokio::join!(
+        // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
+        crate::stores::notifications::fetch_and_merge_from_nip78(),
 
-    // Start real-time notification subscription
-    crate::stores::notifications::start_realtime_subscription().await;
+        // Start real-time notification subscription
+        crate::stores::notifications::start_realtime_subscription(),
 
-    // Fetch custom emojis
-    crate::stores::emoji_store::init_emoji_fetch();
+        // Fetch custom emojis (wrap in async block since it's not async)
+        async {
+            crate::stores::emoji_store::init_emoji_fetch();
+        }
+    );
+
+    log::info!("Post-login initialization complete");
 }
 
 /// Login with NIP-46 remote signer (nostr-connect)
@@ -431,8 +446,10 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
 
     log::info!("Successfully logged in via remote signer with pubkey: {}", pubkey_str);
 
-    // 8. Run post-login initialization
-    run_post_login_init().await;
+    // 8. Run post-login initialization in background (non-blocking)
+    spawn(async {
+        run_post_login_init().await;
+    });
 
     Ok(())
 }
@@ -470,6 +487,9 @@ pub async fn logout() {
 
     // Stop real-time notification subscription
     crate::stores::notifications::stop_realtime_subscription().await;
+
+    // Clear cached contacts
+    *nostr_client::CACHED_CONTACTS.write() = None;
 
     // Unset signer from client
     let _ = nostr_client::set_read_only().await;

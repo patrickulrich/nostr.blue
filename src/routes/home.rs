@@ -1244,8 +1244,8 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize
 
     log::info!("Fetching events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database-first)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first) with reduced timeout
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             let raw_count = events.len();
             log::info!("Loaded {} events (including reposts) from following feed", raw_count);
@@ -1358,8 +1358,8 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<FeedItem>
 
     log::info!("Fetching all events (including replies and reposts) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database-first)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first) with reduced timeout
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             log::info!("Loaded {} events (including replies and reposts) from following feed", events.len());
 
@@ -1425,8 +1425,8 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events using aggregated pattern (database-first)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch events using aggregated pattern (database-first) with reduced timeout
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 

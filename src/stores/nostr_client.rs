@@ -28,6 +28,10 @@ pub static HAS_SIGNER: GlobalSignal<bool> = Signal::global(|| false);
 /// The current signer type (if any)
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 
+/// Cached contact list (pubkey -> contacts)
+/// This prevents multiple sequential fetches of the same contact list
+pub static CACHED_CONTACTS: GlobalSignal<Option<(String, Vec<String>)>> = Signal::global(|| None);
+
 /// Relay connection status
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -174,6 +178,22 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
 
     *HAS_SIGNER.write() = true;
     *CURRENT_SIGNER.write() = Some(signer.clone());
+
+    // Get the user's pubkey for prefetching
+    let user_pubkey = signer.public_key().await.ok().map(|pk| pk.to_hex());
+
+    // Prefetch user's contacts in background to warm the cache
+    // This happens BEFORE the home feed loads, so contacts are ready immediately
+    if let Some(pubkey) = user_pubkey.clone() {
+        spawn(async move {
+            log::info!("Prefetching contacts for user: {}", pubkey);
+            if let Err(e) = fetch_contacts(pubkey).await {
+                log::warn!("Failed to prefetch contacts: {}", e);
+            } else {
+                log::info!("Contacts prefetched successfully");
+            }
+        });
+    }
 
     // Load user's relay lists (kind 10002/10050) in background
     let client_clone = client.clone();
@@ -559,7 +579,17 @@ pub async fn publish_reaction(
 
 /// Fetch a user's contact list (kind 3 event)
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
+///
+/// This function uses a cache to avoid redundant fetches during a session.
 pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
+    // Check cache first
+    if let Some((cached_pubkey, cached_contacts)) = CACHED_CONTACTS.read().as_ref() {
+        if cached_pubkey == &pubkey_str {
+            log::info!("Using cached contacts for: {} ({} contacts)", pubkey_str, cached_contacts.len());
+            return Ok(cached_contacts.clone());
+        }
+    }
+
     log::info!("Fetching contacts for: {}", pubkey_str);
 
     // Parse pubkey
@@ -574,8 +604,8 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
         .kind(Kind::ContactList)
         .limit(1);
 
-    // Fetch from database/relays using aggregated pattern
-    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch from database/relays using aggregated pattern with reduced timeout
+    match fetch_events_aggregated(filter, Duration::from_secs(5)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Extract pubkeys from 'p' tags
@@ -588,11 +618,20 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
                         }
                     }
                 }
-                log::info!("Found {} contacts", contacts.len());
+                log::info!("Found {} contacts, caching result", contacts.len());
+
+                // Update cache
+                *CACHED_CONTACTS.write() = Some((pubkey_str, contacts.clone()));
+
                 Ok(contacts)
             } else {
                 log::info!("No contact list found");
-                Ok(Vec::new())
+                let empty_contacts = Vec::new();
+
+                // Cache empty result to avoid re-fetching
+                *CACHED_CONTACTS.write() = Some((pubkey_str, empty_contacts.clone()));
+
+                Ok(empty_contacts)
             }
         }
         Err(e) => {
@@ -637,6 +676,10 @@ pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<Stri
         Ok(output) => {
             let event_id = output.id().to_string();
             log::info!("Contact list published successfully: {}", event_id);
+
+            // Invalidate cache since we just published a new contact list
+            *CACHED_CONTACTS.write() = None;
+
             Ok(event_id)
         }
         Err(e) => {
