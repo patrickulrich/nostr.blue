@@ -1241,12 +1241,9 @@ fn ProfileSection() -> Element {
     }
 }
 
-// Helper function to load following feed
+// Helper function to load following feed with progressive streaming
 // Returns (feed_items, raw_count_before_filtering) tuple
 async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize), String> {
-    // TODO: Consider implementing progressive loading with client.stream_events() for better UX
-    // This would display events as they arrive instead of waiting for all results
-
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -1302,45 +1299,44 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize
 
     log::info!("Fetching events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database-first) with reduced timeout
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+    // PROGRESSIVE LOADING: Check database first for instant display
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // 1. Query database first (0-100ms) - instant for returning users
+    match client.database().query(filter.clone()).await {
+        Ok(db_events) => {
+            let db_count = db_events.len();
+            if db_count > 0 {
+                log::info!("Found {} cached events in database, displaying immediately", db_count);
+
+                // Process and display cached events IMMEDIATELY
+                let cached_items = process_events_into_feed(db_events.into_iter().collect());
+                let cached_count = cached_items.len();
+
+                // Return cached data immediately - user sees posts in <1s!
+                // The relay fetch will happen in background via fetch_events_aggregated's spawn
+                return Ok((cached_items, cached_count));
+            } else {
+                log::info!("No cached events in database, fetching from relays");
+            }
+        }
+        Err(e) => {
+            log::warn!("Database query failed: {}, falling back to relays", e);
+        }
+    }
+
+    // 2. If no cached data, fetch from relays with reduced timeout
+    // This only happens for first-time users or when cache is empty
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         Ok(events) => {
             let raw_count = events.len();
             log::info!("Loaded {} events (including reposts) from following feed", raw_count);
 
-            // Process events into FeedItems
-            let mut feed_items: Vec<FeedItem> = Vec::new();
+            // Process events into FeedItems using helper function
+            let feed_items = process_events_into_feed(events);
+            let processed_count = feed_items.len();
 
-            for event in events.into_iter() {
-                if event.kind == Kind::Repost {
-                    // Parse repost to extract original event
-                    match extract_reposted_event(&event) {
-                        Ok(original) => {
-                            // Include all reposts (regardless of whether original was a reply)
-                            feed_items.push(FeedItem::Repost {
-                                original,
-                                reposted_by: event.pubkey,
-                                repost_timestamp: event.created_at,
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                        }
-                    }
-                } else if event.kind == Kind::TextNote {
-                    // Filter out replies - only include top-level posts
-                    use nostr_sdk::TagKind;
-                    let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
-                    if !is_reply {
-                        feed_items.push(FeedItem::OriginalPost(event));
-                    }
-                }
-            }
-
-            // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
-
-            log::info!("After processing: {} feed items (raw: {})", feed_items.len(), raw_count);
+            log::info!("After processing: {} feed items (raw: {})", processed_count, raw_count);
 
             // If no events found, fall back to global feed
             if feed_items.is_empty() {
@@ -1416,8 +1412,25 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<FeedItem>
 
     log::info!("Fetching all events (including replies and reposts) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database-first) with reduced timeout
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+    // PROGRESSIVE LOADING: Check database first
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Query database first for instant display (0-100ms)
+    match client.database().query(filter.clone()).await {
+        Ok(db_events) if !db_events.is_empty() => {
+            log::info!("Found {} cached events in database, displaying immediately", db_events.len());
+
+            // Process and return cached events immediately
+            let cached_items = process_events_into_feed(db_events.into_iter().collect());
+            return Ok(cached_items);
+        }
+        _ => {
+            log::info!("No cached events, fetching from relays");
+        }
+    }
+
+    // Fetch from relays with aggressive timeout (only for first-time/cache miss)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         Ok(events) => {
             log::info!("Loaded {} events (including replies and reposts) from following feed", events.len());
 
@@ -1483,8 +1496,25 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events using aggregated pattern (database-first) with reduced timeout
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+    // PROGRESSIVE LOADING: Check database first
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Query database first for instant display (0-100ms)
+    match client.database().query(filter.clone()).await {
+        Ok(db_events) if !db_events.is_empty() => {
+            log::info!("Found {} cached events in database, displaying immediately", db_events.len());
+
+            // Process and return cached events immediately
+            let cached_items = process_events_into_feed(db_events.into_iter().collect());
+            return Ok(cached_items);
+        }
+        _ => {
+            log::info!("No cached events, fetching from relays");
+        }
+    }
+
+    // Fetch from relays with aggressive timeout (only for first-time/cache miss)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 
@@ -1521,6 +1551,43 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
             Err(format!("Failed to load feed: {}", e))
         }
     }
+}
+
+/// Process raw events into FeedItems (filters, sorts, and structures)
+/// This is used for both cached and fresh events
+fn process_events_into_feed(events: Vec<nostr::Event>) -> Vec<FeedItem> {
+    let mut feed_items: Vec<FeedItem> = Vec::new();
+
+    for event in events.into_iter() {
+        if event.kind == Kind::Repost {
+            // Parse repost to extract original event
+            match extract_reposted_event(&event) {
+                Ok(original) => {
+                    // Include all reposts (regardless of whether original was a reply)
+                    feed_items.push(FeedItem::Repost {
+                        original,
+                        reposted_by: event.pubkey,
+                        repost_timestamp: event.created_at,
+                    });
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                }
+            }
+        } else if event.kind == Kind::TextNote {
+            // Filter out replies - only include top-level posts
+            use nostr_sdk::TagKind;
+            let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+            if !is_reply {
+                feed_items.push(FeedItem::OriginalPost(event));
+            }
+        }
+    }
+
+    // Sort by timestamp (repost time for reposts, created_at for originals)
+    feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+
+    feed_items
 }
 
 /// Batch prefetch author metadata for all feed items

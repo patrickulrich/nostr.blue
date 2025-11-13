@@ -604,8 +604,8 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
         .kind(Kind::ContactList)
         .limit(1);
 
-    // Fetch from database/relays using aggregated pattern with reduced timeout
-    match fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+    // Fetch from database/relays using aggregated pattern with aggressive timeout
+    match fetch_events_aggregated(filter, Duration::from_secs(2)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Extract pubkeys from 'p' tags
