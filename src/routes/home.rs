@@ -548,8 +548,8 @@ pub fn Home() -> Element {
                     // Show client initializing animation during client initialization
                     ClientInitializing {}
                 } else if feed_state.read().is_pending() || feed_state.read().is_loading() {
-                    // Show loading animation
-                    ClientInitializing {}
+                    // Show loading skeleton for better perceived performance
+                    FeedLoadingSkeleton {}
                 } else if let Some(err) = feed_state.read().error() {
                     // Show error message
                     div {
@@ -640,6 +640,64 @@ pub fn Home() -> Element {
                 }
             }
 
+        }
+    }
+}
+
+/// Loading skeleton for feed - shows placeholder cards while posts load
+#[component]
+fn FeedLoadingSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "animate-pulse space-y-4 p-4",
+            // Show 5 skeleton cards
+            for _ in 0..5 {
+                div {
+                    class: "border-b border-border pb-4",
+                    // Avatar and name skeleton
+                    div {
+                        class: "flex items-center gap-3 mb-3",
+                        div {
+                            class: "w-12 h-12 bg-muted rounded-full"
+                        }
+                        div {
+                            class: "flex-1 space-y-2",
+                            div {
+                                class: "h-4 bg-muted rounded w-1/4"
+                            }
+                            div {
+                                class: "h-3 bg-muted rounded w-1/6"
+                            }
+                        }
+                    }
+                    // Content skeleton
+                    div {
+                        class: "space-y-2",
+                        div {
+                            class: "h-4 bg-muted rounded w-full"
+                        }
+                        div {
+                            class: "h-4 bg-muted rounded w-5/6"
+                        }
+                        div {
+                            class: "h-4 bg-muted rounded w-4/6"
+                        }
+                    }
+                    // Action buttons skeleton
+                    div {
+                        class: "flex gap-6 mt-3",
+                        div {
+                            class: "h-8 bg-muted rounded w-16"
+                        }
+                        div {
+                            class: "h-8 bg-muted rounded w-16"
+                        }
+                        div {
+                            class: "h-8 bg-muted rounded w-16"
+                        }
+                    }
+                }
+            }
         }
     }
 }
