@@ -17,10 +17,12 @@ pub mod format;
 pub mod url_metadata;
 pub mod profile_prefetch;
 pub mod repost;
+pub mod zap_extraction;
 
 pub use thread_tree::{ThreadNode, build_thread_tree};
 pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};
 pub use data_state::DataState;
 pub use format::{format_sats_with_separator, format_sats_compact};
 pub use repost::{FeedItem, extract_reposted_event};
+pub use zap_extraction::{extract_zap_data, extract_zap_amount, extract_zapper_pubkey, ZapData};
 

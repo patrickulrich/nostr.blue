@@ -12,16 +12,6 @@ pub enum StreamStatus {
     Ended,
 }
 
-impl StreamStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "live" => StreamStatus::Live,
-            "ended" => StreamStatus::Ended,
-            _ => StreamStatus::Planned,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
     pub d_tag: String,

@@ -11,26 +11,20 @@ pub enum StreamStatus {
     Ended,
 }
 
-impl StreamStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "live" => StreamStatus::Live,
-            "ended" => StreamStatus::Ended,
-            _ => StreamStatus::Planned,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
     pub d_tag: String,
     pub title: Option<String>,
+    #[allow(dead_code)]
     pub summary: Option<String>,
     pub image: Option<String>,
+    #[allow(dead_code)]
     pub streaming_url: Option<String>,
     pub status: StreamStatus,
     pub current_participants: Option<u32>,
+    #[allow(dead_code)]
     pub starts: Option<nostr_sdk::Timestamp>,
+    #[allow(dead_code)]
     pub tags: Vec<String>,
     /// The actual creator/streamer (from p tag), if present
     pub creator_pubkey: Option<String>,
