@@ -6,6 +6,8 @@ use crate::stores::{signer, nwc_store, settings_store};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use wasm_bindgen::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::time::Duration as StdDuration;
 
 #[wasm_bindgen]
 extern "C" {
@@ -69,9 +71,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut error_msg = use_signal(|| None::<String>);
     let mut invoice = use_signal(|| None::<String>);
     let mut qr_code_svg = use_signal(|| None::<String>);
-    let mut payment_success = use_signal(|| false);
-    let mut payment_method = use_signal(|| None::<String>);
     let webln_available = is_webln_available();
+
+    // Get toast API
+    let toast = consume_toast();
 
     // Preset amounts in sats
     let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
@@ -88,10 +91,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         error_msg.set(None);
         invoice.set(None);
         qr_code_svg.set(None);
-        payment_success.set(false);
-        payment_method.set(None);
 
         spawn(async move {
+            let toast_api = toast.clone();
+            let close_modal = props.on_close.clone();
             // Get signer
             let signer_type = match signer::get_signer() {
                 Some(s) => s,
@@ -243,9 +246,15 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     match nwc_store::pay_invoice(inv_clone.clone()).await {
                         Ok(_) => {
                             log::info!("NWC payment successful");
-                            payment_success.set(true);
-                            payment_method.set(Some("Nostr Wallet Connect".to_string()));
                             loading.set(false);
+                            toast_api.success(
+                                "⚡ Zap Sent!".to_string(),
+                                ToastOptions::new()
+                                    .description("Payment sent via Nostr Wallet Connect")
+                                    .duration(StdDuration::from_secs(4))
+                                    .permanent(false),
+                            );
+                            close_modal.call(());
                             return;
                         }
                         Err(e) => {
@@ -280,9 +289,15 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         match nwc_store::pay_invoice(inv_clone.clone()).await {
                             Ok(_) => {
                                 log::info!("NWC payment successful");
-                                payment_success.set(true);
-                                payment_method.set(Some("Nostr Wallet Connect".to_string()));
                                 loading.set(false);
+                                toast_api.success(
+                                    "⚡ Zap Sent!".to_string(),
+                                    ToastOptions::new()
+                                        .description("Payment sent via Nostr Wallet Connect")
+                                        .duration(StdDuration::from_secs(4))
+                                        .permanent(false),
+                                );
+                                close_modal.call(());
                                 return;
                             }
                             Err(e) => {
@@ -303,9 +318,15 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         match webln_send_payment(&inv_clone).await {
                             Ok(result) if !result.is_null() && !result.is_undefined() => {
                                 // Payment successful
-                                payment_success.set(true);
-                                payment_method.set(Some("WebLN".to_string()));
                                 loading.set(false);
+                                toast_api.success(
+                                    "⚡ Zap Sent!".to_string(),
+                                    ToastOptions::new()
+                                        .description("Payment sent via WebLN")
+                                        .duration(StdDuration::from_secs(4))
+                                        .permanent(false),
+                                );
+                                close_modal.call(());
                                 return;
                             }
                             Ok(_) => {
@@ -325,14 +346,20 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 }
 
                 // If WebLN failed and preference is "webln_first", try NWC as fallback
-                if payment_preference == "webln_first" && nwc_available && !*payment_success.read() {
+                if payment_preference == "webln_first" && nwc_available {
                     log::info!("WebLN failed, trying NWC as fallback");
                     match nwc_store::pay_invoice(inv_clone.clone()).await {
                         Ok(_) => {
                             log::info!("NWC fallback payment successful");
-                            payment_success.set(true);
-                            payment_method.set(Some("Nostr Wallet Connect".to_string()));
                             loading.set(false);
+                            toast_api.success(
+                                "⚡ Zap Sent!".to_string(),
+                                ToastOptions::new()
+                                    .description("Payment sent via Nostr Wallet Connect")
+                                    .duration(StdDuration::from_secs(4))
+                                    .permanent(false),
+                            );
+                            close_modal.call(());
                             return;
                         }
                         Err(e) => {
@@ -418,35 +445,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 div {
                     class: "p-4 space-y-4",
 
-                    // Show payment success
-                    if *payment_success.read() {
-                        div {
-                            class: "text-center space-y-4",
-                            div {
-                                class: "text-6xl",
-                                "✅"
-                            }
-                            h3 {
-                                class: "text-2xl font-bold text-green-500",
-                                "Zap Sent!"
-                            }
-                            p {
-                                class: "text-muted-foreground",
-                                {
-                                    let method = payment_method.read();
-                                    match method.as_deref() {
-                                        Some(m) => format!("Your zap was successfully sent via {}", m),
-                                        None => "Your zap was successfully sent!".to_string(),
-                                    }
-                                }
-                            }
-                            button {
-                                class: "w-full bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 transition",
-                                onclick: move |_| props.on_close.call(()),
-                                "Close"
-                            }
-                        }
-                    } else if let Some(inv) = invoice.read().as_ref() {
+                    // Show invoice if generated (WebLN/NWC failed or manual payment)
+                    if let Some(inv) = invoice.read().as_ref() {
                         div {
                             class: "space-y-4",
 
