@@ -36,99 +36,52 @@ pub struct LiveStreamMeta {
     pub creator_pubkey: Option<String>,
 }
 
-/// Parse NIP-53 Kind 30311 live streaming event
+/// Parse NIP-53 Kind 30311 live streaming event using NIP-53 dedicated parser
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
-    let mut meta = LiveStreamMeta {
-        d_tag: String::new(),
-        title: None,
-        summary: None,
-        image: None,
-        streaming_url: None,
-        status: StreamStatus::Planned,
-        current_participants: None,
-        starts: None,
-        tags: Vec::new(),
-        creator_pubkey: None,
+    use nostr_sdk::nips::nip53::LiveEvent;
+    use nostr_sdk::TagKind;
+
+    // Use the NIP-53 dedicated parser
+    let live_event = match LiveEvent::try_from(event.tags.clone().to_vec()) {
+        Ok(le) => le,
+        Err(e) => {
+            log::error!("Failed to parse live event with NIP-53 parser: {}", e);
+            return None;
+        }
     };
 
-    for tag in event.tags.iter() {
-        let tag_vec = tag.clone().to_vec();
-        if let Some(tag_name) = tag_vec.first().map(|s| s.as_str()) {
-            match tag_name {
-                "d" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.d_tag = value.to_string();
-                    }
-                }
-                "p" => {
-                    // Get the first p tag as the creator/streamer
-                    if meta.creator_pubkey.is_none() {
-                        if let Some(value) = tag_vec.get(1) {
-                            meta.creator_pubkey = Some(value.to_string());
-                        }
-                    }
-                }
-                "title" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.title = Some(value.to_string());
-                    }
-                }
-                "summary" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.summary = Some(value.to_string());
-                    }
-                }
-                "image" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.image = Some(value.to_string());
-                    }
-                }
-                "streaming" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.streaming_url = Some(value.to_string());
-                    }
-                }
-                "status" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.status = StreamStatus::from_str(value);
-                    }
-                }
-                "current_participants" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(count) = value.parse::<u32>() {
-                            meta.current_participants = Some(count);
-                        }
-                    }
-                }
-                "starts" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(ts) = value.parse::<i64>() {
-                            // Only convert to u64 if timestamp is non-negative
-                            if ts >= 0 {
-                                if let Ok(timestamp_u64) = u64::try_from(ts) {
-                                    meta.starts = Some(nostr_sdk::Timestamp::from(timestamp_u64));
-                                }
-                            }
-                            // Negative timestamps are ignored
-                        }
-                    }
-                }
-                "t" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.tags.push(value.to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
+    // Extract d-tag manually (not part of LiveEvent struct)
+    let d_tag = event.tags.iter()
+        .find(|tag| tag.kind() == TagKind::d())
+        .and_then(|tag| tag.content())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    if d_tag.is_empty() {
+        return None;
     }
 
-    // Only return if we have a d_tag (required)
-    if meta.d_tag.is_empty() {
-        None
-    } else {
-        Some(meta)
-    }
+    // Map NIP-53 LiveEvent to LiveStreamMeta
+    let meta = LiveStreamMeta {
+        d_tag,
+        title: live_event.title,
+        summary: live_event.summary,
+        image: live_event.image.map(|(url, _dimensions)| url.to_string()),
+        streaming_url: live_event.streaming.map(|url| url.to_string()),
+        status: match live_event.status {
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Planned) => StreamStatus::Planned,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Live) => StreamStatus::Live,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Ended) => StreamStatus::Ended,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Custom(_)) => StreamStatus::Planned,
+            None => StreamStatus::Planned, // Default to Planned if no status
+        },
+        current_participants: live_event.current_participants.map(|n| n as u32),
+        starts: live_event.starts,
+        tags: live_event.hashtags,
+        creator_pubkey: live_event.host.map(|h| h.public_key.to_string()),
+    };
+
+    Some(meta)
 }
 
 #[component]

@@ -55,61 +55,47 @@ pub fn default_relays() -> Vec<RelayConfig> {
     ]
 }
 
-/// Parse relay list from kind 10002 event
+/// Parse relay list from kind 10002 event using NIP-65 dedicated parser
 /// NIP-65 tag format:
 /// - ["r", "wss://relay.url"] = both read and write
 /// - ["r", "wss://relay.url", "read"] = read only
 /// - ["r", "wss://relay.url", "write"] = write only
 pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
-    let mut relays = Vec::new();
+    use nostr_sdk::nips::nip65::{self, RelayMetadata};
 
-    for tag in event.tags.iter() {
-        // Try to extract relay URL from the tag
-        // For NIP-65, we're looking for tags like ["r", "wss://relay.url", "read"|"write"]
-        if let Some(standardized) = tag.as_standardized() {
-            // Check if this is a Relay tag
-            if let nostr_sdk::TagStandard::Relay(relay_url) = standardized {
-                log::debug!("Found relay tag: {}", relay_url);
-                relays.push(RelayConfig {
-                    url: relay_url.to_string(),
-                    read: true,
-                    write: true,
-                });
-                continue;
+    let relays: Vec<RelayConfig> = nip65::extract_relay_list(event)
+        .map(|(relay_url, metadata)| {
+            let (read, write) = match metadata {
+                Some(RelayMetadata::Read) => (true, false),
+                Some(RelayMetadata::Write) => (false, true),
+                None => (true, true), // No marker means both read and write
+            };
+
+            log::debug!("Found relay: {} (read: {}, write: {})", relay_url, read, write);
+
+            RelayConfig {
+                url: relay_url.to_string(),
+                read,
+                write,
             }
-        }
+        })
+        .collect();
 
-        // Fallback: try parsing as custom 'r' tag
-        if tag.kind() == TagKind::Custom("r".into()) {
-            if let Some(url) = tag.content() {
-                log::debug!("Found 'r' tag: {}", url);
-                relays.push(RelayConfig {
-                    url: url.to_string(),
-                    read: true,
-                    write: true,
-                });
-            }
-        }
-    }
-
-    log::info!("Parsed {} relays from event", relays.len());
+    log::info!("Parsed {} relays from event using NIP-65 parser", relays.len());
     relays
 }
 
-/// Parse DM relay list from kind 10050 event
+/// Parse DM relay list from kind 10050 event using NIP-17 dedicated parser
 /// NIP-17 tag format: ["relay", "wss://relay.url"]
 pub fn parse_dm_relay_list(event: &nostr_sdk::Event) -> Vec<String> {
-    let mut dm_relays = Vec::new();
+    use nostr_sdk::nips::nip17;
 
-    for tag in event.tags.iter() {
-        // Check if this is a custom "relay" tag
-        if tag.kind() == TagKind::Custom("relay".into()) {
-            if let Some(content) = tag.content() {
-                dm_relays.push(content.to_string());
-            }
-        }
-    }
+    // Use the NIP-17 dedicated parser
+    let dm_relays: Vec<String> = nip17::extract_relay_list(event)
+        .map(|relay_url| relay_url.to_string())
+        .collect();
 
+    log::info!("Parsed {} DM relays from event using NIP-17 parser", dm_relays.len());
     dm_relays
 }
 

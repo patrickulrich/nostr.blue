@@ -37,103 +37,60 @@ pub struct LiveStreamMeta {
     pub creator_pubkey: Option<String>,
 }
 
-/// Parse NIP-53 Kind 30311 live streaming event
+/// Parse NIP-53 Kind 30311 live streaming event using NIP-53 dedicated parser
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
+    use nostr_sdk::nips::nip53::LiveEvent;
     use nostr_sdk::TagKind;
-
-    let mut meta = LiveStreamMeta {
-        d_tag: String::new(),
-        title: None,
-        summary: None,
-        image: None,
-        streaming_url: None,
-        status: StreamStatus::Planned,
-        current_participants: None,
-        starts: None,
-        tags: Vec::new(),
-        creator_pubkey: None,
-    };
 
     log::info!("Parsing live stream event: {}", event.id);
     log::info!("Total tags: {}", event.tags.len());
 
-    for tag in event.tags.iter() {
-        let tag_kind = tag.kind();
-
-        // Handle standard tags with TagKind methods
-        if tag_kind == TagKind::d() {
-            if let Some(value) = tag.content() {
-                meta.d_tag = value.to_string();
-                log::info!("Found d tag: {}", value);
-            }
-        } else if tag_kind == TagKind::p() {
-            // Get the first p tag as the creator/streamer
-            if meta.creator_pubkey.is_none() {
-                if let Some(value) = tag.content() {
-                    meta.creator_pubkey = Some(value.to_string());
-                    log::info!("Found creator p tag: {}", value);
-                }
-            }
-        } else if tag_kind == TagKind::t() {
-            if let Some(value) = tag.content() {
-                meta.tags.push(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("title") {
-            if let Some(value) = tag.content() {
-                meta.title = Some(value.to_string());
-                log::info!("Found title: {}", value);
-            }
-        } else if tag_kind == TagKind::custom("summary") {
-            if let Some(value) = tag.content() {
-                meta.summary = Some(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("image") {
-            if let Some(value) = tag.content() {
-                meta.image = Some(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("streaming") {
-            if let Some(value) = tag.content() {
-                let url = value.to_string();
-                log::info!("✅ Found streaming tag with URL: {}", url);
-                meta.streaming_url = Some(url);
-            } else {
-                log::warn!("❌ Found streaming tag but content is None");
-            }
-        } else if tag_kind == TagKind::custom("status") {
-            if let Some(value) = tag.content() {
-                meta.status = StreamStatus::from_str(value);
-                log::info!("Found status: {:?}", meta.status);
-            }
-        } else if tag_kind == TagKind::custom("current_participants") {
-            if let Some(value) = tag.content() {
-                if let Ok(count) = value.parse::<u32>() {
-                    meta.current_participants = Some(count);
-                }
-            }
-        } else if tag_kind == TagKind::custom("starts") {
-            if let Some(value) = tag.content() {
-                if let Ok(ts) = value.parse::<i64>() {
-                    // Validate timestamp is non-negative to avoid wraparound
-                    if ts >= 0 {
-                        meta.starts = Some(Timestamp::from(ts as u64));
-                    } else {
-                        log::warn!("Negative timestamp {} in starts tag, skipping", ts);
-                    }
-                }
-            }
+    // Use the NIP-53 dedicated parser
+    let live_event = match LiveEvent::try_from(event.tags.clone().to_vec()) {
+        Ok(le) => le,
+        Err(e) => {
+            log::error!("Failed to parse live event with NIP-53 parser: {}", e);
+            return None;
         }
+    };
+
+    // Extract d-tag manually (not part of LiveEvent struct)
+    let d_tag = event.tags.iter()
+        .find(|tag| tag.kind() == TagKind::d())
+        .and_then(|tag| tag.content())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    if d_tag.is_empty() {
+        log::warn!("Event {} missing required d tag", event.id);
+        return None;
     }
+
+    // Map NIP-53 LiveEvent to LiveStreamMeta
+    let meta = LiveStreamMeta {
+        d_tag: d_tag.clone(),
+        title: live_event.title,
+        summary: live_event.summary,
+        image: live_event.image.map(|(url, _dimensions)| url.to_string()),
+        streaming_url: live_event.streaming.map(|url| url.to_string()),
+        status: match live_event.status {
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Planned) => StreamStatus::Planned,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Live) => StreamStatus::Live,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Ended) => StreamStatus::Ended,
+            Some(nostr_sdk::nips::nip53::LiveEventStatus::Custom(_)) => StreamStatus::Planned,
+            None => StreamStatus::Planned, // Default to Planned if no status
+        },
+        current_participants: live_event.current_participants.map(|n| n as u32),
+        starts: live_event.starts,
+        tags: live_event.hashtags,
+        creator_pubkey: live_event.host.map(|h| h.public_key.to_string()),
+    };
 
     log::info!("📊 Parsed streaming_url: {:?}", meta.streaming_url);
     log::info!("📊 Parsed d_tag: {}", meta.d_tag);
+    log::info!("📊 Parsed status: {:?}", meta.status);
 
-    // Only return if we have a d_tag (required)
-    if meta.d_tag.is_empty() {
-        log::warn!("Event {} missing required d tag", event.id);
-        None
-    } else {
-        Some(meta)
-    }
+    Some(meta)
 }
 
 #[component]

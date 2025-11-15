@@ -126,17 +126,28 @@ pub async fn fetch_gifs(limit: usize, until: Option<Timestamp>, search_query: Op
     Ok(gifs)
 }
 
-/// Parse a Nostr event into GifMetadata
+/// Parse a Nostr event into GifMetadata using NIP-94 dedicated parser
 fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
-    let mut url = None;
+    use nostr_sdk::nips::nip94::FileMetadata;
+
+    // Use the NIP-94 dedicated parser for core fields
+    let file_metadata = match FileMetadata::try_from(event.tags.clone().to_vec()) {
+        Ok(fm) => fm,
+        Err(e) => {
+            log::debug!("Failed to parse file metadata with NIP-94 parser: {}", e);
+            return None;
+        }
+    };
+
+    // Extract dimensions from NIP-94 ImageDimensions
+    let dimensions = file_metadata.dim.map(|dim| (dim.width, dim.height));
+
+    // Parse additional fields not in FileMetadata struct (thumb, alt, summary)
+    // These are part of NIP-94 spec but may not be in the current SDK version
     let mut thumbnail = None;
-    let mut dimensions = None;
-    let mut size = None;
-    let mut blurhash = None;
     let mut alt = None;
     let mut summary = None;
 
-    // Parse tags to extract metadata
     for tag in event.tags.iter() {
         let tag_slice = tag.as_slice();
         if tag_slice.is_empty() {
@@ -144,34 +155,9 @@ fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
         }
 
         match tag_slice[0].as_str() {
-            "url" => {
-                if tag_slice.len() >= 2 {
-                    url = Some(tag_slice[1].to_string());
-                }
-            }
             "thumb" => {
                 if tag_slice.len() >= 2 {
                     thumbnail = Some(tag_slice[1].to_string());
-                }
-            }
-            "dim" => {
-                if tag_slice.len() >= 2 {
-                    // Parse dimensions like "480x360"
-                    if let Some((w, h)) = parse_dimensions(&tag_slice[1]) {
-                        dimensions = Some((w, h));
-                    }
-                }
-            }
-            "size" => {
-                if tag_slice.len() >= 2 {
-                    if let Ok(s) = tag_slice[1].parse::<usize>() {
-                        size = Some(s);
-                    }
-                }
-            }
-            "blurhash" => {
-                if tag_slice.len() >= 2 {
-                    blurhash = Some(tag_slice[1].to_string());
                 }
             }
             "alt" => {
@@ -188,31 +174,16 @@ fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
         }
     }
 
-    // URL is required
-    let url = url?;
-
     Some(GifMetadata {
-        url,
+        url: file_metadata.url.to_string(),
         thumbnail,
         dimensions,
-        size,
-        blurhash,
+        size: file_metadata.size,
+        blurhash: file_metadata.blurhash,
         alt,
         summary,
         created_at: event.created_at,
     })
-}
-
-/// Parse dimensions string like "480x360" into (width, height)
-fn parse_dimensions(dim_str: &str) -> Option<(u64, u64)> {
-    let parts: Vec<&str> = dim_str.split('x').collect();
-    if parts.len() == 2 {
-        let width = parts[0].parse::<u64>().ok()?;
-        let height = parts[1].parse::<u64>().ok()?;
-        Some((width, height))
-    } else {
-        None
-    }
 }
 
 /// Load initial GIFs (from cache and network)

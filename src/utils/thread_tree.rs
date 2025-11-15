@@ -20,10 +20,32 @@ pub struct ThreadNode {
 ///   - Falls back to 'e' tags with "root" marker if no reply marker
 ///   - Falls back to last 'e' tag if no markers present (positional)
 /// - For NIP-22 (kind 1111 comments):
-///   - Looks for lowercase 'e' tag (parent reference)
-///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
+///   - Uses NIP-22 dedicated parser to extract parent reference
 fn get_parent_id(event: &Event) -> Option<EventId> {
-    // First, try lowercase 'e' tags (standard NIP-10 and NIP-22 parent reference)
+    // For NIP-22 comments (kind 1111), use the dedicated NIP-22 parser
+    if event.kind == nostr_sdk::Kind::Comment {
+        use nostr_sdk::nips::nip22::{self, CommentTarget};
+
+        // Try to get parent first (direct parent of this comment)
+        if let Some(parent) = nip22::extract_parent(event) {
+            match parent {
+                CommentTarget::Event { id, .. } => return Some(id),
+                _ => {} // Other target types (Coordinate, External) don't have EventId
+            }
+        }
+
+        // Fallback to root if no parent found
+        if let Some(root) = nip22::extract_root(event) {
+            match root {
+                CommentTarget::Event { id, .. } => return Some(id),
+                _ => {} // Other target types don't have EventId
+            }
+        }
+
+        return None;
+    }
+
+    // For NIP-10 regular replies (kind 1), use the existing logic
     let e_tags: Vec<_> = event.tags.iter()
         .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)))
         .collect();
@@ -56,24 +78,6 @@ fn get_parent_id(event: &Event) -> Option<EventId> {
         // Positional fallback: last 'e' tag is the parent (NIP-10 deprecated positional)
         if let Some(last_tag) = e_tags.last() {
             if let Some(content) = last_tag.content() {
-                let parts: Vec<&str> = content.split('\t').collect();
-                if let Ok(event_id) = EventId::from_hex(parts[0]) {
-                    return Some(event_id);
-                }
-            }
-        }
-    }
-
-    // NIP-22 fallback: For kind 1111 comments, if no lowercase 'e' tag found,
-    // check for uppercase 'E' tag (root reference)
-    // This handles non-compliant comments that might only have uppercase tags
-    if event.kind == nostr_sdk::Kind::Comment {
-        let upper_e_tags: Vec<_> = event.tags.iter()
-            .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E)))
-            .collect();
-
-        if let Some(first_tag) = upper_e_tags.first() {
-            if let Some(content) = first_tag.content() {
                 let parts: Vec<&str> = content.split('\t').collect();
                 if let Ok(event_id) = EventId::from_hex(parts[0]) {
                     return Some(event_id);

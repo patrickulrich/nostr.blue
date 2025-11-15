@@ -193,22 +193,22 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     }
 }
 
-/// Parse a Kind 0 event into a Profile struct
+/// Parse a Kind 0 event into a Profile struct using NIP-01 Metadata parser
 fn parse_profile_event(event: &Event) -> Result<Profile, String> {
-    let content = &event.content;
-    let metadata: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
+    // Use the NIP-01 dedicated parser
+    let metadata = nostr_sdk::Metadata::try_from(event)
+        .map_err(|e| format!("Failed to parse metadata: {}", e))?;
 
     Ok(Profile {
         pubkey: event.pubkey.to_string(),
-        name: metadata.get("name").and_then(|v| v.as_str()).map(String::from),
-        display_name: metadata.get("display_name").and_then(|v| v.as_str()).map(String::from),
-        about: metadata.get("about").and_then(|v| v.as_str()).map(String::from),
-        picture: metadata.get("picture").and_then(|v| v.as_str()).map(String::from),
-        banner: metadata.get("banner").and_then(|v| v.as_str()).map(String::from),
-        nip05: metadata.get("nip05").and_then(|v| v.as_str()).map(String::from),
-        lud16: metadata.get("lud16").and_then(|v| v.as_str()).map(String::from),
-        website: metadata.get("website").and_then(|v| v.as_str()).map(String::from),
+        name: metadata.name,
+        display_name: metadata.display_name,
+        about: metadata.about,
+        picture: metadata.picture.map(|url| url.to_string()),
+        banner: metadata.banner.map(|url| url.to_string()),
+        nip05: metadata.nip05,
+        lud16: metadata.lud16,
+        website: metadata.website.map(|url| url.to_string()),
         fetched_at: Utc::now(),
     })
 }
