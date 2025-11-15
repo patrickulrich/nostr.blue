@@ -6,3 +6,4 @@ pub mod profile_stats;
 pub mod admission_policy;
 pub mod aggregation;
 pub mod content_search;
+pub mod quick_zap;

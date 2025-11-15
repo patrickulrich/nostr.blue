@@ -2,7 +2,7 @@
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::{signer, nwc_store, settings_store, nostr_client};
-use std::time::Duration;
+use dioxus::prelude::ReadableExt;
 
 /// Result of a quick zap attempt
 #[derive(Debug, Clone)]
@@ -183,7 +183,7 @@ pub async fn quick_zap_with_amount(
     };
 
     // Try to pay automatically based on preferences
-    let payment_preference = settings_store::SETTINGS.read().payment_method_preference.clone();
+    let payment_preference = settings_store::SETTINGS.peek().payment_method_preference.clone();
     let nwc_available = nwc_store::is_connected();
     let webln_available = is_webln_available();
 
@@ -260,7 +260,7 @@ fn is_webln_available() -> bool {
 }
 
 /// Attempt WebLN payment
-async fn attempt_webln_payment(invoice: &str) -> Result<(), String> {
+async fn attempt_webln_payment(_invoice: &str) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::prelude::*;
@@ -280,7 +280,7 @@ async fn attempt_webln_payment(invoice: &str) -> Result<(), String> {
             .map_err(|e| format!("WebLN enable failed: {:?}", e))?;
 
         // Send payment
-        let result = webln_send_payment(invoice)
+        let result = webln_send_payment(_invoice)
             .await
             .map_err(|e| format!("WebLN payment failed: {:?}", e))?;
 
@@ -300,7 +300,7 @@ pub fn get_available_payment_method() -> Option<PaymentMethod> {
     let nwc_available = nwc_store::is_connected();
     let webln_available = is_webln_available();
 
-    let preference = settings_store::SETTINGS.read().payment_method_preference.clone();
+    let preference = settings_store::SETTINGS.peek().payment_method_preference.clone();
 
     match preference.as_str() {
         "nwc_first" if nwc_available => Some(PaymentMethod::NostrWalletConnect),
