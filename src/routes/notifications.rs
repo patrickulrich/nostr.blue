@@ -368,7 +368,8 @@ fn render_notification(notification: &NotificationType) -> Element {
                         }
                     }
                     NoteCard {
-                        event: event.clone()
+                        event: event.clone(),
+                        collapsible: true
                     }
                 }
             }
@@ -541,7 +542,8 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                 div {
                     class: "ml-13 mt-2",
                     NoteCard {
-                        event: post.clone()
+                        event: post.clone(),
+                        collapsible: true
                     }
                 }
             } else if *loading.read() {
@@ -661,7 +663,8 @@ fn RepostNotification(event: NostrEvent) -> Element {
                 div {
                     class: "ml-13 mt-2",
                     NoteCard {
-                        event: post.clone()
+                        event: post.clone(),
+                        collapsible: true
                     }
                 }
             } else if *loading.read() {

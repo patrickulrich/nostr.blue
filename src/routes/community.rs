@@ -220,7 +220,8 @@ pub fn CommunityPage(a_tag: String) -> Element {
                         class: "divide-y divide-border",
                         for post in posts.read().iter() {
                             NoteCard {
-                                event: post.clone()
+                                event: post.clone(),
+                                collapsible: true
                             }
                         }
                     }
