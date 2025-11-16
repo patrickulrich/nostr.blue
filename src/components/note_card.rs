@@ -580,7 +580,8 @@ pub fn NoteCard(
                         class: "mb-3",
                         RichContent {
                             content: content.clone(),
-                            tags: event.tags.iter().cloned().collect()
+                            tags: event.tags.iter().cloned().collect(),
+                            collapsible: true
                         }
                     }
 
