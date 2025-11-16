@@ -849,14 +849,16 @@ pub fn Profile(pubkey: String) -> Element {
                                                 },
                                                 _ => rsx! {
                                                     NoteCard {
-                                                        event: event.clone()
+                                                        event: event.clone(),
+                                                        collapsible: true
                                                     }
                                                 }
                                             }
                                         },
                                         _ => rsx! {
                                             NoteCard {
-                                                event: event.clone()
+                                                event: event.clone(),
+                                                collapsible: true
                                             }
                                         }
                                     }
