@@ -111,7 +111,8 @@ pub fn Trending() -> Element {
                     for event in events.read().iter() {
                         NoteCard {
                             key: "{event.id}",
-                            event: event.clone()
+                            event: event.clone(),
+                            collapsible: true
                         }
                     }
                 }

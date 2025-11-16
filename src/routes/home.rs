@@ -735,7 +735,8 @@ pub fn Home() -> Element {
                                         NoteCard {
                                             event: event.clone(),
                                             repost_info: repost_info,
-                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned()
+                                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                                            collapsible: true
                                         }
                                     }
                                 }

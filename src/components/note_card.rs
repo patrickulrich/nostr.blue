@@ -15,6 +15,7 @@ pub fn NoteCard(
     event: NostrEvent,
     #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = true)] collapsible: bool,
 ) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();
@@ -580,7 +581,8 @@ pub fn NoteCard(
                         class: "mb-3",
                         RichContent {
                             content: content.clone(),
-                            tags: event.tags.iter().cloned().collect()
+                            tags: event.tags.iter().cloned().collect(),
+                            collapsible: collapsible
                         }
                     }
 

@@ -8,14 +8,69 @@ use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
 
 #[component]
-pub fn RichContent(content: String, tags: Vec<Tag>) -> Element {
+pub fn RichContent(
+    content: String,
+    tags: Vec<Tag>,
+    #[props(default = false)] collapsible: bool,
+) -> Element {
     let tokens = parse_content(&content, &tags);
+    let mut is_expanded = use_signal(|| false);
 
-    rsx! {
-        div {
-            class: "whitespace-pre-wrap break-words space-y-2",
-            for token in tokens.iter() {
-                {render_token(token)}
+    // Estimate if content is long enough to need collapsing
+    // Count characters and media items to estimate ~8 lines
+    let is_long_content = if collapsible {
+        let char_count = content.chars().count();
+        let media_count = tokens.iter().filter(|t| {
+            matches!(t, ContentToken::Image(_) | ContentToken::Video(_) |
+                     ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
+                     ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
+                     ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
+                     ContentToken::EventMention(_))
+        }).count();
+
+        // Heuristic: >400 chars (roughly 8 lines at ~50 chars/line) or has media
+        char_count > 400 || media_count > 0
+    } else {
+        false
+    };
+
+    if collapsible && is_long_content {
+        rsx! {
+            div {
+                class: "relative",
+                div {
+                    class: if *is_expanded.read() {
+                        "whitespace-pre-wrap break-words space-y-2"
+                    } else {
+                        "whitespace-pre-wrap break-words space-y-2 max-h-[12em] overflow-hidden"
+                    },
+                    for token in tokens.iter() {
+                        {render_token(token)}
+                    }
+                }
+                // Show More button - only visible when collapsed
+                if !*is_expanded.read() {
+                    div {
+                        class: "absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background via-background/95 to-transparent flex items-end justify-center pb-1",
+                        button {
+                            class: "px-4 py-1.5 text-sm font-medium text-primary border border-border rounded-md bg-background hover:bg-accent transition-colors",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                is_expanded.set(true);
+                            },
+                            "Show More"
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div {
+                class: "whitespace-pre-wrap break-words space-y-2",
+                for token in tokens.iter() {
+                    {render_token(token)}
+                }
             }
         }
     }

@@ -181,7 +181,8 @@ pub fn Explore() -> Element {
                             }
                         } else {
                             NoteCard {
-                                event: event.clone()
+                                event: event.clone(),
+                                collapsible: true
                             }
                         }
                     }
