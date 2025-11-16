@@ -42,10 +42,15 @@ pub fn Home() -> Element {
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(|| Vec::<FeedItem>::new());
-    let mut pending_count = use_signal(|| 0);
+
+    // Derive pending count from pending_posts to avoid race conditions
+    let pending_count = use_memo(move || pending_posts.read().len());
 
     // Track whether real-time subscription is active to prevent duplicate subscriptions
     let mut realtime_started = use_signal(|| false);
+
+    // Track active subscription IDs for cleanup
+    let mut subscription_ids = use_signal(|| Vec::<nostr_sdk::SubscriptionId>::new());
 
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
@@ -64,7 +69,6 @@ pub fn Home() -> Element {
 
             // Clear pending posts buffer on refresh
             pending_posts.set(Vec::new());
-            pending_count.set(0);
 
             // Reset real-time subscription flag to allow fresh subscription
             realtime_started.set(false);
@@ -143,6 +147,26 @@ pub fn Home() -> Element {
                 }
             });
         }
+    });
+
+    // Reset real-time subscription when feed type changes
+    use_effect(move || {
+        let _ = feed_type.read(); // watch for changes
+
+        // Cleanup existing subscriptions before resetting
+        let ids = subscription_ids.read().clone();
+        if !ids.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!("Cleaning up {} real-time subscriptions due to feed type change", ids.len());
+                    for id in ids {
+                        let _ = client.unsubscribe(&id).await;
+                    }
+                }
+            });
+        }
+        subscription_ids.write().clear();
+        realtime_started.set(false);
     });
 
     // Real-time subscription for live feed updates (starts AFTER initial load)
@@ -265,6 +289,9 @@ pub fn Home() -> Element {
                         let subscription_id = output.val;
                         log::info!("Batch {}/{} subscribed: {:?}", batch_num, num_batches, subscription_id);
 
+                        // Store subscription ID for cleanup
+                        subscription_ids.write().push(subscription_id.clone());
+
                         // Handle incoming events for this batch
                         let client_for_notifications = client.clone();
                         spawn(async move {
@@ -342,9 +369,7 @@ pub fn Home() -> Element {
                                         if !already_buffered && !already_in_feed {
                                             // Add to pending buffer
                                             pending_posts.write().push(feed_item);
-                                            let new_count = *pending_count.read() + 1;
-                                            pending_count.set(new_count);
-                                            log::info!("Buffered new post, total pending: {}", new_count);
+                                            log::info!("Buffered new post, total pending: {}", pending_posts.read().len());
                                         }
                                     }
                                 }
@@ -481,7 +506,6 @@ pub fn Home() -> Element {
 
                 // Clear pending buffer
                 pending_posts.set(Vec::new());
-                pending_count.set(0);
 
                 log::info!("Merged {} new posts into feed", pending_len);
             }
