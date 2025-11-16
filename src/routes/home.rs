@@ -44,6 +44,9 @@ pub fn Home() -> Element {
     let mut pending_posts = use_signal(|| Vec::<FeedItem>::new());
     let mut pending_count = use_signal(|| 0);
 
+    // Track whether real-time subscription is active to prevent duplicate subscriptions
+    let mut realtime_started = use_signal(|| false);
+
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         // Watch refresh trigger and feed type
@@ -62,6 +65,9 @@ pub fn Home() -> Element {
             // Clear pending posts buffer on refresh
             pending_posts.set(Vec::new());
             pending_count.set(0);
+
+            // Reset real-time subscription flag to allow fresh subscription
+            realtime_started.set(false);
 
             // Clear profile cache to prevent stale author metadata on refresh
             crate::stores::profiles::PROFILE_CACHE.write().clear();
@@ -142,7 +148,6 @@ pub fn Home() -> Element {
     // Real-time subscription for live feed updates (starts AFTER initial load)
     use_effect(move || {
         let current_feed_type = *feed_type.read();
-        let current_state = feed_state.read().clone();
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -152,10 +157,32 @@ pub fn Home() -> Element {
             return;
         }
 
-        // Wait until feed is loaded before starting real-time subscription
-        if !matches!(current_state, DataState::Loaded(_)) {
+        // Check if subscription is already active to prevent duplicate subscriptions
+        if *realtime_started.read() {
             return;
         }
+
+        // Wait until feed is loaded before starting real-time subscription
+        // Use reference pattern matching to avoid cloning the entire feed
+        let since_timestamp = match &*feed_state.read() {
+            DataState::Loaded(ref items) => {
+                // Compute since timestamp from the latest (first) event in the feed
+                // This prevents gaps between feed load and subscription start
+                if let Some(latest_item) = items.first() {
+                    latest_item.sort_timestamp()
+                } else {
+                    // Empty feed, use current time
+                    Timestamp::now()
+                }
+            }
+            _ => {
+                // Feed not loaded yet, wait
+                return;
+            }
+        };
+
+        // Mark subscription as started
+        realtime_started.set(true);
 
         spawn(async move {
             // Get user's pubkey
@@ -227,7 +254,7 @@ pub fn Home() -> Element {
                 let filter = Filter::new()
                     .kinds(vec![Kind::TextNote, Kind::Repost])
                     .authors(batch_authors.clone())
-                    .since(Timestamp::now())
+                    .since(since_timestamp)
                     .limit(0); // limit=0 means only new events
 
                 log::info!("Subscribing to batch {}/{} ({} authors)",
@@ -304,10 +331,12 @@ pub fn Home() -> Element {
                                         let already_buffered = pending_posts.read().iter()
                                             .any(|item| item.event().id == event_id);
 
-                                        let already_in_feed = if let DataState::Loaded(current_items) = feed_state.read().clone() {
-                                            current_items.iter().any(|item| item.event().id == event_id)
-                                        } else {
-                                            false
+                                        // Use reference pattern matching to avoid cloning the entire feed
+                                        let already_in_feed = match &*feed_state.read() {
+                                            DataState::Loaded(ref current_items) => {
+                                                current_items.iter().any(|item| item.event().id == event_id)
+                                            }
+                                            _ => false,
                                         };
 
                                         if !already_buffered && !already_in_feed {
