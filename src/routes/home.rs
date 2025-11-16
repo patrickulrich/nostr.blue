@@ -154,7 +154,8 @@ pub fn Home() -> Element {
         let _ = feed_type.read(); // watch for changes
 
         // Cleanup existing subscriptions before resetting
-        let ids = subscription_ids.read().clone();
+        // Use peek() instead of read() to avoid subscribing to subscription_ids changes
+        let ids = subscription_ids.peek().clone();
         if !ids.is_empty() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
@@ -480,7 +481,8 @@ pub fn Home() -> Element {
 
     // Handler to merge pending posts into feed (Twitter/X pattern)
     let show_new_posts = move |_| {
-        let mut pending = pending_posts.read().clone();
+        // Move pending posts out to avoid allocation (mem::take swaps with empty Vec)
+        let mut pending = std::mem::take(&mut *pending_posts.write());
 
         if !pending.is_empty() {
             let pending_len = pending.len();
@@ -488,13 +490,10 @@ pub fn Home() -> Element {
             // Sort pending posts by timestamp (newest first)
             pending.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
 
-            // Get current items and clone to avoid borrow checker issues
-            let current_items = {
-                if let DataState::Loaded(items) = feed_state.read().clone() {
-                    Some(items)
-                } else {
-                    None
-                }
+            // Match feed_state by reference to avoid cloning entire state
+            let current_items = match &*feed_state.read() {
+                DataState::Loaded(items) => Some(items.clone()),
+                _ => None,
             };
 
             if let Some(current_items) = current_items {
@@ -504,11 +503,9 @@ pub fn Home() -> Element {
 
                 feed_state.set(DataState::Loaded(new_items));
 
-                // Clear pending buffer
-                pending_posts.set(Vec::new());
-
                 log::info!("Merged {} new posts into feed", pending_len);
             }
+            // Note: pending_posts is already cleared by mem::take
         }
     };
 
