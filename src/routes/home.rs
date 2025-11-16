@@ -40,6 +40,18 @@ pub fn Home() -> Element {
     // Interaction counts cache (event_id -> counts) for batch optimization
     let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
 
+    // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
+    let mut pending_posts = use_signal(|| Vec::<FeedItem>::new());
+
+    // Derive pending count from pending_posts to avoid race conditions
+    let pending_count = use_memo(move || pending_posts.read().len());
+
+    // Track whether real-time subscription is active to prevent duplicate subscriptions
+    let mut realtime_started = use_signal(|| false);
+
+    // Track active subscription IDs for cleanup
+    let mut subscription_ids = use_signal(|| Vec::<nostr_sdk::SubscriptionId>::new());
+
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         // Watch refresh trigger and feed type
@@ -54,6 +66,12 @@ pub fn Home() -> Element {
             feed_state.set(DataState::Loading);
             oldest_timestamp.set(None);
             has_more.set(true);
+
+            // Clear pending posts buffer on refresh
+            pending_posts.set(Vec::new());
+
+            // Reset real-time subscription flag to allow fresh subscription
+            realtime_started.set(false);
 
             // Clear profile cache to prevent stale author metadata on refresh
             crate::stores::profiles::PROFILE_CACHE.write().clear();
@@ -131,16 +149,65 @@ pub fn Home() -> Element {
         }
     });
 
-    // Real-time subscription for live feed updates
+    // Reset real-time subscription when feed type changes
+    use_effect(move || {
+        let _ = feed_type.read(); // watch for changes
+
+        // Cleanup existing subscriptions before resetting
+        // Use peek() instead of read() to avoid subscribing to subscription_ids changes
+        let ids = subscription_ids.peek().clone();
+        if !ids.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!("Cleaning up {} real-time subscriptions due to feed type change", ids.len());
+                    for id in ids {
+                        let _ = client.unsubscribe(&id).await;
+                    }
+                }
+            });
+        }
+        subscription_ids.write().clear();
+        realtime_started.set(false);
+    });
+
+    // Real-time subscription for live feed updates (starts AFTER initial load)
     use_effect(move || {
         let current_feed_type = *feed_type.read();
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        // Only subscribe if both authenticated AND client is initialized
+        // Only subscribe if authenticated, initialized, AND feed is loaded
+        // This prevents race conditions during initial load
         if !is_authenticated || !client_initialized {
             return;
         }
+
+        // Check if subscription is already active to prevent duplicate subscriptions
+        if *realtime_started.read() {
+            return;
+        }
+
+        // Wait until feed is loaded before starting real-time subscription
+        // Use reference pattern matching to avoid cloning the entire feed
+        let since_timestamp = match &*feed_state.read() {
+            DataState::Loaded(ref items) => {
+                // Compute since timestamp from the latest (first) event in the feed
+                // This prevents gaps between feed load and subscription start
+                if let Some(latest_item) = items.first() {
+                    latest_item.sort_timestamp()
+                } else {
+                    // Empty feed, use current time
+                    Timestamp::now()
+                }
+            }
+            _ => {
+                // Feed not loaded yet, wait
+                return;
+            }
+        };
+
+        // Mark subscription as started
+        realtime_started.set(true);
 
         spawn(async move {
             // Get user's pubkey
@@ -212,7 +279,7 @@ pub fn Home() -> Element {
                 let filter = Filter::new()
                     .kinds(vec![Kind::TextNote, Kind::Repost])
                     .authors(batch_authors.clone())
-                    .since(Timestamp::now())
+                    .since(since_timestamp)
                     .limit(0); // limit=0 means only new events
 
                 log::info!("Subscribing to batch {}/{} ({} authors)",
@@ -222,6 +289,9 @@ pub fn Home() -> Element {
                     Ok(output) => {
                         let subscription_id = output.val;
                         log::info!("Batch {}/{} subscribed: {:?}", batch_num, num_batches, subscription_id);
+
+                        // Store subscription ID for cleanup
+                        subscription_ids.write().push(subscription_id.clone());
 
                         // Handle incoming events for this batch
                         let client_for_notifications = client.clone();
@@ -282,19 +352,25 @@ pub fn Home() -> Element {
                                     if let Some(feed_item) = feed_item_opt {
                                         log::info!("New post received in real-time from batch {}", batch_num);
 
-                                        // Only add to feed if we're in Loaded state
-                                        let current_state = feed_state.read().clone();
-                                        if let DataState::Loaded(current_items) = current_state {
-                                            // Check if event already exists (avoid duplicates)
-                                            let event_id = feed_item.event().id;
-                                            let exists = current_items.iter().any(|item| item.event().id == event_id);
+                                        // Buffer new posts instead of direct insertion (Twitter/X pattern)
+                                        // Check if event already exists in buffer or feed (avoid duplicates)
+                                        let event_id = feed_item.event().id;
 
-                                            if !exists {
-                                                // Prepend to feed
-                                                let mut new_items = vec![feed_item];
-                                                new_items.extend(current_items);
-                                                feed_state.set(DataState::Loaded(new_items));
+                                        let already_buffered = pending_posts.read().iter()
+                                            .any(|item| item.event().id == event_id);
+
+                                        // Use reference pattern matching to avoid cloning the entire feed
+                                        let already_in_feed = match &*feed_state.read() {
+                                            DataState::Loaded(ref current_items) => {
+                                                current_items.iter().any(|item| item.event().id == event_id)
                                             }
+                                            _ => false,
+                                        };
+
+                                        if !already_buffered && !already_in_feed {
+                                            // Add to pending buffer
+                                            pending_posts.write().push(feed_item);
+                                            log::info!("Buffered new post, total pending: {}", pending_posts.read().len());
                                         }
                                     }
                                 }
@@ -402,6 +478,36 @@ pub fn Home() -> Element {
         has_more,
         pagination_loading
     );
+
+    // Handler to merge pending posts into feed (Twitter/X pattern)
+    let show_new_posts = move |_| {
+        // Move pending posts out to avoid allocation (mem::take swaps with empty Vec)
+        let mut pending = std::mem::take(&mut *pending_posts.write());
+
+        if !pending.is_empty() {
+            let pending_len = pending.len();
+
+            // Sort pending posts by timestamp (newest first)
+            pending.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+
+            // Match feed_state by reference to avoid cloning entire state
+            let current_items = match &*feed_state.read() {
+                DataState::Loaded(items) => Some(items.clone()),
+                _ => None,
+            };
+
+            if let Some(current_items) = current_items {
+                // Prepend pending posts to feed
+                let mut new_items = pending;
+                new_items.extend(current_items);
+
+                feed_state.set(DataState::Loaded(new_items));
+
+                log::info!("Merged {} new posts into feed", pending_len);
+            }
+            // Note: pending_posts is already cleared by mem::take
+        }
+    };
 
     // Read auth state for rendering
     let auth = auth_store::AUTH_STATE.read();
@@ -588,6 +694,27 @@ pub fn Home() -> Element {
                             }
                         }
                     } else {
+                        // "Show N new posts" banner (Twitter/X pattern)
+                        if *pending_count.read() > 0 {
+                            {
+                                let count = *pending_count.read();
+                                let post_text = if count == 1 { "post" } else { "posts" };
+                                rsx! {
+                                    div {
+                                        class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
+                                        onclick: show_new_posts,
+                                        div {
+                                            class: "px-4 py-3 text-center",
+                                            span {
+                                                class: "text-white font-medium",
+                                                "Show {count} new {post_text}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Show feed items (with conditional rendering for articles and reposts)
                         for feed_item in feed_items.iter() {
                             {
