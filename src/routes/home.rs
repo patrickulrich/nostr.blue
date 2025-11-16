@@ -67,6 +67,21 @@ pub fn Home() -> Element {
             oldest_timestamp.set(None);
             has_more.set(true);
 
+            // Cleanup existing subscriptions before refresh to prevent subscription leaks
+            // Use peek() instead of read() to avoid subscribing to subscription_ids changes
+            let ids = subscription_ids.peek().clone();
+            if !ids.is_empty() {
+                spawn(async move {
+                    if let Some(client) = nostr_client::get_client() {
+                        log::info!("Cleaning up {} real-time subscriptions due to manual refresh", ids.len());
+                        for id in ids {
+                            let _ = client.unsubscribe(&id).await;
+                        }
+                    }
+                });
+            }
+            subscription_ids.write().clear();
+
             // Clear pending posts buffer on refresh
             pending_posts.set(Vec::new());
 
