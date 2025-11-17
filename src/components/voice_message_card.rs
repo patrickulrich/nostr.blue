@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use dioxus::events::MediaData;
+use dioxus::events::{MediaData, MouseData};
 use dioxus::web::WebEventExt;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, EventId};
 use crate::routes::Route;
@@ -416,9 +416,46 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         }
     };
 
+    // Navigator for clicking to detail page
+    let navigator = use_navigator();
+    let voice_id_for_nav = event_id_str.clone();
+
+    // Handler to navigate to detail page
+    let navigate_to_detail = move |evt: Event<MouseData>| {
+        // Check if click is on an interactive element (button, a, audio controls)
+        if let Some(target) = evt.data.as_web_event().target() {
+            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                let tag_name = element.tag_name().to_lowercase();
+
+                // Don't navigate if clicking on buttons, links, or if a parent is a button/link
+                if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
+                    return;
+                }
+
+                // Check if any parent element is a button or link (up to 5 levels)
+                let mut current = element.clone();
+                for _ in 0..5 {
+                    if let Some(parent) = current.parent_element() {
+                        let parent_tag = parent.tag_name().to_lowercase();
+                        if parent_tag == "button" || parent_tag == "a" {
+                            return;
+                        }
+                        current = parent;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Navigate to detail page
+        navigator.push(Route::VoiceMessageDetail { voice_id: voice_id_for_nav.clone() });
+    };
+
     rsx! {
         div {
             class: "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border",
+            onclick: navigate_to_detail,
 
             // Author info header
             div {
