@@ -586,6 +586,7 @@ pub fn Profile(pubkey: String) -> Element {
                     button {
                         class: "p-2 border border-border rounded-full hover:bg-accent transition",
                         onclick: move |_| show_info_dialog.set(true),
+                        "aria-label": "Info",
                         title: "Info",
                         InfoIcon { class: "w-5 h-5".to_string(), filled: false }
                     }
@@ -595,6 +596,7 @@ pub fn Profile(pubkey: String) -> Element {
                         button {
                             class: "p-2 border border-border rounded-full hover:bg-accent transition",
                             onclick: move |_| show_dm_dialog.set(true),
+                            "aria-label": "Message",
                             title: "Message",
                             MailIcon { class: "w-5 h-5".to_string(), filled: false }
                         }
