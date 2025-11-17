@@ -205,7 +205,8 @@ pub fn Note(note_id: String) -> Element {
                             div {
                                 class: "relative",
                                 NoteCard {
-                                    event: parent.clone()
+                                    event: parent.clone(),
+                                    collapsible: true
                                 }
                                 // Thread line indicator
                                 div {
@@ -218,7 +219,8 @@ pub fn Note(note_id: String) -> Element {
 
                 // Main post being viewed
                 NoteCard {
-                    event: event.clone()
+                    event: event.clone(),
+                    collapsible: false
                 }
 
                 div {

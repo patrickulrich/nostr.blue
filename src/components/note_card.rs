@@ -15,6 +15,7 @@ pub fn NoteCard(
     event: NostrEvent,
     #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
+    #[props(default = true)] collapsible: bool,
 ) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();
@@ -63,10 +64,26 @@ pub fn NoteCard(
     // Initialize counts from precomputed data if available (batch optimization)
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
-            reply_count.set(counts.replies.min(500));
-            like_count.set(counts.likes.min(500));
-            repost_count.set(counts.reposts.min(500));
-            zap_amount_sats.set(counts.zap_amount_sats);
+            // CRITICAL FIX: Don't overwrite non-zero counts with zeros from batch fetch
+            // This prevents batch fetch from clearing reactions that individual fetch already found
+            // Only update if new counts are non-zero OR if current counts are still at initial zero state
+            let current_has_data = {
+                let reply = *reply_count.peek();
+                let like = *like_count.peek();
+                let repost = *repost_count.peek();
+                let zap = *zap_amount_sats.peek();
+                reply > 0 || like > 0 || repost > 0 || zap > 0
+            };
+
+            let new_has_data = counts.replies > 0 || counts.likes > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
+
+            // Only update if: new data exists, OR no current data exists
+            if new_has_data || !current_has_data {
+                reply_count.set(counts.replies.min(500));
+                like_count.set(counts.likes.min(500));
+                repost_count.set(counts.reposts.min(500));
+                zap_amount_sats.set(counts.zap_amount_sats);
+            }
         }
     }));
 
@@ -580,7 +597,8 @@ pub fn NoteCard(
                         class: "mb-3",
                         RichContent {
                             content: content.clone(),
-                            tags: event.tags.iter().cloned().collect()
+                            tags: event.tags.iter().cloned().collect(),
+                            collapsible: collapsible
                         }
                     }
 

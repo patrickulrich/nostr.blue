@@ -195,7 +195,8 @@ pub fn Bookmarks() -> Element {
                         for event in bookmarked_events.read().iter() {
                             NoteCard {
                                 key: "{event.id}",
-                                event: event.clone()
+                                event: event.clone(),
+                                collapsible: true
                             }
                         }
 

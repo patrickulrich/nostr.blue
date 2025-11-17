@@ -171,7 +171,8 @@ pub fn Hashtag(tag: String) -> Element {
                     class: "divide-y divide-border",
                     for event in events.read().iter() {
                         NoteCard {
-                            event: event.clone()
+                            event: event.clone(),
+                            collapsible: true
                         }
                     }
                 }

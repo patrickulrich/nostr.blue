@@ -239,6 +239,7 @@ pub fn Search(q: String) -> Element {
                                         SearchTab::TextNotes | SearchTab::Articles => rsx! {
                                             NoteCard {
                                                 event: event_clone,
+                                                collapsible: true
                                             }
                                         },
                                         SearchTab::Photos => rsx! {

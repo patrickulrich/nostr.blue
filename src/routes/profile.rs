@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store, dms};
 use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
+use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
@@ -501,6 +502,24 @@ pub fn Profile(pubkey: String) -> Element {
                                     "{post_count.read()} posts"
                                 }
                             }
+                        } else {
+                            // Placeholder header while metadata loads
+                            h2 {
+                                class: "text-xl font-bold",
+                                {
+                                    if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
+                                        .or_else(|_| PublicKey::from_hex(&pubkey_for_display)) {
+                                        let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
+                                        if npub.len() > 16 {
+                                            format!("{}...{}", &npub[..12], &npub[npub.len()-4..])
+                                        } else {
+                                            npub
+                                        }
+                                    } else {
+                                        pubkey_for_display.clone()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -545,6 +564,12 @@ pub fn Profile(pubkey: String) -> Element {
                                 "{get_avatar_initial(metadata)}"
                             }
                         }
+                    } else {
+                        // Placeholder avatar while metadata loads
+                        div {
+                            class: "w-32 h-32 rounded-full border-4 border-background bg-gray-600 flex items-center justify-center text-white text-4xl font-bold",
+                            "?"
+                        }
                     }
                 }
             }
@@ -559,17 +584,21 @@ pub fn Profile(pubkey: String) -> Element {
 
                     // Info button (all profiles)
                     button {
-                        class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                        class: "p-2 border border-border rounded-full hover:bg-accent transition",
                         onclick: move |_| show_info_dialog.set(true),
-                        "Info"
+                        "aria-label": "Info",
+                        title: "Info",
+                        InfoIcon { class: "w-5 h-5".to_string(), filled: false }
                     }
 
                     // Message button (other users' profiles only)
                     if !is_own_profile && auth.is_authenticated {
                         button {
-                            class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                            class: "p-2 border border-border rounded-full hover:bg-accent transition",
                             onclick: move |_| show_dm_dialog.set(true),
-                            "Message"
+                            "aria-label": "Message",
+                            title: "Message",
+                            MailIcon { class: "w-5 h-5".to_string(), filled: false }
                         }
                     }
 
@@ -685,6 +714,69 @@ pub fn Profile(pubkey: String) -> Element {
                     }
 
                     // Following/Followers counts
+                    div {
+                        class: "flex gap-4 mt-3",
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            span {
+                                class: "font-bold",
+                                "{following_count.read()}"
+                            }
+                            span {
+                                class: "text-muted-foreground ml-1",
+                                "Following"
+                            }
+                        }
+                        div {
+                            class: "hover:underline cursor-pointer",
+                            span {
+                                class: "font-bold",
+                                "{followers_count.read()}"
+                            }
+                            span {
+                                class: "text-muted-foreground ml-1",
+                                "Followers"
+                            }
+                        }
+                    }
+                } else {
+                    // Placeholder profile info while metadata loads
+                    h1 {
+                        class: "text-2xl font-bold",
+                        {
+                            // Show truncated npub as placeholder
+                            if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
+                                .or_else(|_| PublicKey::from_hex(&pubkey_for_display)) {
+                                let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
+                                if npub.len() > 16 {
+                                    format!("{}...{}", &npub[..12], &npub[npub.len()-4..])
+                                } else {
+                                    npub
+                                }
+                            } else {
+                                pubkey_for_display.clone()
+                            }
+                        }
+                    }
+                    p {
+                        class: "text-muted-foreground",
+                        {
+                            // Show npub as username placeholder
+                            if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_display)
+                                .or_else(|_| PublicKey::from_hex(&pubkey_for_display)) {
+                                let npub = pk.to_bech32().unwrap_or_else(|_| pubkey_for_display.clone());
+                                if npub.len() > 18 {
+                                    format!("@{}...{}", &npub[..12], &npub[npub.len()-6..])
+                                } else {
+                                    format!("@{}", npub)
+                                }
+                            } else {
+                                format!("@{}", pubkey_for_display)
+                            }
+                        }
+                    }
+
+                    // Following/Followers counts (still show even without metadata)
                     div {
                         class: "flex gap-4 mt-3",
                         div {
@@ -849,14 +941,16 @@ pub fn Profile(pubkey: String) -> Element {
                                                 },
                                                 _ => rsx! {
                                                     NoteCard {
-                                                        event: event.clone()
+                                                        event: event.clone(),
+                                                        collapsible: true
                                                     }
                                                 }
                                             }
                                         },
                                         _ => rsx! {
                                             NoteCard {
-                                                event: event.clone()
+                                                event: event.clone(),
+                                                collapsible: true
                                             }
                                         }
                                     }
