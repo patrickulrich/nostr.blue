@@ -35,6 +35,7 @@ pub mod photos;
 pub mod photo_detail;
 pub mod voicemessages;
 pub mod voice_message_new;
+pub mod voice_message_detail;
 pub mod webbookmarks;
 pub mod polls;
 pub mod poll_view;
@@ -71,6 +72,7 @@ use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
 use voice_message_new::VoiceMessageNew;
+use voice_message_detail::VoiceMessageDetail;
 use webbookmarks::WebBookmarks;
 use polls::Polls;
 use poll_view::PollView;
@@ -164,6 +166,9 @@ pub enum Route {
 
         #[route("/voicemessages/new")]
         VoiceMessageNew {},
+
+        #[route("/voicemessages/:voice_id")]
+        VoiceMessageDetail { voice_id: String },
 
         #[route("/webbookmarks")]
         WebBookmarks {},
