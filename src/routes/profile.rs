@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store, dms};
 use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
+use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
@@ -583,17 +584,21 @@ pub fn Profile(pubkey: String) -> Element {
 
                     // Info button (all profiles)
                     button {
-                        class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                        class: "p-2 border border-border rounded-full hover:bg-accent transition",
                         onclick: move |_| show_info_dialog.set(true),
-                        "Info"
+                        "aria-label": "Info",
+                        title: "Info",
+                        InfoIcon { class: "w-5 h-5".to_string(), filled: false }
                     }
 
                     // Message button (other users' profiles only)
                     if !is_own_profile && auth.is_authenticated {
                         button {
-                            class: "px-6 py-2 border border-border rounded-full font-semibold hover:bg-accent transition",
+                            class: "p-2 border border-border rounded-full hover:bg-accent transition",
                             onclick: move |_| show_dm_dialog.set(true),
-                            "Message"
+                            "aria-label": "Message",
+                            title: "Message",
+                            MailIcon { class: "w-5 h-5".to_string(), filled: false }
                         }
                     }
 

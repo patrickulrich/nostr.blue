@@ -804,6 +804,27 @@ pub fn HashIcon(props: IconProps) -> Element {
     }
 }
 
+#[component]
+pub fn InfoIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M12 16v-4" }
+            path { d: "M12 8h.01" }
+        }
+    }
+}
+
 // SVG string constants for music player (used with dangerous_inner_html)
 pub const PLAY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>"#;
 
