@@ -6,6 +6,8 @@ use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
+use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard};
+use crate::components::live_stream_card::LiveStreamCard;
 
 #[component]
 pub fn RichContent(
@@ -341,8 +343,41 @@ fn EventMentionRenderer(mention: String) -> Element {
         let metadata_clone = author_metadata.read().clone();
 
         if has_event {
-            rsx! {
-                {render_embedded_note(&event_clone.unwrap(), metadata_clone.as_ref())}
+            let event = event_clone.unwrap();
+            let event_kind = event.kind.as_u16();
+
+            // Route to appropriate card based on event kind
+            match event_kind {
+                20 => {
+                    // Photo (kind 20)
+                    rsx! {
+                        PhotoCard { event: event }
+                    }
+                }
+                22 => {
+                    // Video (kind 22)
+                    rsx! {
+                        VideoCard { event: event }
+                    }
+                }
+                1040 => {
+                    // Voice Message (kind 1040)
+                    rsx! {
+                        VoiceMessageCard { event: event }
+                    }
+                }
+                1068 => {
+                    // Poll (kind 1068)
+                    rsx! {
+                        PollCard { event: event }
+                    }
+                }
+                _ => {
+                    // Default: render as embedded note
+                    rsx! {
+                        {render_embedded_note(&event, metadata_clone.as_ref())}
+                    }
+                }
             }
         } else {
             // Loading state - show link
@@ -672,7 +707,7 @@ fn ArticleMentionRenderer(mention: String) -> Element {
     // Parse the naddr coordinate and extract data we need
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
-        .map(|coord| (coord.public_key.to_hex(), coord.identifier.clone()));
+        .map(|coord| (coord.public_key.to_hex(), coord.identifier.clone(), coord.kind.as_u16()));
 
     // Always call hooks unconditionally
     let mut article_event = use_signal(|| None::<Event>);
@@ -682,15 +717,15 @@ fn ArticleMentionRenderer(mention: String) -> Element {
     // Clone for use in effect
     let coord_data_for_effect = coord_data.clone();
 
-    // Fetch the article
+    // Fetch the event by coordinate
     use_effect(move || {
-        if let Some((ref pubkey, ref ident)) = coord_data_for_effect {
+        if let Some((ref pubkey, ref ident, _kind)) = coord_data_for_effect {
             let pubkey = pubkey.clone();
             let ident = ident.clone();
             spawn(async move {
                 loading.set(true);
 
-                // Fetch article by coordinate
+                // Fetch event by coordinate (works for both articles and streams)
                 match crate::stores::nostr_client::fetch_article_by_coordinate(
                         pubkey.clone(),
                         ident
@@ -729,17 +764,37 @@ fn ArticleMentionRenderer(mention: String) -> Element {
         }
     });
 
-    if let Some(_) = coord_data {
+    if let Some((_pubkey, _ident, kind)) = coord_data {
         let naddr_for_link = identifier.to_string();
 
-        // Render embedded article preview
-        let has_article = article_event.read().is_some();
-        let article_clone = article_event.read().clone();
+        // Render embedded preview based on kind
+        let has_event = article_event.read().is_some();
+        let event_clone = article_event.read().clone();
         let metadata_clone = author_metadata.read().clone();
 
-        if has_article {
-            rsx! {
-                {render_embedded_article(&article_clone.unwrap(), metadata_clone.as_ref(), &naddr_for_link)}
+        if has_event {
+            let event = event_clone.unwrap();
+
+            // Route to appropriate card based on event kind
+            match kind {
+                30311 => {
+                    // Live Stream (kind 30311)
+                    rsx! {
+                        LiveStreamCard { event: event }
+                    }
+                }
+                30023 => {
+                    // Article (kind 30023)
+                    rsx! {
+                        {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                    }
+                }
+                _ => {
+                    // Default: render as article
+                    rsx! {
+                        {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                    }
+                }
             }
         } else if *loading.read() {
             // Loading state
