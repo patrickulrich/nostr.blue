@@ -92,24 +92,50 @@ pub fn ReplyComposer(
         }
     };
 
+    let mut cursor_position = use_signal(|| 0usize);
+
+    // Helper to insert text at cursor position
+    let mut insert_at_cursor = move |text: String| {
+        let mut current = content.read().clone();
+        let pos = *cursor_position.read();
+        
+        // Ensure position is valid
+        let pos = pos.min(current.len());
+        
+        // Insert text
+        current.insert_str(pos, &text);
+        
+        // Update content
+        content.set(current);
+        
+        // Update cursor position to be after inserted text
+        cursor_position.set(pos + text.len());
+    };
+
     // Handler when emoji is selected
     let handle_emoji_selected = move |emoji: String| {
-        // Insert emoji at the end of the current content
-        let mut current = content.read().clone();
-        current.push_str(&emoji);
-        content.set(current);
+        insert_at_cursor(emoji);
     };
 
     // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
-        // Insert GIF URL at the end of the current content
-        let mut current = content.read().clone();
-        if !current.is_empty() && !current.ends_with('\n') && !current.ends_with(' ') {
-            current.push(' ');
+        let mut url_with_space = gif_url.clone();
+        // Add space before if not at start and not preceded by whitespace
+        {
+            let current = content.read();
+            let pos = *cursor_position.read();
+            if pos > 0 {
+                if let Some(prev_char) = current.chars().nth(pos - 1) {
+                    if !prev_char.is_whitespace() {
+                        url_with_space.insert(0, ' ');
+                    }
+                }
+            }
         }
-        current.push_str(&gif_url);
-        content.set(current);
+        // Add space after
+        url_with_space.push(' ');
 
+        insert_at_cursor(url_with_space);
         log::info!("GIF URL inserted: {}", gif_url);
     };
 
@@ -283,7 +309,8 @@ pub fn ReplyComposer(
                             placeholder: "Write your reply...".to_string(),
                             rows: 6,
                             disabled: *is_publishing.read(),
-                            thread_participants: thread_participants.clone()
+                            thread_participants: thread_participants.clone(),
+                            cursor_position: cursor_position
                         }
 
                         // Character counter
