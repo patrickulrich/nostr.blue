@@ -31,6 +31,9 @@ pub struct MentionAutocompleteProps {
     /// Optional thread participants (e.g., for reply composers)
     #[props(default = Vec::new())]
     pub thread_participants: Vec<PublicKey>,
+    /// Optional signal to track cursor position externally
+    #[props(optional)]
+    pub cursor_position: Option<Signal<usize>>,
 }
 
 #[component]
@@ -68,6 +71,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         let new_value = evt.value().clone();
         let cursor_pos = get_cursor_position(&**textarea_id.read());
         cursor_position.set(cursor_pos);
+        if let Some(mut signal) = props.cursor_position {
+            let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
+            signal.set(cursor_utf8);
+        }
 
         // Update content
         props.on_input.call(new_value.clone());
@@ -135,6 +142,26 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         }
     };
 
+    let handle_keyup = move |_| {
+        let cursor_pos = get_cursor_position(&**textarea_id.read());
+        cursor_position.set(cursor_pos);
+        if let Some(mut signal) = props.cursor_position {
+            let text = props.content.read();
+            let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
+            signal.set(cursor_utf8);
+        }
+    };
+
+    let handle_click = move |_| {
+        let cursor_pos = get_cursor_position(&**textarea_id.read());
+        cursor_position.set(cursor_pos);
+        if let Some(mut signal) = props.cursor_position {
+            let text = props.content.read();
+            let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
+            signal.set(cursor_utf8);
+        }
+    };
+
     rsx! {
         div {
             class: "relative w-full",
@@ -149,6 +176,8 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 disabled: props.disabled,
                 oninput: handle_input,
                 onkeydown: handle_keydown,
+                onkeyup: handle_keyup,
+                onclick: handle_click,
                 onfocus: handle_focus,
             }
 
