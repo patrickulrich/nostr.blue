@@ -87,8 +87,9 @@ pub fn NoteComposer() -> Element {
         {
             let current = content.read();
             let pos = *cursor_position.read();
-            if pos > 0 {
-                if let Some(prev_char) = current.chars().nth(pos - 1) {
+            // pos is a UTF-8 byte index, so slice to that position and get the last char
+            if pos > 0 && pos <= current.len() {
+                if let Some(prev_char) = current[..pos].chars().last() {
                     if !prev_char.is_whitespace() {
                         url_with_space.insert(0, ' ');
                     }
@@ -97,7 +98,7 @@ pub fn NoteComposer() -> Element {
         }
         // Add space after
         url_with_space.push(' ');
-        
+
         insert_at_cursor(url_with_space);
         log::info!("Image URL inserted: {}", url);
     };
@@ -114,8 +115,9 @@ pub fn NoteComposer() -> Element {
         {
             let current = content.read();
             let pos = *cursor_position.read();
-            if pos > 0 {
-                if let Some(prev_char) = current.chars().nth(pos - 1) {
+            // pos is a UTF-8 byte index, so slice to that position and get the last char
+            if pos > 0 && pos <= current.len() {
+                if let Some(prev_char) = current[..pos].chars().last() {
                     if !prev_char.is_whitespace() {
                         url_with_space.insert(0, ' ');
                     }
