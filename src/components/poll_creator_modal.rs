@@ -81,21 +81,19 @@ pub fn PollCreatorModal(
         let end_time_preset_val = end_time_preset.read().clone();
         let custom_end_time_val = custom_end_time.read().clone();
 
+        // Calculate end time once (avoid race condition from computing twice)
+        let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
+
         // Validate custom end time before publishing
-        if end_time_preset_val == "custom" {
-            let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
-            if ends_at.is_none() {
-                error_message.set(Some("Invalid or past end time. Please select a future date/time.".to_string()));
-                return;
-            }
+        if end_time_preset_val == "custom" && ends_at.is_none() {
+            error_message.set(Some("Invalid or past end time. Please select a future date/time.".to_string()));
+            return;
         }
 
         is_publishing.set(true);
         error_message.set(None);
 
         spawn(async move {
-            // Calculate end time
-            let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
 
             // Convert options to PollOption
             let poll_options: Vec<PollOption> = options_val
