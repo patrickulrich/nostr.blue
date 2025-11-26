@@ -1745,7 +1745,9 @@ pub async fn send_tokens(
 
     // PUBLISH TO NOSTR (idempotent, can be queued if it fails)
     for (builder, event_type) in nostr_events_to_publish {
-        match client.send_event_builder(builder).await {
+        // Clone builder so we can use it in the error handler if needed
+        let builder_for_send = builder.clone();
+        match client.send_event_builder(builder_for_send).await {
             Ok(event_output) => {
                 match event_type {
                     PendingEventType::TokenEvent => {
@@ -1759,8 +1761,93 @@ pub async fn send_tokens(
             }
             Err(e) => {
                 log::warn!("Failed to publish event, will queue for retry: {}", e);
-                // In production, would queue the event for later retry
-                // For now, just log the warning - the local state is already updated
+
+                // Attempt to queue the failed event for retry
+                let signer = crate::stores::signer::get_signer()
+                    .ok_or("No signer available for queuing failed event");
+
+                if let Ok(signer) = signer {
+                    match signer {
+                        crate::stores::signer::SignerType::Keys(keys) => {
+                            // For Keys-based signers, use synchronous signing
+                            match builder.sign_with_keys(&keys) {
+                                Ok(event) => {
+                                    match serde_json::to_string(&event) {
+                                        Ok(event_json) => {
+                                            match queue_nostr_event(event_json, event_type).await {
+                                                Ok(queue_id) => {
+                                                    log::info!("Queued failed event for retry: {}", queue_id);
+                                                }
+                                                Err(queue_err) => {
+                                                    log::error!("Failed to queue event for retry: {}", queue_err);
+                                                }
+                                            }
+                                        }
+                                        Err(json_err) => {
+                                            log::error!("Failed to serialize event for queueing: {}", json_err);
+                                        }
+                                    }
+                                }
+                                Err(sign_err) => {
+                                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                                }
+                            }
+                        }
+                        #[cfg(target_family = "wasm")]
+                        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+                            // For async signers, use async signing
+                            match builder.sign(&*browser_signer).await {
+                                Ok(event) => {
+                                    match serde_json::to_string(&event) {
+                                        Ok(event_json) => {
+                                            match queue_nostr_event(event_json, event_type).await {
+                                                Ok(queue_id) => {
+                                                    log::info!("Queued failed event for retry: {}", queue_id);
+                                                }
+                                                Err(queue_err) => {
+                                                    log::error!("Failed to queue event for retry: {}", queue_err);
+                                                }
+                                            }
+                                        }
+                                        Err(json_err) => {
+                                            log::error!("Failed to serialize event for queueing: {}", json_err);
+                                        }
+                                    }
+                                }
+                                Err(sign_err) => {
+                                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                                }
+                            }
+                        }
+                        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
+                            // For remote signers, use async signing
+                            match builder.sign(&*remote_signer).await {
+                                Ok(event) => {
+                                    match serde_json::to_string(&event) {
+                                        Ok(event_json) => {
+                                            match queue_nostr_event(event_json, event_type).await {
+                                                Ok(queue_id) => {
+                                                    log::info!("Queued failed event for retry: {}", queue_id);
+                                                }
+                                                Err(queue_err) => {
+                                                    log::error!("Failed to queue event for retry: {}", queue_err);
+                                                }
+                                            }
+                                        }
+                                        Err(json_err) => {
+                                            log::error!("Failed to serialize event for queueing: {}", json_err);
+                                        }
+                                    }
+                                }
+                                Err(sign_err) => {
+                                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    log::error!("Cannot queue failed event: no signer available");
+                }
             }
         }
     }
