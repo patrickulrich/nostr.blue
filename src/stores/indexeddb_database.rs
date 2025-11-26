@@ -1,3 +1,37 @@
+//! # IndexedDB Wallet Database
+//!
+//! Browser-native implementation of CDK's `WalletDatabase` trait using IndexedDB.
+//!
+//! ## Overview
+//!
+//! This module provides persistent storage for Cashu wallet data in web browsers.
+//! It implements the `WalletDatabase` trait from CDK, enabling full ecash wallet
+//! functionality in WASM environments.
+//!
+//! ## Storage Model
+//!
+//! Data is stored as JSON strings in IndexedDB object stores:
+//! - `mints` - Mint URLs and their info
+//! - `keysets` - Keysets per mint
+//! - `keyset_by_id` - Keyset lookup by ID
+//! - `keys` - Cryptographic keys
+//! - `mint_quotes` - Pending mint (receive) quotes
+//! - `melt_quotes` - Pending melt (send) quotes
+//! - `proofs` - Ecash proofs (tokens)
+//! - `transactions` - Transaction history
+//! - `keyset_counters` - Deterministic derivation counters
+//!
+//! ## Thread Safety
+//!
+//! In WASM, JavaScript is single-threaded. `Send` and `Sync` are implemented
+//! via unsafe impl since there's no actual concurrency. IndexedDB handles
+//! transaction serialization internally.
+//!
+//! ## Storage Limits
+//!
+//! Subject to browser storage quota (typically ~50MB, varies by browser).
+//! Use `navigator.storage.estimate()` to check available space.
+
 use cdk_common::database::{self, WalletDatabase};
 use cdk_common::common::ProofInfo;
 use cdk_common::wallet::{MintQuote, MeltQuote, Transaction, TransactionDirection, TransactionId};
@@ -13,6 +47,7 @@ use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::instrument;
 use wasm_bindgen::JsValue;
 use web_sys::IdbTransactionMode;
 
@@ -284,11 +319,12 @@ impl IndexedDbDatabase {
 }
 
 // Implement WalletDatabase trait for IndexedDbDatabase
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl WalletDatabase for IndexedDbDatabase {
     type Err = database::Error;
 
+    #[instrument(skip(self, mint_info), fields(mint = %mint_url))]
     async fn add_mint(
         &self,
         mint_url: MintUrl,
@@ -298,11 +334,13 @@ impl WalletDatabase for IndexedDbDatabase {
         self.put_value(STORE_MINTS, &key, &mint_info).await
     }
 
+    #[instrument(skip(self), fields(mint = %mint_url))]
     async fn remove_mint(&self, mint_url: MintUrl) -> Result<(), Self::Err> {
         let key = mint_url.to_string();
         self.delete_value(STORE_MINTS, &key).await
     }
 
+    #[instrument(skip(self), fields(mint = %mint_url))]
     async fn get_mint(&self, mint_url: MintUrl) -> Result<Option<MintInfo>, Self::Err> {
         let key = mint_url.to_string();
         self.get_value::<Option<MintInfo>>(STORE_MINTS, &key)
@@ -310,6 +348,7 @@ impl WalletDatabase for IndexedDbDatabase {
             .map(|opt| opt.flatten())
     }
 
+    #[instrument(skip(self))]
     async fn get_mints(&self) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
         // Load all stored mint entries and rebuild the map
         let key_values = self.get_all_key_values::<Option<MintInfo>>(STORE_MINTS).await?;
@@ -332,6 +371,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(result)
     }
 
+    #[instrument(skip(self), fields(old_mint = %old_mint_url, new_mint = %new_mint_url))]
     async fn update_mint_url(
         &self,
         old_mint_url: MintUrl,
@@ -556,6 +596,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self, keysets), fields(mint = %mint_url, count = keysets.len()))]
     async fn add_mint_keysets(
         &self,
         mint_url: MintUrl,
@@ -611,6 +652,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self), fields(mint = %mint_url))]
     async fn get_mint_keysets(
         &self,
         mint_url: MintUrl,
@@ -619,64 +661,77 @@ impl WalletDatabase for IndexedDbDatabase {
         self.get_value(STORE_KEYSETS, &key).await
     }
 
+    #[instrument(skip(self), fields(keyset_id = %keyset_id))]
     async fn get_keyset_by_id(&self, keyset_id: &Id) -> Result<Option<KeySetInfo>, Self::Err> {
         let key = keyset_id.to_string();
         self.get_value(STORE_KEYSET_BY_ID, &key).await
     }
 
+    #[instrument(skip(self, quote), fields(quote_id = %quote.id))]
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
         let key = quote.id.clone();
         log::debug!("Storing mint quote: {}", key);
         self.put_value(STORE_MINT_QUOTES, &key, &quote).await
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         self.get_value(STORE_MINT_QUOTES, quote_id).await
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
         self.get_all_values(STORE_MINT_QUOTES).await
     }
 
+    #[instrument(skip(self))]
     async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         log::debug!("Removing mint quote: {}", quote_id);
         self.delete_value(STORE_MINT_QUOTES, quote_id).await
     }
 
+    #[instrument(skip(self, quote), fields(quote_id = %quote.id))]
     async fn add_melt_quote(&self, quote: MeltQuote) -> Result<(), Self::Err> {
         let key = quote.id.clone();
         log::debug!("Storing melt quote: {}", key);
         self.put_value(STORE_MELT_QUOTES, &key, &quote).await
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<MeltQuote>, Self::Err> {
         self.get_value(STORE_MELT_QUOTES, quote_id).await
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quotes(&self) -> Result<Vec<MeltQuote>, Self::Err> {
         self.get_all_values(STORE_MELT_QUOTES).await
     }
 
+    #[instrument(skip(self))]
     async fn remove_melt_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         log::debug!("Removing melt quote: {}", quote_id);
         self.delete_value(STORE_MELT_QUOTES, quote_id).await
     }
 
+    #[instrument(skip(self, keyset), fields(keyset_id = %keyset.id))]
     async fn add_keys(&self, keyset: KeySet) -> Result<(), Self::Err> {
         let key = keyset.id.to_string();
         self.put_value(STORE_KEYS, &key, &keyset.keys).await
     }
 
+    #[instrument(skip(self), fields(keyset_id = %id))]
     async fn get_keys(&self, id: &Id) -> Result<Option<Keys>, Self::Err> {
         let key = id.to_string();
         self.get_value(STORE_KEYS, &key).await
     }
 
+    #[instrument(skip(self), fields(keyset_id = %id))]
     async fn remove_keys(&self, id: &Id) -> Result<(), Self::Err> {
         let key = id.to_string();
         self.delete_value(STORE_KEYS, &key).await
     }
 
+    #[instrument(skip(self), fields(keyset_id = %keyset_id, count = count))]
     async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<u32, Self::Err> {
         log::debug!("Incrementing counter for keyset: {} by {}", keyset_id, count);
 
@@ -729,6 +784,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(new_value)
     }
 
+    #[instrument(skip(self, added, removed_ys), fields(added_count = added.len(), removed_count = removed_ys.len()))]
     async fn update_proofs(
         &self,
         added: Vec<ProofInfo>,
@@ -775,6 +831,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self, spending_conditions), fields(mint = ?mint_url, unit = ?unit, state = ?state))]
     async fn get_proofs(
         &self,
         mint_url: Option<MintUrl>,
@@ -833,6 +890,20 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(filtered)
     }
 
+    #[instrument(skip(self), fields(mint = ?mint_url, unit = ?unit, state = ?state))]
+    async fn get_balance(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+    ) -> Result<u64, Self::Err> {
+        // Reuse get_proofs with no spending condition filter, then sum amounts
+        let proofs = self.get_proofs(mint_url, unit, state, None).await?;
+        let total: u64 = proofs.iter().map(|p| u64::from(p.proof.amount)).sum();
+        Ok(total)
+    }
+
+    #[instrument(skip(self, ys), fields(count = ys.len(), new_state = ?state))]
     async fn update_proofs_state(&self, ys: Vec<CashuPublicKey>, state: State) -> Result<(), Self::Err> {
         // Perform all operations in a single write transaction for atomicity
         let tx = self
@@ -887,11 +958,13 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self, transaction), fields(tx_id = %transaction.id()))]
     async fn add_transaction(&self, transaction: Transaction) -> Result<(), Self::Err> {
         let key = transaction.id().to_string();
         self.put_value(STORE_TRANSACTIONS, &key, &transaction).await
     }
 
+    #[instrument(skip(self), fields(tx_id = %transaction_id))]
     async fn get_transaction(
         &self,
         transaction_id: TransactionId,
@@ -900,6 +973,7 @@ impl WalletDatabase for IndexedDbDatabase {
         self.get_value(STORE_TRANSACTIONS, &key).await
     }
 
+    #[instrument(skip(self), fields(mint = ?mint_url, direction = ?direction, unit = ?unit))]
     async fn list_transactions(
         &self,
         mint_url: Option<MintUrl>,
@@ -940,6 +1014,7 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(filtered)
     }
 
+    #[instrument(skip(self), fields(tx_id = %transaction_id))]
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err> {
         let key = transaction_id.to_string();
         self.delete_value(STORE_TRANSACTIONS, &key).await
