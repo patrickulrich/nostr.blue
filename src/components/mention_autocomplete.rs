@@ -31,6 +31,9 @@ pub struct MentionAutocompleteProps {
     /// Optional thread participants (e.g., for reply composers)
     #[props(default = Vec::new())]
     pub thread_participants: Vec<PublicKey>,
+    /// Optional signal to track cursor position externally
+    #[props(optional)]
+    pub cursor_position: Option<Signal<usize>>,
 }
 
 #[component]
@@ -68,6 +71,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         let new_value = evt.value().clone();
         let cursor_pos = get_cursor_position(&**textarea_id.read());
         cursor_position.set(cursor_pos);
+        if let Some(mut signal) = props.cursor_position {
+            let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
+            signal.set(cursor_utf8);
+        }
 
         // Update content
         props.on_input.call(new_value.clone());
@@ -118,6 +125,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                             mention_query.read().len(),
                             (**textarea_id.read()).clone(),
                             show_autocomplete,
+                            props.cursor_position,
                         );
                     }
                 }
@@ -135,6 +143,25 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         }
     };
 
+    // Shared helper to update cursor position from DOM
+    let mut sync_cursor_position = move || {
+        let cursor_pos = get_cursor_position(&**textarea_id.read());
+        cursor_position.set(cursor_pos);
+        if let Some(mut signal) = props.cursor_position {
+            let text = props.content.read();
+            let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
+            signal.set(cursor_utf8);
+        }
+    };
+
+    let handle_keyup = move |_| {
+        sync_cursor_position();
+    };
+
+    let handle_click = move |_| {
+        sync_cursor_position();
+    };
+
     rsx! {
         div {
             class: "relative w-full",
@@ -149,6 +176,8 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 disabled: props.disabled,
                 oninput: handle_input,
                 onkeydown: handle_keydown,
+                onkeyup: handle_keyup,
+                onclick: handle_click,
                 onfocus: handle_focus,
             }
 
@@ -167,6 +196,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     mention_query.read().len(),
                     (**textarea_id.read()).clone(),
                     show_autocomplete,
+                    props.cursor_position,
                 )}
             }
         }
@@ -285,6 +315,7 @@ fn insert_mention(
     query_len: usize,
     textarea_id: String,
     mut show_autocomplete: Signal<bool>,
+    external_cursor_position: Option<Signal<usize>>,
 ) {
     spawn(async move {
         // With gossip, relay hints are not needed - the client handles routing automatically
@@ -308,21 +339,27 @@ fn insert_mention(
         let after = &current_content[query_end_pos.min(current_content.len())..];
         let new_content = format!("{}{} {}", before, mention, after);
 
+        // Calculate new cursor position (UTF-8 byte index)
+        let new_cursor_byte_pos = before.len() + mention.len() + 1; // +1 for space
+
         // Update content
         on_input.call(new_content.clone());
 
         // Hide autocomplete
         show_autocomplete.set(false);
 
-        // Restore focus and cursor position
+        // Update external cursor position signal if provided
+        if let Some(mut signal) = external_cursor_position {
+            signal.set(new_cursor_byte_pos);
+        }
+
+        // Restore focus and cursor position in DOM
         #[cfg(target_family = "wasm")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
                         if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                            // Calculate UTF-8 byte position
-                            let new_cursor_byte_pos = before.len() + mention.len() + 1; // +1 for space
                             // Convert to UTF-16 code unit index for DOM
                             let new_cursor_utf16_pos = utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
                             let _ = textarea.set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
@@ -447,6 +484,7 @@ fn render_dropdown(
     query_len: usize,
     textarea_id: String,
     show_autocomplete: Signal<bool>,
+    external_cursor_position: Option<Signal<usize>>,
 ) -> Element {
     // Wrap in Rc for cheap cloning
     let textarea_id_rc = Rc::new(textarea_id);
@@ -493,6 +531,7 @@ fn render_dropdown(
                                                 query_len,
                                                 (*textarea_id_clone).clone(),
                                                 show_autocomplete,
+                                                external_cursor_position,
                                             );
                                         }
                                     },
