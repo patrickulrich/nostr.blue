@@ -65,6 +65,7 @@ const STORE_MELT_QUOTES: &str = "melt_quotes";
 const STORE_PROOFS: &str = "proofs";
 const STORE_TRANSACTIONS: &str = "transactions";
 const STORE_KEYSET_COUNTERS: &str = "keyset_counters";
+const STORE_PENDING_EVENTS: &str = "pending_events";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[derive(Clone, Debug)]
@@ -125,6 +126,9 @@ impl IndexedDbDatabase {
             }
             if !db.object_store_names().any(|n| n == STORE_KEYSET_COUNTERS) {
                 db.create_object_store(STORE_KEYSET_COUNTERS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PENDING_EVENTS) {
+                db.create_object_store(STORE_PENDING_EVENTS)?;
             }
 
             Ok(())
@@ -315,6 +319,45 @@ impl IndexedDbDatabase {
         }
 
         Ok(results)
+    }
+
+    /// Store a pending Nostr event
+    pub async fn add_pending_event(
+        &self,
+        event: &crate::stores::cashu_wallet::PendingNostrEvent,
+    ) -> Result<(), database::Error> {
+        let key = event.id.clone();
+        self.put_value(STORE_PENDING_EVENTS, &key, event).await
+    }
+
+    /// Get a pending event by ID
+    pub async fn get_pending_event(
+        &self,
+        event_id: &str,
+    ) -> Result<Option<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
+        self.get_value(STORE_PENDING_EVENTS, event_id).await
+    }
+
+    /// Get all pending events
+    pub async fn get_all_pending_events(
+        &self,
+    ) -> Result<Vec<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
+        let results = self.get_all_values_with_keys(STORE_PENDING_EVENTS).await?;
+        Ok(results.into_iter().map(|(_, event)| event).collect())
+    }
+
+    /// Remove a pending event
+    pub async fn remove_pending_event(&self, event_id: &str) -> Result<(), database::Error> {
+        self.delete_value(STORE_PENDING_EVENTS, event_id).await
+    }
+
+    /// Update a pending event (for retry count increments)
+    pub async fn update_pending_event(
+        &self,
+        event: &crate::stores::cashu_wallet::PendingNostrEvent,
+    ) -> Result<(), database::Error> {
+        let key = event.id.clone();
+        self.put_value(STORE_PENDING_EVENTS, &key, event).await
     }
 }
 

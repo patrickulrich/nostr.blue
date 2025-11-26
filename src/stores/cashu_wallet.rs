@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, SecretKey};
-use nostr_sdk::nips::nip60::{WalletEvent, CashuProof, TransactionDirection};
+use nostr_sdk::{Event, Filter, Kind, PublicKey, SecretKey, EventId};
+use nostr_sdk::nips::nip60::{WalletEvent, CashuProof, TransactionDirection, SpendingHistory};
+use nostr_sdk::types::url::Url;
+use nostr_sdk::types::time::Timestamp;
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
@@ -16,6 +18,16 @@ struct TokenEventData {
     pub mint: String,
     pub proofs: Vec<ProofData>,
     #[serde(default)]
+    pub del: Vec<String>,
+}
+
+/// Extended token event with P2PK support (extends rust-nostr's TokenEvent)
+/// Uses ExtendedCashuProof instead of CashuProof to preserve witness/DLEQ fields
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExtendedTokenEvent {
+    pub mint: String,
+    pub proofs: Vec<ExtendedCashuProof>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub del: Vec<String>,
 }
 
@@ -40,6 +52,33 @@ struct ProofData {
     pub witness: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dleq: Option<DleqData>,
+}
+
+/// Extended Cashu proof with P2PK support (superset of nostr_sdk::nips::nip60::CashuProof)
+/// Preserves witness and DLEQ fields for P2PK verification while maintaining NIP-60 compatibility
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExtendedCashuProof {
+    pub id: String,
+    pub amount: u64,
+    pub secret: String,
+    pub c: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dleq: Option<DleqData>,
+}
+
+impl From<ProofData> for ExtendedCashuProof {
+    fn from(p: ProofData) -> Self {
+        Self {
+            id: p.id,
+            amount: p.amount,
+            secret: p.secret,
+            c: p.c,
+            witness: p.witness,
+            dleq: p.dleq,
+        }
+    }
 }
 
 /// Wallet state containing configuration
@@ -330,14 +369,14 @@ async fn publish_quote_event(
     let encrypted = signer.nip44_encrypt(&pubkey, quote_id).await
         .map_err(|e| format!("Failed to encrypt quote ID: {}", e))?;
 
-    // Calculate expiration (default 14 days)
-    let expiration = chrono::Utc::now().timestamp() as u64
-        + (expiration_days * 24 * 60 * 60);
+    // Calculate expiration timestamp (default 14 days)
+    let expiration_ts = Timestamp::now() + (expiration_days * 24 * 60 * 60);
 
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(7374), encrypted)
+    // Build quote event using rust-nostr structure
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletQuote, encrypted)
         .tags(vec![
             nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("mint"), [mint_url]),
-            nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("expiration"), [expiration.to_string()]),
+            nostr_sdk::Tag::expiration(expiration_ts),
         ]);
 
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
@@ -849,25 +888,30 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
 
     log::info!("Creating new wallet with {} mints", mints.len());
 
-    // Build JSON array: [["privkey", "hex"], ["mint", "url"], ...]
-    let mut content_array: Vec<Vec<String>> = vec![
-        vec!["privkey".to_string(), wallet_privkey.clone()]
-    ];
+    // Parse mint URLs for rust-nostr compatibility
+    let mint_urls: Vec<Url> = mints.iter()
+        .filter_map(|m| Url::parse(m).ok())
+        .collect();
 
-    for mint_url in &mints {
-        content_array.push(vec!["mint".to_string(), mint_url.clone()]);
+    // Build wallet event using rust-nostr structure
+    let wallet_event = WalletEvent::new(wallet_privkey.clone(), mint_urls);
+
+    // Build wallet data following rust-nostr's internal format
+    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", &wallet_event.privkey]];
+    for mint in wallet_event.mints.iter() {
+        content_array.push(vec!["mint", mint.as_str()]);
     }
 
     let json_content = serde_json::to_string(&content_array)
         .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
 
-    // Encrypt content using signer
+    // Encrypt content using signer (keeps existing pattern)
     let encrypted_content = signer.nip44_encrypt(&pubkey, &json_content).await
         .map_err(|e| format!("Failed to encrypt wallet data: {}", e))?;
 
-    // Build event manually
+    // Build event using rust-nostr kind constant
     let builder = nostr_sdk::EventBuilder::new(
-        Kind::from(17375),
+        Kind::CashuWallet,
         encrypted_content
     );
 
@@ -1301,15 +1345,19 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     let new_proofs = wallet.get_unspent_proofs().await
         .map_err(|e| format!("Failed to get proofs: {}", e))?;
 
-    // Convert to ProofData
+    // Convert to ProofData and then ExtendedCashuProof
     let proof_data: Vec<ProofData> = new_proofs.iter()
         .map(|p| cdk_proof_to_proof_data(p))
         .collect();
 
-    // Create token event (kind 7375)
-    let token_event_data = TokenEventData {
+    // Create extended token event with P2PK support
+    let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
-        proofs: proof_data.clone(),
+        proofs: extended_proofs,
         del: vec![],
     };
 
@@ -1323,13 +1371,13 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let json_content = serde_json::to_string(&token_event_data)
-        .map_err(|e| format!("Failed to serialize: {}", e))?;
+        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
     let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
     let builder = nostr_sdk::EventBuilder::new(
-        Kind::from(7375),
+        Kind::CashuWalletUnspentProof,
         encrypted
     );
 
@@ -1580,19 +1628,24 @@ pub async fn send_tokens(
             .map(|p| cdk_proof_to_proof_data(p))
             .collect();
 
-        let token_event_data = TokenEventData {
+        // Convert to extended proofs with P2PK support
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
-            proofs: proof_data.clone(),
+            proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
 
         let json_content = serde_json::to_string(&token_event_data)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
         let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-            .map_err(|e| format!("Failed to encrypt: {}", e))?;
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
-        let builder = nostr_sdk::EventBuilder::new(Kind::from(7375), encrypted);
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
         // Generate a local event ID for optimization
         new_event_id = Some(format!("send-{}", uuid::Uuid::new_v4()));
@@ -1718,38 +1771,65 @@ async fn create_history_event(
     let pubkey = PublicKey::parse(&pubkey_str)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Build content array: [["direction", "in"], ["amount", "100"], ["e", "id", "", "created"], ...]
-    let mut content_array = vec![
-        vec!["direction".to_string(), direction.to_string()],
-        vec!["amount".to_string(), amount.to_string()],
+    // Build spending history using rust-nostr's SpendingHistory
+    let direction_enum = match direction {
+        "in" => TransactionDirection::In,
+        "out" => TransactionDirection::Out,
+        _ => return Err("Invalid direction".to_string()),
+    };
+
+    let mut spending_history = SpendingHistory::new(direction_enum, amount);
+
+    // Add created event IDs
+    for token_id in created_tokens {
+        let event_id = EventId::from_hex(&token_id)
+            .map_err(|e| format!("Invalid event ID: {}", e))?;
+        spending_history = spending_history.add_created(event_id);
+    }
+
+    // Add destroyed event IDs
+    for token_id in destroyed_tokens {
+        let event_id = EventId::from_hex(&token_id)
+            .map_err(|e| format!("Invalid event ID: {}", e))?;
+        spending_history = spending_history.add_destroyed(event_id);
+    }
+
+    // Build encrypted content manually (keeping signer pattern)
+    // following rust-nostr's internal format
+    // Convert to Strings first to avoid lifetime issues with Vec<Vec<&str>>
+    let mut content_data: Vec<Vec<String>> = vec![
+        vec!["direction".to_string(), spending_history.direction.to_string()],
+        vec!["amount".to_string(), spending_history.amount.to_string()],
     ];
 
-    for token_id in created_tokens {
-        content_array.push(vec![
+    // Add created event references
+    for event_id in &spending_history.created {
+        content_data.push(vec![
             "e".to_string(),
-            token_id,
-            "".to_string(),
+            event_id.to_hex(),
+            String::new(),
             "created".to_string()
         ]);
     }
 
-    for token_id in destroyed_tokens {
-        content_array.push(vec![
+    // Add destroyed event references
+    for event_id in &spending_history.destroyed {
+        content_data.push(vec![
             "e".to_string(),
-            token_id,
-            "".to_string(),
+            event_id.to_hex(),
+            String::new(),
             "destroyed".to_string()
         ]);
     }
 
-    let json_content = serde_json::to_string(&content_array)
-        .map_err(|e| format!("Failed to serialize history: {}", e))?;
+    let json_content = serde_json::to_string(&content_data)
+        .map_err(|e| format!("Failed to serialize history event: {}", e))?;
 
     let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-        .map_err(|e| format!("Failed to encrypt history: {}", e))?;
+        .map_err(|e| format!("Failed to encrypt history event: {}", e))?;
 
     let builder = nostr_sdk::EventBuilder::new(
-        Kind::from(7376),
+        Kind::CashuWalletSpendingHistory,
         encrypted
     );
 
@@ -1884,20 +1964,25 @@ async fn cleanup_spent_proofs_internal(mint_url: String) -> Result<(usize, u64),
             })
             .collect();
 
-        let token_event_data = TokenEventData {
+        // Convert to extended proofs with P2PK support
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
-            proofs: proof_data.clone(),
+            proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
 
         let json_content = serde_json::to_string(&token_event_data)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
         let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-            .map_err(|e| format!("Failed to encrypt: {}", e))?;
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
         let builder = nostr_sdk::EventBuilder::new(
-            Kind::from(7375),
+            Kind::CashuWalletUnspentProof,
             encrypted
         );
 
@@ -2288,15 +2373,19 @@ pub async fn mint_tokens_from_quote(
 
     log::info!("Minted {} sats", amount_minted);
 
-    // Convert to ProofData
+    // Convert to ProofData and then ExtendedCashuProof
     let proof_data: Vec<ProofData> = proofs.iter()
         .map(|p| cdk_proof_to_proof_data(p))
         .collect();
 
-    // Create token event (kind 7375) - same as receive_tokens
-    let token_event_data = TokenEventData {
+    // Create extended token event with P2PK support (same as receive_tokens)
+    let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
-        proofs: proof_data.clone(),
+        proofs: extended_proofs,
         del: vec![],
     };
 
@@ -2310,13 +2399,13 @@ pub async fn mint_tokens_from_quote(
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let json_content = serde_json::to_string(&token_event_data)
-        .map_err(|e| format!("Failed to serialize: {}", e))?;
+        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
     let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
     let builder = nostr_sdk::EventBuilder::new(
-        Kind::from(7375),
+        Kind::CashuWalletUnspentProof,
         encrypted
     );
 
@@ -2630,19 +2719,24 @@ pub async fn melt_tokens(
             .map(|p| cdk_proof_to_proof_data(p))
             .collect();
 
-        let token_event_data = TokenEventData {
+        // Convert to extended proofs with P2PK support
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
-            proofs: proof_data.clone(),
+            proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
 
         let json_content = serde_json::to_string(&token_event_data)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
         let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
-            .map_err(|e| format!("Failed to encrypt: {}", e))?;
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
-        let builder = nostr_sdk::EventBuilder::new(Kind::from(7375), encrypted);
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
         // Generate a local event ID for optimization
         new_event_id = Some(format!("melt-{}", uuid::Uuid::new_v4()));
