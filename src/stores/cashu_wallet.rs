@@ -539,6 +539,9 @@ pub async fn init_wallet() -> Result<(), String> {
 }
 
 /// Decrypt wallet event (kind 17375)
+///
+/// Parses the NIP-60 wallet event format: `[["privkey", "hex"], ["mint", "url"], ...]`
+/// Returns an error if the wallet is missing required fields (privkey or at least one mint).
 async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
     use nostr_sdk::signer::NostrSigner;
 
@@ -556,24 +559,47 @@ async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
 
     let mut privkey = String::new();
     let mut mints = Vec::new();
+    let mut found_multiple_privkeys = false;
 
     for pair in pairs {
+        // Skip malformed entries (must have exactly 2 elements per NIP-60)
         if pair.len() != 2 {
+            log::warn!("Skipping malformed wallet event entry with {} elements", pair.len());
             continue;
         }
         match pair[0].as_str() {
-            "privkey" => privkey = pair[1].clone(),
-            "mint" => {
-                let mint_url = nostr_sdk::Url::parse(&pair[1])
-                    .map_err(|e| format!("Invalid mint URL: {}", e))?;
-                mints.push(mint_url);
+            "privkey" => {
+                if !privkey.is_empty() {
+                    // Per rust-nostr SDK, multiple privkeys is an error
+                    found_multiple_privkeys = true;
+                } else {
+                    privkey = pair[1].clone();
+                }
             }
-            _ => {} // Ignore unknown keys
+            "mint" => {
+                match nostr_sdk::Url::parse(&pair[1]) {
+                    Ok(mint_url) => mints.push(mint_url),
+                    Err(e) => {
+                        // Log but continue - one bad mint shouldn't break the wallet
+                        log::warn!("Skipping invalid mint URL '{}': {}", pair[1], e);
+                    }
+                }
+            }
+            _ => {} // Ignore unknown keys for forward compatibility
         }
     }
 
+    // Validate required fields per NIP-60 spec (matching rust-nostr SDK behavior)
+    if found_multiple_privkeys {
+        return Err("Wallet event contains multiple privkeys (invalid per NIP-60)".to_string());
+    }
+
     if privkey.is_empty() {
-        return Err("No privkey found in wallet event".to_string());
+        return Err("Missing required field: privkey".to_string());
+    }
+
+    if mints.is_empty() {
+        return Err("Missing required field: mint (at least one mint URL required)".to_string());
     }
 
     Ok(WalletEvent::new(privkey, mints))
@@ -630,8 +656,10 @@ pub async fn fetch_tokens() -> Result<(), String> {
             // Convert Events to Vec for multiple iterations
             let events: Vec<_> = events.into_iter().collect();
 
-            // First pass: collect all deleted proof secrets from del fields
-            let mut deleted_secrets = HashSet::new();
+            // First pass: collect all deleted event IDs from del fields
+            // Per NIP-60, the `del` field contains event IDs of token events that were
+            // destroyed/replaced by this event, NOT proof secrets
+            let mut deleted_via_del_field = HashSet::new();
 
             for event in &events {
                 // Skip events that are deleted by kind-5
@@ -639,28 +667,37 @@ pub async fn fetch_tokens() -> Result<(), String> {
                     continue;
                 }
 
-                // Decrypt and parse to get del field
+                // Decrypt and parse to get del field (contains event IDs)
                 if let Ok(decrypted) = signer.nip44_decrypt(&event.pubkey, &event.content).await {
                     if let Ok(token_event) = serde_json::from_str::<TokenEventData>(&decrypted) {
-                        // Add all deleted proof identifiers to the set
-                        for del_id in &token_event.del {
-                            deleted_secrets.insert(del_id.clone());
+                        // Add all deleted event IDs to the set
+                        for del_event_id in &token_event.del {
+                            deleted_via_del_field.insert(del_event_id.clone());
                         }
                     }
                 }
             }
 
-            if !deleted_secrets.is_empty() {
-                log::info!("Found {} deleted proof identifiers via del field", deleted_secrets.len());
+            if !deleted_via_del_field.is_empty() {
+                log::info!("Found {} deleted token events via del field", deleted_via_del_field.len());
             }
 
-            // Second pass: collect tokens and filter out deleted proofs
+            // Combine both deletion sources: kind-5 events and del field references
+            let all_deleted_events: HashSet<String> = deleted_event_ids
+                .union(&deleted_via_del_field)
+                .cloned()
+                .collect();
+
+            // Second pass: collect tokens, skipping deleted events
             let mut tokens = Vec::new();
             let mut total_balance = 0u64;
 
             for event in &events {
-                // Skip events deleted by kind-5
-                if deleted_event_ids.contains(&event.id.to_hex()) {
+                let event_id_hex = event.id.to_hex();
+
+                // Skip events that are deleted (either by kind-5 or del field)
+                if all_deleted_events.contains(&event_id_hex) {
+                    log::debug!("Skipping deleted token event: {}", event_id_hex);
                     continue;
                 }
 
@@ -670,20 +707,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
                         // Parse JSON: { mint: string, proofs: [...], del?: [...] }
                         match serde_json::from_str::<TokenEventData>(&decrypted) {
                             Ok(token_event) => {
-                                // Convert ProofData to CashuProof, filtering out deleted proofs
+                                // Convert ProofData to CashuProof
                                 let proofs: Vec<CashuProof> = token_event.proofs.iter()
-                                    .filter(|p| {
-                                        // Filter out proofs that are in the deletion set
-                                        // Check by id, secret, or the combined identifier
-                                        let proof_id = if p.id.is_empty() {
-                                            format!("{}_{}", p.secret, p.amount)
-                                        } else {
-                                            p.id.clone()
-                                        };
-                                        !deleted_secrets.contains(&p.secret)
-                                            && !deleted_secrets.contains(&p.id)
-                                            && !deleted_secrets.contains(&proof_id)
-                                    })
                                     .map(|p| CashuProof {
                                         id: if p.id.is_empty() {
                                             // Generate a placeholder ID if missing
@@ -697,26 +722,26 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                     })
                                     .collect();
 
-                                // Only include tokens with remaining proofs
+                                // Only include tokens with proofs
                                 if !proofs.is_empty() {
-                                    // Calculate balance from non-deleted proofs using checked arithmetic
+                                    // Calculate balance using checked arithmetic
                                     let token_balance: u64 = proofs.iter()
                                         .map(|p| p.amount)
                                         .try_fold(0u64, |acc, amount| acc.checked_add(amount))
                                         .ok_or_else(|| format!(
                                             "Proof amount overflow in token event {}",
-                                            event.id.to_hex()
+                                            event_id_hex
                                         ))?;
 
                                     // Use checked addition to prevent silent overflow
                                     total_balance = total_balance.checked_add(token_balance)
                                         .ok_or_else(|| format!(
                                             "Balance overflow when adding token event {} (balance: {}, adding: {})",
-                                            event.id.to_hex(), total_balance, token_balance
+                                            event_id_hex, total_balance, token_balance
                                         ))?;
 
                                     tokens.push(TokenData {
-                                        event_id: event.id.to_hex(),
+                                        event_id: event_id_hex,
                                         mint: token_event.mint.clone(),
                                         unit: "sat".to_string(), // TODO: Parse unit from event
                                         proofs,
@@ -1866,11 +1891,34 @@ pub async fn send_tokens(
 // ============================================================================
 
 /// Create a history event (kind 7376)
+///
+/// Per NIP-60, spending history events have:
+/// - Encrypted content: direction, amount, created/destroyed event references
+/// - Unencrypted tags: redeemed event references (for P2PK redemptions)
+///
+/// The `redeemed_tokens` parameter should contain event IDs of token events
+/// that were redeemed via P2PK spending conditions.
 async fn create_history_event(
     direction: &str,
     amount: u64,
     created_tokens: Vec<String>,
     destroyed_tokens: Vec<String>,
+) -> Result<(), String> {
+    // Delegate to the full function with empty redeemed list
+    create_history_event_full(direction, amount, created_tokens, destroyed_tokens, vec![]).await
+}
+
+/// Create a history event with full control over all fields including redeemed tokens
+///
+/// Per NIP-60 spec and rust-nostr SDK:
+/// - `created` and `destroyed` go in encrypted content
+/// - `redeemed` goes in unencrypted tags (for P2PK redemption tracking)
+async fn create_history_event_full(
+    direction: &str,
+    amount: u64,
+    created_tokens: Vec<String>,
+    destroyed_tokens: Vec<String>,
+    redeemed_tokens: Vec<String>,
 ) -> Result<(), String> {
     use nostr_sdk::signer::NostrSigner;
 
@@ -1906,6 +1954,13 @@ async fn create_history_event(
         spending_history = spending_history.add_destroyed(event_id);
     }
 
+    // Add redeemed event IDs (these go in unencrypted tags per NIP-60)
+    for token_id in redeemed_tokens {
+        let event_id = EventId::from_hex(&token_id)
+            .map_err(|e| format!("Invalid redeemed event ID: {}", e))?;
+        spending_history = spending_history.add_redeemed(event_id);
+    }
+
     // Build encrypted content manually (keeping signer pattern)
     // following rust-nostr's internal format
     // Convert to Strings first to avoid lifetime issues with Vec<Vec<&str>>
@@ -1914,7 +1969,7 @@ async fn create_history_event(
         vec!["amount".to_string(), spending_history.amount.to_string()],
     ];
 
-    // Add created event references
+    // Add created event references (encrypted)
     for event_id in &spending_history.created {
         content_data.push(vec![
             "e".to_string(),
@@ -1924,7 +1979,7 @@ async fn create_history_event(
         ]);
     }
 
-    // Add destroyed event references
+    // Add destroyed event references (encrypted)
     for event_id in &spending_history.destroyed {
         content_data.push(vec![
             "e".to_string(),
@@ -1940,10 +1995,22 @@ async fn create_history_event(
     let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
         .map_err(|e| format!("Failed to encrypt history event: {}", e))?;
 
+    // Build unencrypted tags for redeemed events (per NIP-60 spec)
+    // These are public so other clients can verify P2PK redemptions
+    let mut tags = Vec::new();
+    for event_id in &spending_history.redeemed {
+        tags.push(nostr_sdk::Tag::parse([
+            "e".to_string(),
+            event_id.to_hex(),
+            String::new(),
+            "redeemed".to_string()
+        ]).map_err(|e| format!("Failed to create redeemed tag: {}", e))?);
+    }
+
     let builder = nostr_sdk::EventBuilder::new(
         Kind::CashuWalletSpendingHistory,
         encrypted
-    );
+    ).tags(tags);
 
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
@@ -1951,7 +2018,12 @@ async fn create_history_event(
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish history event: {}", e))?;
 
-    log::info!("Created history event: {} {} sats", direction, amount);
+    log::info!("Created history event: {} {} sats (created: {}, destroyed: {}, redeemed: {})",
+        direction, amount,
+        spending_history.created.len(),
+        spending_history.destroyed.len(),
+        spending_history.redeemed.len()
+    );
 
     Ok(())
 }
@@ -2971,6 +3043,22 @@ pub async fn melt_tokens(
 }
 
 /// Extended history event creation with operation type and invoice
+///
+/// This function creates NIP-60 spending history events (kind 7376) with additional
+/// nostr.blue-specific extension fields for enhanced transaction tracking.
+///
+/// # Standard NIP-60 Fields (interoperable)
+/// - `direction`: "in" or "out"
+/// - `amount`: Amount in sats
+/// - `e` tags with "created"/"destroyed" markers
+///
+/// # nostr.blue Extension Fields (non-standard)
+/// These fields are NOT part of the NIP-60 spec and may not be understood by other clients:
+/// - `unit`: Currency unit (always "sat" currently) - useful for multi-currency support
+/// - `type`: Operation type ("lightning_mint", "lightning_melt", etc.) - for categorization
+/// - `invoice`: Lightning invoice (for lightning operations) - for reference/debugging
+///
+/// Other NIP-60 clients will ignore these extension fields per standard JSON parsing behavior.
 async fn create_history_event_with_type(
     direction: &str,
     amount: u64,
@@ -2990,29 +3078,31 @@ async fn create_history_event_with_type(
     let pubkey = PublicKey::parse(&pubkey_str)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Build content array
+    // Build content array with standard NIP-60 fields first
     let mut content_array = vec![
         vec!["direction".to_string(), direction.to_string()],
         vec!["amount".to_string(), amount.to_string()],
-        vec!["unit".to_string(), "sat".to_string()],
     ];
 
-    // Add operation type if provided
+    // Extension field: unit (non-standard, for future multi-currency support)
+    content_array.push(vec!["unit".to_string(), "sat".to_string()]);
+
+    // Extension field: operation type (non-standard, for categorization)
     if let Some(op_type) = operation_type {
         content_array.push(vec!["type".to_string(), op_type.to_string()]);
     }
 
-    // Add invoice if provided (for lightning operations)
+    // Extension field: invoice (non-standard, for lightning operation reference)
     if let Some(inv) = invoice {
         content_array.push(vec!["invoice".to_string(), inv.to_string()]);
     }
 
-    // Add created token events
+    // Standard NIP-60: Add created token events
     for event_id in created_tokens {
         content_array.push(vec!["e".to_string(), event_id, "".to_string(), "created".to_string()]);
     }
 
-    // Add destroyed token events
+    // Standard NIP-60: Add destroyed token events
     for event_id in destroyed_tokens {
         content_array.push(vec!["e".to_string(), event_id, "".to_string(), "destroyed".to_string()]);
     }
@@ -3024,7 +3114,7 @@ async fn create_history_event_with_type(
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
 
     let builder = nostr_sdk::EventBuilder::new(
-        Kind::from(7376),
+        Kind::CashuWalletSpendingHistory,
         encrypted
     );
 
