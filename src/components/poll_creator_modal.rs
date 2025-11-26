@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{PollOptionList, PollOptionData};
+use crate::utils::generate_option_id;
 use nostr_sdk::{nips::nip88::{PollType, PollOption}, Timestamp, EventId, ToBech32};
 
 #[component]
@@ -40,8 +41,25 @@ pub fn PollCreatorModal(
         !*is_publishing.read()
     });
 
-    // Handle close
+    // Handle close - reset all form state
     let handle_close = move |_| {
+        poll_question.set(String::new());
+        poll_type.set(PollType::SingleChoice);
+        options.set(vec![
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+        ]);
+        end_time_preset.set(String::from("1day"));
+        custom_end_time.set(String::new());
+        hashtags_input.set(String::new());
+        error_message.set(None);
+        show_advanced.set(false);
         show.set(false);
     };
 
@@ -62,6 +80,15 @@ pub fn PollCreatorModal(
         let hashtags_val = hashtags_input.read().clone();
         let end_time_preset_val = end_time_preset.read().clone();
         let custom_end_time_val = custom_end_time.read().clone();
+
+        // Validate custom end time before publishing
+        if end_time_preset_val == "custom" {
+            let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
+            if ends_at.is_none() {
+                error_message.set(Some("Invalid or past end time. Please select a future date/time.".to_string()));
+                return;
+            }
+        }
 
         is_publishing.set(true);
         error_message.set(None);
@@ -400,16 +427,6 @@ pub fn PollCreatorModal(
     }
 }
 
-/// Generate a random alphanumeric option ID
-fn generate_option_id() -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..9)
-        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
-        .collect()
-}
-
 /// Calculate end timestamp based on preset or custom time
 fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
     let now = Timestamp::now();
@@ -417,7 +434,6 @@ fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
     match preset {
         "1hour" => Some(Timestamp::from(now.as_secs() + 3600)),
         "1day" => Some(Timestamp::from(now.as_secs() + 86400)),
-        "3days" => Some(Timestamp::from(now.as_secs() + 259200)),
         "1week" => Some(Timestamp::from(now.as_secs() + 604800)),
         "custom" => {
             if custom_time.is_empty() {

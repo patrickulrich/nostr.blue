@@ -82,26 +82,29 @@ pub fn NoteComposer() -> Element {
         cursor_position.set(pos + text.len());
     };
 
-    // Handler when image upload completes
-    let handle_image_uploaded = move |url: String| {
-        let mut url_with_space = url.clone();
+    // Helper to insert text with smart spacing (space before if needed, space after)
+    let mut insert_with_spacing = move |text: String| {
+        let mut text_with_space = text.clone();
         // Add space before if not at start and not preceded by whitespace
         {
             let current = content.read();
             let pos = *cursor_position.read();
-            // pos is a UTF-8 byte index, so slice to that position and get the last char
             if pos > 0 && pos <= current.len() {
                 if let Some(prev_char) = current[..pos].chars().last() {
                     if !prev_char.is_whitespace() {
-                        url_with_space.insert(0, ' ');
+                        text_with_space.insert(0, ' ');
                     }
                 }
             }
         }
         // Add space after
-        url_with_space.push(' ');
+        text_with_space.push(' ');
+        insert_at_cursor(text_with_space);
+    };
 
-        insert_at_cursor(url_with_space);
+    // Handler when image upload completes
+    let handle_image_uploaded = move |url: String| {
+        insert_with_spacing(url.clone());
         log::info!("Image URL inserted: {}", url);
     };
 
@@ -112,46 +115,13 @@ pub fn NoteComposer() -> Element {
 
     // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
-        let mut url_with_space = gif_url.clone();
-        // Add space before if not at start and not preceded by whitespace
-        {
-            let current = content.read();
-            let pos = *cursor_position.read();
-            // pos is a UTF-8 byte index, so slice to that position and get the last char
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        url_with_space.insert(0, ' ');
-                    }
-                }
-            }
-        }
-        // Add space after
-        url_with_space.push(' ');
-
-        insert_at_cursor(url_with_space);
+        insert_with_spacing(gif_url.clone());
         log::info!("GIF URL inserted: {}", gif_url);
     };
 
     // Handler when poll is created
     let handle_poll_created = move |nevent_ref: String| {
-        let mut ref_with_space = nevent_ref.clone();
-        // Add space before if not at start and not preceded by whitespace
-        {
-            let current = content.read();
-            let pos = *cursor_position.read();
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        ref_with_space.insert(0, ' ');
-                    }
-                }
-            }
-        }
-        // Add space after
-        ref_with_space.push(' ');
-
-        insert_at_cursor(ref_with_space);
+        insert_with_spacing(nevent_ref.clone());
         show_poll_modal.set(false);
         log::info!("Poll reference inserted: {}", nevent_ref);
     };
