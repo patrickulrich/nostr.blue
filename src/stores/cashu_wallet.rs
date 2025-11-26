@@ -319,6 +319,14 @@ async fn queue_nostr_event(
     // Save to in-memory queue
     PENDING_NOSTR_EVENTS.write().push(pending.clone());
 
+    // Persist to IndexedDB for offline support
+    if let Ok(localstore) = get_shared_localstore().await {
+        if let Err(e) = localstore.add_pending_event(&pending).await {
+            log::warn!("Failed to persist pending event to IndexedDB: {}", e);
+            // Non-critical: local state is already updated, DB persistence is optional
+        }
+    }
+
     // Log the queued event
     log::debug!("Queued {} event: {}",
         match pending.event_type {
@@ -329,16 +337,25 @@ async fn queue_nostr_event(
         },
         event_id);
 
-    // TODO: Persist to IndexedDB (would need custom DB schema extension)
-
     Ok(event_id)
 }
 
-/// Remove a pending event from the queue
+/// Remove a pending event from the queue and IndexedDB
 #[allow(dead_code)]
-fn remove_pending_event(event_id: &str) {
+async fn remove_pending_event(event_id: &str) -> Result<(), String> {
+    // Remove from in-memory queue
     PENDING_NOSTR_EVENTS.write().retain(|e| e.id != event_id);
+
+    // Remove from IndexedDB
+    if let Ok(localstore) = get_shared_localstore().await {
+        if let Err(e) = localstore.remove_pending_event(event_id).await {
+            log::warn!("Failed to remove pending event from IndexedDB: {}", e);
+            // Non-critical: memory state is already updated
+        }
+    }
+
     log::debug!("Removed pending event from queue: {}", event_id);
+    Ok(())
 }
 
 /// Get count of pending events waiting to be published
@@ -482,6 +499,15 @@ pub async fn init_wallet() -> Result<(), String> {
                             log::error!("Failed to fetch history: {}", e);
                         }
 
+                        // Load pending events queue from IndexedDB
+                        if let Err(e) = load_pending_events().await {
+                            log::warn!("Failed to load pending events: {}", e);
+                            // Non-critical: wallet still works even if pending queue can't load
+                        }
+
+                        // Start background processor for pending events
+                        start_pending_events_processor();
+
                         *WALLET_STATUS.write() = WalletStatus::Ready;
                         Ok(())
                     }
@@ -575,11 +601,10 @@ pub async fn fetch_tokens() -> Result<(), String> {
 
     if let Ok(deletion_events) = client.fetch_events(deletion_filter, Duration::from_secs(10)).await {
         for del_event in deletion_events {
-            // Check e tags that reference kind-7375 events
+            // Check e tags that reference kind-7375 events (using type-safe tag parsing)
             for tag in del_event.tags.iter() {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 2 && tag_vec[0] == "e" {
-                    deleted_event_ids.insert(tag_vec[1].clone());
+                if let Some(nostr::TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+                    deleted_event_ids.insert(event_id.to_hex());
                 }
             }
         }
@@ -2925,4 +2950,127 @@ async fn create_history_event_with_type(
     log::info!("Published history event: {}", event_output.id().to_hex());
 
     Ok(())
+}
+
+/// Load pending events from IndexedDB into memory on wallet startup
+async fn load_pending_events() -> Result<(), String> {
+    log::info!("Loading pending events from IndexedDB");
+
+    let localstore = get_shared_localstore().await?;
+    let stored_events = localstore.get_all_pending_events().await
+        .map_err(|e| format!("Failed to load pending events: {}", e))?;
+
+    let count = stored_events.len();
+    *PENDING_NOSTR_EVENTS.write() = stored_events;
+
+    if count > 0 {
+        log::info!("Loaded {} pending events from IndexedDB", count);
+    }
+
+    Ok(())
+}
+
+/// Process pending events with exponential backoff retry logic
+pub async fn process_pending_events() -> Result<usize, String> {
+    const MAX_RETRIES: u32 = 5;
+    const BASE_RETRY_DELAY_SECS: u64 = 60;
+
+    let pending_events = PENDING_NOSTR_EVENTS.read().clone();
+    let mut processed_count = 0;
+
+    log::info!("Processing {} pending events", pending_events.len());
+
+    for event in pending_events {
+        // Skip if too many retries
+        if event.retry_count >= MAX_RETRIES {
+            log::warn!("Event {} exceeded max retries ({}), removing from queue", event.id, MAX_RETRIES);
+            let _ = remove_pending_event(&event.id).await;
+            continue;
+        }
+
+        // Check if enough time has passed since creation (exponential backoff)
+        let now = chrono::Utc::now().timestamp() as u64;
+        let elapsed = now.saturating_sub(event.created_at);
+        let retry_delay = BASE_RETRY_DELAY_SECS * (2_u64.pow(event.retry_count));
+
+        if elapsed < retry_delay {
+            log::debug!(
+                "Event {} not ready for retry yet (elapsed: {}, required: {})",
+                event.id, elapsed, retry_delay
+            );
+            continue;
+        }
+
+        // Attempt to publish
+        match publish_pending_event(&event).await {
+            Ok(_) => {
+                log::info!("Successfully published pending event: {}", event.id);
+                let _ = remove_pending_event(&event.id).await;
+                processed_count += 1;
+            }
+            Err(e) => {
+                log::warn!("Failed to publish pending event {} (attempt {}): {}",
+                    event.id, event.retry_count + 1, e);
+
+                // Increment retry count and update in both memory and DB
+                let mut updated_event = event.clone();
+                updated_event.retry_count += 1;
+
+                // Update in memory
+                let mut events = PENDING_NOSTR_EVENTS.write();
+                if let Some(pos) = events.iter().position(|e| e.id == event.id) {
+                    events[pos] = updated_event.clone();
+                }
+                drop(events);
+
+                // Update in IndexedDB
+                if let Ok(localstore) = get_shared_localstore().await {
+                    let _ = localstore.update_pending_event(&updated_event).await;
+                }
+            }
+        }
+    }
+
+    if processed_count > 0 {
+        log::info!("Successfully processed {} pending events", processed_count);
+    }
+
+    Ok(processed_count)
+}
+
+/// Publish a single pending event
+async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> {
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Nostr client not initialized")?
+        .clone();
+
+    // Deserialize the event JSON to Event
+    let evt: nostr_sdk::Event = serde_json::from_str(&event.builder_json)
+        .map_err(|e| format!("Failed to deserialize event: {}", e))?;
+
+    // Publish to relays
+    client.send_event(&evt).await
+        .map_err(|e| format!("Failed to publish event: {}", e))?;
+
+    Ok(())
+}
+
+/// Start background task to process pending events periodically
+pub fn start_pending_events_processor() {
+    spawn(async {
+        loop {
+            // Wait 5 minutes between checks
+            #[cfg(target_arch = "wasm32")]
+            {
+                use gloo_timers::future::TimeoutFuture;
+                TimeoutFuture::new(5 * 60 * 1000).await;
+            }
+
+            if let Err(e) = process_pending_events().await {
+                log::error!("Error processing pending events: {}", e);
+            }
+        }
+    });
+
+    log::info!("Started pending events background processor (5 minute interval)");
 }

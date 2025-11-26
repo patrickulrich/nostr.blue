@@ -322,6 +322,7 @@ impl IndexedDbDatabase {
     }
 
     /// Store a pending Nostr event
+    #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn add_pending_event(
         &self,
         event: &crate::stores::cashu_wallet::PendingNostrEvent,
@@ -331,6 +332,7 @@ impl IndexedDbDatabase {
     }
 
     /// Get a pending event by ID
+    #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn get_pending_event(
         &self,
         event_id: &str,
@@ -339,19 +341,22 @@ impl IndexedDbDatabase {
     }
 
     /// Get all pending events
+    #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn get_all_pending_events(
         &self,
     ) -> Result<Vec<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
-        let results = self.get_all_values_with_keys(STORE_PENDING_EVENTS).await?;
+        let results = self.get_all_key_values(STORE_PENDING_EVENTS).await?;
         Ok(results.into_iter().map(|(_, event)| event).collect())
     }
 
     /// Remove a pending event
+    #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn remove_pending_event(&self, event_id: &str) -> Result<(), database::Error> {
         self.delete_value(STORE_PENDING_EVENTS, event_id).await
     }
 
     /// Update a pending event (for retry count increments)
+    #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn update_pending_event(
         &self,
         event: &crate::stores::cashu_wallet::PendingNostrEvent,
