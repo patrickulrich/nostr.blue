@@ -650,7 +650,8 @@ fn extract_zapstream(url: &str) -> Option<String> {
         let naddr = &url[naddr_start..];
         // Extract just the naddr (stop at query params or hash)
         let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
-        if !naddr.is_empty() {
+        // Validate the extracted string still starts with naddr1 and has reasonable length
+        if naddr.starts_with("naddr1") && naddr.len() > 10 {
             return Some(naddr.to_string());
         }
     }

@@ -252,7 +252,7 @@ pub async fn fetch_interaction_counts_batch(
                 }
             },
             Kind::Repost => counts.reposts += 1,
-            Kind::Custom(9735) => {
+            Kind::ZapReceipt => {
                 counts.zaps += 1;
                 // Extract zap amount from bolt11 tag
                 if let Some(amount) = extract_zap_amount(&event) {
@@ -445,7 +445,7 @@ pub async fn fetch_trending_interactions(
                 }
             },
             Kind::Repost => counts.reposts += 1,
-            Kind::Custom(9735) => {
+            Kind::ZapReceipt => {
                 counts.zaps += 1;
                 if let Some(amount) = extract_zap_amount(&event) {
                     counts.zap_amount_sats += amount;

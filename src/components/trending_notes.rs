@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::services::trending::{TrendingNote, get_trending_notes, get_display_name, truncate_content};
+use crate::services::trending::{TrendingNote, get_trending_notes, truncate_content};
+use crate::stores::profiles;
 use crate::routes::Route;
 
 #[component]
@@ -19,7 +20,7 @@ pub fn TrendingNotes() -> Element {
                     trending_notes.set(notes.clone());
                     loading.set(false);
 
-                    // Prefetch author metadata for trending notes to prevent stale cache on navigation
+                    // Prefetch author metadata for trending notes
                     use crate::utils::profile_prefetch;
                     use nostr_sdk::PublicKey;
                     let pubkeys: Vec<PublicKey> = notes.iter()
@@ -51,7 +52,7 @@ pub fn TrendingNotes() -> Element {
                 h3 {
                     class: "text-xl font-bold flex items-center gap-2",
                     span { "📈" }
-                    "Nostr.Band Trending"
+                    "Trending | nostr.wine"
                 }
             }
 
@@ -71,7 +72,7 @@ pub fn TrendingNotes() -> Element {
                     // Error state
                     div {
                         class: "px-4 py-8 text-center text-sm text-muted-foreground",
-                        "Nostr.band API currently down"
+                        "Trending API currently unavailable"
                     }
                 } else if trending_notes.read().is_empty() {
                     // Empty state
@@ -82,83 +83,9 @@ pub fn TrendingNotes() -> Element {
                 } else {
                     // Trending notes list
                     for note in trending_notes.read().iter() {
-                        {
-                            let note_id = &note.event.id;
-                            let note_bech32 = match nostr_sdk::EventId::from_hex(note_id) {
-                                Ok(id) => {
-                                    use nostr_sdk::ToBech32;
-                                    id.to_bech32().unwrap_or_else(|_| note_id.clone())
-                                },
-                                Err(_) => note_id.clone(),
-                            };
-
-                            let author_name = get_display_name(note);
-                            let content = truncate_content(&note.event.content, 100);
-                            let picture = note.profile.as_ref()
-                                .and_then(|p| p.picture.clone())
-                                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", note.event.pubkey));
-
-                            rsx! {
-                                Link {
-                                    key: "{note_id}",
-                                    to: Route::Note { note_id: note_bech32 },
-                                    class: "block px-4 py-3 hover:bg-accent/50 transition-colors border-b border-border last:border-0",
-
-                                    div {
-                                        class: "flex gap-3",
-
-                                        // Avatar
-                                        img {
-                                            src: "{picture}",
-                                            alt: "{author_name}",
-                                            class: "w-10 h-10 rounded-full flex-shrink-0",
-                                            loading: "lazy"
-                                        }
-
-                                        // Content
-                                        div {
-                                            class: "flex-1 min-w-0",
-
-                                            // Author name
-                                            div {
-                                                class: "text-sm font-semibold truncate mb-1",
-                                                "{author_name}"
-                                            }
-
-                                            // Note content
-                                            div {
-                                                class: "text-sm mb-2 line-clamp-2",
-                                                "{content}"
-                                            }
-
-                                            // Stats
-                                            if let Some(stats) = &note.stats {
-                                                div {
-                                                    class: "flex items-center gap-3 text-xs text-muted-foreground",
-
-                                                    if let Some(reactions) = stats.reactions {
-                                                        if reactions > 0 {
-                                                            span {
-                                                                class: "flex items-center gap-1",
-                                                                "❤️ {reactions}"
-                                                            }
-                                                        }
-                                                    }
-
-                                                    if let Some(replies) = stats.replies {
-                                                        if replies > 0 {
-                                                            span {
-                                                                class: "flex items-center gap-1",
-                                                                "💬 {replies}"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        TrendingNoteItem {
+                            key: "{note.event.id}",
+                            note: note.clone()
                         }
                     }
                 }
@@ -172,6 +99,120 @@ pub fn TrendingNotes() -> Element {
                         to: Route::Trending {},
                         class: "block w-full px-4 py-3 text-blue-500 hover:bg-accent/50 transition-colors text-left text-sm",
                         "Show more"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Individual trending note item that fetches its own profile from the store
+#[component]
+fn TrendingNoteItem(note: TrendingNote) -> Element {
+    let author_pubkey = note.event.pubkey.clone();
+    let author_pubkey_for_profile = author_pubkey.clone();
+
+    // Get profile from centralized profiles store (reactive)
+    let profile = use_memo(move || {
+        profiles::get_profile(&author_pubkey_for_profile)
+    });
+
+    let note_id = &note.event.id;
+    let note_bech32 = match nostr_sdk::EventId::from_hex(note_id) {
+        Ok(id) => {
+            use nostr_sdk::ToBech32;
+            id.to_bech32().unwrap_or_else(|_| note_id.clone())
+        },
+        Err(_) => note_id.clone(),
+    };
+
+    // Get display name from profile or fallback to truncated pubkey
+    let author_name = {
+        let p = profile.read();
+        if let Some(ref prof) = *p {
+            prof.display_name.clone()
+                .or_else(|| prof.name.clone())
+                .unwrap_or_else(|| {
+                    if author_pubkey.len() > 16 {
+                        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
+                    } else {
+                        author_pubkey.clone()
+                    }
+                })
+        } else {
+            if author_pubkey.len() > 16 {
+                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
+            } else {
+                author_pubkey.clone()
+            }
+        }
+    };
+
+    // Get picture from profile or fallback to identicon
+    let picture = {
+        let p = profile.read();
+        p.as_ref()
+            .and_then(|prof| prof.picture.clone())
+            .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", author_pubkey))
+    };
+
+    let content = truncate_content(&note.event.content, 100);
+
+    rsx! {
+        Link {
+            to: Route::Note { note_id: note_bech32 },
+            class: "block px-4 py-3 hover:bg-accent/50 transition-colors border-b border-border last:border-0",
+
+            div {
+                class: "flex gap-3",
+
+                // Avatar
+                img {
+                    src: "{picture}",
+                    alt: "{author_name}",
+                    class: "w-10 h-10 rounded-full flex-shrink-0 object-cover",
+                    loading: "lazy"
+                }
+
+                // Content
+                div {
+                    class: "flex-1 min-w-0",
+
+                    // Author name
+                    div {
+                        class: "text-sm font-semibold truncate mb-1",
+                        "{author_name}"
+                    }
+
+                    // Note content
+                    div {
+                        class: "text-sm mb-2 line-clamp-2",
+                        "{content}"
+                    }
+
+                    // Stats
+                    if let Some(stats) = &note.stats {
+                        div {
+                            class: "flex items-center gap-3 text-xs text-muted-foreground",
+
+                            if let Some(reactions) = stats.reactions {
+                                if reactions > 0 {
+                                    span {
+                                        class: "flex items-center gap-1",
+                                        "❤️ {reactions}"
+                                    }
+                                }
+                            }
+
+                            if let Some(replies) = stats.replies {
+                                if replies > 0 {
+                                    span {
+                                        class: "flex items-center gap-1",
+                                        "💬 {replies}"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

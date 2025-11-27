@@ -91,7 +91,10 @@ pub fn NoteCard(
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
     use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
         spawn(async move {
-            let has_precomputed = counts_opt.is_some();
+            // Only consider precomputed if it actually has data (not just zeros from batch init)
+            let has_precomputed = counts_opt.as_ref().map_or(false, |c|
+                c.replies > 0 || c.likes > 0 || c.reposts > 0 || c.zap_amount_sats > 0
+            );
             let client = match get_client() {
                 Some(c) => c,
                 None => return,

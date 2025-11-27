@@ -2046,27 +2046,26 @@ fn ZapStreamRenderer(naddr: String) -> Element {
         spawn(async move {
             match Nip19::from_bech32(&naddr_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
-                    // Fetch the event using the coordinate
-                    if let Some(client) = nostr_client::get_client() {
-                        let filter = Filter::new()
-                            .kind(coord.kind)
-                            .author(coord.public_key)
-                            .identifier(coord.identifier.clone());
+                    // Use helper that handles relay hints, ensure_relays_ready, and DB caching
+                    let relay_hints: Vec<String> = coord.relays.iter()
+                        .map(|r| r.to_string())
+                        .collect();
 
-                        match client.fetch_events(filter, std::time::Duration::from_secs(5)).await {
-                            Ok(events) => {
-                                if let Some(e) = events.into_iter().next() {
-                                    event.set(Some(e));
-                                } else {
-                                    error.set(Some("Live event not found".to_string()));
-                                }
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to fetch event: {}", e)));
-                            }
+                    match nostr_client::fetch_event_by_coordinate_with_relays(
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier.clone(),
+                        relay_hints,
+                    ).await {
+                        Ok(Some(e)) => {
+                            event.set(Some(e));
                         }
-                    } else {
-                        error.set(Some("Client not initialized".to_string()));
+                        Ok(None) => {
+                            error.set(Some("Live event not found".to_string()));
+                        }
+                        Err(e) => {
+                            error.set(Some(e));
+                        }
                     }
                     loading.set(false);
                 }
