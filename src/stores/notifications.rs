@@ -180,6 +180,9 @@ pub async fn fetch_and_merge_from_nip78() {
         .identifier("notifications_checked_at")
         .limit(1);
 
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
+
     // Fetch events with timeout
     match client.fetch_events(filter, std::time::Duration::from_secs(5)).await {
         Ok(events) => {

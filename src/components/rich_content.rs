@@ -19,7 +19,7 @@ pub fn RichContent(
     let mut is_expanded = use_signal(|| false);
 
     // Estimate if content is long enough to need collapsing
-    // Count characters and media items to estimate ~8 lines
+    // Count characters and media items to estimate content height
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
         let media_count = tokens.iter().filter(|t| {
@@ -30,8 +30,9 @@ pub fn RichContent(
                      ContentToken::EventMention(_))
         }).count();
 
-        // Heuristic: >400 chars (roughly 8 lines at ~50 chars/line) or has media
-        char_count > 400 || media_count > 0
+        // Heuristic: >800 chars (roughly 16 lines at ~50 chars/line)
+        // OR has media AND enough text that it would overflow with media (~200 chars + media)
+        char_count > 800 || (media_count > 0 && char_count > 200)
     } else {
         false
     };
@@ -44,7 +45,7 @@ pub fn RichContent(
                     class: if *is_expanded.read() {
                         "whitespace-pre-wrap break-words space-y-2"
                     } else {
-                        "whitespace-pre-wrap break-words space-y-2 max-h-[12em] overflow-hidden"
+                        "whitespace-pre-wrap break-words space-y-2 max-h-[24em] overflow-hidden"
                     },
                     for token in tokens.iter() {
                         {render_token(token)}
@@ -276,16 +277,24 @@ fn EventMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:note..." or just "note..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
-    // Parse event ID from either nevent or note
-    let event_id_result: Option<EventId> = if identifier.starts_with("nevent1") {
+    // Parse event ID and relay hints from either nevent or note
+    let parsed_event: Option<(EventId, Vec<String>)> = if identifier.starts_with("nevent1") {
         nostr_sdk::nips::nip19::Nip19Event::from_bech32(identifier)
             .ok()
-            .map(|nip19| nip19.event_id)
+            .map(|nip19| {
+                let relays: Vec<String> = nip19.relays.iter()
+                    .map(|r| r.to_string())
+                    .collect();
+                (nip19.event_id, relays)
+            })
     } else if identifier.starts_with("note1") {
-        nostr_sdk::EventId::from_bech32(identifier).ok()
+        nostr_sdk::EventId::from_bech32(identifier).ok().map(|id| (id, Vec::new()))
     } else {
         None
     };
+
+    let event_id_result = parsed_event.as_ref().map(|(id, _)| *id);
+    let relay_hints = parsed_event.map(|(_, relays)| relays).unwrap_or_default();
 
     // Handle naddr (parameterized replaceable event coordinate) - typically articles
     if identifier.starts_with("naddr1") {
@@ -301,33 +310,63 @@ fn EventMentionRenderer(mention: String) -> Element {
     // Fetch the referenced event
     use_effect(move || {
         if let Some(event_id) = event_id_result {
+            let relay_hints_clone = relay_hints.clone();
             spawn(async move {
                 let event_filter = Filter::new()
                     .id(event_id)
                     .limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                    event_filter,
-                    std::time::Duration::from_secs(5)
-                ).await {
-                    if let Some(event) = events.into_iter().next() {
-                        let author_pubkey = event.pubkey;
-                        embedded_event.set(Some(event));
+                // Try relay hints first if available, then fall back to aggregated fetch
+                let fetch_result = if !relay_hints_clone.is_empty() {
+                    // Use relay hints from nevent
+                    if let Some(client) = nostr_client::get_client() {
+                        let relay_urls: Vec<nostr_sdk::Url> = relay_hints_clone.iter()
+                            .filter_map(|r| nostr_sdk::Url::parse(r).ok())
+                            .collect();
 
-                        // Fetch author metadata using Outbox
-                        let metadata_filter = Filter::new()
-                            .author(author_pubkey)
-                            .kind(Kind::Metadata)
-                            .limit(1);
+                        if !relay_urls.is_empty() {
+                            nostr_client::ensure_relays_ready(&client).await;
+                            client.fetch_events_from(relay_urls, event_filter.clone(), std::time::Duration::from_secs(5)).await
+                                .map(|events| events.into_iter().collect::<Vec<_>>())
+                                .ok()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-                        if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                            metadata_filter,
+                // Fall back to aggregated fetch if relay hints didn't work
+                let events = match fetch_result {
+                    Some(events) if !events.is_empty() => events,
+                    _ => {
+                        nostr_client::fetch_events_aggregated(
+                            event_filter,
                             std::time::Duration::from_secs(5)
-                        ).await {
-                            if let Some(metadata_event) = metadata_events.into_iter().next() {
-                                if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                                    author_metadata.set(Some(meta));
-                                }
+                        ).await.unwrap_or_default()
+                    }
+                };
+
+                if let Some(event) = events.into_iter().next() {
+                    let author_pubkey = event.pubkey;
+                    embedded_event.set(Some(event));
+
+                    // Fetch author metadata using Outbox
+                    let metadata_filter = Filter::new()
+                        .author(author_pubkey)
+                        .kind(Kind::Metadata)
+                        .limit(1);
+
+                    if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
+                        metadata_filter,
+                        std::time::Duration::from_secs(5)
+                    ).await {
+                        if let Some(metadata_event) = metadata_events.into_iter().next() {
+                            if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
+                                author_metadata.set(Some(meta));
                             }
                         }
                     }
@@ -512,12 +551,15 @@ fn render_youtube_embed(url: &str) -> Element {
 }
 
 fn extract_youtube_id(url: &str) -> Option<String> {
-    // Handle youtube.com/watch?v=ID
+    // Handle youtube.com/watch?v=ID (including with playlist params)
     if let Some(start) = url.find("v=") {
         let id_start = start + 2;
         let id = &url[id_start..];
         let id = id.split('&').next()?;
-        return Some(id.to_string());
+        let id = id.split('#').next()?; // Handle hash fragments
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
     }
 
     // Handle youtu.be/ID
@@ -526,6 +568,57 @@ fn extract_youtube_id(url: &str) -> Option<String> {
             let id_start = start + 9;
             let id = &url[id_start..];
             let id = id.split('?').next()?;
+            let id = id.split('#').next()?;
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    // Handle youtube.com/shorts/ID
+    if let Some(start) = url.find("/shorts/") {
+        let id_start = start + 8;
+        let id = &url[id_start..];
+        let id = id.split('?').next()?;
+        let id = id.split('#').next()?;
+        let id = id.split('/').next()?; // Handle trailing slashes
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    // Handle youtube.com/embed/ID
+    if let Some(start) = url.find("/embed/") {
+        let id_start = start + 7;
+        let id = &url[id_start..];
+        let id = id.split('?').next()?;
+        let id = id.split('#').next()?;
+        let id = id.split('/').next()?;
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    // Handle youtube.com/live/ID
+    if let Some(start) = url.find("/live/") {
+        let id_start = start + 6;
+        let id = &url[id_start..];
+        let id = id.split('?').next()?;
+        let id = id.split('#').next()?;
+        let id = id.split('/').next()?;
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    // Handle youtube.com/v/ID (older embed format)
+    if let Some(start) = url.find("/v/") {
+        let id_start = start + 3;
+        let id = &url[id_start..];
+        let id = id.split('?').next()?;
+        let id = id.split('#').next()?;
+        let id = id.split('/').next()?;
+        if !id.is_empty() {
             return Some(id.to_string());
         }
     }
@@ -704,10 +797,15 @@ fn ArticleMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:naddr..." or just "naddr..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
-    // Parse the naddr coordinate and extract data we need
+    // Parse the naddr coordinate and extract data we need, including relay hints
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
-        .map(|coord| (coord.public_key.to_hex(), coord.identifier.clone(), coord.kind.as_u16()));
+        .map(|coord| {
+            let relay_hints: Vec<String> = coord.relays.iter()
+                .map(|r| r.to_string())
+                .collect();
+            (coord.public_key.to_hex(), coord.identifier.clone(), coord.kind.as_u16(), relay_hints)
+        });
 
     // Always call hooks unconditionally
     let mut article_event = use_signal(|| None::<Event>);
@@ -719,16 +817,19 @@ fn ArticleMentionRenderer(mention: String) -> Element {
 
     // Fetch the event by coordinate
     use_effect(move || {
-        if let Some((ref pubkey, ref ident, _kind)) = coord_data_for_effect {
+        if let Some((ref pubkey, ref ident, kind, ref relays)) = coord_data_for_effect {
             let pubkey = pubkey.clone();
             let ident = ident.clone();
+            let relay_hints = relays.clone();
             spawn(async move {
                 loading.set(true);
 
-                // Fetch event by coordinate (works for both articles and streams)
-                match crate::stores::nostr_client::fetch_article_by_coordinate(
+                // Fetch event by coordinate with the correct kind from naddr and relay hints
+                match crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
+                        kind,
                         pubkey.clone(),
-                        ident
+                        ident,
+                        relay_hints
                     ).await {
                         Ok(Some(event)) => {
                             let author_pubkey = event.pubkey;
@@ -764,7 +865,7 @@ fn ArticleMentionRenderer(mention: String) -> Element {
         }
     });
 
-    if let Some((_pubkey, _ident, kind)) = coord_data {
+    if let Some((_pubkey, _ident, kind, _relays)) = coord_data {
         let naddr_for_link = identifier.to_string();
 
         // Render embedded preview based on kind
@@ -778,9 +879,12 @@ fn ArticleMentionRenderer(mention: String) -> Element {
             // Route to appropriate card based on event kind
             match kind {
                 30311 => {
-                    // Live Stream (kind 30311)
+                    // Live Stream (kind 30311) - wrap with stop_propagation for embedded use
                     rsx! {
-                        LiveStreamCard { event: event }
+                        div {
+                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                            LiveStreamCard { event: event }
+                        }
                     }
                 }
                 30023 => {

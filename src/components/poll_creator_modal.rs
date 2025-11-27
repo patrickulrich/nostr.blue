@@ -41,8 +41,8 @@ pub fn PollCreatorModal(
         !*is_publishing.read()
     });
 
-    // Handle close - reset all form state
-    let handle_close = move |_| {
+    // Reset form to initial state - used by both close and successful publish
+    let mut reset_form = move || {
         poll_question.set(String::new());
         poll_type.set(PollType::SingleChoice);
         options.set(vec![
@@ -60,6 +60,12 @@ pub fn PollCreatorModal(
         hashtags_input.set(String::new());
         error_message.set(None);
         show_advanced.set(false);
+        is_publishing.set(false);
+    };
+
+    // Handle close - reset all form state and hide modal
+    let handle_close = move |_| {
+        reset_form();
         show.set(false);
     };
 
@@ -121,7 +127,6 @@ pub fn PollCreatorModal(
             ).await {
                 Ok(event_id_hex) => {
                     log::info!("Poll published successfully: {}", event_id_hex);
-                    is_publishing.set(false);
 
                     // Convert event ID hex to nostr:nevent1... format
                     let nevent_ref = match EventId::from_hex(&event_id_hex) {
@@ -134,6 +139,9 @@ pub fn PollCreatorModal(
 
                     // Call the callback with the nevent reference
                     on_poll_created.call(nevent_ref);
+
+                    // Reset form and close modal
+                    reset_form();
                     show.set(false);
                 }
                 Err(e) => {

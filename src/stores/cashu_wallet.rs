@@ -473,6 +473,9 @@ pub async fn init_wallet() -> Result<(), String> {
         .kind(Kind::from(17375))
         .limit(1);
 
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
+
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(wallet_event) = events.into_iter().next() {
@@ -617,6 +620,9 @@ pub async fn fetch_tokens() -> Result<(), String> {
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     log::info!("Fetching token events");
+
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
 
     // Fetch kind-5 deletion events that target kind-7375 token events
     let deletion_filter = Filter::new()
@@ -784,6 +790,9 @@ pub async fn fetch_history() -> Result<(), String> {
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     log::info!("Fetching transaction history");
+
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
 
     let filter = Filter::new()
         .author(pubkey)

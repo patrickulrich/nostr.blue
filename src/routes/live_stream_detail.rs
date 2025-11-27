@@ -19,12 +19,12 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Get author metadata from profile store (use creator from p tag if available)
+    // Get author metadata from profile store (use host from p tag if available)
     let author_metadata = use_memo(move || {
         if let Some(meta) = stream_meta.read().as_ref() {
-            // Use creator_pubkey from p tag if available
-            if let Some(creator_pk) = &meta.creator_pubkey {
-                return profiles::get_profile(creator_pk);
+            // Use host_pubkey from p tag if available
+            if let Some(host_pk) = &meta.host_pubkey {
+                return profiles::get_profile(host_pk);
             }
         }
         // Fall back to event publisher
@@ -72,8 +72,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                         if let Some(event) = events.first() {
                             // Parse stream metadata
                             if let Some(meta) = parse_live_stream_event(event) {
-                                // Fetch creator profile (use p tag if available, otherwise publisher)
-                                let profile_to_fetch = meta.creator_pubkey.clone()
+                                // Fetch host profile (use p tag if available, otherwise publisher)
+                                let profile_to_fetch = meta.host_pubkey.clone()
                                     .unwrap_or_else(|| author_pk.clone());
 
                                 stream_meta.set(Some(meta));
@@ -313,9 +313,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                             div {
                                                 class: "flex-1",
                                                 {
-                                                    // Get creator-aware identifier (use p tag creator if available, otherwise event publisher)
+                                                    // Get host-aware identifier (use p tag host if available, otherwise event publisher)
                                                     let event_pubkey = event.pubkey.to_string();
-                                                    let author_identifier = meta.creator_pubkey.as_ref()
+                                                    let author_identifier = meta.host_pubkey.as_ref()
                                                         .map(|s| s.as_str())
                                                         .unwrap_or(&event_pubkey);
 

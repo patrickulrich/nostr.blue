@@ -81,6 +81,9 @@ pub async fn load_settings() -> Result<(), String> {
         .identifier(SETTINGS_D_TAG)
         .limit(1);
 
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
+
     // Fetch settings event
     match client.fetch_events(filter, Duration::from_secs(5)).await {
         Ok(events) => {

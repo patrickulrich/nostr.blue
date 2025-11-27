@@ -33,8 +33,13 @@ pub fn Search(q: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
-    let query = use_signal(|| q.clone());
+    let mut query = use_signal(|| q.clone());
     let mut search_version = use_signal(|| 0u64);
+
+    // Update query signal when prop changes (e.g., new search from search bar)
+    use_effect(use_reactive!(|q| {
+        query.set(q.clone());
+    }));
 
     // Fetch contacts on mount
     use_effect(move || {

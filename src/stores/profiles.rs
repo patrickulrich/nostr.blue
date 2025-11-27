@@ -73,9 +73,10 @@ impl Profile {
 }
 
 /// Global signal to cache profiles (pubkey -> Profile)
-/// LRU cache with max capacity of 1000 profiles to prevent unbounded memory growth
+/// LRU cache with max capacity of 5000 profiles to prevent unbounded memory growth
+/// Increased from 1000 to better serve power users who follow many accounts
 pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
-    Signal::global(|| LruCache::new(NonZeroUsize::new(1000).unwrap()));
+    Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
 
 /// Cache TTL in seconds (5 minutes)
 const CACHE_TTL_SECONDS: i64 = 300;

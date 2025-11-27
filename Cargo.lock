@@ -3210,6 +3210,7 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "dioxus-stores",
+ "futures",
  "getrandom 0.2.16",
  "gloo-net 0.5.0",
  "gloo-storage",

@@ -17,7 +17,7 @@ pub fn Explore() -> Element {
 
     // Load initial feed
     use_effect(move || {
-        let _ = refresh_trigger.read();
+        let trigger = *refresh_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         // Only load if client is initialized
@@ -29,11 +29,19 @@ pub fn Explore() -> Element {
         error.set(None);
         oldest_timestamp.set(None);
 
-        // Clear profile cache to prevent stale author metadata on refresh
-        crate::stores::profiles::PROFILE_CACHE.write().clear();
+        // Note: Profile cache NOT cleared - 5-min TTL handles staleness
+
+        // If trigger > 0, this is a refresh - fetch from relays for fresh data
+        let is_refresh = trigger > 0;
 
         spawn(async move {
-            match load_global_feed(None).await {
+            let result = if is_refresh {
+                load_global_feed_refresh().await
+            } else {
+                load_global_feed(None).await
+            };
+
+            match result {
                 Ok(feed_events) => {
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -235,7 +243,15 @@ pub fn Explore() -> Element {
 
 // Helper function to load global feed
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
-    log::info!("Loading global feed (until: {:?})...", until);
+    load_global_feed_impl(until, false).await
+}
+
+async fn load_global_feed_refresh() -> Result<Vec<Event>, String> {
+    load_global_feed_impl(None, true).await
+}
+
+async fn load_global_feed_impl(until: Option<u64>, force_relay: bool) -> Result<Vec<Event>, String> {
+    log::info!("Loading global feed (until: {:?}, force_relay: {})...", until, force_relay);
 
     // Create filter for recent text notes (kind 1)
     let mut filter = Filter::new()
@@ -249,8 +265,15 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
 
     log::info!("Fetching events with filter: {:?}", filter);
 
-    // Fetch events using aggregated pattern (database-first)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // For refresh, fetch directly from relays to get fresh data
+    // For initial load/pagination, use aggregated pattern (database-first)
+    let fetch_result = if force_relay {
+        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
+    } else {
+        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    };
+
+    match fetch_result {
         Ok(events) => {
             log::info!("Loaded {} events", events.len());
 

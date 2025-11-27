@@ -1,14 +1,18 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_blossom::prelude::*;
-use nostr_sdk::Url;
+use nostr_sdk::{Url, Filter, Kind, PublicKey, FromBech32, Tag, TagKind};
 use sha2::{Sha256, Digest};
 use image::ImageFormat;
 use std::io::Cursor;
-use crate::stores::nostr_client;
+use std::time::Duration;
+use crate::stores::{nostr_client, auth_store};
 
 /// Default Blossom server
 pub const DEFAULT_SERVER: &str = "https://blossom.primal.net";
+
+/// Kind 10063 - User Blossom Server List (NIP-B7)
+pub const KIND_USER_BLOSSOM_SERVERS: u16 = 10063;
 
 /// Global signal for the list of configured Blossom servers
 /// Store for blossom servers with fine-grained reactivity
@@ -18,6 +22,9 @@ pub struct BlossomServersStore {
 }
 
 pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| { let mut store = BlossomServersStore::default(); store.data = vec![DEFAULT_SERVER.to_string()]; Store::new(store) });
+
+/// Track if servers have been loaded from Nostr
+pub static SERVERS_LOADED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Global signal for upload progress (0-100)
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
@@ -269,4 +276,137 @@ pub fn calculate_sha256(data: &[u8]) -> String {
     hasher.update(data);
     let result = hasher.finalize();
     format!("{:x}", result)
+}
+
+/// Fetch user's Blossom servers from kind 10063 (NIP-B7)
+/// Should be called on authentication to load user's preferred servers
+pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey = PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| PublicKey::from_hex(&pubkey_str))
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    log::info!("Fetching user's Blossom servers (kind 10063)...");
+
+    // Build filter for kind 10063
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::from(KIND_USER_BLOSSOM_SERVERS))
+        .limit(1);
+
+    // Try database first
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if let Some(event) = db_events.into_iter().next() {
+            let servers = parse_server_tags(&event.tags);
+            if !servers.is_empty() {
+                log::info!("Found {} Blossom servers in DB", servers.len());
+                set_servers(servers.clone());
+                *SERVERS_LOADED.write() = true;
+                return Ok(servers);
+            }
+        }
+    }
+
+    // Fetch from relays
+    nostr_client::ensure_relays_ready(&client).await;
+
+    match client.fetch_events(filter, Duration::from_secs(5)).await {
+        Ok(events) => {
+            if let Some(event) = events.into_iter().next() {
+                let servers = parse_server_tags(&event.tags);
+                if !servers.is_empty() {
+                    log::info!("Found {} Blossom servers from relay", servers.len());
+                    set_servers(servers.clone());
+                    *SERVERS_LOADED.write() = true;
+                    return Ok(servers);
+                }
+            }
+            log::info!("No Blossom servers found, using defaults");
+            *SERVERS_LOADED.write() = true;
+            Ok(vec![DEFAULT_SERVER.to_string()])
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch Blossom servers: {}", e);
+            *SERVERS_LOADED.write() = true;
+            Err(format!("Failed to fetch servers: {}", e))
+        }
+    }
+}
+
+/// Parse server tags from a kind 10063 event
+fn parse_server_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
+    tags.iter()
+        .filter_map(|tag| {
+            // Look for ["server", "url"] tags
+            if tag.kind() == TagKind::Custom("server".into()) {
+                tag.content().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Set all servers (replaces existing list)
+pub fn set_servers(servers: Vec<String>) {
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut current = data.write();
+    current.clear();
+    if servers.is_empty() {
+        current.push(DEFAULT_SERVER.to_string());
+    } else {
+        current.extend(servers);
+    }
+}
+
+/// Publish user's Blossom servers as kind 10063 (NIP-B7)
+pub async fn publish_user_servers() -> Result<String, String> {
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    let signer = nostr_client::get_signer().ok_or("No signer available")?;
+
+    let servers = BLOSSOM_SERVERS.read().data().read().clone();
+
+    log::info!("Publishing {} Blossom servers to kind 10063", servers.len());
+
+    // Build tags: ["server", "url"] for each server
+    let tags: Vec<Tag> = servers.iter()
+        .map(|url| Tag::custom(TagKind::Custom("server".into()), vec![url.clone()]))
+        .collect();
+
+    // Create kind 10063 event
+    let builder = nostr_sdk::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "")
+        .tags(tags);
+
+    // Sign and publish
+    let event = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            builder.sign(&keys).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            builder.sign(browser_signer.as_ref()).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            builder.sign(nostr_connect.as_ref()).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+    };
+
+    nostr_client::ensure_relays_ready(&client).await;
+
+    match client.send_event(&event).await {
+        Ok(output) => {
+            log::info!("Published Blossom server list: {}", output.id());
+            Ok(output.id().to_string())
+        }
+        Err(e) => {
+            log::error!("Failed to publish Blossom server list: {}", e);
+            Err(format!("Failed to publish: {}", e))
+        }
+    }
 }

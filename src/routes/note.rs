@@ -7,19 +7,35 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 
-// Helper functions for parallel loading
+// Helper functions for two-phase loading (DB first, then relay)
 
-async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
+/// Phase 1: Load from database (instant)
+async fn fetch_note_from_db(event_id: EventId) -> Option<NostrEvent> {
+    let client = nostr_client::get_client()?;
     let filter = Filter::new().id(event_id);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    events.into_iter().next().ok_or("Event not found".to_string())
+
+    if let Ok(events) = client.database().query(filter).await {
+        events.into_iter().next()
+    } else {
+        None
+    }
 }
 
-async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
-    // First get the main note to extract parent IDs
-    let main_note = fetch_main_note(event_id).await?;
+/// Phase 2: Fetch from relays (slower but fresh)
+async fn fetch_note_from_relay(event_id: EventId) -> std::result::Result<Option<NostrEvent>, String> {
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
+    nostr_client::ensure_relays_ready(&client).await;
 
-    let parent_ids: Vec<EventId> = main_note.tags.iter()
+    let filter = Filter::new().id(event_id);
+    match client.fetch_events(filter, Duration::from_secs(10)).await {
+        Ok(events) => Ok(events.into_iter().next()),
+        Err(e) => Err(format!("Failed to fetch note: {}", e))
+    }
+}
+
+/// Fetch parent notes given the main note's tags
+async fn fetch_parent_notes_from_tags(tags: &nostr_sdk::Tags) -> Vec<NostrEvent> {
+    let parent_ids: Vec<EventId> = tags.iter()
         .filter_map(|tag| {
             if tag.kind() == nostr_sdk::TagKind::SingleLetter(
                 nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
@@ -37,7 +53,7 @@ async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrE
         .collect();
 
     if parent_ids.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     let filter = Filter::new()
@@ -45,15 +61,42 @@ async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrE
         .kind(Kind::TextNote);
 
     nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+        .unwrap_or_default()
 }
 
-async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
+/// Fetch replies from DB first, then relay
+async fn fetch_replies_db(event_id: EventId) -> Vec<NostrEvent> {
+    let client = match nostr_client::get_client() {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
     let filter = Filter::new()
         .kind(Kind::TextNote)
         .event(event_id)
         .limit(100);
 
-    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    client.database().query(filter).await
+        .map(|events| events.into_iter().collect())
+        .unwrap_or_default()
+}
+
+async fn fetch_replies_relay(event_id: EventId) -> Vec<NostrEvent> {
+    let client = match nostr_client::get_client() {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    nostr_client::ensure_relays_ready(&client).await;
+
+    let filter = Filter::new()
+        .kind(Kind::TextNote)
+        .event(event_id)
+        .limit(100);
+
+    client.fetch_events(filter, Duration::from_secs(10)).await
+        .map(|events| events.into_iter().collect())
+        .unwrap_or_default()
 }
 
 #[component]
@@ -66,7 +109,7 @@ pub fn Note(note_id: String) -> Element {
     let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
-    // PARALLEL LOADING - Fetch all data at once (10s instead of 30s)
+    // TWO-PHASE LOADING - DB first (instant), then relay (background)
     use_effect(use_reactive!(|note_id| {
         let note_id_str = note_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -83,9 +126,6 @@ pub fn Note(note_id: String) -> Element {
             loading_replies.set(true);
             error.set(None);
 
-            // Clear profile cache to prevent stale author metadata when navigating between notes
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
-
             // Parse the note ID
             let event_id = match EventId::from_bech32(&note_id_str)
                 .or_else(|_| EventId::from_hex(&note_id_str)) {
@@ -99,36 +139,82 @@ pub fn Note(note_id: String) -> Element {
                 }
             };
 
-            // PARALLEL FETCHES - All three at once!
-            let (note_result, parents_result, replies_result) = tokio::join!(
-                fetch_main_note(event_id),
-                fetch_parent_notes(event_id),
-                fetch_replies(event_id)
+            // PHASE 1: Load from DB (instant)
+            let (db_note, db_replies) = tokio::join!(
+                fetch_note_from_db(event_id),
+                fetch_replies_db(event_id)
             );
 
-            // Process main note
-            match note_result {
-                Ok(event) => {
-                    note_data.set(Some(event));
+            // Show DB results immediately
+            if let Some(note) = db_note.clone() {
+                note_data.set(Some(note.clone()));
+                loading.set(false);
+
+                // Fetch parents based on note tags
+                let parents = fetch_parent_notes_from_tags(&note.tags).await;
+                if !parents.is_empty() {
+                    let mut sorted_parents = parents;
+                    sorted_parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                    parent_events.set(sorted_parents);
                 }
-                Err(e) => {
-                    error.set(Some(e));
-                }
+                loading_parents.set(false);
             }
 
-            // Process parents
-            if let Ok(mut parents) = parents_result {
-                parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                parent_events.set(parents);
+            if !db_replies.is_empty() {
+                let mut sorted_replies = db_replies;
+                sorted_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                log::info!("Phase 1 (DB): Loaded {} replies", sorted_replies.len());
+                replies.set(sorted_replies);
+                loading_replies.set(false);
             }
 
-            // Process replies
-            if let Ok(mut reply_vec) = replies_result {
-                reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                let count = reply_vec.len();
-                replies.set(reply_vec);
-                log::info!("Loaded {} replies", count);
+            // PHASE 2: Fetch from relays (background, merge new data)
+            let (relay_note, relay_replies) = tokio::join!(
+                fetch_note_from_relay(event_id),
+                async { fetch_replies_relay(event_id).await }
+            );
+
+            // Merge relay note (if not found in DB)
+            if let Ok(Some(note)) = relay_note {
+                if note_data.read().is_none() {
+                    note_data.set(Some(note.clone()));
+
+                    // Fetch parents if we didn't have the note before
+                    let parents = fetch_parent_notes_from_tags(&note.tags).await;
+                    if !parents.is_empty() {
+                        let mut sorted_parents = parents;
+                        sorted_parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                        parent_events.set(sorted_parents);
+                    }
+                }
+                loading.set(false);
+                loading_parents.set(false);
+            } else if note_data.read().is_none() {
+                error.set(Some("Event not found".to_string()));
+                loading.set(false);
+                loading_parents.set(false);
             }
+
+            // Merge relay replies (deduplicate)
+            if !relay_replies.is_empty() {
+                let current_replies = replies.read().clone();
+                let existing_ids: std::collections::HashSet<_> = current_replies.iter()
+                    .map(|e| e.id)
+                    .collect();
+
+                let new_replies: Vec<_> = relay_replies.into_iter()
+                    .filter(|e| !existing_ids.contains(&e.id))
+                    .collect();
+
+                if !new_replies.is_empty() {
+                    let mut all_replies = current_replies;
+                    all_replies.extend(new_replies);
+                    all_replies.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                    log::info!("Phase 2 (Relay): Total {} replies after merge", all_replies.len());
+                    replies.set(all_replies);
+                }
+            }
+            loading_replies.set(false);
 
             // Prefetch author metadata for all loaded events
             use crate::utils::profile_prefetch;
@@ -144,10 +230,6 @@ pub fn Note(note_id: String) -> Element {
                     profile_prefetch::prefetch_event_authors(&all_events).await;
                 });
             }
-
-            loading.set(false);
-            loading_parents.set(false);
-            loading_replies.set(false);
         });
     }));
 

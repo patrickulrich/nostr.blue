@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::events::MouseData;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, Timestamp, JsonUtil};
+use nostr_sdk::nips::nip53::{LiveEvent, LiveEventStatus};
 use crate::routes::Route;
 use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED};
 use std::time::Duration;
@@ -12,12 +13,13 @@ pub enum StreamStatus {
     Ended,
 }
 
-impl StreamStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "live" => StreamStatus::Live,
-            "ended" => StreamStatus::Ended,
-            _ => StreamStatus::Planned,
+impl From<&LiveEventStatus> for StreamStatus {
+    fn from(status: &LiveEventStatus) -> Self {
+        match status {
+            LiveEventStatus::Live => StreamStatus::Live,
+            LiveEventStatus::Ended => StreamStatus::Ended,
+            LiveEventStatus::Planned => StreamStatus::Planned,
+            LiveEventStatus::Custom(_) => StreamStatus::Planned,
         }
     }
 }
@@ -30,110 +32,46 @@ pub struct LiveStreamMeta {
     pub image: Option<String>,
     pub streaming_url: Option<String>,
     pub status: StreamStatus,
-    pub current_participants: Option<u32>,
+    pub current_participants: Option<u64>,
     pub starts: Option<Timestamp>,
     pub tags: Vec<String>,
-    /// The actual creator/streamer (from p tag), if present
-    pub creator_pubkey: Option<String>,
+    /// The host pubkey from p tag with Host marker
+    pub host_pubkey: Option<String>,
 }
 
-/// Parse NIP-53 Kind 30311 live streaming event
+/// Parse NIP-53 Kind 30311 live streaming event using nostr-sdk's LiveEvent
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
-    use nostr_sdk::TagKind;
-
-    let mut meta = LiveStreamMeta {
-        d_tag: String::new(),
-        title: None,
-        summary: None,
-        image: None,
-        streaming_url: None,
-        status: StreamStatus::Planned,
-        current_participants: None,
-        starts: None,
-        tags: Vec::new(),
-        creator_pubkey: None,
+    // Use nostr-sdk's built-in LiveEvent parsing
+    let live_event = match LiveEvent::try_from(event.tags.clone().to_vec()) {
+        Ok(le) => le,
+        Err(e) => {
+            log::warn!("Failed to parse LiveEvent from tags: {}", e);
+            return None;
+        }
     };
 
-    log::info!("Parsing live stream event: {}", event.id);
-    log::info!("Total tags: {}", event.tags.len());
+    log::debug!("Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}",
+        live_event.id,
+        live_event.title,
+        live_event.streaming,
+        live_event.status
+    );
 
-    for tag in event.tags.iter() {
-        let tag_kind = tag.kind();
+    // Extract host pubkey
+    let host_pubkey = live_event.host.as_ref().map(|h| h.public_key.to_string());
 
-        // Handle standard tags with TagKind methods
-        if tag_kind == TagKind::d() {
-            if let Some(value) = tag.content() {
-                meta.d_tag = value.to_string();
-                log::info!("Found d tag: {}", value);
-            }
-        } else if tag_kind == TagKind::p() {
-            // Get the first p tag as the creator/streamer
-            if meta.creator_pubkey.is_none() {
-                if let Some(value) = tag.content() {
-                    meta.creator_pubkey = Some(value.to_string());
-                    log::info!("Found creator p tag: {}", value);
-                }
-            }
-        } else if tag_kind == TagKind::t() {
-            if let Some(value) = tag.content() {
-                meta.tags.push(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("title") {
-            if let Some(value) = tag.content() {
-                meta.title = Some(value.to_string());
-                log::info!("Found title: {}", value);
-            }
-        } else if tag_kind == TagKind::custom("summary") {
-            if let Some(value) = tag.content() {
-                meta.summary = Some(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("image") {
-            if let Some(value) = tag.content() {
-                meta.image = Some(value.to_string());
-            }
-        } else if tag_kind == TagKind::custom("streaming") {
-            if let Some(value) = tag.content() {
-                let url = value.to_string();
-                log::info!("✅ Found streaming tag with URL: {}", url);
-                meta.streaming_url = Some(url);
-            } else {
-                log::warn!("❌ Found streaming tag but content is None");
-            }
-        } else if tag_kind == TagKind::custom("status") {
-            if let Some(value) = tag.content() {
-                meta.status = StreamStatus::from_str(value);
-                log::info!("Found status: {:?}", meta.status);
-            }
-        } else if tag_kind == TagKind::custom("current_participants") {
-            if let Some(value) = tag.content() {
-                if let Ok(count) = value.parse::<u32>() {
-                    meta.current_participants = Some(count);
-                }
-            }
-        } else if tag_kind == TagKind::custom("starts") {
-            if let Some(value) = tag.content() {
-                if let Ok(ts) = value.parse::<i64>() {
-                    // Validate timestamp is non-negative to avoid wraparound
-                    if ts >= 0 {
-                        meta.starts = Some(Timestamp::from(ts as u64));
-                    } else {
-                        log::warn!("Negative timestamp {} in starts tag, skipping", ts);
-                    }
-                }
-            }
-        }
-    }
-
-    log::info!("📊 Parsed streaming_url: {:?}", meta.streaming_url);
-    log::info!("📊 Parsed d_tag: {}", meta.d_tag);
-
-    // Only return if we have a d_tag (required)
-    if meta.d_tag.is_empty() {
-        log::warn!("Event {} missing required d tag", event.id);
-        None
-    } else {
-        Some(meta)
-    }
+    Some(LiveStreamMeta {
+        d_tag: live_event.id,
+        title: live_event.title,
+        summary: live_event.summary,
+        image: live_event.image.map(|(url, _dims)| url.to_string()),
+        streaming_url: live_event.streaming.map(|url| url.to_string()),
+        status: live_event.status.as_ref().map(StreamStatus::from).unwrap_or(StreamStatus::Planned),
+        current_participants: live_event.current_participants,
+        starts: live_event.starts,
+        tags: live_event.hashtags,
+        host_pubkey,
+    })
 }
 
 #[component]
@@ -144,8 +82,8 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     };
 
     // Clone values for closures
-    // Use creator pubkey from p tag if available, otherwise fall back to event publisher
-    let author_pubkey = stream_meta.creator_pubkey.clone()
+    // Use host pubkey from p tag if available, otherwise fall back to event publisher
+    let author_pubkey = stream_meta.host_pubkey.clone()
         .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let author_pubkey_display = author_pubkey.clone();
