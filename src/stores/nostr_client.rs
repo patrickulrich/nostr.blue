@@ -71,7 +71,15 @@ pub async fn ensure_relays_ready(client: &Client) {
     // but connect().await properly drives the connection futures to completion
     log::info!("No relays connected, calling connect().await to establish connections...");
     client.connect().await;
-    log::info!("connect().await completed, relays should now be connected");
+
+    // Verify connection status after connect attempt
+    let relays_after = client.relays().await;
+    let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
+    if connected_count == 0 {
+        log::warn!("connect().await completed but no relays are connected - fetches may fail");
+    } else {
+        log::info!("connect().await completed, {} relay(s) connected", connected_count);
+    }
 }
 
 /// Relay connection status
@@ -186,10 +194,21 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     *NOSTR_CLIENT.write() = Some(client.clone());
     *CLIENT_INITIALIZED.write() = true;
 
-    // Connect to relays in background - intentionally not awaited!
-    // nostr-sdk's connect() spawns background tasks and queues requests to disconnected relays
+    // Connect to relays in background - spawn the future so it gets polled to completion
+    // In WASM, simply dropping the Future won't reliably execute it
     log::debug!("Spawning background relay connections...");
-    let _ = client.connect();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let client_for_connect = client.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            client_for_connect.connect().await;
+            log::info!("Background relay connections completed");
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = client.connect();
+    }
 
     log::info!("Nostr client initialized (relays connecting in background)");
     Ok(client)
@@ -2214,8 +2233,9 @@ pub async fn publish_poll_vote(
             }
         }
 
-        // Connect to newly added relays
+        // Connect to newly added relays and log status
         client.connect().await;
+        log::debug!("Poll vote: connect() completed for {} poll relay(s)", poll_relays.len());
 
         // Publish to poll-specified relays
         let relay_urls: Vec<nostr::Url> = poll_relays.iter()

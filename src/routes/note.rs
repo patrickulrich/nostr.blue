@@ -34,23 +34,65 @@ async fn fetch_note_from_relay(event_id: EventId) -> std::result::Result<Option<
 }
 
 /// Fetch parent notes given the main note's tags
+/// Returns events sorted chronologically (oldest first) to show the thread context
 async fn fetch_parent_notes_from_tags(tags: &nostr_sdk::Tags) -> Vec<NostrEvent> {
-    let parent_ids: Vec<EventId> = tags.iter()
-        .filter_map(|tag| {
-            if tag.kind() == nostr_sdk::TagKind::SingleLetter(
-                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-            ) {
-                if let Some(content) = tag.content() {
-                    let parts: Vec<&str> = content.split('\t').collect();
-                    EventId::from_hex(parts[0]).ok()
-                } else {
-                    None
-                }
-            } else {
-                None
+    let mut root_id: Option<EventId> = None;
+    let mut reply_id: Option<EventId> = None;
+    let mut all_e_ids: Vec<EventId> = Vec::new();
+
+    // Parse e tags according to NIP-10
+    for tag in tags.iter() {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) != Some("e") {
+            continue;
+        }
+
+        // Get the event ID (second element)
+        let event_id = match slice.get(1).and_then(|id| EventId::from_hex(id).ok()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        // Check for marker (fourth element, if present)
+        let marker = slice.get(3).map(|s| s.as_str());
+
+        match marker {
+            Some("root") => root_id = Some(event_id),
+            Some("reply") => reply_id = Some(event_id),
+            _ => {
+                // Collect all e-tagged events for positional fallback
+                all_e_ids.push(event_id);
             }
-        })
-        .collect();
+        }
+    }
+
+    // Build the list of parent IDs to fetch
+    let mut parent_ids: Vec<EventId> = Vec::new();
+
+    // If we have marked tags, use them
+    if root_id.is_some() || reply_id.is_some() {
+        if let Some(root) = root_id {
+            parent_ids.push(root);
+        }
+        if let Some(reply) = reply_id {
+            // Only add reply if it's different from root
+            if Some(reply) != root_id {
+                parent_ids.push(reply);
+            }
+        }
+    } else {
+        // Fallback to positional parsing (deprecated but still in use)
+        // First e tag is root, last e tag is reply
+        if all_e_ids.len() == 1 {
+            parent_ids.push(all_e_ids[0]);
+        } else if all_e_ids.len() >= 2 {
+            parent_ids.push(all_e_ids[0]); // root
+            let last = all_e_ids[all_e_ids.len() - 1];
+            if last != all_e_ids[0] {
+                parent_ids.push(last); // reply (direct parent)
+            }
+        }
+    }
 
     if parent_ids.is_empty() {
         return Vec::new();
@@ -76,9 +118,13 @@ async fn fetch_replies_db(event_id: EventId) -> Vec<NostrEvent> {
         .event(event_id)
         .limit(100);
 
-    client.database().query(filter).await
-        .map(|events| events.into_iter().collect())
-        .unwrap_or_default()
+    match client.database().query(filter).await {
+        Ok(events) => events.into_iter().collect(),
+        Err(e) => {
+            log::error!("Failed to fetch replies from DB for event {}: {}", event_id, e);
+            Vec::new()
+        }
+    }
 }
 
 async fn fetch_replies_relay(event_id: EventId) -> Vec<NostrEvent> {
@@ -94,9 +140,13 @@ async fn fetch_replies_relay(event_id: EventId) -> Vec<NostrEvent> {
         .event(event_id)
         .limit(100);
 
-    client.fetch_events(filter, Duration::from_secs(10)).await
-        .map(|events| events.into_iter().collect())
-        .unwrap_or_default()
+    match client.fetch_events(filter, Duration::from_secs(10)).await {
+        Ok(events) => events.into_iter().collect(),
+        Err(e) => {
+            log::error!("Failed to fetch replies from relay for event {}: {}", event_id, e);
+            Vec::new()
+        }
+    }
 }
 
 #[component]

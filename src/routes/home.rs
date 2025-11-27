@@ -437,128 +437,25 @@ pub fn Home() -> Element {
 
             log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
 
-            match current_feed_type {
-                FeedType::Following => {
-                    match load_following_feed(until).await {
-                        Ok((new_items, _raw_count)) => {
-                            // If no items returned at all, we've reached the end
-                            if new_items.is_empty() {
-                                log::info!("No more items from relay, reached end of feed");
-                                has_more.set(false);
-                                pagination_loading.set(false);
-                                return;
-                            }
+            // Fetch items based on feed type
+            let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
+                FeedType::Following => load_following_feed(until).await.map(|(items, _)| items),
+                FeedType::FollowingWithReplies => load_following_with_replies(until).await,
+            };
 
-                            // Get current feed to deduplicate
-                            let current_state = feed_state.read().clone();
-                            if let DataState::Loaded(current) = current_state {
-                                // Build set of existing event IDs for O(1) lookup
-                                let existing_ids: std::collections::HashSet<_> = current.iter()
-                                    .map(|item| item.event().id)
-                                    .collect();
-
-                                // Filter out duplicates
-                                let unique_items: Vec<_> = new_items.iter()
-                                    .filter(|item| !existing_ids.contains(&item.event().id))
-                                    .cloned()
-                                    .collect();
-
-                                log::info!("Deduplication: {} total, {} unique items after filtering",
-                                    new_items.len(), unique_items.len());
-
-                                // Always update oldest_timestamp from ALL fetched items (not just unique)
-                                // to ensure we make progress even if all items were duplicates
-                                // Subtract 1 to avoid re-fetching posts at the exact boundary
-                                if let Some(last_item) = new_items.last() {
-                                    let ts = last_item.sort_timestamp().as_secs().saturating_sub(1);
-                                    oldest_timestamp.set(Some(ts));
-                                }
-
-                                // Keep has_more true as long as relay returns items
-                                // Only the empty check above should disable pagination
-                                // (duplicates just mean overlap, not end of feed)
-
-                                // Append unique items
-                                if !unique_items.is_empty() {
-                                    let prefetch_items = unique_items.clone();
-                                    let mut updated = current;
-                                    updated.extend(unique_items);
-                                    feed_state.set(DataState::Loaded(updated));
-
-                                    // Spawn non-blocking background prefetch for missing metadata
-                                    spawn(async move {
-                                        prefetch_author_metadata(&prefetch_items).await;
-                                    });
-                                }
-                            }
-                            pagination_loading.set(false);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load more events: {}", e);
-                            pagination_loading.set(false);
-                        }
-                    }
+            match fetch_result {
+                Ok(new_items) => {
+                    append_paginated_items(
+                        new_items,
+                        &mut feed_state,
+                        &mut oldest_timestamp,
+                        &mut has_more,
+                        &mut pagination_loading,
+                    ).await;
                 }
-                FeedType::FollowingWithReplies => {
-                    match load_following_with_replies(until).await {
-                        Ok(new_items) => {
-                            // If no items returned at all, we've reached the end
-                            if new_items.is_empty() {
-                                log::info!("No more items from relay, reached end of feed");
-                                has_more.set(false);
-                                pagination_loading.set(false);
-                                return;
-                            }
-
-                            // Get current feed to deduplicate
-                            let current_state = feed_state.read().clone();
-                            if let DataState::Loaded(current) = current_state {
-                                // Build set of existing event IDs for O(1) lookup
-                                let existing_ids: std::collections::HashSet<_> = current.iter()
-                                    .map(|item| item.event().id)
-                                    .collect();
-
-                                // Filter out duplicates
-                                let unique_items: Vec<_> = new_items.iter()
-                                    .filter(|item| !existing_ids.contains(&item.event().id))
-                                    .cloned()
-                                    .collect();
-
-                                log::info!("Deduplication: {} total, {} unique items after filtering",
-                                    new_items.len(), unique_items.len());
-
-                                // Always update oldest_timestamp from ALL fetched items (not just unique)
-                                // to ensure we make progress even if all items were duplicates
-                                // Subtract 1 to avoid re-fetching posts at the exact boundary
-                                if let Some(last_item) = new_items.last() {
-                                    let ts = last_item.sort_timestamp().as_secs().saturating_sub(1);
-                                    oldest_timestamp.set(Some(ts));
-                                }
-
-                                // Keep has_more true as long as relay returns items
-                                // Only the empty check above should disable pagination
-                                // (duplicates just mean overlap, not end of feed)
-
-                                // Append unique items
-                                if !unique_items.is_empty() {
-                                    let prefetch_items = unique_items.clone();
-                                    let mut updated = current;
-                                    updated.extend(unique_items);
-                                    feed_state.set(DataState::Loaded(updated));
-
-                                    // Spawn non-blocking background prefetch for missing metadata
-                                    spawn(async move {
-                                        prefetch_author_metadata(&prefetch_items).await;
-                                    });
-                                }
-                            }
-                            pagination_loading.set(false);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load more events: {}", e);
-                            pagination_loading.set(false);
-                        }
-                    }
+                Err(e) => {
+                    log::error!("Failed to load more events: {}", e);
+                    pagination_loading.set(false);
                 }
             }
         });
@@ -1401,6 +1298,68 @@ fn ProfileSection() -> Element {
             }
         }
     }
+}
+
+/// Helper function to append paginated items to the feed
+/// Handles deduplication, timestamp updates, and metadata prefetching
+async fn append_paginated_items(
+    new_items: Vec<FeedItem>,
+    feed_state: &mut Signal<DataState<Vec<FeedItem>>>,
+    oldest_timestamp: &mut Signal<Option<u64>>,
+    has_more: &mut Signal<bool>,
+    pagination_loading: &mut Signal<bool>,
+) {
+    // If no items returned at all, we've reached the end
+    if new_items.is_empty() {
+        log::info!("No more items from relay, reached end of feed");
+        has_more.set(false);
+        pagination_loading.set(false);
+        return;
+    }
+
+    // Get current feed to deduplicate
+    let current_state = feed_state.read().clone();
+    if let DataState::Loaded(current) = current_state {
+        // Build set of existing event IDs for O(1) lookup
+        let existing_ids: std::collections::HashSet<_> = current.iter()
+            .map(|item| item.event().id)
+            .collect();
+
+        // Filter out duplicates
+        let unique_items: Vec<_> = new_items.iter()
+            .filter(|item| !existing_ids.contains(&item.event().id))
+            .cloned()
+            .collect();
+
+        log::info!("Deduplication: {} total, {} unique items after filtering",
+            new_items.len(), unique_items.len());
+
+        // Always update oldest_timestamp from ALL fetched items (not just unique)
+        // to ensure we make progress even if all items were duplicates
+        // Subtract 1 to avoid re-fetching posts at the exact boundary
+        if let Some(last_item) = new_items.last() {
+            let ts = last_item.sort_timestamp().as_secs().saturating_sub(1);
+            oldest_timestamp.set(Some(ts));
+        }
+
+        // Keep has_more true as long as relay returns items
+        // Only the empty check above should disable pagination
+        // (duplicates just mean overlap, not end of feed)
+
+        // Append unique items
+        if !unique_items.is_empty() {
+            let prefetch_items = unique_items.clone();
+            let mut updated = current;
+            updated.extend(unique_items);
+            feed_state.set(DataState::Loaded(updated));
+
+            // Spawn non-blocking background prefetch for missing metadata
+            spawn(async move {
+                prefetch_author_metadata(&prefetch_items).await;
+            });
+        }
+    }
+    pagination_loading.set(false);
 }
 
 // Helper function to load following feed

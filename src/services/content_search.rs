@@ -12,6 +12,14 @@ pub struct ContentSearchResult {
     pub relevance: u32, // Higher = more relevant
 }
 
+impl PartialEq for ContentSearchResult {
+    fn eq(&self, other: &Self) -> bool {
+        self.event.id == other.event.id
+            && self.is_from_contact == other.is_from_contact
+            && self.relevance == other.relevance
+    }
+}
+
 /// Search for text notes (Kind 1) using NIP-50
 pub async fn search_text_notes(
     query: &str,

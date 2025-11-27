@@ -1,28 +1,11 @@
 use dioxus::prelude::*;
 use dioxus::events::MouseData;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, Timestamp, JsonUtil};
-use nostr_sdk::nips::nip53::{LiveEvent, LiveEventStatus};
+use nostr_sdk::nips::nip53::LiveEvent;
 use crate::routes::Route;
 use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED};
+use crate::components::StreamStatus;
 use std::time::Duration;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum StreamStatus {
-    Planned,
-    Live,
-    Ended,
-}
-
-impl From<&LiveEventStatus> for StreamStatus {
-    fn from(status: &LiveEventStatus) -> Self {
-        match status {
-            LiveEventStatus::Live => StreamStatus::Live,
-            LiveEventStatus::Ended => StreamStatus::Ended,
-            LiveEventStatus::Planned => StreamStatus::Planned,
-            LiveEventStatus::Custom(_) => StreamStatus::Planned,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {

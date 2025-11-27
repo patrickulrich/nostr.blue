@@ -6,6 +6,7 @@ use crate::stores::nostr_client::{get_client, fetch_events_aggregated, HAS_SIGNE
 use crate::stores::profiles;
 use crate::utils::profile_prefetch;
 use crate::routes::Route;
+use crate::components::{EmojiPicker, RichContent};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
@@ -303,7 +304,15 @@ pub fn LiveChat(
                 div {
                     class: "p-4 border-t border-border",
                     div {
-                        class: "flex gap-2",
+                        class: "flex items-center gap-2",
+                        // Emoji picker
+                        EmojiPicker {
+                            icon_only: true,
+                            on_emoji_selected: move |emoji: String| {
+                                let current = message_input.read().clone();
+                                message_input.set(format!("{}{}", current, emoji));
+                            }
+                        }
                         input {
                             r#type: "text",
                             class: "flex-1 px-3 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -356,6 +365,7 @@ pub fn LiveChat(
 fn ChatMessage(event: Event) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let content = event.content.clone();
+    let tags: Vec<nostr_sdk::Tag> = event.tags.iter().cloned().collect();
     let timestamp = event.created_at;
 
     // Clone author_pubkey for closures
@@ -421,9 +431,12 @@ fn ChatMessage(event: Event) -> Element {
                         "{timestamp.to_human_datetime()}"
                     }
                 }
-                p {
-                    class: "text-sm whitespace-pre-wrap break-words mt-1",
-                    "{content}"
+                div {
+                    class: "text-sm mt-1",
+                    RichContent {
+                        content: content.clone(),
+                        tags: tags.clone()
+                    }
                 }
             }
         }

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, FromBech32};
-use crate::components::{LiveStreamPlayer, LiveChat};
-use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta, StreamStatus};
+use crate::components::{LiveStreamPlayer, LiveChat, StreamStatus};
+use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta};
 use crate::components::icons::ArrowLeftIcon;
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED};

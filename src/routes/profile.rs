@@ -365,7 +365,9 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_stats.clone();
-        let _ = pubkey_for_follows_you.clone(); // Used to track dependency, actual value comes from pubkey_str
+        // Note: pubkey_for_follows_you is captured to ensure this effect has its own
+        // copy of the pubkey for the "follows you" check logic below
+        let _ = pubkey_for_follows_you.clone();
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
 
@@ -1509,8 +1511,17 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
     })
 }
 
-// Special handling for Likes tab - DB phase
-async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+/// Common logic for loading liked events
+/// Takes a fetch function that retrieves events given a filter
+async fn load_likes_common<F, Fut>(
+    public_key: PublicKey,
+    until: Option<u64>,
+    fetch_events: F,
+) -> std::result::Result<LoadOutcome, String>
+where
+    F: Fn(Filter) -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<Vec<NostrEvent>, String>>,
+{
     let mut filter = Filter::new()
         .author(public_key)
         .kind(Kind::Reaction)
@@ -1520,7 +1531,7 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    let reactions = nostr_client::fetch_profile_events_db(filter).await?;
+    let reactions = fetch_events(filter).await?;
 
     if reactions.is_empty() {
         return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None });
@@ -1547,9 +1558,9 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
         return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None });
     }
 
-    // Fetch liked events from DB
+    // Fetch liked events
     let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
-    let liked_events = nostr_client::fetch_profile_events_db(liked_filter).await?;
+    let liked_events = fetch_events(liked_filter).await?;
 
     let mut event_vec: Vec<NostrEvent> = liked_events;
     event_vec.sort_by(|a, b| {
@@ -1564,59 +1575,18 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
     Ok(LoadOutcome { events: event_vec, oldest_cursor })
 }
 
+// Special handling for Likes tab - DB phase
+async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+    load_likes_common(public_key, until, |filter| {
+        nostr_client::fetch_profile_events_db(filter)
+    }).await
+}
+
 // Special handling for Likes tab - Relay phase
 async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
-    let mut filter = Filter::new()
-        .author(public_key)
-        .kind(Kind::Reaction)
-        .limit(50);
-
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
-
-    let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
-
-    if reactions.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None });
-    }
-
-    // Extract event IDs from reactions
-    let mut liked_event_ids = Vec::new();
-    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-
-    for reaction in reactions.iter() {
-        for tag in reaction.tags.iter() {
-            if tag.kind() == TagKind::e() {
-                if let Some(event_id_str) = tag.content() {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
-                        liked_event_ids.push(event_id);
-                        reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_secs());
-                    }
-                }
-            }
-        }
-    }
-
-    if liked_event_ids.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None });
-    }
-
-    // Fetch liked events from relays
-    let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
-    let liked_events = nostr_client::fetch_profile_events_from_relays(liked_filter, Duration::from_secs(10)).await?;
-
-    let mut event_vec: Vec<NostrEvent> = liked_events;
-    event_vec.sort_by(|a, b| {
-        let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
-        let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
-        time_b.cmp(&time_a)
-    });
-
-    let oldest_cursor = event_vec.last()
-        .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
-
-    Ok(LoadOutcome { events: event_vec, oldest_cursor })
+    load_likes_common(public_key, until, |filter| {
+        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+    }).await
 }
 
 // Helper function to load events based on tab type (legacy - for pagination/load_more)

@@ -133,12 +133,14 @@ pub fn PollCard(event: NostrEvent) -> Element {
                 },
             };
 
-            match nostr_client::publish_poll_vote(poll_id, response, poll.relays.clone()).await {
+            // Clone relays once for both publish and fetch operations
+            let relays = poll.relays.clone();
+            match nostr_client::publish_poll_vote(poll_id, response, relays.clone()).await {
                 Ok(_event_id) => {
                     log::info!("Vote published successfully");
 
                     // Refresh votes to get updated totals including the new vote
-                    match fetch_poll_votes(poll_id, poll.ends_at, poll.relays.clone()).await {
+                    match fetch_poll_votes(poll_id, poll.ends_at, relays).await {
                         Ok(vote_events) => {
                             votes.set(vote_events.clone());
 
@@ -361,6 +363,9 @@ async fn fetch_poll_votes(
                 log::debug!("Could not add poll relay {}: {}", relay_url, e);
             }
         }
+
+        // Connect to newly added relays before fetching
+        client.connect().await;
 
         // Fetch from poll-specified relays
         let relay_urls: Vec<nostr_sdk::Url> = poll_relays.iter()
