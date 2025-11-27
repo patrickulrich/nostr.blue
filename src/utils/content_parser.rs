@@ -422,7 +422,7 @@ fn extract_twitch_vod(url: &str) -> Option<String> {
 /// Extract YouTube video ID from various URL formats
 /// Supports: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID,
 /// youtube.com/embed/ID, youtube.com/live/ID, youtube.com/v/ID
-fn extract_youtube_id(url: &str) -> Option<String> {
+pub fn extract_youtube_id(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
 
     // Must be a YouTube URL

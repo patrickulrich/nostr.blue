@@ -25,7 +25,7 @@ pub fn VoiceReplyComposer(
         author_pubkey.clone()
     };
     let reply_content = reply_to.content.clone();
-    let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
+    let reply_tags = reply_to.tags.clone().to_vec();
     let reply_event = reply_to.clone();
 
     // Handle recording complete

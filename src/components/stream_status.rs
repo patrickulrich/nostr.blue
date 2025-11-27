@@ -1,6 +1,6 @@
 use nostr_sdk::nips::nip53::LiveEventStatus;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StreamStatus {
     Planned,
     Live,

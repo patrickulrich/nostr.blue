@@ -310,7 +310,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             class: "text-sm mt-1",
                             RichContent {
                                 content: event.content.clone(),
-                                tags: event.tags.iter().cloned().collect()
+                                tags: event.tags.clone().to_vec()
                             }
                         }
 

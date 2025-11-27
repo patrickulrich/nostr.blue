@@ -1,9 +1,8 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, JsonUtil};
-use nostr_sdk::nips::nip53::LiveEvent;
 use crate::routes::Route;
 use crate::stores::nostr_client;
-use crate::components::StreamStatus;
+use crate::components::{StreamStatus, parse_nip53_live_event};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -17,16 +16,9 @@ pub struct LiveStreamMeta {
     pub host_pubkey: Option<String>,
 }
 
-/// Parse NIP-53 Kind 30311 live streaming event using nostr-sdk's LiveEvent
-pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
-    // Use nostr-sdk's built-in LiveEvent parsing
-    let live_event = match LiveEvent::try_from(event.tags.clone().to_vec()) {
-        Ok(le) => le,
-        Err(e) => {
-            log::warn!("Failed to parse LiveEvent from tags: {}", e);
-            return None;
-        }
-    };
+/// Parse NIP-53 Kind 30311 live streaming event into MiniLiveStreamCard's meta format
+fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
+    let live_event = parse_nip53_live_event(event)?;
 
     // Extract host pubkey
     let host_pubkey = live_event.host.as_ref().map(|h| h.public_key.to_string());

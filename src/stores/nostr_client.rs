@@ -641,19 +641,12 @@ pub async fn publish_reaction(
             let kind = Some(event.kind);
             // For addressable events (30000-39999), include coordinate
             let coordinate = if event.kind.is_addressable() {
-                // Find the 'd' tag (identifier) for addressable events
-                event.tags.iter()
-                    .find_map(|tag| {
-                        if tag.kind() == nostr::TagKind::d() {
-                            tag.content().map(|id| Coordinate {
-                                kind: event.kind,
-                                public_key: event.pubkey,
-                                identifier: id.to_string(),
-                            })
-                        } else {
-                            None
-                        }
-                    })
+                // Use SDK's identifier() method for d-tag lookup
+                event.tags.identifier().map(|id| Coordinate {
+                    kind: event.kind,
+                    public_key: event.pubkey,
+                    identifier: id.to_string(),
+                })
             } else {
                 None
             };
@@ -731,16 +724,10 @@ async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Ve
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                // Extract pubkeys from 'p' tags
-                let mut contacts = Vec::new();
-                for tag in event.tags.iter() {
-                    // Check if this is a p-tag (public key tag)
-                    if tag.kind() == nostr::TagKind::p() {
-                        if let Some(pk_str) = tag.content() {
-                            contacts.push(pk_str.to_string());
-                        }
-                    }
-                }
+                // Use SDK's public_keys() method to extract p-tags
+                let contacts: Vec<String> = event.tags.public_keys()
+                    .map(|pk| pk.to_string())
+                    .collect();
                 log::info!("Found {} contacts from relay", contacts.len());
 
                 // Update cache
@@ -909,14 +896,10 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
 pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
-            let mut muted_posts = Vec::new();
-            for tag in event.tags.iter() {
-                if tag.kind() == nostr::TagKind::e() {
-                    if let Some(event_id) = tag.content() {
-                        muted_posts.push(event_id.to_string());
-                    }
-                }
-            }
+            // Use SDK's event_ids() method to extract e-tags
+            let muted_posts: Vec<String> = event.tags.event_ids()
+                .map(|id| id.to_string())
+                .collect();
             Ok(muted_posts)
         }
         None => Ok(Vec::new()),
@@ -927,14 +910,10 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
 pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
-            let mut blocked_users = Vec::new();
-            for tag in event.tags.iter() {
-                if tag.kind() == nostr::TagKind::p() {
-                    if let Some(pubkey) = tag.content() {
-                        blocked_users.push(pubkey.to_string());
-                    }
-                }
-            }
+            // Use SDK's public_keys() method to extract p-tags
+            let blocked_users: Vec<String> = event.tags.public_keys()
+                .map(|pk| pk.to_string())
+                .collect();
             Ok(blocked_users)
         }
         None => Ok(Vec::new()),
@@ -2162,13 +2141,11 @@ pub async fn publish_voice_message_reply(
     // Add p tag for parent author
     tags.push(Tag::public_key(parent_pubkey));
 
-    // Add p tags for anyone else mentioned in the parent
-    for tag in reply_to.tags.iter() {
-        if let Some(nostr::TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
-            // Don't duplicate the parent author
-            if public_key != &parent_pubkey {
-                tags.push(Tag::public_key(*public_key));
-            }
+    // Add p tags for anyone else mentioned in the parent (using SDK's public_keys())
+    for public_key in reply_to.tags.public_keys() {
+        // Don't duplicate the parent author
+        if public_key != &parent_pubkey {
+            tags.push(Tag::public_key(*public_key));
         }
     }
 

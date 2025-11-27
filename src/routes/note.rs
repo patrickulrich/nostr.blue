@@ -225,25 +225,34 @@ pub fn Note(note_id: String) -> Element {
             );
 
             // Merge relay note (if not found in DB)
-            if let Ok(Some(note)) = relay_note {
-                if note_data.read().is_none() {
-                    note_data.set(Some(note.clone()));
+            match relay_note {
+                Ok(Some(note)) => {
+                    if note_data.read().is_none() {
+                        note_data.set(Some(note.clone()));
 
-                    // Fetch parents if we didn't have the note before
-                    let parents = fetch_parent_notes_from_tags(&note.tags).await;
-                    if !parents.is_empty() {
-                        let mut sorted_parents = parents;
-                        sorted_parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                        parent_events.set(sorted_parents);
+                        // Fetch parents if we didn't have the note before
+                        let parents = fetch_parent_notes_from_tags(&note.tags).await;
+                        if !parents.is_empty() {
+                            let mut sorted_parents = parents;
+                            sorted_parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                            parent_events.set(sorted_parents);
+                        }
                     }
                 }
-                loading.set(false);
-                loading_parents.set(false);
-            } else if note_data.read().is_none() {
-                error.set(Some("Event not found".to_string()));
-                loading.set(false);
-                loading_parents.set(false);
+                Ok(None) => {
+                    if note_data.read().is_none() {
+                        error.set(Some("Event not found".to_string()));
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch note from relay: {}", e);
+                    if note_data.read().is_none() {
+                        error.set(Some("Event not found".to_string()));
+                    }
+                }
             }
+            loading.set(false);
+            loading_parents.set(false);
 
             // Merge relay replies (deduplicate)
             if !relay_replies.is_empty() {

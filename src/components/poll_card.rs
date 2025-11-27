@@ -343,9 +343,6 @@ async fn fetch_poll_votes(
 ) -> Result<Vec<NostrEvent>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
-    // Ensure relays are ready before fetching
-    nostr_client::ensure_relays_ready(&client).await;
-
     let mut filter = Filter::new()
         .kind(Kind::PollResponse)
         .event(poll_id);
@@ -364,7 +361,7 @@ async fn fetch_poll_votes(
             }
         }
 
-        // Connect to newly added relays before fetching
+        // Connect to poll relays before fetching
         client.connect().await;
 
         // Fetch from poll-specified relays
@@ -386,6 +383,8 @@ async fn fetch_poll_votes(
         }
     } else {
         // No poll relays specified, use default relays
+        // Ensure default relays are ready before fetching
+        nostr_client::ensure_relays_ready(&client).await;
         client
             .fetch_events(filter, Duration::from_secs(10))
             .await

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::utils::content_parser::{parse_content, ContentToken};
+use crate::utils::content_parser::{parse_content, ContentToken, extract_youtube_id};
 use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use nostr_sdk::nips::nip19::Nip19;
@@ -603,81 +603,6 @@ fn render_youtube_embed(url: &str) -> Element {
     }
 }
 
-fn extract_youtube_id(url: &str) -> Option<String> {
-    // Handle youtube.com/watch?v=ID (including with playlist params)
-    if let Some(start) = url.find("v=") {
-        let id_start = start + 2;
-        let id = &url[id_start..];
-        let id = id.split('&').next()?;
-        let id = id.split('#').next()?; // Handle hash fragments
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-
-    // Handle youtu.be/ID
-    if url.contains("youtu.be/") {
-        if let Some(start) = url.find("youtu.be/") {
-            let id_start = start + 9;
-            let id = &url[id_start..];
-            let id = id.split('?').next()?;
-            let id = id.split('#').next()?;
-            if !id.is_empty() {
-                return Some(id.to_string());
-            }
-        }
-    }
-
-    // Handle youtube.com/shorts/ID
-    if let Some(start) = url.find("/shorts/") {
-        let id_start = start + 8;
-        let id = &url[id_start..];
-        let id = id.split('?').next()?;
-        let id = id.split('#').next()?;
-        let id = id.split('/').next()?; // Handle trailing slashes
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-
-    // Handle youtube.com/embed/ID
-    if let Some(start) = url.find("/embed/") {
-        let id_start = start + 7;
-        let id = &url[id_start..];
-        let id = id.split('?').next()?;
-        let id = id.split('#').next()?;
-        let id = id.split('/').next()?;
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-
-    // Handle youtube.com/live/ID
-    if let Some(start) = url.find("/live/") {
-        let id_start = start + 6;
-        let id = &url[id_start..];
-        let id = id.split('?').next()?;
-        let id = id.split('#').next()?;
-        let id = id.split('/').next()?;
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-
-    // Handle youtube.com/v/ID (older embed format)
-    if let Some(start) = url.find("/v/") {
-        let id_start = start + 3;
-        let id = &url[id_start..];
-        let id = id.split('?').next()?;
-        let id = id.split('#').next()?;
-        let id = id.split('/').next()?;
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-
-    None
-}
 
 #[component]
 fn TwitterTweetRenderer(tweet_id: String) -> Element {

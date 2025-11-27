@@ -55,19 +55,17 @@ pub fn ReplyComposer(
         author_pubkey.clone()
     };
     let reply_content = reply_to.content.clone();
-    let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
+    let reply_tags = reply_to.tags.clone().to_vec();
     let reply_id = reply_to.id.to_hex();
 
     // Extract thread participants (author + anyone mentioned in the note)
     let mut thread_participants = Vec::new();
     thread_participants.push(reply_to.pubkey); // Add author
 
-    // Add anyone mentioned in p tags
-    for tag in reply_to.tags.iter() {
-        if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
-            if !thread_participants.contains(public_key) {
-                thread_participants.push(*public_key);
-            }
+    // Add anyone mentioned in p tags using SDK's public_keys()
+    for public_key in reply_to.tags.public_keys() {
+        if !thread_participants.contains(public_key) {
+            thread_participants.push(*public_key);
         }
     }
 

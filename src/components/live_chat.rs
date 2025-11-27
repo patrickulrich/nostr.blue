@@ -365,7 +365,7 @@ pub fn LiveChat(
 fn ChatMessage(event: Event) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let content = event.content.clone();
-    let tags: Vec<nostr_sdk::Tag> = event.tags.iter().cloned().collect();
+    let tags = event.tags.to_vec();
     let timestamp = event.created_at;
 
     // Clone author_pubkey for closures

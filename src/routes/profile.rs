@@ -6,7 +6,7 @@ use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event as NostrEvent, TagKind};
+use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -1435,14 +1435,16 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
     match tab {
         ProfileTab::Posts => {
             // Filter for posts only (no e-tags = not replies)
+            // Use SDK's event_ids() to check for e-tags
             events.into_iter()
-                .filter(|e| !e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                .filter(|e| e.tags.event_ids().next().is_none())
                 .collect()
         }
         ProfileTab::Replies => {
             // Filter for replies only (with e-tags)
+            // Use SDK's event_ids() to check for e-tags
             events.into_iter()
-                .filter(|e| e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                .filter(|e| e.tags.event_ids().next().is_some())
                 .collect()
         }
         _ => events, // No filtering needed for other tabs
@@ -1537,20 +1539,14 @@ where
         return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None });
     }
 
-    // Extract event IDs from reactions
+    // Extract event IDs from reactions using SDK's event_ids()
     let mut liked_event_ids = Vec::new();
     let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
     for reaction in reactions.iter() {
-        for tag in reaction.tags.iter() {
-            if tag.kind() == TagKind::e() {
-                if let Some(event_id_str) = tag.content() {
-                    if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
-                        liked_event_ids.push(event_id);
-                        reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_secs());
-                    }
-                }
-            }
+        for event_id in reaction.tags.event_ids() {
+            liked_event_ids.push(*event_id);
+            reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
         }
     }
 
@@ -1633,9 +1629,9 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 // Get the oldest event timestamp BEFORE filtering
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
-                // Filter for posts only (no e-tags)
+                // Filter for posts only (no e-tags) using SDK's event_ids()
                 let posts: Vec<NostrEvent> = events.into_iter()
-                    .filter(|e| !e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                    .filter(|e| e.tags.event_ids().next().is_none())
                     .collect();
 
                 all_posts.extend(posts);
@@ -1699,9 +1695,9 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 // Get the oldest event timestamp BEFORE filtering
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
-                // Filter for replies only (with e-tags)
+                // Filter for replies only (with e-tags) using SDK's event_ids()
                 let replies: Vec<NostrEvent> = events.into_iter()
-                    .filter(|e| e.tags.iter().any(|t| t.kind() == TagKind::e()))
+                    .filter(|e| e.tags.event_ids().next().is_some())
                     .collect();
 
                 all_replies.extend(replies);
@@ -1853,17 +1849,11 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 });
             }
 
-            // Extract event IDs from reactions' e tags
+            // Extract event IDs from reactions using SDK's event_ids()
             let mut liked_event_ids = Vec::new();
             for reaction in reactions.iter() {
-                for tag in reaction.tags.iter() {
-                    if tag.kind() == TagKind::e() {
-                        if let Some(event_id_str) = tag.content() {
-                            if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
-                                liked_event_ids.push(event_id);
-                            }
-                        }
-                    }
+                for event_id in reaction.tags.event_ids() {
+                    liked_event_ids.push(*event_id);
                 }
             }
 
@@ -1885,15 +1875,11 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
 
             // Sort by the reaction timestamp (when the user liked it), not the original event timestamp
-            // Create a map of event_id -> reaction_timestamp for sorting
+            // Create a map of event_id -> reaction_timestamp for sorting using SDK's event_ids()
             let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
             for reaction in reactions.iter() {
-                for tag in reaction.tags.iter() {
-                    if tag.kind() == TagKind::e() {
-                        if let Some(event_id_str) = tag.content() {
-                            reaction_times.insert(event_id_str.to_string(), reaction.created_at.as_secs());
-                        }
-                    }
+                for event_id in reaction.tags.event_ids() {
+                    reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
                 }
             }
 
