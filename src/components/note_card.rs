@@ -156,21 +156,23 @@ pub fn NoteCard(
                             // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
                             if let Some(ref user_pk) = current_user_pubkey {
                                 // Method 1: Try to get sender from uppercase "P" tag (most common)
+                                // Use as_slice for zero-copy access
                                 let mut zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                    let tag_vec = tag.clone().to_vec();
-                                    if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                        Some(tag_vec.get(1)?.as_str().to_string())
+                                    let slice = tag.as_slice();
+                                    if slice.len() >= 2 && slice.first()?.as_str() == "P" {
+                                        Some(slice.get(1)?.as_str().to_string())
                                     } else {
                                         None
                                     }
                                 });
 
                                 // Method 2: Fallback - parse description tag (contains zap request JSON)
+                                // Use as_slice for zero-copy access
                                 if zap_sender_pubkey.is_none() {
                                     zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                        let tag_vec = tag.clone().to_vec();
-                                        if tag_vec.first()?.as_str() == "description" {
-                                            let zap_request_json = tag_vec.get(1)?.as_str();
+                                        let slice = tag.as_slice();
+                                        if slice.first()?.as_str() == "description" {
+                                            let zap_request_json = slice.get(1)?.as_str();
                                             if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
                                                 // The pubkey field in the zap request is the sender
                                                 return zap_request.get("pubkey")
@@ -189,12 +191,12 @@ pub fn NoteCard(
                                 }
                             }
 
-                            // Calculate zap amount
+                            // Calculate zap amount (use as_slice for zero-copy access)
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
-                                let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
+                                let slice = tag.as_slice();
+                                if slice.first()?.as_str() == "description" {
                                     // Parse the JSON zap request
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    let zap_request_json = slice.get(1)?.as_str();
                                     if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
                                         // Find the amount tag in the zap request
                                         if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {

@@ -4,6 +4,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 use crate::stores::nostr_client::get_client;
+use crate::utils::truncate_pubkey;
 
 const NOSTR_WINE_API: &str = "https://api.nostr.wine";
 
@@ -29,7 +30,6 @@ pub struct TrendingEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingAuthor {
     pub pubkey: String,
-    pub content: String, // JSON string containing profile data
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,11 +170,11 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         if let Some(event) = events_map.get(&item.event_id) {
             let stats = stats_map.get(&item.event_id).cloned();
 
-            // Convert tags to Vec<Vec<String>>
+            // Convert tags to Vec<Vec<String>> (use as_slice for zero-copy access)
             let tags: Vec<Vec<String>> = event
                 .tags
                 .iter()
-                .map(|tag| tag.clone().to_vec().into_iter().map(|s| s.to_string()).collect())
+                .map(|tag| tag.as_slice().iter().map(|s| s.to_string()).collect())
                 .collect();
 
             let trending_event = TrendingEvent {
@@ -190,7 +190,6 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
             // Create a placeholder author - profile will be fetched by UI component
             let author = TrendingAuthor {
                 pubkey: event.pubkey.to_hex(),
-                content: "{}".to_string(),
             };
 
             trending_notes.push(TrendingNote {
@@ -200,6 +199,16 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
                 stats,
             });
         }
+    }
+
+    // Warn if some trending items couldn't be fetched from relays
+    if trending_notes.len() < trending_items.len() {
+        log::warn!(
+            "Trending: only fetched {} of {} items from relays (missing {})",
+            trending_notes.len(),
+            trending_items.len(),
+            trending_items.len() - trending_notes.len()
+        );
     }
 
     log::info!("Built {} trending notes from nostr.wine", trending_notes.len());
@@ -219,12 +228,7 @@ pub fn get_display_name(note: &TrendingNote) -> String {
     }
 
     // Fallback to truncated pubkey
-    let pubkey = &note.event.pubkey;
-    if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-    } else {
-        pubkey.clone()
-    }
+    truncate_pubkey(&note.event.pubkey)
 }
 
 /// Truncate content to a maximum length

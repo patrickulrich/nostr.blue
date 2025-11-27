@@ -2106,8 +2106,12 @@ fn ZapStreamRenderer(naddr: String) -> Element {
                     "{err}"
                 }
             } else if let Some(ev) = event.read().as_ref() {
-                LiveStreamCard {
-                    event: ev.clone()
+                // Wrap with stop_propagation to prevent click bubbling to parent note
+                div {
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    LiveStreamCard {
+                        event: ev.clone()
+                    }
                 }
             }
         }

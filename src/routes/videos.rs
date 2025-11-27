@@ -394,9 +394,9 @@ pub fn Videos() -> Element {
                                         // Only show LIVE streams on the videos page
                                         {
                                             let is_live = event.tags.iter().any(|tag| {
-                                                let tag_vec = tag.clone().to_vec();
-                                                tag_vec.first().map(|s| s.as_str()) == Some("status") &&
-                                                tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+                                                let slice = tag.as_slice();
+                                                slice.first().map(|s| s.as_str()) == Some("status") &&
+                                                slice.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
                                             });
 
                                             if is_live {
@@ -699,20 +699,20 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
         dimensions: None,
     };
 
-    // Parse title tag
+    // Parse title tag (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
-        let tag_vec = (*tag).clone().to_vec();
-        if tag_vec.first().map(|s| s.as_str()) == Some("title") && tag_vec.len() > 1 {
-            meta.title = Some(tag_vec[1].clone());
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("title") && slice.len() > 1 {
+            meta.title = Some(slice[1].clone());
             break;
         }
     }
 
-    // Parse imeta tags
+    // Parse imeta tags (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
-        let tag_vec = (*tag).clone().to_vec();
-        if tag_vec.first().map(|s| s.as_str()) == Some("imeta") {
-            for field in tag_vec.iter().skip(1) {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("imeta") {
+            for field in slice.iter().skip(1) {
                 if let Some((key, value)) = field.split_once(' ') {
                     match key {
                         "url" => meta.url = Some(value.to_string()),

@@ -1,5 +1,19 @@
 use nostr_sdk::prelude::*;
+use once_cell::sync::Lazy;
 use regex::Regex;
+use ::url::Url;
+
+// Precompiled regexes for content parsing - compiled once at startup
+static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex")
+});
+static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"nostr:(npub1|note1|nevent1|nprofile1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile nostr regex")
+});
+static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
+});
 
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
@@ -49,17 +63,11 @@ pub enum ContentToken {
 /// Parse note content into structured tokens
 pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     let mut tokens = Vec::new();
-
-    // Regex patterns
-    let url_pattern = Regex::new(r"https?://[^\s]+").unwrap();
-    let nostr_pattern = Regex::new(r"nostr:(npub1|note1|nevent1|nprofile1|naddr1)[a-zA-Z0-9]+").unwrap();
-    let hashtag_pattern = Regex::new(r"#(\w+)").unwrap();
-
     let mut last_end = 0;
     let mut matches: Vec<(usize, usize, ContentToken)> = Vec::new();
 
-    // Find all URLs
-    for mat in url_pattern.find_iter(content) {
+    // Find all URLs (using precompiled static regex)
+    for mat in URL_PATTERN.find_iter(content) {
         let url = mat.as_str().to_string();
         let token = if is_image_url(&url) {
             ContentToken::Image(url)
@@ -104,8 +112,8 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         matches.push((mat.start(), mat.end(), token));
     }
 
-    // Find all nostr: mentions
-    for mat in nostr_pattern.find_iter(content) {
+    // Find all nostr: mentions (using precompiled static regex)
+    for mat in NOSTR_PATTERN.find_iter(content) {
         let mention = mat.as_str().to_string();
         let token = if mention.contains("npub1") || mention.contains("nprofile1") {
             ContentToken::Mention(mention)
@@ -115,8 +123,8 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         matches.push((mat.start(), mat.end(), token));
     }
 
-    // Find all hashtags
-    for mat in hashtag_pattern.find_iter(content) {
+    // Find all hashtags (using precompiled static regex)
+    for mat in HASHTAG_PATTERN.find_iter(content) {
         let hashtag = mat.as_str()[1..].to_string(); // Remove the #
         matches.push((mat.start(), mat.end(), ContentToken::Hashtag(hashtag)));
     }
@@ -505,14 +513,33 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
     None
 }
 
+/// Check if URL host is a valid Spotify domain
+fn is_spotify_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "open.spotify.com" || h == "spotify.com" || h.ends_with(".spotify.com"))
+        .unwrap_or(false)
+}
+
+/// Check if URL host is a valid Tidal domain
+fn is_tidal_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "tidal.com" || h == "embed.tidal.com" || h.ends_with(".tidal.com"))
+        .unwrap_or(false)
+}
+
 /// Extract Spotify content from URL
 /// Supports: open.spotify.com/track/ID, /album/ID, /playlist/ID, /episode/ID
 fn extract_spotify(url: &str) -> Option<ContentToken> {
-    let lower = url.to_lowercase();
-
-    if !lower.contains("open.spotify.com") && !lower.contains("spotify.com") {
+    // Use proper URL parsing to check host (prevents false positives like notspotify.com)
+    if !is_spotify_host(url) {
         return None;
     }
+
+    let lower = url.to_lowercase();
 
     // Extract the path type and ID
     if lower.contains("/track/") {
@@ -627,9 +654,8 @@ fn extract_rumble(url: &str) -> Option<String> {
 /// Extract Tidal embed URL
 /// Supports: embed.tidal.com/{type}/{id}, tidal.com/browse/{type}/{id}
 fn extract_tidal(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
-
-    if lower.contains("tidal.com") {
+    // Use proper URL parsing to check host (prevents false positives like faketidal.com)
+    if is_tidal_host(url) {
         return Some(url.to_string());
     }
 

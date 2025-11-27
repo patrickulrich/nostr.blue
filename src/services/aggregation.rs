@@ -338,13 +338,11 @@ fn extract_referenced_event(event: &Event, requested_ids: &std::collections::Has
 
 /// Extract zap amount in satoshis from a zap event (kind 9735)
 fn extract_zap_amount(event: &Event) -> Option<u64> {
-    // Look for 'bolt11' tag first
+    // Look for 'bolt11' tag first (use as_slice for zero-copy access)
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
-        let vec = (*tag).clone().to_vec();
-        vec.get(0).map(|k| k.as_str() == "bolt11").unwrap_or(false)
+        tag.as_slice().first().map(|k| k.as_str() == "bolt11").unwrap_or(false)
     }) {
-        let tag_vec = bolt11_tag.clone().to_vec();
-        if let Some(bolt11) = tag_vec.get(1) {
+        if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             // Parse bolt11 invoice to extract amount
             // For now, try to extract from description tag as fallback
             // Full bolt11 parsing would require additional dependency
@@ -354,13 +352,11 @@ fn extract_zap_amount(event: &Event) -> Option<u64> {
         }
     }
 
-    // Fallback: check description tag for amount
+    // Fallback: check description tag for amount (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        let vec = (*tag).clone().to_vec();
-        vec.get(0).map(|k| k.as_str() == "description").unwrap_or(false)
+        tag.as_slice().first().map(|k| k.as_str() == "description").unwrap_or(false)
     }) {
-        let tag_vec = description_tag.clone().to_vec();
-        if let Some(desc) = tag_vec.get(1) {
+        if let Some(desc) = description_tag.as_slice().get(1) {
             // Description contains the zap request which has amount
             return parse_amount_from_description(desc.as_str());
         }

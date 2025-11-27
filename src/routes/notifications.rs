@@ -407,15 +407,15 @@ fn ReactionNotification(event: NostrEvent) -> Element {
     let reactor_pubkey = event.pubkey.to_string();
 
     // Get the reaction emoji (NIP-25)
-    // Custom emoji URL if present
+    // Custom emoji URL if present (use as_slice for zero-copy access)
     let custom_emoji_url = if event.content.starts_with(':') && event.content.ends_with(':') {
         let shortcode = event.content.trim_matches(':');
         event.tags.iter()
             .find_map(|tag| {
-                let vec = (*tag).clone().to_vec();
-                if vec.get(0).map(|k| k == "emoji").unwrap_or(false) &&
-                   vec.get(1).map(|s| s == shortcode).unwrap_or(false) {
-                    vec.get(2).cloned()
+                let slice = tag.as_slice();
+                if slice.get(0).map(|k| k == "emoji").unwrap_or(false) &&
+                   slice.get(1).map(|s| s == shortcode).unwrap_or(false) {
+                    slice.get(2).cloned()
                 } else {
                     None
                 }
@@ -811,13 +811,11 @@ fn ZapNotification(event: NostrEvent) -> Element {
 /// Helper to extract the actual zapper's pubkey from a zap receipt event (kind 9735)
 /// The event.pubkey is the Lightning node's pubkey, the actual zapper is in the description
 fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
-    // Find the description tag which contains the zap request
+    // Find the description tag which contains the zap request (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        let vec = (*tag).clone().to_vec();
-        vec.get(0).map(|k| k == "description").unwrap_or(false)
+        tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
     }) {
-        let vec = (*description_tag).clone().to_vec();
-        if let Some(description) = vec.get(1) {
+        if let Some(description) = description_tag.as_slice().get(1) {
             // Parse the zap request event from the description
             if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(description) {
                 // Extract the pubkey from the zap request event
@@ -833,24 +831,20 @@ fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
 
 /// Helper to extract zap amount in sats from a zap receipt event (kind 9735)
 fn extract_zap_amount(event: &NostrEvent) -> Option<u64> {
-    // Try to find the bolt11 tag and parse the amount from it
+    // Try to find the bolt11 tag and parse the amount from it (use as_slice for zero-copy access)
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
-        let vec = (*tag).clone().to_vec();
-        vec.get(0).map(|k| k == "bolt11").unwrap_or(false)
+        tag.as_slice().first().map(|k| k == "bolt11").unwrap_or(false)
     }) {
-        let vec = (*bolt11_tag).clone().to_vec();
-        if let Some(bolt11) = vec.get(1) {
+        if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             return parse_bolt11_amount(bolt11);
         }
     }
 
-    // Fallback: try to parse from description tag (zap request)
+    // Fallback: try to parse from description tag (zap request) (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        let vec = (*tag).clone().to_vec();
-        vec.get(0).map(|k| k == "description").unwrap_or(false)
+        tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
     }) {
-        let vec = (*description_tag).clone().to_vec();
-        if let Some(description) = vec.get(1) {
+        if let Some(description) = description_tag.as_slice().get(1) {
             if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(description) {
                 if let Some(amount_msat) = zap_request.get("amount").and_then(|a| a.as_u64()) {
                     return Some(amount_msat / 1000); // Convert millisats to sats
