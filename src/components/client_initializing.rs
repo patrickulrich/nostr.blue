@@ -1,69 +1,100 @@
 use dioxus::prelude::*;
 
-/// A friendly loading indicator shown while the Nostr client is initializing
+/// A skeleton loading placeholder shown while the Nostr client is initializing or data is loading
+/// Mimics the feed layout for a smoother perceived loading experience
 #[component]
 pub fn ClientInitializing() -> Element {
     rsx! {
         div {
-            class: "flex flex-col items-center justify-center py-20",
+            class: "animate-pulse",
 
-            // Bouncing N animation
+            // Skeleton for 3 feed items
+            for _ in 0..3 {
+                SkeletonNoteCard {}
+            }
+        }
+    }
+}
+
+/// A single skeleton note card that matches the NoteCard layout
+#[component]
+fn SkeletonNoteCard() -> Element {
+    rsx! {
+        article {
+            class: "border-b border-border p-4",
+
             div {
-                class: "mb-6 animate-bounce",
+                class: "flex gap-3",
+
+                // Avatar placeholder
                 div {
-                    class: "w-20 h-20 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg",
-                    span {
-                        class: "text-5xl font-bold text-white",
-                        "N"
+                    class: "flex-shrink-0",
+                    div {
+                        class: "w-12 h-12 rounded-full bg-muted"
+                    }
+                }
+
+                // Content area
+                div {
+                    class: "flex-1 min-w-0",
+
+                    // Header row (name + timestamp)
+                    div {
+                        class: "flex items-center gap-2 mb-2",
+                        // Display name
+                        div {
+                            class: "h-4 w-24 bg-muted rounded"
+                        }
+                        // Username
+                        div {
+                            class: "h-3 w-20 bg-muted rounded"
+                        }
+                        // Dot separator
+                        div {
+                            class: "h-1 w-1 bg-muted rounded-full"
+                        }
+                        // Timestamp
+                        div {
+                            class: "h-3 w-12 bg-muted rounded"
+                        }
+                    }
+
+                    // Content lines (3 lines of varying length)
+                    div {
+                        class: "space-y-2 mb-4",
+                        div {
+                            class: "h-4 bg-muted rounded w-full"
+                        }
+                        div {
+                            class: "h-4 bg-muted rounded w-4/5"
+                        }
+                        div {
+                            class: "h-4 bg-muted rounded w-3/5"
+                        }
+                    }
+
+                    // Action buttons row
+                    div {
+                        class: "flex items-center gap-8 mt-4",
+                        // Reply
+                        div {
+                            class: "h-4 w-8 bg-muted rounded"
+                        }
+                        // Like
+                        div {
+                            class: "h-4 w-8 bg-muted rounded"
+                        }
+                        // Repost
+                        div {
+                            class: "h-4 w-8 bg-muted rounded"
+                        }
+                        // Zap
+                        div {
+                            class: "h-4 w-10 bg-muted rounded"
+                        }
                     }
                 }
             }
-
-            // Loading text
-            div {
-                class: "text-center",
-                h2 {
-                    class: "text-xl font-semibold text-foreground mb-2",
-                    "Client Initializing"
-                }
-                p {
-                    class: "text-sm text-muted-foreground",
-                    "Connecting to the Nostr network..."
-                }
-            }
-
-            // Animated dots
-            div {
-                class: "flex gap-2 mt-6",
-                div {
-                    class: "w-3 h-3 rounded-full bg-purple-500",
-                    style: "animation: pulse 1.5s ease-in-out 0s infinite;",
-                }
-                div {
-                    class: "w-3 h-3 rounded-full bg-purple-500",
-                    style: "animation: pulse 1.5s ease-in-out 0.2s infinite;",
-                }
-                div {
-                    class: "w-3 h-3 rounded-full bg-purple-500",
-                    style: "animation: pulse 1.5s ease-in-out 0.4s infinite;",
-                }
-            }
-        }
-
-        // Add custom animation keyframes
-        style {
-            r#"
-            @keyframes pulse {{
-                0%, 100% {{
-                    opacity: 0.3;
-                    transform: scale(0.8);
-                }}
-                50% {{
-                    opacity: 1;
-                    transform: scale(1.2);
-                }}
-            }}
-            "#
         }
     }
 }

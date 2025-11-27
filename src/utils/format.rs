@@ -25,3 +25,23 @@ pub fn format_sats_compact(sats: u64) -> String {
         sats.to_string()
     }
 }
+
+/// Truncates a pubkey/hex string to show first 8 and last 8 chars
+/// Returns "abcd1234...wxyz5678" format for long strings
+pub fn truncate_pubkey(pubkey: &str) -> String {
+    if pubkey.len() <= 19 {
+        return pubkey.to_string();
+    }
+    // Fast path for ASCII (common case for hex pubkeys)
+    if pubkey.is_ascii() {
+        return format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len() - 8..]);
+    }
+    // Safe path for non-ASCII to avoid panic on multi-byte UTF-8
+    let chars: Vec<char> = pubkey.chars().collect();
+    if chars.len() <= 19 {
+        return pubkey.to_string();
+    }
+    let prefix: String = chars[..8].iter().collect();
+    let suffix: String = chars[chars.len() - 8..].iter().collect();
+    format!("{}...{}", prefix, suffix)
+}

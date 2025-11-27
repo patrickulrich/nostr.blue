@@ -91,7 +91,10 @@ pub fn NoteCard(
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
     use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
         spawn(async move {
-            let has_precomputed = counts_opt.is_some();
+            // Only consider precomputed if it actually has data (not just zeros from batch init)
+            let has_precomputed = counts_opt.as_ref().map_or(false, |c|
+                c.replies > 0 || c.likes > 0 || c.reposts > 0 || c.zap_amount_sats > 0
+            );
             let client = match get_client() {
                 Some(c) => c,
                 None => return,
@@ -153,21 +156,23 @@ pub fn NoteCard(
                             // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
                             if let Some(ref user_pk) = current_user_pubkey {
                                 // Method 1: Try to get sender from uppercase "P" tag (most common)
+                                // Use as_slice for zero-copy access
                                 let mut zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                    let tag_vec = tag.clone().to_vec();
-                                    if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                        Some(tag_vec.get(1)?.as_str().to_string())
+                                    let slice = tag.as_slice();
+                                    if slice.len() >= 2 && slice.first()?.as_str() == "P" {
+                                        Some(slice.get(1)?.as_str().to_string())
                                     } else {
                                         None
                                     }
                                 });
 
                                 // Method 2: Fallback - parse description tag (contains zap request JSON)
+                                // Use as_slice for zero-copy access
                                 if zap_sender_pubkey.is_none() {
                                     zap_sender_pubkey = event.tags.iter().find_map(|tag| {
-                                        let tag_vec = tag.clone().to_vec();
-                                        if tag_vec.first()?.as_str() == "description" {
-                                            let zap_request_json = tag_vec.get(1)?.as_str();
+                                        let slice = tag.as_slice();
+                                        if slice.first()?.as_str() == "description" {
+                                            let zap_request_json = slice.get(1)?.as_str();
                                             if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
                                                 // The pubkey field in the zap request is the sender
                                                 return zap_request.get("pubkey")
@@ -186,12 +191,12 @@ pub fn NoteCard(
                                 }
                             }
 
-                            // Calculate zap amount
+                            // Calculate zap amount (use as_slice for zero-copy access)
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
-                                let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
+                                let slice = tag.as_slice();
+                                if slice.first()?.as_str() == "description" {
                                     // Parse the JSON zap request
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    let zap_request_json = slice.get(1)?.as_str();
                                     if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
                                         // Find the amount tag in the zap request
                                         if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
@@ -597,7 +602,7 @@ pub fn NoteCard(
                         class: "mb-3",
                         RichContent {
                             content: content.clone(),
-                            tags: event.tags.iter().cloned().collect(),
+                            tags: event.tags.clone().to_vec(),
                             collapsible: collapsible
                         }
                     }

@@ -88,21 +88,23 @@ pub fn Home() -> Element {
             // Reset real-time subscription flag to allow fresh subscription
             realtime_started.set(false);
 
-            // Clear profile cache to prevent stale author metadata on refresh
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
+            // Note: Profile cache NOT cleared - 5-min TTL handles staleness
+            // Clearing was causing slow avatar loading on page navigation
 
             spawn(async move {
                 match current_feed_type {
                     FeedType::Following => {
                         match load_following_feed(None).await {
-                            Ok((feed_items, raw_count)) => {
+                            Ok((feed_items, _raw_count)) => {
                                 // Track oldest timestamp for pagination
                                 if let Some(last_item) = feed_items.last() {
                                     oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                                 }
 
-                                // Determine if there are more events based on RAW count before filtering
-                                has_more.set(raw_count >= 100);
+                                // Always assume there's more content on initial load
+                                // Only disable pagination when we explicitly get 0 results from a "load more" request
+                                // This prevents disabling infinite scroll on first login when database is empty
+                                has_more.set(true);
 
                                 // Display feed immediately (NoteCard shows fallback until metadata loads)
                                 feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -134,8 +136,9 @@ pub fn Home() -> Element {
                                     oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
                                 }
 
-                                // Determine if there are more events to load
-                                has_more.set(feed_items.len() >= 150);
+                                // Always assume there's more content on initial load
+                                // Only disable pagination when we explicitly get 0 results from a "load more" request
+                                has_more.set(true);
 
                                 // Display feed immediately (NoteCard shows fallback until metadata loads)
                                 feed_state.set(DataState::Loaded(feed_items.clone()));
@@ -383,6 +386,20 @@ pub fn Home() -> Element {
                                         };
 
                                         if !already_buffered && !already_in_feed {
+                                            // Prefetch author metadata so it's ready when "Show new posts" is clicked
+                                            let author_pk = feed_item.event().pubkey.to_hex();
+                                            spawn(async move {
+                                                let _ = crate::stores::profiles::fetch_profile(author_pk).await;
+                                            });
+
+                                            // If repost, also prefetch original author's metadata
+                                            if let FeedItem::Repost { ref original, .. } = feed_item {
+                                                let original_author_pk = original.pubkey.to_hex();
+                                                spawn(async move {
+                                                    let _ = crate::stores::profiles::fetch_profile(original_author_pk).await;
+                                                });
+                                            }
+
                                             // Add to pending buffer
                                             pending_posts.write().push(feed_item);
                                             log::info!("Buffered new post, total pending: {}", pending_posts.read().len());
@@ -420,68 +437,25 @@ pub fn Home() -> Element {
 
             log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
 
-            match current_feed_type {
-                FeedType::Following => {
-                    match load_following_feed(until).await {
-                        Ok((mut new_items, raw_count)) => {
-                            // Track oldest timestamp from new items
-                            if let Some(last_item) = new_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
-                            }
+            // Fetch items based on feed type
+            let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
+                FeedType::Following => load_following_feed(until).await.map(|(items, _)| items),
+                FeedType::FollowingWithReplies => load_following_with_replies(until).await,
+            };
 
-                            // Determine if there are more events based on RAW count before filtering
-                            has_more.set(raw_count >= 100);
-
-                            // Append and show new items immediately
-                            let prefetch_items = new_items.clone();
-                            let current_state = feed_state.read().clone();
-                            if let DataState::Loaded(mut current) = current_state {
-                                current.append(&mut new_items);
-                                feed_state.set(DataState::Loaded(current));
-                            }
-                            pagination_loading.set(false);
-
-                            // Spawn non-blocking background prefetch for missing metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&prefetch_items).await;
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load more events: {}", e);
-                            pagination_loading.set(false);
-                        }
-                    }
+            match fetch_result {
+                Ok(new_items) => {
+                    append_paginated_items(
+                        new_items,
+                        &mut feed_state,
+                        &mut oldest_timestamp,
+                        &mut has_more,
+                        &mut pagination_loading,
+                    ).await;
                 }
-                FeedType::FollowingWithReplies => {
-                    match load_following_with_replies(until).await {
-                        Ok(mut new_items) => {
-                            // Track oldest timestamp from new items
-                            if let Some(last_item) = new_items.last() {
-                                oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
-                            }
-
-                            // Determine if there are more events to load
-                            has_more.set(new_items.len() >= 150);
-
-                            // Append and show new items immediately
-                            let prefetch_items = new_items.clone();
-                            let current_state = feed_state.read().clone();
-                            if let DataState::Loaded(mut current) = current_state {
-                                current.append(&mut new_items);
-                                feed_state.set(DataState::Loaded(current));
-                            }
-                            pagination_loading.set(false);
-
-                            // Spawn non-blocking background prefetch for missing metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&prefetch_items).await;
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load more events: {}", e);
-                            pagination_loading.set(false);
-                        }
-                    }
+                Err(e) => {
+                    log::error!("Failed to load more events: {}", e);
+                    pagination_loading.set(false);
                 }
             }
         });
@@ -1326,6 +1300,68 @@ fn ProfileSection() -> Element {
     }
 }
 
+/// Helper function to append paginated items to the feed
+/// Handles deduplication, timestamp updates, and metadata prefetching
+async fn append_paginated_items(
+    new_items: Vec<FeedItem>,
+    feed_state: &mut Signal<DataState<Vec<FeedItem>>>,
+    oldest_timestamp: &mut Signal<Option<u64>>,
+    has_more: &mut Signal<bool>,
+    pagination_loading: &mut Signal<bool>,
+) {
+    // If no items returned at all, we've reached the end
+    if new_items.is_empty() {
+        log::info!("No more items from relay, reached end of feed");
+        has_more.set(false);
+        pagination_loading.set(false);
+        return;
+    }
+
+    // Get current feed to deduplicate
+    let current_state = feed_state.read().clone();
+    if let DataState::Loaded(current) = current_state {
+        // Build set of existing event IDs for O(1) lookup
+        let existing_ids: std::collections::HashSet<_> = current.iter()
+            .map(|item| item.event().id)
+            .collect();
+
+        // Filter out duplicates
+        let unique_items: Vec<_> = new_items.iter()
+            .filter(|item| !existing_ids.contains(&item.event().id))
+            .cloned()
+            .collect();
+
+        log::info!("Deduplication: {} total, {} unique items after filtering",
+            new_items.len(), unique_items.len());
+
+        // Always update oldest_timestamp from ALL fetched items (not just unique)
+        // to ensure we make progress even if all items were duplicates
+        // Subtract 1 to avoid re-fetching posts at the exact boundary
+        if let Some(last_item) = new_items.last() {
+            let ts = last_item.sort_timestamp().as_secs().saturating_sub(1);
+            oldest_timestamp.set(Some(ts));
+        }
+
+        // Keep has_more true as long as relay returns items
+        // Only the empty check above should disable pagination
+        // (duplicates just mean overlap, not end of feed)
+
+        // Append unique items
+        if !unique_items.is_empty() {
+            let prefetch_items = unique_items.clone();
+            let mut updated = current;
+            updated.extend(unique_items);
+            feed_state.set(DataState::Loaded(updated));
+
+            // Spawn non-blocking background prefetch for missing metadata
+            spawn(async move {
+                prefetch_author_metadata(&prefetch_items).await;
+            });
+        }
+    }
+    pagination_loading.set(false);
+}
+
 // Helper function to load following feed
 // Returns (feed_items, raw_count_before_filtering) tuple
 async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize), String> {
@@ -1338,21 +1374,29 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize
 
     log::info!("Loading following feed for {} (until: {:?})", pubkey_str, until);
 
-    // Fetch the user's contact list (people they follow)
-    let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
+    // OPTIMIZATION: Fetch contacts AND global feed in parallel
+    // If contacts fails or is empty, global feed is already ready
+    let contacts_future = nostr_client::fetch_contacts(pubkey_str.clone());
+    let global_future = load_global_feed(until);
+
+    let (contacts_result, global_result) = futures::join!(contacts_future, global_future);
+
+    // Handle contacts fetch result
+    let contacts = match contacts_result {
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            let global = load_global_feed(until).await?;
+            // Global feed was fetched in parallel, use it
+            let global = global_result?;
             let count = global.len();
             return Ok((global, count));
         }
     };
 
-    // If user doesn't follow anyone, show global feed
+    // If user doesn't follow anyone, show global feed (already fetched)
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global feed");
-        let global = load_global_feed(until).await?;
+        let global = global_result?;
         let count = global.len();
         return Ok((global, count));
     }

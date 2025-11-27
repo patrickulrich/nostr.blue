@@ -67,7 +67,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
@@ -145,6 +145,9 @@ pub enum Route {
 
         #[route("/music/album/:album_id")]
         MusicAlbum { album_id: String },
+
+        #[route("/music/search?:q")]
+        MusicSearch { q: String },
 
         #[route("/notifications")]
         Notifications {},
