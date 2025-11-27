@@ -4,6 +4,7 @@ use crate::components::{TrackCard, TrackCardSkeleton};
 
 #[component]
 pub fn MusicHome() -> Element {
+    let navigator = navigator();
     let mut search_query = use_signal(|| String::new());
     let mut tracks = use_signal(|| Vec::<WavlakeTrack>::new());
     let mut loading = use_signal(|| true);
@@ -47,48 +48,12 @@ pub fn MusicHome() -> Element {
         });
     });
 
-    // Search handler
-    let mut handle_search = move |_| {
+    // Search handler - navigates to dedicated search page
+    let handle_search = move |_| {
         let query = search_query.read().clone();
-        if query.trim().is_empty() {
-            return;
+        if !query.trim().is_empty() {
+            navigator.push(crate::routes::Route::MusicSearch { q: query });
         }
-
-        loading.set(true);
-        spawn(async move {
-            log::info!("Searching for: {}", query);
-            let api = WavlakeAPI::new();
-
-            match api.search_content(&query).await {
-                Ok(results) => {
-                    // Filter only track results
-                    let track_ids: Vec<String> = results
-                        .into_iter()
-                        .filter(|r| r.result_type == "track")
-                        .map(|r| r.id)
-                        .collect();
-
-                    log::info!("Found {} track IDs, fetching full details...", track_ids.len());
-
-                    // Fetch full track details for each ID to get media_url
-                    let mut track_results = Vec::new();
-                    for track_id in track_ids {
-                        match api.get_track(&track_id).await {
-                            Ok(track) => track_results.push(track),
-                            Err(e) => log::warn!("Failed to fetch track {}: {}", track_id, e),
-                        }
-                    }
-
-                    log::info!("Successfully loaded {} tracks", track_results.len());
-                    tracks.set(track_results);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    log::error!("Search failed: {}", e);
-                    loading.set(false);
-                }
-            }
-        });
     };
 
     rsx! {

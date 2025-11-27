@@ -137,7 +137,12 @@ pub fn Videos() -> Element {
             return;
         }
 
-        let until = *oldest_timestamp.read();
+        // Need a valid oldest_timestamp for pagination
+        // If None, initial load hasn't completed yet
+        let until = match *oldest_timestamp.read() {
+            Some(ts) => Some(ts),
+            None => return,
+        };
         let current_feed_type = *feed_type.read();
 
         loading_feed.set(true);
@@ -389,9 +394,9 @@ pub fn Videos() -> Element {
                                         // Only show LIVE streams on the videos page
                                         {
                                             let is_live = event.tags.iter().any(|tag| {
-                                                let tag_vec = tag.clone().to_vec();
-                                                tag_vec.first().map(|s| s.as_str()) == Some("status") &&
-                                                tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+                                                let slice = tag.as_slice();
+                                                slice.first().map(|s| s.as_str()) == Some("status") &&
+                                                slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
                                             });
 
                                             if is_live {
@@ -694,20 +699,20 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
         dimensions: None,
     };
 
-    // Parse title tag
+    // Parse title tag (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
-        let tag_vec = (*tag).clone().to_vec();
-        if tag_vec.first().map(|s| s.as_str()) == Some("title") && tag_vec.len() > 1 {
-            meta.title = Some(tag_vec[1].clone());
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("title") && slice.len() > 1 {
+            meta.title = Some(slice[1].clone());
             break;
         }
     }
 
-    // Parse imeta tags
+    // Parse imeta tags (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
-        let tag_vec = (*tag).clone().to_vec();
-        if tag_vec.first().map(|s| s.as_str()) == Some("imeta") {
-            for field in tag_vec.iter().skip(1) {
+        let slice = tag.as_slice();
+        if slice.first().map(|s| s.as_str()) == Some("imeta") {
+            for field in slice.iter().skip(1) {
                 if let Some((key, value)) = field.split_once(' ') {
                     match key {
                         "url" => meta.url = Some(value.to_string()),
@@ -895,8 +900,9 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
         .authors(authors)
         .limit(40);
 
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        video_filter = video_filter.until(Timestamp::from(until_ts));
+        video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     let mut stream_filter = Filter::new()
@@ -904,8 +910,9 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
         .authors(authors_clone)
         .limit(10);
 
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        stream_filter = stream_filter.until(Timestamp::from(until_ts));
+        stream_filter = stream_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     log::info!("Fetching videos and livestreams separately from followed accounts");
@@ -968,8 +975,9 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
         .kinds([Kind::Custom(21), Kind::Custom(22)])
         .limit(40);
 
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        video_filter = video_filter.until(Timestamp::from(until_ts));
+        video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     // Fetch livestreams (Kind 30311) separately
@@ -977,8 +985,9 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
         .kind(Kind::Custom(30311))
         .limit(10);
 
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        stream_filter = stream_filter.until(Timestamp::from(until_ts));
+        stream_filter = stream_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     log::info!("Fetching global videos and livestreams separately");

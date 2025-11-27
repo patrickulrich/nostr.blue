@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::utils::generate_option_id;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PollOptionData {
@@ -144,14 +145,4 @@ pub fn PollOptionList(
             }
         }
     }
-}
-
-/// Generate a random alphanumeric option ID
-fn generate_option_id() -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..9)
-        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
-        .collect()
 }

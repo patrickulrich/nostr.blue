@@ -372,11 +372,36 @@ async fn run_post_login_init() {
     // Fetch and merge notification checked_at from NIP-78 (if sync enabled)
     crate::stores::notifications::fetch_and_merge_from_nip78().await;
 
+    // Fetch user's Blossom servers from kind 10063 (NIP-B7)
+    if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
+        log::warn!("Failed to fetch Blossom servers: {}", e);
+    }
+
     // Start real-time notification subscription
     crate::stores::notifications::start_realtime_subscription().await;
 
     // Fetch custom emojis
     crate::stores::emoji_store::init_emoji_fetch();
+
+    // Batch prefetch metadata for all contacts (runs in background)
+    // This populates IndexedDB so avatars are ready when feed loads
+    spawn(async move {
+        if let Some(client) = crate::stores::nostr_client::get_client() {
+            log::info!("Prefetching metadata for all contacts...");
+            // Ensure relays are ready before making network calls
+            crate::stores::nostr_client::ensure_relays_ready(&client).await;
+            match client.get_contact_list_metadata(std::time::Duration::from_secs(15)).await {
+                Ok(contacts) => {
+                    log::info!("Prefetched metadata for {} contacts", contacts.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to prefetch contact metadata: {}", e);
+                }
+            }
+        } else {
+            log::debug!("Skipping contact metadata prefetch: no client available");
+        }
+    });
 }
 
 /// Login with NIP-46 remote signer (nostr-connect)

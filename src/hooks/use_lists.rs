@@ -30,10 +30,7 @@ impl UserList {
 
         // Get title tag or use identifier as fallback
         let name = event.tags.iter()
-            .find(|tag| {
-                let vec = (*tag).clone().to_vec();
-                vec.first().map(|s| s.as_str()) == Some("title")
-            })
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .or_else(|| Some(identifier.clone()))
@@ -41,10 +38,7 @@ impl UserList {
 
         // Get description tag
         let description = event.tags.iter()
-            .find(|tag| {
-                let vec = (*tag).clone().to_vec();
-                vec.first().map(|s| s.as_str()) == Some("description")
-            })
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("description"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .unwrap_or_default();

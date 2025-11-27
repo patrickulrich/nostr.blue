@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{PollOptionList, PollOptionData};
+use crate::utils::generate_option_id;
 use nostr_sdk::{nips::nip88::{PollType, PollOption}, Timestamp};
 use once_cell::sync::Lazy;
 
@@ -379,16 +380,6 @@ pub fn PollNew() -> Element {
             }
         }
     }
-}
-
-/// Generate a random alphanumeric option ID
-fn generate_option_id() -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..9)
-        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
-        .collect()
 }
 
 /// Calculate end timestamp based on preset or custom time

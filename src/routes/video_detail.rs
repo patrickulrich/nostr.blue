@@ -38,12 +38,12 @@ pub fn VideoDetail(video_id: String) -> Element {
         loading.set(true);
         error.set(None);
 
-        // Clear profile cache to prevent stale author metadata
-        crate::stores::profiles::PROFILE_CACHE.write().clear();
-
         spawn(async move {
             match load_video_by_id(&id).await {
                 Ok(event) => {
+                    // Clear profile cache for author to ensure fresh metadata on detail pages
+                    let author_pubkey = event.pubkey.to_hex();
+                    crate::stores::profiles::PROFILE_CACHE.write().pop(&author_pubkey);
                     video_event.set(Some(event));
                     loading.set(false);
                 }

@@ -67,7 +67,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
@@ -145,6 +145,9 @@ pub enum Route {
 
         #[route("/music/album/:album_id")]
         MusicAlbum { album_id: String },
+
+        #[route("/music/search?:q")]
+        MusicSearch { q: String },
 
         #[route("/notifications")]
         Notifications {},
@@ -1050,9 +1053,12 @@ fn NavLink(
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
         (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => p1 == p2,
-        (Route::MusicHome {}, Route::MusicHome {}) => true,
-        (Route::MusicRadio {}, Route::MusicRadio {}) => true,
-        (Route::MusicLeaderboard {}, Route::MusicLeaderboard {}) => true,
+        (Route::MusicHome {}, Route::MusicHome {}) |
+        (Route::MusicHome {}, Route::MusicRadio {}) |
+        (Route::MusicHome {}, Route::MusicLeaderboard {}) |
+        (Route::MusicHome {}, Route::MusicSearch { .. }) |
+        (Route::MusicHome {}, Route::MusicArtist { .. }) |
+        (Route::MusicHome {}, Route::MusicAlbum { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
