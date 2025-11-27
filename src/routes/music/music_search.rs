@@ -81,14 +81,25 @@ pub fn MusicSearch(q: String) -> Element {
 
                     log::info!("Found {} tracks, {} artists, {} albums", tracks.len(), artists.len(), albums.len());
 
-                    // Fetch full track details for playability
-                    let mut full_tracks = Vec::new();
-                    for track_result in tracks {
-                        match api.get_track(&track_result.id).await {
-                            Ok(track) => full_tracks.push(track),
-                            Err(e) => log::warn!("Failed to fetch track {}: {}", track_result.id, e),
+                    // Fetch full track details for playability (in parallel)
+                    let track_futures: Vec<_> = tracks.into_iter().map(|track_result| {
+                        async move {
+                            let api = WavlakeAPI::new();
+                            match api.get_track(&track_result.id).await {
+                                Ok(track) => Some(track),
+                                Err(e) => {
+                                    log::warn!("Failed to fetch track {}: {}", track_result.id, e);
+                                    None
+                                }
+                            }
                         }
-                    }
+                    }).collect();
+
+                    let full_tracks: Vec<_> = futures::future::join_all(track_futures)
+                        .await
+                        .into_iter()
+                        .flatten()
+                        .collect();
 
                     track_results.set(full_tracks);
                     artist_results.set(artists);

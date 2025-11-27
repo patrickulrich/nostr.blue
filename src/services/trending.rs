@@ -62,14 +62,14 @@ struct NostrWineTrendingItem {
 }
 
 /// Fetch trending notes from nostr.wine API
-/// Returns the top trending posts ordered by replies (default)
+/// Returns the top trending posts ordered by reactions
 ///
 /// Parameters:
-/// - limit: Number of events to return (max 200, default 10)
-/// - hours: Hours to look back (1-48, default 4)
-/// - order: Order by "replies", "reposts", "reactions", "zap_count", or "zap_amount"
+/// - limit: Number of events to return (1-200, default 10)
+///
+/// Note: Hours is fixed at 24 and order is fixed to "reactions" for best engagement signal.
 pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote>, String> {
-    let limit = limit.unwrap_or(10).min(200);
+    let limit = limit.unwrap_or(10).clamp(1, 200);
 
     // Fetch trending event IDs from nostr.wine
     // Use 24 hours lookback and order by reactions for best engagement signal

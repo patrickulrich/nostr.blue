@@ -439,8 +439,10 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
     }
 
     // Handle youtube.com/watch?v=ID (including with playlist params)
-    if let Some(start) = url.find("v=") {
-        let id_start = start + 2;
+    // Check for ?v= or &v= to avoid matching parameters like av=, rev=, etc.
+    let v_pos = url.find("?v=").or_else(|| url.find("&v="));
+    if let Some(start) = v_pos {
+        let id_start = start + 3; // skip ?v= or &v=
         let id = &url[id_start..];
         let id = id.split('&').next()?;
         let id = id.split('#').next()?;
@@ -634,17 +636,12 @@ fn extract_mixcloud(url: &str) -> Option<(String, String)> {
 }
 
 /// Extract Rumble embed URL
-/// Supports: rumble.com/embed/{id}
+/// Only supports: rumble.com/embed/{id}
+/// Non-embed URLs are not supported as the renderer cannot convert them.
 fn extract_rumble(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
 
     if lower.contains("rumble.com/embed/") {
-        return Some(url.to_string());
-    }
-
-    // Convert rumble.com/{video} to embed format if needed
-    if lower.contains("rumble.com/") && !lower.contains("/embed/") {
-        // For non-embed URLs, return the URL and let the renderer handle it
         return Some(url.to_string());
     }
 

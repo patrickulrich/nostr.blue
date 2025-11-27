@@ -396,7 +396,7 @@ pub fn Videos() -> Element {
                                             let is_live = event.tags.iter().any(|tag| {
                                                 let slice = tag.as_slice();
                                                 slice.first().map(|s| s.as_str()) == Some("status") &&
-                                                slice.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+                                                slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
                                             });
 
                                             if is_live {
