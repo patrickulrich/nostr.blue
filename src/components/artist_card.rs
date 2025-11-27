@@ -29,7 +29,7 @@ pub fn ArtistCard(props: ArtistCardProps) -> Element {
                 } else {
                     div {
                         class: "w-14 h-14 rounded-full bg-muted flex items-center justify-center",
-                        UserIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
+                        UserIcon { class: "w-6 h-6 text-muted-foreground" }
                     }
                 }
             }

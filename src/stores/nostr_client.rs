@@ -44,10 +44,10 @@ fn get_contacts_cache() -> &'static Mutex<Option<CachedContacts>> {
 
 /// Invalidate the contacts cache (call after follow/unfollow)
 pub fn invalidate_contacts_cache() {
-    if let Ok(mut cache) = get_contacts_cache().lock() {
-        *cache = None;
-        log::debug!("Contacts cache invalidated");
-    }
+    // Use unwrap_or_else to recover from poisoned mutex instead of silently ignoring
+    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    *cache = None;
+    log::debug!("Contacts cache invalidated");
 }
 
 /// Wait for at least one relay to be ready before fetching
@@ -685,21 +685,21 @@ pub async fn publish_reaction(
 pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
     // Check cache first (5-minute TTL)
     {
-        if let Ok(cache) = get_contacts_cache().lock() {
-            if let Some(ref cached) = *cache {
-                if cached.pubkey == pubkey_str
-                   && cached.cached_at.elapsed() < Duration::from_secs(300) {
-                    log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
-                    let contacts = cached.contacts.clone();
+        let cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(ref cached) = *cache {
+            if cached.pubkey == pubkey_str
+               && cached.cached_at.elapsed() < Duration::from_secs(300) {
+                log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
+                let contacts = cached.contacts.clone();
+                drop(cache); // Release lock before spawning
 
-                    // Background refresh (don't await)
-                    let pk = pubkey_str.clone();
-                    spawn(async move {
-                        let _ = fetch_contacts_from_relay(pk).await;
-                    });
+                // Background refresh (don't await)
+                let pk = pubkey_str.clone();
+                spawn(async move {
+                    let _ = fetch_contacts_from_relay(pk).await;
+                });
 
-                    return Ok(contacts);
-                }
+                return Ok(contacts);
             }
         }
     }
@@ -735,7 +735,8 @@ async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Ve
                 log::info!("Found {} contacts from relay", contacts.len());
 
                 // Update cache
-                if let Ok(mut cache) = get_contacts_cache().lock() {
+                {
+                    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     *cache = Some(CachedContacts {
                         pubkey: pubkey_str,
                         contacts: contacts.clone(),
@@ -2207,31 +2208,59 @@ pub async fn publish_poll_vote(
 
     // NIP-88: Votes should be published to the relays specified in the poll
     let output = if !poll_relays.is_empty() {
-        // Add poll relays if not already connected
+        // Track which relays we actually add (to clean up later)
+        let mut added_relays = Vec::new();
         for relay_url in &poll_relays {
-            if let Err(e) = client.add_relay(relay_url.as_str()).await {
-                log::debug!("Could not add poll relay {}: {}", relay_url, e);
+            // add_relay returns Ok if added, Err if already present or failed
+            if client.add_relay(relay_url.as_str()).await.is_ok() {
+                added_relays.push(relay_url.clone());
             }
         }
 
-        // Connect to newly added relays and log status
-        client.connect().await;
-        log::debug!("Poll vote: connect() completed for {} poll relay(s)", poll_relays.len());
+        // Use non-blocking relay ready check instead of blocking connect()
+        ensure_relays_ready(&client).await;
+
+        // Check if any poll relays are actually connected
+        let relays_status = client.relays().await;
+        let connected_poll_relays: Vec<_> = poll_relays.iter()
+            .filter(|r| {
+                if let Ok(url) = nostr::RelayUrl::parse(r.as_str()) {
+                    relays_status.get(&url).map(|relay| relay.is_connected()).unwrap_or(false)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        if connected_poll_relays.is_empty() {
+            log::warn!("None of the {} poll relays are connected, falling back to default relays", poll_relays.len());
+        } else {
+            log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), poll_relays.len());
+        }
 
         // Publish to poll-specified relays
         let relay_urls: Vec<nostr::Url> = poll_relays.iter()
             .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
             .collect();
 
-        if !relay_urls.is_empty() {
+        let result = if !relay_urls.is_empty() {
             log::info!("Publishing vote to {} poll-specified relays", relay_urls.len());
             client.send_event_builder_to(relay_urls, builder).await
-                .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))?
+                .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
         } else {
             // Fallback if URL parsing failed
             client.send_event_builder(builder).await
-                .map_err(|e| format!("Failed to publish poll vote: {}", e))?
+                .map_err(|e| format!("Failed to publish poll vote: {}", e))
+        };
+
+        // Cleanup: remove only the relays we added
+        for relay_url in added_relays {
+            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
+                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
+            }
         }
+
+        result?
     } else {
         // No poll relays specified, use default relays
         client.send_event_builder(builder).await

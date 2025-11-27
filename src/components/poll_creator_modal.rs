@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::nostr_client;
+use crate::stores::{nostr_client, relay_metadata};
 use crate::components::{PollOptionList, PollOptionData};
 use crate::utils::generate_option_id;
 use nostr_sdk::{nips::nip19::Nip19Event, nips::nip88::{PollType, PollOption}, Timestamp, EventId, ToBech32};
@@ -113,8 +113,18 @@ pub fn PollCreatorModal(
             // Parse hashtags
             let hashtags: Vec<String> = extract_hashtags(&question, &hashtags_val);
 
-            // Get user's relays (empty for now)
-            let relays = vec![];
+            // Get user's write relays for poll discoverability (NIP-88 relay hints)
+            let relays: Vec<String> = relay_metadata::USER_RELAY_METADATA.read()
+                .as_ref()
+                .map(|m| m.relays.iter()
+                    .filter(|r| r.write)
+                    .map(|r| r.url.clone())
+                    .collect())
+                .unwrap_or_default();
+
+            if relays.is_empty() {
+                log::debug!("No write relays configured, poll will be published without relay hints");
+            }
 
             // Publish poll
             match nostr_client::publish_poll(

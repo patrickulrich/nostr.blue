@@ -398,6 +398,8 @@ async fn run_post_login_init() {
                     log::warn!("Failed to prefetch contact metadata: {}", e);
                 }
             }
+        } else {
+            log::debug!("Skipping contact metadata prefetch: no client available");
         }
     });
 }

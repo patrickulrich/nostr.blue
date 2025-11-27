@@ -358,6 +358,27 @@ async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Queue an already-signed Event for retry when publication fails
+///
+/// Used when we've pre-signed an event to get its ID but publication failed.
+async fn queue_signed_event_for_retry(event: nostr_sdk::Event, event_type: PendingEventType) {
+    match serde_json::to_string(&event) {
+        Ok(event_json) => {
+            match queue_nostr_event(event_json, event_type).await {
+                Ok(queue_id) => {
+                    log::info!("Queued signed event {} for retry: {}", event.id.to_hex(), queue_id);
+                }
+                Err(queue_err) => {
+                    log::error!("Failed to queue event for retry: {}", queue_err);
+                }
+            }
+        }
+        Err(json_err) => {
+            log::error!("Failed to serialize event for queueing: {}", json_err);
+        }
+    }
+}
+
 /// Queue an EventBuilder for retry when initial publication fails
 ///
 /// Signs the event using the current signer and queues for later retry.
@@ -1765,20 +1786,32 @@ pub async fn send_tokens(
 
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-        // Publish immediately to get real event ID
-        match client.send_event_builder(builder.clone()).await {
-            Ok(event_output) => {
-                let real_id = event_output.id().to_hex();
-                log::info!("Published new token event: {}", real_id);
-                new_event_id = Some(real_id);
+        // Pre-compute event ID using UnsignedEvent before signing
+        // Event ID is deterministic (SHA256 of pubkey + created_at + kind + tags + content)
+        // This allows us to track the event ID even if publish fails
+        let mut unsigned = builder.clone().build(pubkey);
+        let event_id_hex = unsigned.id().to_hex();
+        log::debug!("Pre-computed token event ID: {}", event_id_hex);
+
+        // Sign the event
+        let signed_event = unsigned.sign(&signer).await
+            .map_err(|e| format!("Failed to sign token event: {}", e))?;
+
+        // Try to publish - if it fails, queue the already-signed event
+        match client.send_event(&signed_event).await {
+            Ok(_) => {
+                log::info!("Published new token event: {}", event_id_hex);
             }
             Err(e) => {
-                log::warn!("Failed to publish token event, will queue for retry: {}", e);
-                // Queue for retry - local state will not include this token event
-                // but the proofs are still valid and will be re-synced on next wallet load
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                log::warn!("Failed to publish token event, queuing for retry: {}", e);
+                // Queue the signed event for retry
+                queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
             }
         }
+
+        // Always set event ID - it's valid regardless of publish success
+        // The proofs are tracked locally with this ID and will sync on retry
+        new_event_id = Some(event_id_hex);
     }
 
     // STEP 2: Update local state with the real event ID
