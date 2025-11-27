@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::utils::content_parser::{parse_content, ContentToken, extract_youtube_id};
+use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use nostr_sdk::nips::nip19::Nip19;
@@ -116,21 +116,16 @@ fn render_token(token: &ContentToken) -> Element {
             }
         },
 
+        // Regular video (YouTube URLs use ContentToken::YouTube)
         ContentToken::Video(url) => rsx! {
             div {
                 class: "my-2 rounded-lg overflow-hidden border border-border",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
-                if url.contains("youtube.com") || url.contains("youtu.be") {
-                    // YouTube embed
-                    {render_youtube_embed(url)}
-                } else {
-                    // Regular video
-                    video {
-                        src: "{url}",
-                        controls: true,
-                        class: "max-w-full h-auto",
-                        "Your browser does not support the video tag."
-                    }
+                video {
+                    src: "{url}",
+                    controls: true,
+                    class: "max-w-full h-auto",
+                    "Your browser does not support the video tag."
                 }
             }
         },
@@ -574,35 +569,6 @@ fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
         }
     }
 }
-
-fn render_youtube_embed(url: &str) -> Element {
-    // Extract video ID from YouTube URL
-    let video_id = extract_youtube_id(url);
-
-    if let Some(id) = video_id {
-        let embed_url = format!("https://www.youtube.com/embed/{}", id);
-        rsx! {
-            iframe {
-                src: "{embed_url}",
-                class: "w-full aspect-video",
-                allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture",
-                allowfullscreen: true,
-            }
-        }
-    } else {
-        // Fallback to link if we can't extract ID
-        rsx! {
-            a {
-                href: "{url}",
-                target: "_blank",
-                rel: "noopener noreferrer",
-                class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline",
-                "{url}"
-            }
-        }
-    }
-}
-
 
 #[component]
 fn TwitterTweetRenderer(tweet_id: String) -> Element {
@@ -1925,8 +1891,23 @@ fn RumbleRenderer(embed_url: String) -> Element {
     let final_embed_url = if embed_url.contains("/embed/") {
         embed_url.clone()
     } else {
-        // Try to convert to embed URL
-        embed_url.clone()
+        // Try to convert standard Rumble URLs to embed format
+        // Rumble URLs can be like: https://rumble.com/vXXXXX-title.html
+        // Embed format is: https://rumble.com/embed/vXXXXX/
+        if let Some(start) = embed_url.find("/v") {
+            let after_v = &embed_url[start + 1..]; // Skip the "/"
+            // Extract video ID (everything up to "-" or "." or "/" or end)
+            let video_id: String = after_v.chars()
+                .take_while(|c| *c != '-' && *c != '.' && *c != '/')
+                .collect();
+            if !video_id.is_empty() {
+                format!("https://rumble.com/embed/{}/", video_id)
+            } else {
+                embed_url.clone()
+            }
+        } else {
+            embed_url.clone()
+        }
     };
 
     rsx! {

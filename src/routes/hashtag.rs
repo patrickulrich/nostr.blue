@@ -81,10 +81,10 @@ pub fn Hashtag(tag: String) -> Element {
                     }
 
                     // Deduplicate: build set of existing event IDs
-                    let current = events.read().clone();
-                    let existing_ids: std::collections::HashSet<_> = current.iter()
+                    let existing_ids: std::collections::HashSet<_> = events.read().iter()
                         .map(|e| e.id)
                         .collect();
+                    let current = events.read().clone();
 
                     // Filter out duplicates
                     let unique_events: Vec<_> = new_events.iter()

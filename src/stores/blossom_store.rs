@@ -329,19 +329,34 @@ pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch Blossom servers: {}", e);
-            *SERVERS_LOADED.write() = true;
+            // Do NOT set SERVERS_LOADED = true on error - allow retry
             Err(format!("Failed to fetch servers: {}", e))
         }
     }
 }
 
-/// Parse server tags from a kind 10063 event
+/// Parse server tags from a kind 10063 event with URL validation
 fn parse_server_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
     tags.iter()
         .filter_map(|tag| {
             // Look for ["server", "url"] tags
             if tag.kind() == TagKind::Custom("server".into()) {
-                tag.content().map(|s| s.to_string())
+                tag.content().and_then(|s| {
+                    // Validate URL - Blossom servers should be HTTP(S)
+                    match url::Url::parse(s) {
+                        Ok(url) if url.scheme() == "https" || url.scheme() == "http" => {
+                            Some(s.to_string())
+                        }
+                        Ok(url) => {
+                            log::warn!("Invalid Blossom server scheme: {} (expected http/https)", url.scheme());
+                            None
+                        }
+                        Err(e) => {
+                            log::warn!("Invalid Blossom server URL '{}': {}", s, e);
+                            None
+                        }
+                    }
+                })
             } else {
                 None
             }

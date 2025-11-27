@@ -7,6 +7,15 @@ pub fn ClientInitializing() -> Element {
     rsx! {
         div {
             class: "animate-pulse",
+            role: "status",
+            aria_live: "polite",
+            aria_busy: "true",
+
+            // Screen reader announcement
+            span {
+                class: "sr-only",
+                "Loading..."
+            }
 
             // Skeleton for 3 feed items
             for _ in 0..3 {

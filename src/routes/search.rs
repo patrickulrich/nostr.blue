@@ -57,7 +57,7 @@ pub fn Search(q: String) -> Element {
 
     // Update query signal when prop changes (e.g., new search from search bar)
     use_effect(use_reactive!(|q| {
-        query.set(q.clone());
+        query.set(q);
     }));
 
     // Fetch contacts on mount
@@ -288,10 +288,15 @@ pub fn Search(q: String) -> Element {
                                 }
                             }
 
-                            // Dropdown menu
+                            // Dropdown menu with backdrop for click-outside dismissal
                             if *show_sort_dropdown.read() {
+                                // Invisible backdrop to close dropdown on outside click
                                 div {
-                                    class: "absolute right-0 top-full mt-1 w-40 bg-background border border-border rounded-lg shadow-lg z-30 overflow-hidden",
+                                    class: "fixed inset-0 z-40",
+                                    onclick: move |_| show_sort_dropdown.set(false)
+                                }
+                                div {
+                                    class: "absolute right-0 top-full mt-1 w-40 bg-background border border-border rounded-lg shadow-lg z-50 overflow-hidden",
                                     for option in [SortOrder::Newest, SortOrder::Oldest, SortOrder::FollowingFirst] {
                                         {
                                             let is_selected = *sort_order.read() == option;

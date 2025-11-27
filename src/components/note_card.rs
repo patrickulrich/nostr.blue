@@ -602,7 +602,7 @@ pub fn NoteCard(
                         class: "mb-3",
                         RichContent {
                             content: content.clone(),
-                            tags: event.tags.clone().to_vec(),
+                            tags: event.tags.iter().cloned().collect(),
                             collapsible: collapsible
                         }
                     }

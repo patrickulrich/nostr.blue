@@ -108,7 +108,6 @@ pub fn Profile(pubkey: String) -> Element {
     let pubkey_for_follow = pubkey.clone();
     let pubkey_for_stats = pubkey.clone();
     let pubkey_for_button = pubkey.clone();
-    let pubkey_for_follows_you = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_load_more = pubkey.clone();
     let pubkey_for_dm = pubkey.clone();
@@ -365,9 +364,6 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_stats.clone();
-        // Note: pubkey_for_follows_you is captured to ensure this effect has its own
-        // copy of the pubkey for the "follows you" check logic below
-        let _ = pubkey_for_follows_you.clone();
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
 

@@ -354,33 +354,44 @@ async fn fetch_poll_votes(
     // If poll specifies relays, fetch from those relays specifically
     // Otherwise fall back to user's default relays
     let events = if !poll_relays.is_empty() {
-        // Add poll relays temporarily if not already connected
+        // Track which relays we actually add (to clean up later)
+        let mut added_relays = Vec::new();
         for relay_url in &poll_relays {
-            if let Err(e) = client.add_relay(relay_url.as_str()).await {
-                log::debug!("Could not add poll relay {}: {}", relay_url, e);
+            // add_relay returns Ok if added, Err if already present or failed
+            if client.add_relay(relay_url.as_str()).await.is_ok() {
+                added_relays.push(relay_url.clone());
             }
         }
 
-        // Connect to poll relays before fetching
-        client.connect().await;
+        // Ensure relays are connected before fetching
+        nostr_client::ensure_relays_ready(&client).await;
 
         // Fetch from poll-specified relays
         let relay_urls: Vec<nostr_sdk::Url> = poll_relays.iter()
             .filter_map(|r| nostr_sdk::Url::parse(r.as_str()).ok())
             .collect();
 
-        if !relay_urls.is_empty() {
+        let result = if !relay_urls.is_empty() {
             client
                 .fetch_events_from(relay_urls, filter.clone(), Duration::from_secs(10))
                 .await
-                .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))?
+                .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))
         } else {
             // Fallback if URL parsing failed
             client
                 .fetch_events(filter, Duration::from_secs(10))
                 .await
-                .map_err(|e| format!("Failed to fetch votes: {}", e))?
+                .map_err(|e| format!("Failed to fetch votes: {}", e))
+        };
+
+        // Cleanup: remove only the relays we added
+        for relay_url in added_relays {
+            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
+                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
+            }
         }
+
+        result?
     } else {
         // No poll relays specified, use default relays
         // Ensure default relays are ready before fetching

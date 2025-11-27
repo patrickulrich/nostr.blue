@@ -284,6 +284,9 @@ pub fn Settings() -> Element {
                 }
                 Err(e) => {
                     blossom_save_status.set(Some(format!("❌ Failed: {}", e)));
+                    // Auto-clear error after 7 seconds
+                    gloo_timers::future::TimeoutFuture::new(7000).await;
+                    blossom_save_status.set(None);
                 }
             }
         });

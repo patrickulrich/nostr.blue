@@ -207,7 +207,11 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = client.connect();
+        let client_for_connect = client.clone();
+        tokio::spawn(async move {
+            client_for_connect.connect().await;
+            log::info!("Background relay connections completed (non-WASM)");
+        });
     }
 
     log::info!("Nostr client initialized (relays connecting in background)");

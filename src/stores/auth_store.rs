@@ -388,6 +388,8 @@ async fn run_post_login_init() {
     spawn(async move {
         if let Some(client) = crate::stores::nostr_client::get_client() {
             log::info!("Prefetching metadata for all contacts...");
+            // Ensure relays are ready before making network calls
+            crate::stores::nostr_client::ensure_relays_ready(&client).await;
             match client.get_contact_list_metadata(std::time::Duration::from_secs(15)).await {
                 Ok(contacts) => {
                     log::info!("Prefetched metadata for {} contacts", contacts.len());

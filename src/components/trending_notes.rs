@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::services::trending::{TrendingNote, get_trending_notes, truncate_content};
 use crate::stores::profiles;
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn TrendingNotes() -> Element {
@@ -132,19 +133,9 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
         if let Some(ref prof) = *p {
             prof.display_name.clone()
                 .or_else(|| prof.name.clone())
-                .unwrap_or_else(|| {
-                    if author_pubkey.len() > 16 {
-                        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-                    } else {
-                        author_pubkey.clone()
-                    }
-                })
+                .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
         } else {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
+            truncate_pubkey(&author_pubkey)
         }
     };
 

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{PollOptionList, PollOptionData};
 use crate::utils::generate_option_id;
-use nostr_sdk::{nips::nip88::{PollType, PollOption}, Timestamp, EventId, ToBech32};
+use nostr_sdk::{nips::nip19::Nip19Event, nips::nip88::{PollType, PollOption}, Timestamp, EventId, ToBech32};
 
 #[component]
 pub fn PollCreatorModal(
@@ -130,10 +130,13 @@ pub fn PollCreatorModal(
 
                     // Convert event ID hex to nostr:nevent1... format
                     let nevent_ref = match EventId::from_hex(&event_id_hex) {
-                        Ok(eid) => format!(
-                            "nostr:{}",
-                            eid.to_bech32().unwrap_or_else(|_| event_id_hex.clone())
-                        ),
+                        Ok(eid) => {
+                            let nevent = Nip19Event::new(eid);
+                            format!(
+                                "nostr:{}",
+                                nevent.to_bech32().unwrap_or_else(|_| event_id_hex.clone())
+                            )
+                        },
                         Err(_) => format!("nostr:{}", event_id_hex),
                     };
 
@@ -450,7 +453,8 @@ fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
 
             if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
                 // Convert from local time to UTC
-                if let Some(local_dt) = Local.from_local_datetime(&naive_dt).single() {
+                // Use .earliest() for deterministic behavior during DST transitions
+                if let Some(local_dt) = Local.from_local_datetime(&naive_dt).earliest() {
                     let utc_dt = local_dt.with_timezone(&Utc);
                     let timestamp = utc_dt.timestamp();
 
@@ -472,12 +476,15 @@ fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
 }
 
 /// Extract hashtags from question and additional input
+/// - Uses ASCII-only pattern for Nostr compatibility
+/// - Limits to max 10 hashtags, max 50 chars each
 fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {
     use std::collections::HashSet;
     use once_cell::sync::Lazy;
 
+    // ASCII-only hashtags for Nostr compatibility
     static HASHTAG_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
-        regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
+        regex::Regex::new(r"#([A-Za-z0-9_]+)").expect("Failed to compile hashtag regex")
     });
 
     let mut hashtags = HashSet::new();
@@ -485,17 +492,26 @@ fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {
     // Extract from question (format: #hashtag)
     for cap in HASHTAG_REGEX.captures_iter(question) {
         if let Some(tag) = cap.get(1) {
-            hashtags.insert(tag.as_str().to_lowercase());
+            let tag_str = tag.as_str().to_lowercase();
+            // Max 50 chars per tag
+            if tag_str.len() <= 50 {
+                hashtags.insert(tag_str);
+            }
         }
     }
 
     // Extract from additional input (comma separated, no # required)
     for tag in additional.split(',') {
         let cleaned = tag.trim().trim_start_matches('#').to_lowercase();
-        if !cleaned.is_empty() {
+        // ASCII alphanumeric + underscore only, max 50 chars
+        if !cleaned.is_empty()
+            && cleaned.len() <= 50
+            && cleaned.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             hashtags.insert(cleaned);
         }
     }
 
-    hashtags.into_iter().collect()
+    // Limit to first 10 unique hashtags
+    hashtags.into_iter().take(10).collect()
 }

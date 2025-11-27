@@ -7,6 +7,11 @@ use ::url::Url;
 static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex")
 });
+
+/// Clean trailing punctuation from URLs that may have been captured by regex
+fn clean_url_trailing_punctuation(url: &str) -> &str {
+    url.trim_end_matches(|c| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"'))
+}
 static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"nostr:(npub1|note1|nevent1|nprofile1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr regex")
@@ -68,7 +73,11 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
 
     // Find all URLs (using precompiled static regex)
     for mat in URL_PATTERN.find_iter(content) {
-        let url = mat.as_str().to_string();
+        let raw_url = mat.as_str();
+        // Clean trailing punctuation that may have been captured
+        let url = clean_url_trailing_punctuation(raw_url).to_string();
+        // Adjust the end position if we trimmed punctuation
+        let actual_end = mat.start() + url.len();
         let token = if is_image_url(&url) {
             ContentToken::Image(url)
         } else if let Some(video_id) = extract_youtube_id(&url) {
@@ -109,7 +118,7 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         } else {
             ContentToken::Link(url)
         };
-        matches.push((mat.start(), mat.end(), token));
+        matches.push((mat.start(), actual_end, token));
     }
 
     // Find all nostr: mentions (using precompiled static regex)
@@ -446,7 +455,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = &url[id_start..];
         let id = id.split('&').next()?;
         let id = id.split('#').next()?;
-        if !id.is_empty() && id.len() >= 11 {
+        // YouTube IDs are exactly 11 characters
+        if !id.is_empty() && id.len() == 11 {
             return Some(id.to_string());
         }
     }
@@ -458,7 +468,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
             let id = &url[id_start..];
             let id = id.split('?').next()?;
             let id = id.split('#').next()?;
-            if !id.is_empty() && id.len() >= 11 {
+            // YouTube IDs are exactly 11 characters
+            if !id.is_empty() && id.len() == 11 {
                 return Some(id.to_string());
             }
         }
@@ -471,7 +482,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('?').next()?;
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
-        if !id.is_empty() && id.len() >= 11 {
+        // YouTube IDs are exactly 11 characters
+        if !id.is_empty() && id.len() == 11 {
             return Some(id.to_string());
         }
     }
@@ -483,7 +495,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('?').next()?;
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
-        if !id.is_empty() && id.len() >= 11 {
+        // YouTube IDs are exactly 11 characters
+        if !id.is_empty() && id.len() == 11 {
             return Some(id.to_string());
         }
     }
@@ -495,7 +508,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('?').next()?;
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
-        if !id.is_empty() && id.len() >= 11 {
+        // YouTube IDs are exactly 11 characters
+        if !id.is_empty() && id.len() == 11 {
             return Some(id.to_string());
         }
     }
@@ -507,7 +521,8 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('?').next()?;
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
-        if !id.is_empty() && id.len() >= 11 {
+        // YouTube IDs are exactly 11 characters
+        if !id.is_empty() && id.len() == 11 {
             return Some(id.to_string());
         }
     }

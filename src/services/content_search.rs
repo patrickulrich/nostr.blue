@@ -14,9 +14,8 @@ pub struct ContentSearchResult {
 
 impl PartialEq for ContentSearchResult {
     fn eq(&self, other: &Self) -> bool {
+        // Only compare event ID for deduplication purposes
         self.event.id == other.event.id
-            && self.is_from_contact == other.is_from_contact
-            && self.relevance == other.relevance
     }
 }
 

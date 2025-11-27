@@ -19,7 +19,7 @@ pub fn ArtistCard(props: ArtistCardProps) -> Element {
             // Artist image (circular)
             div {
                 class: "relative flex-shrink-0",
-                if let Some(ref art_url) = result.artist_art_url {
+                if let Some(ref art_url) = result.artist_art_url.as_ref().filter(|u| !u.is_empty()) {
                     img {
                         src: "{art_url}",
                         alt: "{result.name}",

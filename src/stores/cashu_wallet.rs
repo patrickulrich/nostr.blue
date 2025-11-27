@@ -358,6 +358,65 @@ async fn remove_pending_event(event_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Queue an EventBuilder for retry when initial publication fails
+///
+/// Signs the event using the current signer and queues for later retry.
+async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
+    let signer = match crate::stores::signer::get_signer() {
+        Some(s) => s,
+        None => {
+            log::error!("Cannot queue failed event: no signer available");
+            return;
+        }
+    };
+
+    let sign_and_queue = |event: nostr_sdk::Event| async move {
+        match serde_json::to_string(&event) {
+            Ok(event_json) => {
+                match queue_nostr_event(event_json, event_type).await {
+                    Ok(queue_id) => {
+                        log::info!("Queued failed event for retry: {}", queue_id);
+                    }
+                    Err(queue_err) => {
+                        log::error!("Failed to queue event for retry: {}", queue_err);
+                    }
+                }
+            }
+            Err(json_err) => {
+                log::error!("Failed to serialize event for queueing: {}", json_err);
+            }
+        }
+    };
+
+    match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            match builder.sign_with_keys(&keys) {
+                Ok(event) => sign_and_queue(event).await,
+                Err(sign_err) => {
+                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                }
+            }
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            match builder.sign(&*browser_signer).await {
+                Ok(event) => sign_and_queue(event).await,
+                Err(sign_err) => {
+                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                }
+            }
+        }
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
+            match builder.sign(&*remote_signer).await {
+                Ok(event) => sign_and_queue(event).await,
+                Err(sign_err) => {
+                    log::error!("Failed to sign event for queueing: {}", sign_err);
+                }
+            }
+        }
+    }
+}
+
 /// Get count of pending events waiting to be published
 #[allow(dead_code)]
 pub fn get_pending_event_count() -> usize {
@@ -1677,11 +1736,11 @@ pub async fn send_tokens(
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
-    // Generate new event ID locally (optimistic approach)
+    // Track the real event ID from Nostr publication (not synthetic)
     let mut new_event_id: Option<String> = None;
-    let mut nostr_events_to_publish = Vec::new();
 
-    // Prepare new token event if we have remaining proofs
+    // STEP 1: Publish token event first to get real EventId
+    // This ensures we have a valid hex EventId for local state and history
     if !keep_proofs.is_empty() {
         let proof_data: Vec<ProofData> = keep_proofs.iter()
             .map(|p| cdk_proof_to_proof_data(p))
@@ -1706,36 +1765,23 @@ pub async fn send_tokens(
 
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-        // Generate a local event ID for optimization
-        new_event_id = Some(format!("send-{}", uuid::Uuid::new_v4()));
-        nostr_events_to_publish.push((builder, PendingEventType::TokenEvent));
-    }
-
-    // Prepare deletion event for old token events
-    if !event_ids_to_delete.is_empty() {
-        let mut tags = Vec::new();
-        for event_id in &event_ids_to_delete {
-            tags.push(nostr_sdk::Tag::event(
-                nostr_sdk::EventId::from_hex(event_id)
-                    .map_err(|e| format!("Invalid event ID: {}", e))?
-            ));
+        // Publish immediately to get real event ID
+        match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                let real_id = event_output.id().to_hex();
+                log::info!("Published new token event: {}", real_id);
+                new_event_id = Some(real_id);
+            }
+            Err(e) => {
+                log::warn!("Failed to publish token event, will queue for retry: {}", e);
+                // Queue for retry - local state will not include this token event
+                // but the proofs are still valid and will be re-synced on next wallet load
+                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            }
         }
-
-        // Add NIP-60 required tag
-        tags.push(nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::custom("k"),
-            ["7375"]
-        ));
-
-        let deletion_builder = nostr_sdk::EventBuilder::new(
-            Kind::from(5),
-            "Spent token"
-        ).tags(tags);
-
-        nostr_events_to_publish.push((deletion_builder, PendingEventType::DeletionEvent));
     }
 
-    // UPDATE LOCAL STATE FIRST (reversible, always succeeds)
+    // STEP 2: Update local state with the real event ID
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
@@ -1744,7 +1790,7 @@ pub async fn send_tokens(
         // Remove old token events
         tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
 
-        // Add new token with remaining proofs
+        // Add new token with remaining proofs (only if we have a real event ID)
         if let Some(ref event_id) = new_event_id {
             let keep_proof_data: Vec<ProofData> = keep_proofs.iter()
                 .map(|p| cdk_proof_to_proof_data(p))
@@ -1777,118 +1823,60 @@ pub async fn send_tokens(
         log::info!("Local state updated. Balance after send: {} sats", new_balance);
     }
 
-    // PUBLISH TO NOSTR (idempotent, can be queued if it fails)
-    for (builder, event_type) in nostr_events_to_publish {
-        // Clone builder so we can use it in the error handler if needed
-        let builder_for_send = builder.clone();
-        match client.send_event_builder(builder_for_send).await {
-            Ok(event_output) => {
-                match event_type {
-                    PendingEventType::TokenEvent => {
-                        log::info!("Published new token event: {}", event_output.id().to_hex());
-                    }
-                    PendingEventType::DeletionEvent => {
-                        log::info!("Published deletion events for {} token events", event_ids_to_delete.len());
-                    }
-                    _ => {}
-                }
+    // STEP 3: Publish deletion event for old token events
+    if !event_ids_to_delete.is_empty() {
+        // Filter to only valid hex event IDs before creating deletion tags
+        let valid_event_ids: Vec<_> = event_ids_to_delete.iter()
+            .filter(|id| EventId::from_hex(id).is_ok())
+            .collect();
+
+        if !valid_event_ids.is_empty() {
+            let mut tags = Vec::new();
+            for event_id in &valid_event_ids {
+                // Safe to unwrap since we filtered above
+                tags.push(nostr_sdk::Tag::event(
+                    nostr_sdk::EventId::from_hex(event_id).unwrap()
+                ));
             }
-            Err(e) => {
-                log::warn!("Failed to publish event, will queue for retry: {}", e);
 
-                // Attempt to queue the failed event for retry
-                let signer = crate::stores::signer::get_signer()
-                    .ok_or("No signer available for queuing failed event");
+            // Add NIP-60 required tag
+            tags.push(nostr_sdk::Tag::custom(
+                nostr_sdk::TagKind::custom("k"),
+                ["7375"]
+            ));
 
-                if let Ok(signer) = signer {
-                    match signer {
-                        crate::stores::signer::SignerType::Keys(keys) => {
-                            // For Keys-based signers, use synchronous signing
-                            match builder.sign_with_keys(&keys) {
-                                Ok(event) => {
-                                    match serde_json::to_string(&event) {
-                                        Ok(event_json) => {
-                                            match queue_nostr_event(event_json, event_type).await {
-                                                Ok(queue_id) => {
-                                                    log::info!("Queued failed event for retry: {}", queue_id);
-                                                }
-                                                Err(queue_err) => {
-                                                    log::error!("Failed to queue event for retry: {}", queue_err);
-                                                }
-                                            }
-                                        }
-                                        Err(json_err) => {
-                                            log::error!("Failed to serialize event for queueing: {}", json_err);
-                                        }
-                                    }
-                                }
-                                Err(sign_err) => {
-                                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                                }
-                            }
-                        }
-                        #[cfg(target_family = "wasm")]
-                        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-                            // For async signers, use async signing
-                            match builder.sign(&*browser_signer).await {
-                                Ok(event) => {
-                                    match serde_json::to_string(&event) {
-                                        Ok(event_json) => {
-                                            match queue_nostr_event(event_json, event_type).await {
-                                                Ok(queue_id) => {
-                                                    log::info!("Queued failed event for retry: {}", queue_id);
-                                                }
-                                                Err(queue_err) => {
-                                                    log::error!("Failed to queue event for retry: {}", queue_err);
-                                                }
-                                            }
-                                        }
-                                        Err(json_err) => {
-                                            log::error!("Failed to serialize event for queueing: {}", json_err);
-                                        }
-                                    }
-                                }
-                                Err(sign_err) => {
-                                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                                }
-                            }
-                        }
-                        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
-                            // For remote signers, use async signing
-                            match builder.sign(&*remote_signer).await {
-                                Ok(event) => {
-                                    match serde_json::to_string(&event) {
-                                        Ok(event_json) => {
-                                            match queue_nostr_event(event_json, event_type).await {
-                                                Ok(queue_id) => {
-                                                    log::info!("Queued failed event for retry: {}", queue_id);
-                                                }
-                                                Err(queue_err) => {
-                                                    log::error!("Failed to queue event for retry: {}", queue_err);
-                                                }
-                                            }
-                                        }
-                                        Err(json_err) => {
-                                            log::error!("Failed to serialize event for queueing: {}", json_err);
-                                        }
-                                    }
-                                }
-                                Err(sign_err) => {
-                                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    log::error!("Cannot queue failed event: no signer available");
+            let deletion_builder = nostr_sdk::EventBuilder::new(
+                Kind::from(5),
+                "Spent token"
+            ).tags(tags);
+
+            match client.send_event_builder(deletion_builder.clone()).await {
+                Ok(_) => {
+                    log::info!("Published deletion events for {} token events", valid_event_ids.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish deletion event, will queue for retry: {}", e);
+                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
                 }
             }
         }
+
+        // Log warning for any invalid IDs that were skipped
+        let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
+        if invalid_count > 0 {
+            log::warn!("Skipped {} invalid event IDs in deletion (non-hex format)", invalid_count);
+        }
     }
 
-    // Create history event (non-critical, can fail)
-    let created = if let Some(ref id) = new_event_id { vec![id.clone()] } else { vec![] };
-    if let Err(e) = create_history_event("out", amount, created, event_ids_to_delete.clone()).await {
+    // STEP 4: Create history event with valid IDs only
+    // Filter created tokens to only include valid hex EventIds
+    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    let valid_destroyed: Vec<String> = event_ids_to_delete.iter()
+        .filter(|id| EventId::from_hex(id).is_ok())
+        .cloned()
+        .collect();
+
+    if let Err(e) = create_history_event("out", amount, valid_created, valid_destroyed).await {
         log::error!("Failed to create history event: {}", e);
     }
 
@@ -1949,25 +1937,49 @@ async fn create_history_event_full(
 
     let mut spending_history = SpendingHistory::new(direction_enum, amount);
 
-    // Add created event IDs
+    // Add created event IDs (skip invalid IDs with warning)
     for token_id in created_tokens {
-        let event_id = EventId::from_hex(&token_id)
-            .map_err(|e| format!("Invalid event ID: {}", e))?;
-        spending_history = spending_history.add_created(event_id);
+        match EventId::from_hex(&token_id) {
+            Ok(event_id) => {
+                spending_history = spending_history.add_created(event_id);
+            }
+            Err(_) => {
+                log::warn!(
+                    "Skipping invalid created token ID in history event: {} (direction={}, amount={})",
+                    token_id, direction, amount
+                );
+            }
+        }
     }
 
-    // Add destroyed event IDs
+    // Add destroyed event IDs (skip invalid IDs with warning)
     for token_id in destroyed_tokens {
-        let event_id = EventId::from_hex(&token_id)
-            .map_err(|e| format!("Invalid event ID: {}", e))?;
-        spending_history = spending_history.add_destroyed(event_id);
+        match EventId::from_hex(&token_id) {
+            Ok(event_id) => {
+                spending_history = spending_history.add_destroyed(event_id);
+            }
+            Err(_) => {
+                log::warn!(
+                    "Skipping invalid destroyed token ID in history event: {} (direction={}, amount={})",
+                    token_id, direction, amount
+                );
+            }
+        }
     }
 
-    // Add redeemed event IDs (these go in unencrypted tags per NIP-60)
+    // Add redeemed event IDs (skip invalid IDs with warning)
     for token_id in redeemed_tokens {
-        let event_id = EventId::from_hex(&token_id)
-            .map_err(|e| format!("Invalid redeemed event ID: {}", e))?;
-        spending_history = spending_history.add_redeemed(event_id);
+        match EventId::from_hex(&token_id) {
+            Ok(event_id) => {
+                spending_history = spending_history.add_redeemed(event_id);
+            }
+            Err(_) => {
+                log::warn!(
+                    "Skipping invalid redeemed token ID in history event: {} (direction={}, amount={})",
+                    token_id, direction, amount
+                );
+            }
+        }
     }
 
     // Build encrypted content manually (keeping signer pattern)
@@ -2902,11 +2914,10 @@ pub async fn melt_tokens(
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
-    // Generate new event ID locally (optimistic approach)
+    // Track the real event ID from Nostr publication (not synthetic)
     let mut new_event_id: Option<String> = None;
-    let mut nostr_events_to_publish = Vec::new();
 
-    // Prepare new token event if we have remaining proofs
+    // STEP 1: Publish token event first to get real EventId
     if !keep_proofs.is_empty() {
         let proof_data: Vec<ProofData> = keep_proofs.iter()
             .map(|p| cdk_proof_to_proof_data(p))
@@ -2931,36 +2942,21 @@ pub async fn melt_tokens(
 
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-        // Generate a local event ID for optimization
-        new_event_id = Some(format!("melt-{}", uuid::Uuid::new_v4()));
-        nostr_events_to_publish.push((builder, PendingEventType::TokenEvent));
-    }
-
-    // Prepare deletion event for old token events
-    if !event_ids_to_delete.is_empty() {
-        let mut tags = Vec::new();
-        for event_id in &event_ids_to_delete {
-            tags.push(nostr_sdk::Tag::event(
-                nostr_sdk::EventId::from_hex(event_id)
-                    .map_err(|e| format!("Invalid event ID: {}", e))?
-            ));
+        // Publish immediately to get real event ID
+        match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                let real_id = event_output.id().to_hex();
+                log::info!("Published new token event: {}", real_id);
+                new_event_id = Some(real_id);
+            }
+            Err(e) => {
+                log::warn!("Failed to publish token event, will queue for retry: {}", e);
+                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            }
         }
-
-        // Add NIP-60 required tag
-        tags.push(nostr_sdk::Tag::custom(
-            nostr_sdk::TagKind::custom("k"),
-            ["7375"]
-        ));
-
-        let deletion_builder = nostr_sdk::EventBuilder::new(
-            Kind::from(5),
-            "Melted token"
-        ).tags(tags);
-
-        nostr_events_to_publish.push((deletion_builder, PendingEventType::DeletionEvent));
     }
 
-    // UPDATE LOCAL STATE FIRST (reversible, always succeeds)
+    // STEP 2: Update local state with the real event ID
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
@@ -2969,7 +2965,7 @@ pub async fn melt_tokens(
         // Remove old token events
         tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
 
-        // Add new token with remaining proofs
+        // Add new token with remaining proofs (only if we have a real event ID)
         if let Some(ref event_id) = new_event_id {
             let proof_data: Vec<ProofData> = keep_proofs.iter()
                 .map(|p| cdk_proof_to_proof_data(p))
@@ -3002,40 +2998,61 @@ pub async fn melt_tokens(
         log::info!("Local state updated. New balance: {} sats", new_balance);
     }
 
-    // PUBLISH TO NOSTR (idempotent, can be queued if it fails)
-    for (builder, event_type) in nostr_events_to_publish {
-        match client.send_event_builder(builder).await {
-            Ok(event_output) => {
-                match event_type {
-                    PendingEventType::TokenEvent => {
-                        log::info!("Published new token event: {}", event_output.id().to_hex());
-                    }
-                    PendingEventType::DeletionEvent => {
-                        log::info!("Published deletion events for {} token events", event_ids_to_delete.len());
-                    }
-                    _ => {}
+    // STEP 3: Publish deletion event for old token events
+    if !event_ids_to_delete.is_empty() {
+        // Filter to only valid hex event IDs
+        let valid_event_ids: Vec<_> = event_ids_to_delete.iter()
+            .filter(|id| EventId::from_hex(id).is_ok())
+            .collect();
+
+        if !valid_event_ids.is_empty() {
+            let mut tags = Vec::new();
+            for event_id in &valid_event_ids {
+                tags.push(nostr_sdk::Tag::event(
+                    nostr_sdk::EventId::from_hex(event_id).unwrap()
+                ));
+            }
+
+            // Add NIP-60 required tag
+            tags.push(nostr_sdk::Tag::custom(
+                nostr_sdk::TagKind::custom("k"),
+                ["7375"]
+            ));
+
+            let deletion_builder = nostr_sdk::EventBuilder::new(
+                Kind::from(5),
+                "Melted token"
+            ).tags(tags);
+
+            match client.send_event_builder(deletion_builder.clone()).await {
+                Ok(_) => {
+                    log::info!("Published deletion events for {} token events", valid_event_ids.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish deletion event, will queue for retry: {}", e);
+                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
                 }
             }
-            Err(e) => {
-                log::warn!("Failed to publish event, will queue for retry: {}", e);
-                // In production, would queue the event for later retry
-                // For now, just log the warning - the local state is already updated
-            }
+        }
+
+        let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
+        if invalid_count > 0 {
+            log::warn!("Skipped {} invalid event IDs in deletion (non-hex format)", invalid_count);
         }
     }
 
-    // Create history event
-    let created_events = if let Some(ref event_id) = new_event_id {
-        vec![event_id.clone()]
-    } else {
-        vec![]
-    };
+    // STEP 4: Create history event with valid IDs only
+    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    let valid_destroyed: Vec<String> = event_ids_to_delete.iter()
+        .filter(|id| EventId::from_hex(id).is_ok())
+        .cloned()
+        .collect();
 
     create_history_event_with_type(
         "out",
         quote_info.amount + fee_paid,
-        created_events,
-        event_ids_to_delete,
+        valid_created,
+        valid_destroyed,
         Some("lightning_melt"),
         Some(&quote_info.invoice),
     ).await?;

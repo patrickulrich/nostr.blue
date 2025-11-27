@@ -40,28 +40,18 @@ async fn fetch_parent_notes_from_tags(tags: &nostr_sdk::Tags) -> Vec<NostrEvent>
     let mut reply_id: Option<EventId> = None;
     let mut all_e_ids: Vec<EventId> = Vec::new();
 
-    // Parse e tags according to NIP-10
+    // Parse e tags according to NIP-10 using SDK methods
+    use nostr_sdk::nips::nip10::Marker;
+
     for tag in tags.iter() {
-        let slice = tag.as_slice();
-        if slice.first().map(|s| s.as_str()) != Some("e") {
-            continue;
-        }
-
-        // Get the event ID (second element)
-        let event_id = match slice.get(1).and_then(|id| EventId::from_hex(id).ok()) {
-            Some(id) => id,
-            None => continue,
-        };
-
-        // Check for marker (fourth element, if present)
-        let marker = slice.get(3).map(|s| s.as_str());
-
-        match marker {
-            Some("root") => root_id = Some(event_id),
-            Some("reply") => reply_id = Some(event_id),
-            _ => {
-                // Collect all e-tagged events for positional fallback
-                all_e_ids.push(event_id);
+        if let Some(TagStandard::Event { event_id, marker, .. }) = tag.as_standardized() {
+            match marker {
+                Some(Marker::Root) => root_id = Some(*event_id),
+                Some(Marker::Reply) => reply_id = Some(*event_id),
+                _ => {
+                    // Collect all e-tagged events for positional fallback
+                    all_e_ids.push(*event_id);
+                }
             }
         }
     }
@@ -221,7 +211,7 @@ pub fn Note(note_id: String) -> Element {
             // PHASE 2: Fetch from relays (background, merge new data)
             let (relay_note, relay_replies) = tokio::join!(
                 fetch_note_from_relay(event_id),
-                async { fetch_replies_relay(event_id).await }
+                fetch_replies_relay(event_id)
             );
 
             // Merge relay note (if not found in DB)
@@ -247,7 +237,7 @@ pub fn Note(note_id: String) -> Element {
                 Err(e) => {
                     log::error!("Failed to fetch note from relay: {}", e);
                     if note_data.read().is_none() {
-                        error.set(Some("Event not found".to_string()));
+                        error.set(Some("Failed to fetch from relays, please try again".to_string()));
                     }
                 }
             }

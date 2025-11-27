@@ -253,14 +253,14 @@ pub fn NoteComposer() -> Element {
                                 }
                             }
                         }
+
+                // Poll creator modal (inside auth block)
+                PollCreatorModal {
+                    show: show_poll_modal,
+                    on_poll_created: handle_poll_created
+                }
                 }
             }
-        }
-
-        // Poll creator modal
-        PollCreatorModal {
-            show: show_poll_modal,
-            on_poll_created: handle_poll_created
         }
     }
 }

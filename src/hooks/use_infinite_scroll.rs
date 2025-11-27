@@ -125,7 +125,7 @@ where
         });
 
         // Track if observer is already set up to avoid duplicate setup
-        let observer_setup_done = use_signal(|| false);
+        let mut observer_setup_done = use_signal(|| false);
 
         // Use effect that watches has_more - re-runs when feed loads and sentinel appears
         use_effect(move || {
@@ -137,7 +137,9 @@ where
 
             // Skip if no more items (sentinel won't be in DOM)
             if !has_more_value {
-                log::info!("[InfiniteScroll] has_more is false, skipping observer setup");
+                log::debug!("[InfiniteScroll] has_more is false, skipping observer setup");
+                // Reset the setup flag so observer can be recreated when has_more becomes true again
+                observer_setup_done.set(false);
                 return;
             }
 
@@ -174,7 +176,7 @@ where
                     }
                 };
 
-                // Retry finding the element with exponential backoff
+                // Retry finding the element with linear backoff (50ms increments)
                 // Increased attempts and longer delays to handle slow feed loads
                 let mut element = None;
                 for attempt in 1..=20 {
@@ -199,29 +201,28 @@ where
 
                 // Create IntersectionObserver callback
                 let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
-                    log::info!("[InfiniteScroll] IntersectionObserver callback fired, checking {} entries", entries.length());
+                    log::debug!("[InfiniteScroll] IntersectionObserver callback fired, checking {} entries", entries.length());
                     // Check if any entry is intersecting
                     for i in 0..entries.length() {
                         if let Some(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>().ok() {
                             let is_intersecting = entry.is_intersecting();
-                            log::info!("[InfiniteScroll] Entry {} intersecting: {}", i, is_intersecting);
+                            log::debug!("[InfiniteScroll] Entry {} intersecting: {}", i, is_intersecting);
 
                             if is_intersecting {
                                 // Debounce - only trigger once per second
                                 let now = js_sys::Date::now() as u64;
-                                let last = *last_check_for_callback.read();
+                                let last = *last_check_for_callback.peek();
 
-                                log::info!("[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}", now, last, now - last);
+                                log::debug!("[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}", now, last, now - last);
 
                                 if now - last > 1000 {
-                                    log::info!("[InfiniteScroll] Debounce passed - updating trigger signal to {}", now);
                                     last_check_for_callback.set(now);
 
                                     // Update trigger signal to invoke callback in Dioxus context
                                     trigger_clone.set(now);
-                                    log::info!("[InfiniteScroll] Trigger signal updated successfully");
+                                    log::info!("[InfiniteScroll] Triggered load more");
                                 } else {
-                                    log::info!("[InfiniteScroll] Debounce blocked - too soon after last trigger");
+                                    log::debug!("[InfiniteScroll] Debounce blocked - too soon after last trigger");
                                 }
                                 break;
                             }

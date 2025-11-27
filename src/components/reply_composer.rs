@@ -114,7 +114,7 @@ pub fn ReplyComposer(
 
     // Helper to insert text with smart spacing (space before if needed, space after)
     let mut insert_with_spacing = move |text: String| {
-        let mut text_with_space = text.clone();
+        let mut text_with_space = text;
         // Add space before if not at start and not preceded by whitespace
         {
             let current = content.read();

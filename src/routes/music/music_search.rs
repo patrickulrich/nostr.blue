@@ -29,7 +29,6 @@ pub fn MusicSearch(q: String) -> Element {
 
     // State
     let mut active_tab = use_signal(|| MusicSearchTab::Tracks);
-    let query = use_signal(|| q.clone());
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
@@ -44,8 +43,8 @@ pub fn MusicSearch(q: String) -> Element {
     let mut playlist_loading = use_signal(|| false);
     let mut playlist_error = use_signal(|| None::<String>);
 
-    // Search effect - runs when component mounts
-    use_effect(move || {
+    // Search effect - runs when prop changes using use_reactive!
+    use_effect(use_reactive!(|q| {
         let search_query = q.clone();
 
         if search_query.is_empty() {
@@ -113,7 +112,7 @@ pub fn MusicSearch(q: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     let tabs = [
         MusicSearchTab::Tracks,
@@ -153,7 +152,7 @@ pub fn MusicSearch(q: String) -> Element {
 
                     p {
                         class: "text-sm text-muted-foreground ml-11",
-                        "Results for: \"{query.read()}\""
+                        "Results for: \"{q}\""
                     }
                 }
 
@@ -303,61 +302,51 @@ pub fn MusicSearch(q: String) -> Element {
                                 }
 
                                 // Input row
-                                div {
-                                    class: "flex gap-2",
-                                    input {
-                                        r#type: "text",
-                                        placeholder: "Enter playlist ID...",
-                                        class: "flex-1 px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background",
-                                        value: "{playlist_id_input}",
-                                        oninput: move |evt| playlist_id_input.set(evt.value()),
-                                        onkeydown: move |evt| {
-                                            if evt.key() == Key::Enter {
-                                                let id = playlist_id_input.read().clone();
-                                                if !id.is_empty() && !*playlist_loading.read() {
-                                                    playlist_loading.set(true);
-                                                    playlist_error.set(None);
-                                                    spawn(async move {
-                                                        let api = WavlakeAPI::new();
-                                                        match api.get_playlist(&id).await {
-                                                            Ok(p) => {
-                                                                playlist.set(Some(p));
-                                                                playlist_loading.set(false);
-                                                            }
-                                                            Err(e) => {
-                                                                playlist_error.set(Some(format!("Failed to load playlist: {}", e)));
-                                                                playlist_loading.set(false);
-                                                            }
-                                                        }
-                                                    });
+                                {
+                                    // Closure to load playlist by ID
+                                    let mut load_playlist = move || {
+                                        let id = playlist_id_input.read().clone();
+                                        if !id.is_empty() && !*playlist_loading.read() {
+                                            playlist_loading.set(true);
+                                            playlist_error.set(None);
+                                            spawn(async move {
+                                                let api = WavlakeAPI::new();
+                                                match api.get_playlist(&id).await {
+                                                    Ok(p) => {
+                                                        playlist.set(Some(p));
+                                                        playlist_loading.set(false);
+                                                    }
+                                                    Err(e) => {
+                                                        playlist_error.set(Some(format!("Failed to load playlist: {}", e)));
+                                                        playlist_loading.set(false);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    };
+
+                                    rsx! {
+                                        div {
+                                            class: "flex gap-2",
+                                            input {
+                                                r#type: "text",
+                                                placeholder: "Enter playlist ID...",
+                                                class: "flex-1 px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background",
+                                                value: "{playlist_id_input}",
+                                                oninput: move |evt| playlist_id_input.set(evt.value()),
+                                                onkeydown: move |evt| {
+                                                    if evt.key() == Key::Enter {
+                                                        load_playlist();
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }
-                                    button {
-                                        class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
-                                        disabled: playlist_id_input.read().is_empty() || *playlist_loading.read(),
-                                        onclick: move |_| {
-                                            let id = playlist_id_input.read().clone();
-                                            if !id.is_empty() {
-                                                playlist_loading.set(true);
-                                                playlist_error.set(None);
-                                                spawn(async move {
-                                                    let api = WavlakeAPI::new();
-                                                    match api.get_playlist(&id).await {
-                                                        Ok(p) => {
-                                                            playlist.set(Some(p));
-                                                            playlist_loading.set(false);
-                                                        }
-                                                        Err(e) => {
-                                                            playlist_error.set(Some(format!("Failed to load playlist: {}", e)));
-                                                            playlist_loading.set(false);
-                                                        }
-                                                    }
-                                                });
+                                            button {
+                                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
+                                                disabled: playlist_id_input.read().is_empty() || *playlist_loading.read(),
+                                                onclick: move |_| load_playlist(),
+                                                if *playlist_loading.read() { "Loading..." } else { "Load Playlist" }
                                             }
-                                        },
-                                        if *playlist_loading.read() { "Loading..." } else { "Load Playlist" }
+                                        }
                                     }
                                 }
                             }
