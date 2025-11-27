@@ -77,10 +77,9 @@ pub async fn init_bookmarks() -> Result<(), String> {
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                // Extract event IDs from 'e' tags
-                let bookmarked: Vec<String> = event.tags.iter()
-                    .filter(|tag| tag.kind() == nostr_sdk::TagKind::e())
-                    .filter_map(|tag| tag.content().map(|s| s.to_string()))
+                // Extract event IDs from 'e' tags using SDK helper
+                let bookmarked: Vec<String> = event.tags.event_ids()
+                    .map(|id| id.to_hex())
                     .collect();
 
                 log::info!("Loaded {} bookmarks", bookmarked.len());

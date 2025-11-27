@@ -81,9 +81,11 @@ pub fn MusicSearch(q: String) -> Element {
                     log::info!("Found {} tracks, {} artists, {} albums", tracks.len(), artists.len(), albums.len());
 
                     // Fetch full track details for playability (in parallel)
+                    // Create API instance once and share via Arc for efficiency
+                    let api = std::sync::Arc::new(WavlakeAPI::new());
                     let track_futures: Vec<_> = tracks.into_iter().map(|track_result| {
+                        let api = api.clone();
                         async move {
-                            let api = WavlakeAPI::new();
                             match api.get_track(&track_result.id).await {
                                 Ok(track) => Some(track),
                                 Err(e) => {

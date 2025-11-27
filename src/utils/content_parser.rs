@@ -10,7 +10,7 @@ static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 /// Clean trailing punctuation from URLs that may have been captured by regex
 fn clean_url_trailing_punctuation(url: &str) -> &str {
-    url.trim_end_matches(|c| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"'))
+    url.trim_end_matches(|c| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '>'))
 }
 static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"nostr:(npub1|note1|nevent1|nprofile1|naddr1)[a-zA-Z0-9]+")
@@ -124,10 +124,27 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     // Find all nostr: mentions (using precompiled static regex)
     for mat in NOSTR_PATTERN.find_iter(content) {
         let mention = mat.as_str().to_string();
-        let token = if mention.contains("npub1") || mention.contains("nprofile1") {
-            ContentToken::Mention(mention)
-        } else {
-            ContentToken::EventMention(mention)
+        // Extract the bech32 part after "nostr:"
+        let bech32_part = mention.strip_prefix("nostr:").unwrap_or(&mention);
+
+        // Use SDK's NIP-19 parser for type-safe detection
+        let token = match nostr_sdk::nips::nip19::Nip19::from_bech32(bech32_part) {
+            Ok(nip19) => match nip19 {
+                nostr_sdk::nips::nip19::Nip19::Pubkey(_) |
+                nostr_sdk::nips::nip19::Nip19::Profile(_) => ContentToken::Mention(mention),
+                nostr_sdk::nips::nip19::Nip19::EventId(_) |
+                nostr_sdk::nips::nip19::Nip19::Event(_) |
+                nostr_sdk::nips::nip19::Nip19::Coordinate(_) => ContentToken::EventMention(mention),
+                _ => ContentToken::Mention(mention), // Default for unknown types
+            },
+            Err(_) => {
+                // Fallback to string matching if parsing fails
+                if mention.contains("npub1") || mention.contains("nprofile1") {
+                    ContentToken::Mention(mention)
+                } else {
+                    ContentToken::EventMention(mention)
+                }
+            }
         };
         matches.push((mat.start(), mat.end(), token));
     }
@@ -592,12 +609,25 @@ fn extract_spotify(url: &str) -> Option<ContentToken> {
     None
 }
 
+/// Check if URL host is a valid SoundCloud domain
+fn is_soundcloud_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "soundcloud.com" || h.ends_with(".soundcloud.com"))
+        .unwrap_or(false)
+}
+
 /// Extract SoundCloud URL for widget embed
 /// Supports: soundcloud.com/{user}/{track}
 fn extract_soundcloud(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
+    // Validate host to prevent substring spoofing
+    if !is_soundcloud_host(url) {
+        return None;
+    }
 
-    if lower.contains("soundcloud.com/") && !lower.contains("/live") {
+    let lower = url.to_lowercase();
+    if !lower.contains("/live") {
         // Return the full URL for the widget
         return Some(url.to_string());
     }
@@ -605,14 +635,24 @@ fn extract_soundcloud(url: &str) -> Option<String> {
     None
 }
 
+/// Check if URL host is a valid Apple Music domain
+fn is_apple_music_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "music.apple.com")
+        .unwrap_or(false)
+}
+
 /// Extract Apple Music content from URL
 /// Supports: music.apple.com/{region}/album/{name}/{id}, /playlist/{name}/{id}
 fn extract_apple_music(url: &str) -> Option<ContentToken> {
-    let lower = url.to_lowercase();
-
-    if !lower.contains("music.apple.com") {
+    // Validate host to prevent substring spoofing
+    if !is_apple_music_host(url) {
         return None;
     }
+
+    let lower = url.to_lowercase();
 
     // Check if it's a song (has ?i= parameter)
     if lower.contains("?i=") {

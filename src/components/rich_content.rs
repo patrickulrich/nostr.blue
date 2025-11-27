@@ -1596,7 +1596,11 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
 #[component]
 fn YouTubeRenderer(video_id: String) -> Element {
     let mut is_visible = use_signal(|| false);
+    // Track if we've already tried fallback to avoid infinite loops
+    let mut tried_fallback = use_signal(|| false);
+    let video_id_for_fallback = video_id.clone();
     let thumbnail_url = format!("https://img.youtube.com/vi/{}/maxresdefault.jpg", video_id);
+    let fallback_url = format!("https://img.youtube.com/vi/{}/hqdefault.jpg", video_id);
     let embed_url = format!("https://www.youtube.com/embed/{}?autoplay=1", video_id);
 
     rsx! {
@@ -1615,9 +1619,16 @@ fn YouTubeRenderer(video_id: String) -> Element {
                     class: "relative w-full aspect-video cursor-pointer group",
                     onclick: move |_| is_visible.set(true),
                     img {
-                        src: "{thumbnail_url}",
+                        src: if *tried_fallback.read() { "{fallback_url}" } else { "{thumbnail_url}" },
                         alt: "YouTube video thumbnail",
-                        class: "w-full h-full object-cover"
+                        class: "w-full h-full object-cover",
+                        onerror: move |_| {
+                            // Only try fallback once to avoid infinite loops
+                            if !*tried_fallback.peek() {
+                                log::debug!("YouTube maxresdefault.jpg failed for {}, trying hqdefault.jpg", video_id_for_fallback);
+                                tried_fallback.set(true);
+                            }
+                        }
                     }
                     // Play button overlay
                     div {
