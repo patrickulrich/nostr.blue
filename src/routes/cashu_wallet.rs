@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client, cashu_wallet};
-use crate::components::ClientInitializing;
 
 #[component]
 pub fn CashuWallet() -> Element {
@@ -84,21 +83,76 @@ pub fn CashuWallet() -> Element {
                         "Connect your account to create or access your Cashu wallet"
                     }
                 }
-            } else if !*nostr_client::CLIENT_INITIALIZED.read() {
-                // Client initializing
-                ClientInitializing {}
-            } else if matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
-                // Loading wallet
+            } else if !*nostr_client::CLIENT_INITIALIZED.read() || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+                // Client initializing or wallet loading - show bouncing N logo animation
                 div {
-                    class: "text-center py-12",
+                    class: "flex flex-col items-center justify-center py-20",
+
+                    // Bouncing N animation
                     div {
-                        class: "text-4xl mb-4 animate-pulse",
-                        "💰"
+                        class: "mb-6 animate-bounce",
+                        div {
+                            class: "w-20 h-20 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg",
+                            span {
+                                class: "text-5xl font-bold text-white",
+                                "N"
+                            }
+                        }
                     }
-                    p {
-                        class: "text-muted-foreground",
-                        "Loading wallet..."
+
+                    // Loading text
+                    div {
+                        class: "text-center",
+                        h2 {
+                            class: "text-xl font-semibold text-foreground mb-2",
+                            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                                "Client Initializing"
+                            } else {
+                                "Loading Wallet"
+                            }
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                                "Connecting to the Nostr network..."
+                            } else {
+                                "Fetching your Cashu wallet..."
+                            }
+                        }
                     }
+
+                    // Animated dots
+                    div {
+                        class: "flex gap-2 mt-6",
+                        div {
+                            class: "w-3 h-3 rounded-full bg-purple-500",
+                            style: "animation: pulse 1.5s ease-in-out 0s infinite;",
+                        }
+                        div {
+                            class: "w-3 h-3 rounded-full bg-purple-500",
+                            style: "animation: pulse 1.5s ease-in-out 0.2s infinite;",
+                        }
+                        div {
+                            class: "w-3 h-3 rounded-full bg-purple-500",
+                            style: "animation: pulse 1.5s ease-in-out 0.4s infinite;",
+                        }
+                    }
+                }
+
+                // Add custom animation keyframes
+                style {
+                    r#"
+                    @keyframes pulse {{
+                        0%, 100% {{
+                            opacity: 0.3;
+                            transform: scale(0.8);
+                        }}
+                        50% {{
+                            opacity: 1;
+                            transform: scale(1.2);
+                        }}
+                    }}
+                    "#
                 }
             } else if let cashu_wallet::WalletStatus::Error(error_msg) = &*wallet_status {
                 // Error state

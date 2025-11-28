@@ -98,16 +98,16 @@ pub fn ReplyComposer(
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
         let pos = *cursor_position.read();
-        
-        // Ensure position is valid
-        let pos = pos.min(current.len());
-        
+
+        // Ensure position is a valid UTF-8 char boundary
+        let pos = to_char_boundary(&current, pos);
+
         // Insert text
         current.insert_str(pos, &text);
-        
+
         // Update content
         content.set(current);
-        
+
         // Update cursor position to be after inserted text
         cursor_position.set(pos + text.len());
     };
@@ -116,7 +116,7 @@ pub fn ReplyComposer(
     let mut insert_with_spacing = move |text: String| {
         let mut text_with_space = text;
         let current = content.read().clone();
-        let pos = (*cursor_position.read()).min(current.len());
+        let pos = to_char_boundary(&current, *cursor_position.read());
 
         // Add space before if not at start and not preceded by whitespace
         if pos > 0 {
@@ -471,4 +471,22 @@ pub fn ReplyComposer(
             on_poll_created: handle_poll_created
         }
     }
+}
+
+/// Find the nearest valid UTF-8 char boundary at or before the given byte position.
+/// This prevents panics when inserting text at cursor positions in strings with
+/// multi-byte characters (emojis, accented characters, etc.).
+fn to_char_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() {
+        return s.len();
+    }
+    if s.is_char_boundary(pos) {
+        return pos;
+    }
+    // Search backwards for a valid boundary
+    s.char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= pos)
+        .last()
+        .unwrap_or(0)
 }
