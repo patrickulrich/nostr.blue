@@ -26,8 +26,7 @@ pub fn PollView(noteid: String) -> Element {
             loading.set(true);
             error.set(None);
 
-            // Clear profile cache to prevent stale author metadata
-            crate::stores::profiles::PROFILE_CACHE.write().clear();
+            // Note: Profile cache NOT cleared - 5-min TTL handles staleness
 
             // Decode the note ID (support both bech32 and hex)
             match decode_event_id(&noteid_str) {

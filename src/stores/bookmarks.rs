@@ -71,13 +71,15 @@ pub async fn init_bookmarks() -> Result<(), String> {
         .identifier("bookmark") // NIP-51 bookmark identifier
         .limit(1);
 
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
+
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                // Extract event IDs from 'e' tags
-                let bookmarked: Vec<String> = event.tags.iter()
-                    .filter(|tag| tag.kind() == nostr_sdk::TagKind::e())
-                    .filter_map(|tag| tag.content().map(|s| s.to_string()))
+                // Extract event IDs from 'e' tags using SDK helper
+                let bookmarked: Vec<String> = event.tags.event_ids()
+                    .map(|id| id.to_hex())
                     .collect();
 
                 log::info!("Loaded {} bookmarks", bookmarked.len());
@@ -373,6 +375,9 @@ pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>
     let event_ids = event_ids.map_err(|e| format!("Invalid event ID: {}", e))?;
 
     let filter = Filter::new().ids(event_ids);
+
+    // Ensure relays are ready before fetching
+    nostr_client::ensure_relays_ready(&client).await;
 
     match client.fetch_events(filter, Duration::from_secs(15)).await {
         Ok(events) => {

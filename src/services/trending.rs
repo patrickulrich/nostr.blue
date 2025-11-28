@@ -1,11 +1,14 @@
+use nostr_sdk::{EventId, Filter, Kind};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
+use crate::stores::nostr_client::get_client;
+use crate::utils::truncate_pubkey;
 
-const NOSTR_BAND_API: &str = "https://api.nostr.band";
+const NOSTR_WINE_API: &str = "https://api.nostr.wine";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingNote {
     pub event: TrendingEvent,
     pub author: TrendingAuthor,
@@ -13,7 +16,7 @@ pub struct TrendingNote {
     pub stats: Option<TrendingStats>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingEvent {
     pub id: String,
     pub pubkey: String,
@@ -24,13 +27,12 @@ pub struct TrendingEvent {
     pub sig: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingAuthor {
     pub pubkey: String,
-    pub content: String, // JSON string containing profile data
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingProfile {
     pub name: Option<String>,
     pub display_name: Option<String>,
@@ -39,7 +41,7 @@ pub struct TrendingProfile {
     pub about: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingStats {
     pub replies: Option<u32>,
     pub reactions: Option<u32>,
@@ -47,30 +49,36 @@ pub struct TrendingStats {
     pub zaps: Option<u32>,
 }
 
+/// Response item from nostr.wine trending API
 #[derive(Debug, Clone, Deserialize)]
-struct NostrBandApiNote {
-    event: TrendingEvent,
-    author: TrendingAuthor,
-    stats: Option<NostrBandStats>,
+struct NostrWineTrendingItem {
+    event_id: String,
+    replies: u32,
+    reactions: u32,
+    reposts: u32,
+    #[allow(dead_code)]
+    zap_amount: u64,
+    zap_count: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct NostrBandStats {
-    replies_count: Option<u32>,
-    reactions_count: Option<u32>,
-    reposts_count: Option<u32>,
-    zaps_msats: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct NostrBandResponse {
-    notes: Vec<NostrBandApiNote>,
-}
-
-/// Fetch trending notes from Nostr.Band API
-/// Returns the top trending posts in the last 24 hours
+/// Fetch trending notes from nostr.wine API
+/// Returns the top trending posts ordered by reactions
+///
+/// Parameters:
+/// - limit: Number of events to return (1-200, default 10)
+///
+/// Note: Hours is fixed at 24 and order is fixed to "reactions" for best engagement signal.
 pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote>, String> {
-    let url = format!("{}/v0/trending/notes", NOSTR_BAND_API);
+    let limit = limit.unwrap_or(10).clamp(1, 200);
+
+    // Fetch trending event IDs from nostr.wine
+    // Use 24 hours lookback and order by reactions for best engagement signal
+    let url = format!(
+        "{}/trending?limit={}&hours=24&order=reactions",
+        NOSTR_WINE_API, limit
+    );
+
+    log::info!("Fetching trending from nostr.wine: {}", url);
 
     // Create request
     let opts = RequestInit::new();
@@ -99,52 +107,116 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         return Err(format!("API returned status: {}", resp.status()));
     }
 
-    // Parse JSON response
+    // Parse JSON response - nostr.wine returns an array directly
     let json = JsFuture::from(resp.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?)
         .await
         .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
-    let response: NostrBandResponse = serde_wasm_bindgen::from_value(json)
-        .map_err(|e| format!("Failed to deserialize: {:?}", e))?;
+    let trending_items: Vec<NostrWineTrendingItem> = serde_wasm_bindgen::from_value(json)
+        .map_err(|e| format!("Failed to deserialize trending items: {:?}", e))?;
 
-    // Transform and parse notes
+    log::info!("Got {} trending event IDs from nostr.wine", trending_items.len());
+
+    if trending_items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build a map of event_id -> stats for later lookup
+    let stats_map: std::collections::HashMap<String, TrendingStats> = trending_items
+        .iter()
+        .map(|item| {
+            (
+                item.event_id.clone(),
+                TrendingStats {
+                    replies: Some(item.replies),
+                    reactions: Some(item.reactions),
+                    reposts: Some(item.reposts),
+                    zaps: Some(item.zap_count),
+                },
+            )
+        })
+        .collect();
+
+    // Fetch the actual events from relays
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let event_ids: Vec<EventId> = trending_items
+        .iter()
+        .filter_map(|item| EventId::from_hex(&item.event_id).ok())
+        .collect();
+
+    let filter = Filter::new()
+        .ids(event_ids.clone())
+        .kind(Kind::TextNote);
+
+    let events = client
+        .fetch_events(filter, std::time::Duration::from_secs(10))
+        .await
+        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+    log::info!("Fetched {} events from relays", events.len());
+
+    // Build TrendingNote for each event, preserving the trending order
     let mut trending_notes: Vec<TrendingNote> = Vec::new();
 
-    for note in response.notes {
-        // Parse the author's content field to get profile data
-        let profile = match serde_json::from_str::<TrendingProfile>(&note.author.content) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                log::warn!("Failed to parse author profile: {}", e);
-                None
-            }
-        };
+    // Create a map for quick event lookup
+    let events_map: std::collections::HashMap<String, _> = events
+        .into_iter()
+        .map(|e| (e.id.to_hex(), e))
+        .collect();
 
-        let stats = note.stats.map(|s| TrendingStats {
-            replies: s.replies_count,
-            reactions: s.reactions_count,
-            reposts: s.reposts_count,
-            zaps: s.zaps_msats.map(|z| (z / 1000) as u32),
-        });
+    // Iterate in the original trending order
+    for item in &trending_items {
+        if let Some(event) = events_map.get(&item.event_id) {
+            let stats = stats_map.get(&item.event_id).cloned();
 
-        trending_notes.push(TrendingNote {
-            event: note.event,
-            author: note.author,
-            profile,
-            stats,
-        });
+            // Convert tags to Vec<Vec<String>> (allocates String copies from each tag element)
+            let tags: Vec<Vec<String>> = event
+                .tags
+                .iter()
+                .map(|tag| tag.as_slice().iter().map(|s| s.to_string()).collect())
+                .collect();
+
+            let trending_event = TrendingEvent {
+                id: event.id.to_hex(),
+                pubkey: event.pubkey.to_hex(),
+                created_at: event.created_at.as_secs(),
+                kind: event.kind.as_u16(),
+                tags,
+                content: event.content.clone(),
+                sig: event.sig.to_string(),
+            };
+
+            // Create a placeholder author - profile will be fetched by UI component
+            let author = TrendingAuthor {
+                pubkey: event.pubkey.to_hex(),
+            };
+
+            trending_notes.push(TrendingNote {
+                event: trending_event,
+                author,
+                profile: None, // Profile will be loaded by UI component via profiles store
+                stats,
+            });
+        }
     }
 
-    // Apply limit if specified
-    if let Some(limit) = limit {
-        trending_notes.truncate(limit);
+    // Warn if some trending items couldn't be fetched from relays
+    if trending_notes.len() < trending_items.len() {
+        log::warn!(
+            "Trending: only fetched {} of {} items from relays (missing {})",
+            trending_notes.len(),
+            trending_items.len(),
+            trending_items.len() - trending_notes.len()
+        );
     }
 
-    log::info!("Fetched {} trending notes from Nostr.Band", trending_notes.len());
+    log::info!("Built {} trending notes from nostr.wine", trending_notes.len());
     Ok(trending_notes)
 }
 
 /// Get display name for a trending note author
+#[allow(dead_code)]
 pub fn get_display_name(note: &TrendingNote) -> String {
     if let Some(profile) = &note.profile {
         if let Some(display_name) = &profile.display_name {
@@ -156,12 +228,7 @@ pub fn get_display_name(note: &TrendingNote) -> String {
     }
 
     // Fallback to truncated pubkey
-    let pubkey = &note.event.pubkey;
-    if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-    } else {
-        pubkey.clone()
-    }
+    truncate_pubkey(&note.event.pubkey)
 }
 
 /// Truncate content to a maximum length

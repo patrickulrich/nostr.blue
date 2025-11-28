@@ -2,133 +2,35 @@ use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, JsonUtil};
 use crate::routes::Route;
 use crate::stores::nostr_client;
+use crate::components::{StreamStatus, parse_nip53_live_event};
 use std::time::Duration;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum StreamStatus {
-    Planned,
-    Live,
-    Ended,
-}
-
-impl StreamStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "live" => StreamStatus::Live,
-            "ended" => StreamStatus::Ended,
-            _ => StreamStatus::Planned,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
     pub d_tag: String,
     pub title: Option<String>,
-    pub summary: Option<String>,
     pub image: Option<String>,
-    pub streaming_url: Option<String>,
     pub status: StreamStatus,
-    pub current_participants: Option<u32>,
-    pub starts: Option<nostr_sdk::Timestamp>,
-    pub tags: Vec<String>,
-    /// The actual creator/streamer (from p tag), if present
-    pub creator_pubkey: Option<String>,
+    pub current_participants: Option<u64>,
+    /// The host pubkey from p tag with Host marker
+    pub host_pubkey: Option<String>,
 }
 
-/// Parse NIP-53 Kind 30311 live streaming event
-pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
-    let mut meta = LiveStreamMeta {
-        d_tag: String::new(),
-        title: None,
-        summary: None,
-        image: None,
-        streaming_url: None,
-        status: StreamStatus::Planned,
-        current_participants: None,
-        starts: None,
-        tags: Vec::new(),
-        creator_pubkey: None,
-    };
+/// Parse NIP-53 Kind 30311 live streaming event into MiniLiveStreamCard's meta format
+fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
+    let live_event = parse_nip53_live_event(event)?;
 
-    for tag in event.tags.iter() {
-        let tag_vec = tag.clone().to_vec();
-        if let Some(tag_name) = tag_vec.first().map(|s| s.as_str()) {
-            match tag_name {
-                "d" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.d_tag = value.to_string();
-                    }
-                }
-                "p" => {
-                    // Get the first p tag as the creator/streamer
-                    if meta.creator_pubkey.is_none() {
-                        if let Some(value) = tag_vec.get(1) {
-                            meta.creator_pubkey = Some(value.to_string());
-                        }
-                    }
-                }
-                "title" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.title = Some(value.to_string());
-                    }
-                }
-                "summary" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.summary = Some(value.to_string());
-                    }
-                }
-                "image" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.image = Some(value.to_string());
-                    }
-                }
-                "streaming" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.streaming_url = Some(value.to_string());
-                    }
-                }
-                "status" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.status = StreamStatus::from_str(value);
-                    }
-                }
-                "current_participants" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(count) = value.parse::<u32>() {
-                            meta.current_participants = Some(count);
-                        }
-                    }
-                }
-                "starts" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        if let Ok(ts) = value.parse::<i64>() {
-                            // Only convert to u64 if timestamp is non-negative
-                            if ts >= 0 {
-                                if let Ok(timestamp_u64) = u64::try_from(ts) {
-                                    meta.starts = Some(nostr_sdk::Timestamp::from(timestamp_u64));
-                                }
-                            }
-                            // Negative timestamps are ignored
-                        }
-                    }
-                }
-                "t" => {
-                    if let Some(value) = tag_vec.get(1) {
-                        meta.tags.push(value.to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    // Extract host pubkey
+    let host_pubkey = live_event.host.as_ref().map(|h| h.public_key.to_string());
 
-    // Only return if we have a d_tag (required)
-    if meta.d_tag.is_empty() {
-        None
-    } else {
-        Some(meta)
-    }
+    Some(LiveStreamMeta {
+        d_tag: live_event.id,
+        title: live_event.title,
+        image: live_event.image.map(|(url, _dims)| url.to_string()),
+        status: live_event.status.as_ref().map(StreamStatus::from).unwrap_or(StreamStatus::Planned),
+        current_participants: live_event.current_participants,
+        host_pubkey,
+    })
 }
 
 #[component]
@@ -140,8 +42,8 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
 
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
-    // Use creator pubkey from p tag if available, otherwise fall back to event publisher
-    let author_pubkey = stream_meta.creator_pubkey.clone()
+    // Use host pubkey from p tag if available, otherwise fall back to event publisher
+    let author_pubkey = stream_meta.host_pubkey.clone()
         .unwrap_or_else(|| event.pubkey.to_string());
 
     // Create naddr for the livestream (still uses event publisher for fetching)
@@ -170,7 +72,8 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
-            let pk = event.pubkey.to_string();
+            // Use author_pubkey (which may be host_pubkey) for consistent fallback display
+            let pk = author_pubkey.clone();
             if pk.len() > 16 {
                 format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
             } else {

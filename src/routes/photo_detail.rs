@@ -28,8 +28,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
         loading.set(true);
         error.set(None);
 
-        // Clear profile cache to prevent stale author metadata
-        crate::stores::profiles::PROFILE_CACHE.write().clear();
+        // Note: Profile cache NOT cleared - 5-min TTL handles staleness
 
         spawn(async move {
             match load_photo_by_id(&id).await {

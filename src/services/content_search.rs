@@ -12,6 +12,17 @@ pub struct ContentSearchResult {
     pub relevance: u32, // Higher = more relevant
 }
 
+/// Equality is intentionally based solely on event.id for deduplication purposes.
+/// Two results with the same event ID are considered equal even if is_from_contact
+/// or relevance differ.
+impl PartialEq for ContentSearchResult {
+    fn eq(&self, other: &Self) -> bool {
+        self.event.id == other.event.id
+    }
+}
+
+impl Eq for ContentSearchResult {}
+
 /// Search for text notes (Kind 1) using NIP-50
 pub async fn search_text_notes(
     query: &str,

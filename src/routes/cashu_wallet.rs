@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client, cashu_wallet};
-use crate::components::ClientInitializing;
 
 #[component]
 pub fn CashuWallet() -> Element {
@@ -35,6 +34,9 @@ pub fn CashuWallet() -> Element {
     let should_show_wizard = wallet_state.as_ref()
         .map(|w| !w.initialized)
         .unwrap_or(false) || *show_setup_wizard.read();
+
+    // Cache client_initialized once for use throughout the render
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
     rsx! {
         div {
@@ -84,20 +86,55 @@ pub fn CashuWallet() -> Element {
                         "Connect your account to create or access your Cashu wallet"
                     }
                 }
-            } else if !*nostr_client::CLIENT_INITIALIZED.read() {
-                // Client initializing
-                ClientInitializing {}
-            } else if matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
-                // Loading wallet
+            } else if !client_initialized || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+                // Client initializing or wallet loading - show bouncing N logo animation
+
                 div {
-                    class: "text-center py-12",
+                    class: "flex flex-col items-center justify-center py-20",
+
+                    // Bouncing N animation
                     div {
-                        class: "text-4xl mb-4 animate-pulse",
-                        "💰"
+                        class: "mb-6 motion-safe:animate-bounce",
+                        div {
+                            class: "w-20 h-20 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg",
+                            span {
+                                class: "text-5xl font-bold text-white",
+                                "N"
+                            }
+                        }
                     }
-                    p {
-                        class: "text-muted-foreground",
-                        "Loading wallet..."
+
+                    // Loading text
+                    div {
+                        class: "text-center",
+                        h2 {
+                            class: "text-xl font-semibold text-foreground mb-2",
+                            if !client_initialized {
+                                "Client Initializing"
+                            } else {
+                                "Loading Wallet"
+                            }
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            if !client_initialized {
+                                "Connecting to the Nostr network..."
+                            } else {
+                                "Fetching your Cashu wallet..."
+                            }
+                        }
+                    }
+
+                    // Animated dots (wallet-pulse animation defined in tailwind.css)
+                    div {
+                        class: "flex gap-2 mt-6",
+                        for (i, delay) in [0.0, 0.2, 0.4].iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                class: "w-3 h-3 rounded-full bg-purple-500",
+                                style: "animation: wallet-pulse 1.5s ease-in-out {delay}s infinite;",
+                            }
+                        }
                     }
                 }
             } else if let cashu_wallet::WalletStatus::Error(error_msg) = &*wallet_status {

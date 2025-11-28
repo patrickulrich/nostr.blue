@@ -26,6 +26,23 @@ impl SearchTab {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum SortOrder {
+    Newest,
+    Oldest,
+    FollowingFirst,
+}
+
+impl SortOrder {
+    fn label(&self) -> &'static str {
+        match self {
+            SortOrder::Newest => "Newest",
+            SortOrder::Oldest => "Oldest",
+            SortOrder::FollowingFirst => "Following first",
+        }
+    }
+}
+
 #[component]
 pub fn Search(q: String) -> Element {
     let mut active_tab = use_signal(|| SearchTab::TextNotes);
@@ -33,8 +50,15 @@ pub fn Search(q: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
-    let query = use_signal(|| q.clone());
+    let mut query = use_signal(|| q.clone());
     let mut search_version = use_signal(|| 0u64);
+    let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
+    let mut show_sort_dropdown = use_signal(|| false);
+
+    // Update query signal when prop changes (e.g., new search from search bar)
+    use_effect(use_reactive!(|q| {
+        query.set(q);
+    }));
 
     // Fetch contacts on mount
     use_effect(move || {
@@ -99,6 +123,33 @@ pub fn Search(q: String) -> Element {
         SearchTab::Photos,
         SearchTab::Videos,
     ];
+
+    // Compute sorted results based on sort order
+    let sorted_results = use_memo(move || {
+        let mut sorted = results.read().clone();
+        let order = *sort_order.read();
+
+        match order {
+            SortOrder::Newest => {
+                sorted.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            }
+            SortOrder::Oldest => {
+                sorted.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+            }
+            SortOrder::FollowingFirst => {
+                // Sort by following status first (following = true comes first), then by date (newest)
+                sorted.sort_by(|a, b| {
+                    match (a.is_from_contact, b.is_from_contact) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => b.event.created_at.cmp(&a.event.created_at),
+                    }
+                });
+            }
+        }
+
+        sorted
+    });
 
     rsx! {
         div {
@@ -192,23 +243,105 @@ pub fn Search(q: String) -> Element {
                 div {
                     class: "divide-y divide-border",
 
-                    // Summary
+                    // Summary with sort dropdown
                     div {
-                        class: "px-4 py-3 bg-muted/30",
+                        class: "px-4 py-3 bg-muted/30 flex items-center justify-between gap-4",
                         p {
                             class: "text-sm text-muted-foreground",
                             "Found {results.read().len()} {active_tab.read().label().to_lowercase()}"
-                            if results.read().iter().any(|r| r.is_from_contact) {
-                                span {
-                                    class: "ml-2 text-blue-600 dark:text-blue-400",
-                                    "• Results from people you follow are shown first"
+                        }
+
+                        // Sort dropdown
+                        div {
+                            class: "relative",
+                            button {
+                                class: "flex items-center gap-2 px-3 py-1.5 text-sm bg-background border border-border rounded-lg hover:bg-accent/50 transition",
+                                onclick: move |_| {
+                                    let current = *show_sort_dropdown.read();
+                                    show_sort_dropdown.set(!current);
+                                },
+                                svg {
+                                    class: "w-4 h-4 text-muted-foreground",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "m3 16 4 4 4-4" }
+                                    path { d: "M7 20V4" }
+                                    path { d: "m21 8-4-4-4 4" }
+                                    path { d: "M17 4v16" }
+                                }
+                                span { "{sort_order.read().label()}" }
+                                svg {
+                                    class: "w-4 h-4 text-muted-foreground",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "m6 9 6 6 6-6" }
+                                }
+                            }
+
+                            // Dropdown menu with backdrop for click-outside dismissal
+                            if *show_sort_dropdown.read() {
+                                // Invisible backdrop to close dropdown on outside click
+                                div {
+                                    class: "fixed inset-0 z-40",
+                                    onclick: move |_| show_sort_dropdown.set(false)
+                                }
+                                div {
+                                    class: "absolute right-0 top-full mt-1 w-40 bg-background border border-border rounded-lg shadow-lg z-50 overflow-hidden",
+                                    for option in [SortOrder::Newest, SortOrder::Oldest, SortOrder::FollowingFirst] {
+                                        {
+                                            let is_selected = *sort_order.read() == option;
+                                            rsx! {
+                                                button {
+                                                    key: "{option.label()}",
+                                                    class: if is_selected {
+                                                        "w-full px-4 py-2 text-sm text-left bg-accent/50 text-foreground"
+                                                    } else {
+                                                        "w-full px-4 py-2 text-sm text-left hover:bg-accent/30 text-foreground"
+                                                    },
+                                                    onclick: move |_| {
+                                                        sort_order.set(option);
+                                                        show_sort_dropdown.set(false);
+                                                    },
+                                                    div {
+                                                        class: "flex items-center gap-2",
+                                                        if is_selected {
+                                                            svg {
+                                                                class: "w-4 h-4 text-primary",
+                                                                xmlns: "http://www.w3.org/2000/svg",
+                                                                view_box: "0 0 24 24",
+                                                                fill: "none",
+                                                                stroke: "currentColor",
+                                                                stroke_width: "2",
+                                                                stroke_linecap: "round",
+                                                                stroke_linejoin: "round",
+                                                                path { d: "M20 6 9 17l-5-5" }
+                                                            }
+                                                        } else {
+                                                            div { class: "w-4 h-4" }
+                                                        }
+                                                        "{option.label()}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
                     // Render results based on tab type
-                    for result in results.read().iter() {
+                    for result in sorted_results.read().iter() {
                         {
                             let event_clone = result.event.clone();
                             let is_from_contact = result.is_from_contact;

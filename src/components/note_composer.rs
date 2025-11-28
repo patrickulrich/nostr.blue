@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client::publish_note, auth_store};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete, PollCreatorModal};
+use crate::components::icons::{CameraIcon, BarChartIcon};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -10,6 +11,7 @@ pub fn NoteComposer() -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut is_focused = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);
+    let mut show_poll_modal = use_signal(|| false);
 
     // Check if user is authenticated (can publish) using auth_store
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -28,6 +30,8 @@ pub fn NoteComposer() -> Element {
     } else {
         "text-gray-500"
     };
+
+    let mut cursor_position = use_signal(|| 0usize);
 
     let handle_publish = move |_| {
         let content_value = content.read().clone();
@@ -60,38 +64,66 @@ pub fn NoteComposer() -> Element {
         is_focused.set(false);
     };
 
+    // Helper to insert text at cursor position
+    let mut insert_at_cursor = move |text: String| {
+        let mut current = content.read().clone();
+        let pos = *cursor_position.read();
+        
+        // Ensure position is valid
+        let pos = pos.min(current.len());
+        
+        // Insert text
+        current.insert_str(pos, &text);
+        
+        // Update content
+        content.set(current);
+        
+        // Update cursor position to be after inserted text
+        cursor_position.set(pos + text.len());
+    };
+
+    // Helper to insert text with smart spacing (space before if needed, space after)
+    let mut insert_with_spacing = move |text: String| {
+        let mut text_with_space = text.clone();
+        // Add space before if not at start and not preceded by whitespace
+        {
+            let current = content.read();
+            let pos = *cursor_position.read();
+            if pos > 0 && pos <= current.len() {
+                if let Some(prev_char) = current[..pos].chars().last() {
+                    if !prev_char.is_whitespace() {
+                        text_with_space.insert(0, ' ');
+                    }
+                }
+            }
+        }
+        // Add space after
+        text_with_space.push(' ');
+        insert_at_cursor(text_with_space);
+    };
+
     // Handler when image upload completes
     let handle_image_uploaded = move |url: String| {
-        // Insert URL at the end of the current content
-        let mut current = content.read().clone();
-        if !current.is_empty() && !current.ends_with('\n') && !current.ends_with(' ') {
-            current.push(' ');
-        }
-        current.push_str(&url);
-        content.set(current);
-
+        insert_with_spacing(url.clone());
         log::info!("Image URL inserted: {}", url);
     };
 
     // Handler when emoji is selected
     let handle_emoji_selected = move |emoji: String| {
-        // Insert emoji at the end of the current content
-        let mut current = content.read().clone();
-        current.push_str(&emoji);
-        content.set(current);
+        insert_at_cursor(emoji);
     };
 
     // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
-        // Insert GIF URL at the end of the current content
-        let mut current = content.read().clone();
-        if !current.is_empty() && !current.ends_with('\n') && !current.ends_with(' ') {
-            current.push(' ');
-        }
-        current.push_str(&gif_url);
-        content.set(current);
-
+        insert_with_spacing(gif_url.clone());
         log::info!("GIF URL inserted: {}", gif_url);
+    };
+
+    // Handler when poll is created
+    let handle_poll_created = move |nevent_ref: String| {
+        insert_with_spacing(nevent_ref.clone());
+        show_poll_modal.set(false);
+        log::info!("Poll reference inserted: {}", nevent_ref);
     };
 
     rsx! {
@@ -119,7 +151,8 @@ pub fn NoteComposer() -> Element {
                             disabled: *is_publishing.read(),
                             onfocus: move |_| {
                                 is_focused.set(true);
-                            }
+                            },
+                            cursor_position: cursor_position
                         }
 
                         // Media uploader (conditionally shown)
@@ -138,38 +171,50 @@ pub fn NoteComposer() -> Element {
                             div {
                                 class: "mt-3 flex items-center justify-between",
 
-                                // Left side: Image button and character counter
+                                // Left side: Media buttons and character counter
                                 div {
-                                    class: "flex items-center gap-3",
+                                    class: "flex items-center gap-2",
 
-                                    // Media upload toggle button
+                                    // Media upload toggle button (icon-only)
                                     button {
                                         class: if *show_image_uploader.read() {
-                                            "px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium transition"
+                                            "p-2 rounded-full bg-primary text-primary-foreground transition"
                                         } else {
-                                            "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                                            "p-2 rounded-full hover:bg-accent transition"
                                         },
+                                        title: "Add media",
                                         onclick: move |_| {
                                             let current = *show_image_uploader.read();
                                             show_image_uploader.set(!current);
                                         },
                                         disabled: *is_publishing.read(),
-                                        "📎 Media"
+                                        CameraIcon { class: "w-5 h-5".to_string() }
                                     }
 
-                                    // Emoji picker
+                                    // Emoji picker (icon-only)
                                     EmojiPicker {
-                                        on_emoji_selected: handle_emoji_selected
+                                        on_emoji_selected: handle_emoji_selected,
+                                        icon_only: true
                                     }
 
-                                    // GIF picker
+                                    // GIF picker (icon-only)
                                     GifPicker {
-                                        on_gif_selected: handle_gif_selected
+                                        on_gif_selected: handle_gif_selected,
+                                        icon_only: true
+                                    }
+
+                                    // Poll button (icon-only)
+                                    button {
+                                        class: "p-2 rounded-full hover:bg-accent transition",
+                                        title: "Create poll",
+                                        onclick: move |_| show_poll_modal.set(true),
+                                        disabled: *is_publishing.read(),
+                                        BarChartIcon { class: "w-5 h-5".to_string() }
                                     }
 
                                     // Character counter
                                     div {
-                                        class: "text-sm {counter_color}",
+                                        class: "text-sm {counter_color} ml-2",
                                         if is_over_limit {
                                             span { "Over limit by {char_count - MAX_LENGTH}" }
                                         } else {
@@ -208,6 +253,12 @@ pub fn NoteComposer() -> Element {
                                 }
                             }
                         }
+
+                // Poll creator modal (inside auth block)
+                PollCreatorModal {
+                    show: show_poll_modal,
+                    on_poll_created: handle_poll_created
+                }
                 }
             }
         }

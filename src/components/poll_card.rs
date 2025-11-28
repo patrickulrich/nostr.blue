@@ -68,7 +68,8 @@ pub fn PollCard(event: NostrEvent) -> Element {
         let poll = poll_data.read().clone();
         async move {
             loading_votes.set(true);
-            match fetch_poll_votes(poll_id, poll.and_then(|p| p.ends_at)).await {
+            let (ends_at, poll_relays) = poll.map(|p| (p.ends_at, p.relays)).unwrap_or((None, Vec::new()));
+            match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
                 Ok(vote_events) => {
                     votes.set(vote_events.clone());
 
@@ -132,12 +133,14 @@ pub fn PollCard(event: NostrEvent) -> Element {
                 },
             };
 
-            match nostr_client::publish_poll_vote(poll_id, response).await {
+            // Clone relays once for both publish and fetch operations
+            let relays = poll.relays.clone();
+            match nostr_client::publish_poll_vote(poll_id, response, relays.clone()).await {
                 Ok(_event_id) => {
                     log::info!("Vote published successfully");
 
                     // Refresh votes to get updated totals including the new vote
-                    match fetch_poll_votes(poll_id, poll.ends_at).await {
+                    match fetch_poll_votes(poll_id, poll.ends_at, relays).await {
                         Ok(vote_events) => {
                             votes.set(vote_events.clone());
 
@@ -332,9 +335,11 @@ pub fn PollCard(event: NostrEvent) -> Element {
 }
 
 // Helper function to fetch poll votes
+// NIP-88: Votes should be fetched from the relays specified in the poll
 async fn fetch_poll_votes(
     poll_id: EventId,
     ends_at: Option<Timestamp>,
+    poll_relays: Vec<nostr_sdk::RelayUrl>,
 ) -> Result<Vec<NostrEvent>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
@@ -346,10 +351,56 @@ async fn fetch_poll_votes(
         filter = filter.until(until);
     }
 
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch votes: {}", e))?;
+    // If poll specifies relays, fetch from those relays specifically
+    // Otherwise fall back to user's default relays
+    let events = if !poll_relays.is_empty() {
+        // Track which relays we actually add (to clean up later)
+        let mut added_relays = Vec::new();
+        for relay_url in &poll_relays {
+            // add_relay returns Ok if added, Err if already present or failed
+            if client.add_relay(relay_url.as_str()).await.is_ok() {
+                added_relays.push(relay_url.clone());
+            }
+        }
+
+        // Ensure relays are connected before fetching
+        nostr_client::ensure_relays_ready(&client).await;
+
+        // Fetch from poll-specified relays
+        let relay_urls: Vec<nostr_sdk::Url> = poll_relays.iter()
+            .filter_map(|r| nostr_sdk::Url::parse(r.as_str()).ok())
+            .collect();
+
+        let result = if !relay_urls.is_empty() {
+            client
+                .fetch_events_from(relay_urls, filter.clone(), Duration::from_secs(10))
+                .await
+                .map_err(|e| format!("Failed to fetch votes from poll relays: {}", e))
+        } else {
+            // Fallback if URL parsing failed
+            client
+                .fetch_events(filter, Duration::from_secs(10))
+                .await
+                .map_err(|e| format!("Failed to fetch votes: {}", e))
+        };
+
+        // Cleanup: remove only the relays we added
+        for relay_url in added_relays {
+            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
+                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
+            }
+        }
+
+        result?
+    } else {
+        // No poll relays specified, use default relays
+        // Ensure default relays are ready before fetching
+        nostr_client::ensure_relays_ready(&client).await;
+        client
+            .fetch_events(filter, Duration::from_secs(10))
+            .await
+            .map_err(|e| format!("Failed to fetch votes: {}", e))?
+    };
 
     Ok(deduplicate_votes(events.into_iter().collect()))
 }

@@ -67,7 +67,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum};
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
@@ -145,6 +145,9 @@ pub enum Route {
 
         #[route("/music/album/:album_id")]
         MusicAlbum { album_id: String },
+
+        #[route("/music/search?:q")]
+        MusicSearch { q: String },
 
         #[route("/notifications")]
         Notifications {},
@@ -516,6 +519,30 @@ fn Layout() -> Element {
                                                 }
                                                 span {
                                                     "Web Bookmarks"
+                                                }
+                                            }
+                                            Link {
+                                                to: Route::CashuWallet {},
+                                                onclick: move |_| more_menu_open.set(false),
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                svg {
+                                                    class: "w-5 h-5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    // Wallet icon
+                                                    path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                                                    path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                                                    path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+                                                }
+                                                span {
+                                                    "Wallet"
                                                 }
                                             }
                                             a {
@@ -1050,9 +1077,12 @@ fn NavLink(
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
         (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => p1 == p2,
-        (Route::MusicHome {}, Route::MusicHome {}) => true,
-        (Route::MusicRadio {}, Route::MusicRadio {}) => true,
-        (Route::MusicLeaderboard {}, Route::MusicLeaderboard {}) => true,
+        (Route::MusicHome {}, Route::MusicHome {}) |
+        (Route::MusicHome {}, Route::MusicRadio {}) |
+        (Route::MusicHome {}, Route::MusicLeaderboard {}) |
+        (Route::MusicHome {}, Route::MusicSearch { .. }) |
+        (Route::MusicHome {}, Route::MusicArtist { .. }) |
+        (Route::MusicHome {}, Route::MusicAlbum { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,

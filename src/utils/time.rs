@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use nostr_sdk::Timestamp;
 
 /// Format a timestamp as relative time
@@ -69,4 +69,52 @@ pub fn format_datetime(timestamp: Timestamp) -> String {
     let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
         .unwrap_or_else(|| Utc::now());
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Calculate end timestamp based on preset or custom time
+///
+/// Supported presets:
+/// - "1hour": 1 hour from now
+/// - "1day": 1 day from now
+/// - "3days": 3 days from now
+/// - "1week": 1 week from now
+/// - "custom": parse datetime-local format (YYYY-MM-DDTHH:MM)
+/// - Any other value defaults to 1 day
+///
+/// Uses `.earliest()` for DST-safe local time conversion.
+pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
+    let now = Timestamp::now();
+
+    match preset {
+        "1hour" => Some(Timestamp::from(now.as_secs() + 3600)),
+        "1day" => Some(Timestamp::from(now.as_secs() + 86400)),
+        "3days" => Some(Timestamp::from(now.as_secs() + 259200)),
+        "1week" => Some(Timestamp::from(now.as_secs() + 604800)),
+        "custom" => {
+            if custom_time.is_empty() {
+                return None;
+            }
+            // Parse datetime-local format (YYYY-MM-DDTHH:MM)
+            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
+                // Convert from local time to UTC
+                // Use .earliest() for deterministic behavior during DST transitions
+                if let Some(local_dt) = Local.from_local_datetime(&naive_dt).earliest() {
+                    let utc_dt = local_dt.with_timezone(&Utc);
+                    let timestamp = utc_dt.timestamp();
+
+                    // Verify timestamp is valid (non-negative and in the future)
+                    if timestamp >= 0 && timestamp > Utc::now().timestamp() {
+                        Some(Timestamp::from(timestamp as u64))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        _ => Some(Timestamp::from(now.as_secs() + 86400)), // Default to 1 day
+    }
 }

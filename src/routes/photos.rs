@@ -64,8 +64,9 @@ pub fn Photos() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // Determine if there are more events to load
-                    has_more.set(photo_events.len() >= 50);
+                    // Always enable has_more on initial/refresh load
+                    // Only disable when load_more gets 0 results from relay
+                    has_more.set(true);
 
                     events.set(photo_events);
                     loading.set(false);
@@ -84,31 +85,56 @@ pub fn Photos() -> Element {
             return;
         }
 
-        let until = *oldest_timestamp.read();
+        // Need a valid oldest_timestamp for pagination
+        // If None, initial load hasn't completed yet
+        let until = match *oldest_timestamp.read() {
+            Some(ts) => ts,
+            None => return,
+        };
         let current_feed_type = *feed_type.read();
 
         loading.set(true);
 
         spawn(async move {
             let result = match current_feed_type {
-                FeedType::Following => load_following_photos(until).await,
-                FeedType::Global => load_global_photos(until).await,
+                FeedType::Following => load_following_photos(Some(until)).await,
+                FeedType::Global => load_global_photos(Some(until)).await,
             };
 
             match result {
-                Ok(mut new_events) => {
-                    // Track oldest timestamp from new events
+                Ok(new_events) => {
+                    // Stop pagination only when relay returns 0 events
+                    if new_events.is_empty() {
+                        has_more.set(false);
+                        loading.set(false);
+                        return;
+                    }
+
+                    // Deduplicate: build set of existing event IDs
+                    let current = events.read().clone();
+                    let existing_ids: std::collections::HashSet<_> = current.iter()
+                        .map(|e| e.id)
+                        .collect();
+
+                    // Filter out duplicates
+                    let unique_events: Vec<_> = new_events.iter()
+                        .filter(|e| !existing_ids.contains(&e.id))
+                        .cloned()
+                        .collect();
+
+                    // Update oldest timestamp from all new events (not just unique)
+                    // This ensures we advance pagination even if all were duplicates
                     if let Some(last_event) = new_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // Determine if there are more events to load
-                    has_more.set(new_events.len() >= 50);
+                    // Append unique events
+                    if !unique_events.is_empty() {
+                        let mut updated = current;
+                        updated.extend(unique_events);
+                        events.set(updated);
+                    }
 
-                    // Append new events to existing events
-                    let mut current = events.read().clone();
-                    current.append(&mut new_events);
-                    events.set(current);
                     loading.set(false);
                 }
                 Err(e) => {
@@ -357,8 +383,9 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
         .limit(50);
 
     // Add until for pagination
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
     log::info!("Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
@@ -397,8 +424,9 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
         .limit(50);
 
     // Add until for pagination, or since for initial load
+    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
+        filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     } else {
         let since = Timestamp::now() - Duration::from_secs(86400 * 7); // 7 days ago
         filter = filter.since(since);

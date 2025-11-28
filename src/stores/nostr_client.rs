@@ -4,6 +4,7 @@ use nostr_sdk::Client;
 use nostr_sdk::prelude::*;
 use nostr::Url;
 use std::sync::Arc;
+use std::sync::{OnceLock, Mutex};
 use std::time::Duration;
 
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +28,59 @@ pub static HAS_SIGNER: GlobalSignal<bool> = Signal::global(|| false);
 
 /// The current signer type (if any)
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
+
+/// Contacts cache for faster feed loading (5-minute TTL)
+struct CachedContacts {
+    pubkey: String,
+    contacts: Vec<String>,
+    cached_at: instant::Instant,
+}
+
+static CONTACTS_CACHE: OnceLock<Mutex<Option<CachedContacts>>> = OnceLock::new();
+
+fn get_contacts_cache() -> &'static Mutex<Option<CachedContacts>> {
+    CONTACTS_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Invalidate the contacts cache (call after follow/unfollow)
+pub fn invalidate_contacts_cache() {
+    // Use unwrap_or_else to recover from poisoned mutex instead of silently ignoring
+    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    *cache = None;
+    log::debug!("Contacts cache invalidated");
+}
+
+/// Wait for at least one relay to be ready before fetching
+/// This is needed because connect() is non-blocking and spawns background tasks
+/// Ensure at least one relay is connected before fetching
+/// Call this before any direct client.fetch_events() calls
+pub async fn ensure_relays_ready(client: &Client) {
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    // First, check if any relay is already connected
+    let relays = client.relays().await;
+    let any_connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+    if any_connected {
+        log::debug!("At least one relay is already connected, proceeding with fetch");
+        return;
+    }
+
+    // No relays connected yet - call connect().await to actually establish connections
+    // This is the key fix: in WASM, polling doesn't yield control to background tasks,
+    // but connect().await properly drives the connection futures to completion
+    log::info!("No relays connected, calling connect().await to establish connections...");
+    client.connect().await;
+
+    // Verify connection status after connect attempt
+    let relays_after = client.relays().await;
+    let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
+    if connected_count == 0 {
+        log::warn!("connect().await completed but no relays are connected - fetches may fail");
+    } else {
+        log::info!("connect().await completed, {} relay(s) connected", connected_count);
+    }
+}
 
 /// Relay connection status
 #[derive(Clone, Debug, PartialEq)]
@@ -135,13 +189,32 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
-    log::debug!("Connecting to relays...");
-    client.connect().await;
-
+    // Store client and mark initialized BEFORE connecting
+    // This allows the UI to start loading while relays connect in background
     *NOSTR_CLIENT.write() = Some(client.clone());
     *CLIENT_INITIALIZED.write() = true;
 
-    log::info!("Nostr client with IndexedDB initialized successfully");
+    // Connect to relays in background - spawn the future so it gets polled to completion
+    // In WASM, simply dropping the Future won't reliably execute it
+    log::debug!("Spawning background relay connections...");
+    #[cfg(target_arch = "wasm32")]
+    {
+        let client_for_connect = client.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            client_for_connect.connect().await;
+            log::info!("Background relay connections completed");
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let client_for_connect = client.clone();
+        tokio::spawn(async move {
+            client_for_connect.connect().await;
+            log::info!("Background relay connections completed (non-WASM)");
+        });
+    }
+
+    log::info!("Nostr client initialized (relays connecting in background)");
     Ok(client)
 }
 
@@ -360,6 +433,10 @@ pub async fn fetch_events_aggregated(
 
     // Fallback to relays if DB is empty or failed
     log::info!("Fetching from relays (database empty or failed)");
+
+    // Wait for at least one relay to be ready (non-blocking connect() may not have finished)
+    ensure_relays_ready(&client).await;
+
     client
         .fetch_events(filter, timeout)
         .await
@@ -374,10 +451,62 @@ pub async fn fetch_events_aggregated_outbox(
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
+    // Wait for at least one relay to be ready (non-blocking connect() may not have finished)
+    ensure_relays_ready(&client).await;
+
     // Use gossip for automatic relay routing
     client.fetch_events(filter, timeout).await
         .map(|events| events.into_iter().collect())
         .map_err(|e| format!("Failed to fetch events: {}", e))
+}
+
+/// Fetch events from database only (instant, for initial display)
+///
+/// This is Phase 1 of profile loading - shows cached data immediately.
+/// Call `fetch_profile_events_from_relays` afterward for fresh data.
+pub async fn fetch_profile_events_db(
+    filter: Filter,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    match client.database().query(filter).await {
+        Ok(events) => {
+            let count = events.len();
+            log::info!("Profile DB: loaded {} events instantly", count);
+            Ok(events.into_iter().collect())
+        }
+        Err(e) => {
+            log::warn!("Profile DB query failed: {}", e);
+            Ok(Vec::new()) // Return empty on error, relay fetch will get data
+        }
+    }
+}
+
+/// Fetch events from relays only (for background refresh)
+///
+/// This is Phase 2 of profile loading - fetches fresh data from relays.
+/// Uses gossip/outbox routing for efficient relay selection.
+pub async fn fetch_profile_events_from_relays(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Ensure relays are ready
+    ensure_relays_ready(&client).await;
+
+    // Use gossip for automatic relay routing (NIP-65 outbox)
+    match client.fetch_events(filter, timeout).await {
+        Ok(events) => {
+            let count = events.len();
+            log::info!("Profile relays: fetched {} events", count);
+            Ok(events.into_iter().collect())
+        }
+        Err(e) => {
+            log::warn!("Profile relay fetch failed: {}", e);
+            Err(format!("Relay fetch failed: {}", e))
+        }
+    }
 }
 
 /// Publish a text note (kind 1 event)
@@ -516,19 +645,12 @@ pub async fn publish_reaction(
             let kind = Some(event.kind);
             // For addressable events (30000-39999), include coordinate
             let coordinate = if event.kind.is_addressable() {
-                // Find the 'd' tag (identifier) for addressable events
-                event.tags.iter()
-                    .find_map(|tag| {
-                        if tag.kind() == nostr::TagKind::d() {
-                            tag.content().map(|id| Coordinate {
-                                kind: event.kind,
-                                public_key: event.pubkey,
-                                identifier: id.to_string(),
-                            })
-                        } else {
-                            None
-                        }
-                    })
+                // Use SDK's identifier() method for d-tag lookup
+                event.tags.identifier().map(|id| Coordinate {
+                    kind: event.kind,
+                    public_key: event.pubkey,
+                    identifier: id.to_string(),
+                })
             } else {
                 None
             };
@@ -559,8 +681,36 @@ pub async fn publish_reaction(
 
 /// Fetch a user's contact list (kind 3 event)
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
+/// Uses a 5-minute cache to speed up repeated calls
 pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
-    log::info!("Fetching contacts for: {}", pubkey_str);
+    // Check cache first (5-minute TTL)
+    {
+        let cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(ref cached) = *cache {
+            if cached.pubkey == pubkey_str
+               && cached.cached_at.elapsed() < Duration::from_secs(300) {
+                log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
+                let contacts = cached.contacts.clone();
+                drop(cache); // Release lock before spawning
+
+                // Background refresh (don't await)
+                let pk = pubkey_str.clone();
+                spawn(async move {
+                    let _ = fetch_contacts_from_relay(pk).await;
+                });
+
+                return Ok(contacts);
+            }
+        }
+    }
+
+    // Cache miss - fetch from relay
+    fetch_contacts_from_relay(pubkey_str).await
+}
+
+/// Internal function to fetch contacts from relay and update cache
+async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
+    log::info!("Fetching contacts from relay for: {}", pubkey_str);
 
     // Parse pubkey
     use nostr::{PublicKey, Filter, Kind};
@@ -578,17 +728,22 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                // Extract pubkeys from 'p' tags
-                let mut contacts = Vec::new();
-                for tag in event.tags.iter() {
-                    // Check if this is a p-tag (public key tag)
-                    if tag.kind() == nostr::TagKind::p() {
-                        if let Some(pubkey_str) = tag.content() {
-                            contacts.push(pubkey_str.to_string());
-                        }
-                    }
+                // Use SDK's public_keys() method to extract p-tags
+                let contacts: Vec<String> = event.tags.public_keys()
+                    .map(|pk| pk.to_string())
+                    .collect();
+                log::info!("Found {} contacts from relay", contacts.len());
+
+                // Update cache
+                {
+                    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *cache = Some(CachedContacts {
+                        pubkey: pubkey_str,
+                        contacts: contacts.clone(),
+                        cached_at: instant::Instant::now(),
+                    });
                 }
-                log::info!("Found {} contacts", contacts.len());
+
                 Ok(contacts)
             } else {
                 log::info!("No contact list found");
@@ -648,6 +803,9 @@ pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<Stri
 
 /// Follow a user (adds to contact list and publishes)
 pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), String> {
+    // Invalidate contacts cache since we're modifying it
+    invalidate_contacts_cache();
+
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_follow)?;
 
@@ -674,6 +832,9 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
 
 /// Unfollow a user (removes from contact list and publishes)
 pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<(), String> {
+    // Invalidate contacts cache since we're modifying it
+    invalidate_contacts_cache();
+
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_unfollow)?;
 
@@ -740,14 +901,10 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
 pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
-            let mut muted_posts = Vec::new();
-            for tag in event.tags.iter() {
-                if tag.kind() == nostr::TagKind::e() {
-                    if let Some(event_id) = tag.content() {
-                        muted_posts.push(event_id.to_string());
-                    }
-                }
-            }
+            // Use SDK's event_ids() method to extract e-tags
+            let muted_posts: Vec<String> = event.tags.event_ids()
+                .map(|id| id.to_string())
+                .collect();
             Ok(muted_posts)
         }
         None => Ok(Vec::new()),
@@ -758,14 +915,10 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
 pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list().await? {
         Some(event) => {
-            let mut blocked_users = Vec::new();
-            for tag in event.tags.iter() {
-                if tag.kind() == nostr::TagKind::p() {
-                    if let Some(pubkey) = tag.content() {
-                        blocked_users.push(pubkey.to_string());
-                    }
-                }
-            }
+            // Use SDK's public_keys() method to extract p-tags
+            let blocked_users: Vec<String> = event.tags.public_keys()
+                .map(|pk| pk.to_string())
+                .collect();
             Ok(blocked_users)
         }
         None => Ok(Vec::new()),
@@ -1296,6 +1449,9 @@ pub async fn fetch_articles(
         filter = filter.until(Timestamp::from(until_timestamp));
     }
 
+    // Ensure relays are ready before fetching
+    ensure_relays_ready(&client).await;
+
     match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
         Ok(events) => {
             let mut sorted: Vec<_> = events.into_iter().collect();
@@ -1311,13 +1467,35 @@ pub async fn fetch_articles(
 }
 
 /// Fetch a specific article by coordinate (kind:pubkey:identifier)
+/// Legacy function - use fetch_event_by_coordinate for new code
 pub async fn fetch_article_by_coordinate(
     pubkey: String,
     identifier: String,
 ) -> std::result::Result<Option<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
+    fetch_event_by_coordinate(30023, pubkey, identifier).await
+}
 
-    log::info!("Fetching article {}:{}", pubkey, identifier);
+/// Fetch any addressable event by coordinate (kind:pubkey:identifier)
+/// Works for articles (30023), livestreams (30311), and other addressable events
+/// Fetch addressable event by coordinate with two-phase loading (DB first, then relay)
+/// Optionally uses relay hints for faster fetching
+pub async fn fetch_event_by_coordinate(
+    kind: u16,
+    pubkey: String,
+    identifier: String,
+) -> std::result::Result<Option<nostr::Event>, String> {
+    fetch_event_by_coordinate_with_relays(kind, pubkey, identifier, Vec::new()).await
+}
+
+/// Fetch addressable event by coordinate with relay hints
+/// Two-phase loading: DB first (instant), then relay (if not found or for freshness)
+pub async fn fetch_event_by_coordinate_with_relays(
+    kind: u16,
+    pubkey: String,
+    identifier: String,
+    relay_hints: Vec<String>,
+) -> std::result::Result<Option<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
 
     use nostr::{Filter, Kind, PublicKey};
 
@@ -1326,18 +1504,53 @@ pub async fn fetch_article_by_coordinate(
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = Filter::new()
-        .kind(Kind::LongFormTextNote)
+        .kind(Kind::from(kind))
         .author(author)
-        .identifier(identifier)
+        .identifier(identifier.clone())
         .limit(1);
+
+    // PHASE 1: Check database first (instant)
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if let Some(event) = db_events.into_iter().next() {
+            log::debug!("Found event kind {} in DB: {}:{}", kind, pubkey, identifier);
+            return Ok(Some(event));
+        }
+    }
+
+    log::info!("Fetching event kind {} from relay: {}:{}", kind, pubkey, identifier);
+
+    // PHASE 2: Fetch from relays
+    // Try relay hints first if provided
+    if !relay_hints.is_empty() {
+        let relay_urls: Vec<nostr_sdk::RelayUrl> = relay_hints.iter()
+            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+            .collect();
+
+        // Add relay hints temporarily and fetch
+        for relay_url in &relay_urls {
+            if let Err(e) = client.add_relay(relay_url.as_str()).await {
+                log::debug!("Could not add relay hint {}: {}", relay_url, e);
+            }
+        }
+
+        // Try fetching with shorter timeout for relay hints
+        if let Ok(events) = client.fetch_events(filter.clone(), std::time::Duration::from_secs(5)).await {
+            if let Some(event) = events.into_iter().next() {
+                return Ok(Some(event));
+            }
+        }
+    }
+
+    // Fallback: standard relay fetch with longer timeout
+    ensure_relays_ready(&client).await;
 
     match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
         Ok(events) => {
             Ok(events.into_iter().next())
         }
         Err(e) => {
-            log::error!("Failed to fetch article: {}", e);
-            Err(format!("Failed to fetch article: {}", e))
+            log::error!("Failed to fetch event: {}", e);
+            Err(format!("Failed to fetch event: {}", e))
         }
     }
 }
@@ -1349,41 +1562,22 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
     let client = NOSTR_CLIENT.read();
     let client = client.as_ref().ok_or("Client not initialized")?;
 
-    let signer_type = get_signer().ok_or("No signer available")?;
+    // Verify signer is available
+    if !*HAS_SIGNER.read() {
+        return Err("No signer available".to_string());
+    }
 
     log::info!("Publishing profile metadata");
 
-    // Build and sign event based on signer type
-    let event = match signer_type {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            EventBuilder::metadata(&metadata)
-                .sign(&keys)
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(signer) => {
-            EventBuilder::metadata(&metadata)
-                .sign(signer.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            EventBuilder::metadata(&metadata)
-                .sign(nostr_connect.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-    };
-
-    // Publish to relays
-    client.send_event(&event).await
+    // Build event and publish using gossip routing (client handles signing)
+    let builder = EventBuilder::metadata(&metadata);
+    let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish metadata: {}", e))?;
 
     log::info!("Metadata published successfully");
 
     // Return event ID
-    Ok(event.id.to_hex())
+    Ok(output.id().to_hex())
 }
 
 /// Update just the profile picture
@@ -1933,13 +2127,11 @@ pub async fn publish_voice_message_reply(
     // Add p tag for parent author
     tags.push(Tag::public_key(parent_pubkey));
 
-    // Add p tags for anyone else mentioned in the parent
-    for tag in reply_to.tags.iter() {
-        if let Some(nostr::TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
-            // Don't duplicate the parent author
-            if public_key != &parent_pubkey {
-                tags.push(Tag::public_key(*public_key));
-            }
+    // Add p tags for anyone else mentioned in the parent (using SDK's public_keys())
+    for public_key in reply_to.tags.public_keys() {
+        // Don't duplicate the parent author
+        if public_key != &parent_pubkey {
+            tags.push(Tag::public_key(*public_key));
         }
     }
 
@@ -1964,9 +2156,11 @@ pub async fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
 
 /// Publish a poll vote (Kind 1018) following NIP-88
 /// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
+/// Votes are published to the relays specified in the poll event
 pub async fn publish_poll_vote(
     poll_id: nostr::EventId,
     response: nostr::nips::nip88::PollResponse,
+    poll_relays: Vec<nostr::RelayUrl>,
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -1993,9 +2187,66 @@ pub async fn publish_poll_vote(
     // Build event using EventBuilder::poll_response
     let builder = nostr::EventBuilder::poll_response(response);
 
-    // Publish
-    let output = client.send_event_builder(builder).await
-        .map_err(|e| format!("Failed to publish poll vote: {}", e))?;
+    // NIP-88: Votes should be published to the relays specified in the poll
+    let output = if !poll_relays.is_empty() {
+        // Track which relays we actually add (to clean up later)
+        let mut added_relays = Vec::new();
+        for relay_url in &poll_relays {
+            // add_relay returns Ok if added, Err if already present or failed
+            if client.add_relay(relay_url.as_str()).await.is_ok() {
+                added_relays.push(relay_url.clone());
+            }
+        }
+
+        // Use non-blocking relay ready check instead of blocking connect()
+        ensure_relays_ready(&client).await;
+
+        // Check if any poll relays are actually connected
+        let relays_status = client.relays().await;
+        let connected_poll_relays: Vec<_> = poll_relays.iter()
+            .filter(|r| {
+                if let Ok(url) = nostr::RelayUrl::parse(r.as_str()) {
+                    relays_status.get(&url).map(|relay| relay.is_connected()).unwrap_or(false)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        if connected_poll_relays.is_empty() {
+            log::warn!("None of the {} poll relays are connected, falling back to default relays", poll_relays.len());
+        } else {
+            log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), poll_relays.len());
+        }
+
+        // Publish to poll-specified relays
+        let relay_urls: Vec<nostr::Url> = poll_relays.iter()
+            .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
+            .collect();
+
+        let result = if !relay_urls.is_empty() {
+            log::info!("Publishing vote to {} poll-specified relays", relay_urls.len());
+            client.send_event_builder_to(relay_urls, builder).await
+                .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
+        } else {
+            // Fallback if URL parsing failed
+            client.send_event_builder(builder).await
+                .map_err(|e| format!("Failed to publish poll vote: {}", e))
+        };
+
+        // Cleanup: remove only the relays we added
+        for relay_url in added_relays {
+            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
+                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
+            }
+        }
+
+        result?
+    } else {
+        // No poll relays specified, use default relays
+        client.send_event_builder(builder).await
+            .map_err(|e| format!("Failed to publish poll vote: {}", e))?
+    };
 
     let event_id = output.id().to_hex();
     log::info!("Poll vote published successfully: {}", event_id);

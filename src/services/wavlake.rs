@@ -76,7 +76,7 @@ pub struct WavlakeAlbum {
 }
 
 /// Search result from Wavlake
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WavlakeSearchResult {
     pub id: String,
     pub name: String,

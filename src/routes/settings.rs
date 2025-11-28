@@ -247,6 +247,8 @@ pub fn Settings() -> Element {
     };
 
     // Blossom server handlers
+    let mut blossom_save_status = use_signal(|| None::<String>);
+
     let add_blossom_server = move |_| {
         let server_url = new_server_input.read().clone();
         if server_url.is_empty() {
@@ -262,24 +264,30 @@ pub fn Settings() -> Element {
         blossom_store::add_server(server_url);
         new_server_input.set(String::new());
         server_error.set(None);
-
-        // Save to Nostr
-        spawn(async move {
-            let settings = settings_store::SETTINGS.read().clone();
-            if let Err(e) = settings_store::save_settings(&settings).await {
-                log::error!("Failed to save settings: {}", e);
-            }
-        });
     };
 
     let remove_blossom_server = move |url: String| {
         blossom_store::remove_server(&url);
+    };
 
-        // Save to Nostr
+    // Publish Blossom servers to kind 10063 (NIP-B7)
+    let publish_blossom_servers = move |_| {
         spawn(async move {
-            let settings = settings_store::SETTINGS.read().clone();
-            if let Err(e) = settings_store::save_settings(&settings).await {
-                log::error!("Failed to save settings: {}", e);
+            blossom_save_status.set(Some("Publishing...".to_string()));
+
+            match blossom_store::publish_user_servers().await {
+                Ok(_) => {
+                    blossom_save_status.set(Some("✅ Blossom servers published!".to_string()));
+                    // Clear after 3 seconds
+                    gloo_timers::future::TimeoutFuture::new(3000).await;
+                    blossom_save_status.set(None);
+                }
+                Err(e) => {
+                    blossom_save_status.set(Some(format!("❌ Failed: {}", e)));
+                    // Auto-clear error after 7 seconds
+                    gloo_timers::future::TimeoutFuture::new(7000).await;
+                    blossom_save_status.set(None);
+                }
             }
         });
     };
@@ -1075,14 +1083,26 @@ pub fn Settings() -> Element {
             // Blossom Servers section
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                h3 {
-                    class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
-                    "🌸 Blossom Servers"
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h3 {
+                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "🌸 Blossom Servers"
+                    }
+                    span {
+                        class: "text-xs text-gray-500 dark:text-gray-400",
+                        "NIP-B7 (kind 10063)"
+                    }
                 }
 
                 p {
                     class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
-                    "Configure servers for image and media uploads. The first server in the list is used for uploads."
+                    "Configure servers for image and media uploads. The first server in the list is used for uploads. "
+                    if auth.is_authenticated {
+                        "Your server list is synced across devices via Nostr."
+                    } else {
+                        "Login to sync your server list across devices."
+                    }
                 }
 
                 // Server list
@@ -1147,6 +1167,24 @@ pub fn Settings() -> Element {
                         div {
                             class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "❌ {err}"
+                        }
+                    }
+                }
+
+                // Publish button (only when authenticated)
+                if auth.is_authenticated {
+                    div {
+                        class: "pt-4 border-t border-gray-200 dark:border-gray-700 mt-4",
+                        button {
+                            class: "w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition",
+                            onclick: publish_blossom_servers,
+                            "📤 Publish Server List to Nostr"
+                        }
+                        if let Some(status) = blossom_save_status.read().as_ref() {
+                            div {
+                                class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
+                                "{status}"
+                            }
                         }
                     }
                 }

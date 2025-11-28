@@ -213,14 +213,27 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let indent_level = depth.min(MAX_DEPTH);
     let margin_left = indent_level * 4; // 4px per level
 
+    // Clone event_id for navigation
+    let event_id_nav = event.id.to_hex();
+    let nav = use_navigator();
+
     rsx! {
         div {
             class: "comment-thread",
             style: "margin-left: {margin_left}px;",
 
-            // Comment card
+            // Comment card - clickable to navigate to thread
             div {
-                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition",
+                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
+                onclick: {
+                    let event_id_click = event_id_nav.clone();
+                    let navigator = nav.clone();
+                    move |_| {
+                        // Don't navigate if clicking on interactive elements
+                        // The event will be stopped by buttons/links
+                        navigator.push(Route::Note { note_id: event_id_click.clone() });
+                    }
+                },
 
                 // Author info
                 div {
@@ -229,6 +242,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                     // Avatar
                     Link {
                         to: Route::Profile { pubkey: author_pubkey.to_string() },
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
                         if let Some(metadata) = author_metadata.read().as_ref() {
                             if let Some(picture) = &metadata.picture {
                                 img {
@@ -265,6 +279,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             Link {
                                 to: Route::Profile { pubkey: author_pubkey.to_string() },
                                 class: "font-semibold text-sm hover:underline truncate",
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
                                 if let Some(metadata) = author_metadata.read().as_ref() {
                                     if let Some(display_name) = &metadata.display_name {
                                         "{display_name}"
@@ -295,7 +310,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             class: "text-sm mt-1",
                             RichContent {
                                 content: event.content.clone(),
-                                tags: event.tags.iter().cloned().collect()
+                                tags: event.tags.clone().to_vec()
                             }
                         }
 
@@ -306,7 +321,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             // Reply button
                             button {
                                 class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
-                                onclick: move |_| {
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     show_reply_modal.set(true);
                                 },
                                 MessageCircleIcon {
@@ -332,7 +348,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             button {
                                 class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
                                 disabled: !has_signer || *is_reposting.read(),
-                                onclick: move |_| {
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     if !has_signer || *is_reposting.read() {
                                         return;
                                     }
@@ -381,7 +398,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             button {
                                 class: "{like_button_class} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded",
                                 disabled: !has_signer || *is_liking.read(),
-                                onclick: move |_| {
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     if !has_signer || *is_liking.read() {
                                         return;
                                     }
@@ -446,7 +464,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     rsx! {
                                         button {
                                             class: "flex items-center gap-1 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition px-2 py-1.5 rounded",
-                                            onclick: move |_| {
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
                                                 show_zap_modal.set(true);
                                             },
                                             ZapIcon {
@@ -475,7 +494,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             button {
                                 class: "{bookmark_button_class} hover:bg-blue-500/10 gap-1 px-2 py-1.5 rounded",
                                 disabled: *is_bookmarking.read(),
-                                onclick: move |_| {
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     if *is_bookmarking.read() {
                                         return;
                                     }
@@ -506,7 +526,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             // Share button
                             button {
                                 class: "flex items-center gap-1 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
-                                onclick: move |_| {
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     log::info!("Share button clicked for event");
                                 },
                                 ShareIcon {
