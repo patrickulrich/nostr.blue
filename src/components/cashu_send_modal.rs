@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 use crate::stores::cashu_wallet;
-use crate::utils::shorten_url;
+use crate::utils::{shorten_url, format::truncate_pubkey};
 
 #[component]
 pub fn CashuSendModal(
@@ -352,7 +352,7 @@ pub fn CashuSendModal(
                                 div {
                                     class: "flex justify-between",
                                     span { class: "text-muted-foreground", "Recipient:" }
-                                    span { class: "font-mono text-xs truncate max-w-[180px]", {shorten_pubkey(&recipient_pubkey.read())} }
+                                    span { class: "font-mono text-xs truncate max-w-[180px]", {truncate_pubkey(&recipient_pubkey.read())} }
                                 }
                             }
                         }
@@ -397,13 +397,3 @@ pub fn CashuSendModal(
     }
 }
 
-/// Shorten pubkey for display
-fn shorten_pubkey(pubkey: &str) -> String {
-    if pubkey.starts_with("npub") && pubkey.len() > 20 {
-        format!("{}...{}", &pubkey[..12], &pubkey[pubkey.len()-8..])
-    } else if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-    } else {
-        pubkey.to_string()
-    }
-}

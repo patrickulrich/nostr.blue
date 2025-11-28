@@ -2,6 +2,26 @@ use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
 
+/// Select a valid mint from the list, optionally excluding one mint
+fn select_valid_mint(
+    current: &str,
+    mints: &[String],
+    exclude: Option<&str>,
+) -> Option<String> {
+    // If current is valid and not excluded, keep it
+    if !current.is_empty()
+        && mints.contains(&current.to_string())
+        && exclude.map_or(true, |ex| ex != current)
+    {
+        return Some(current.to_string());
+    }
+
+    // Otherwise, find first valid alternative
+    mints.iter()
+        .find(|m| exclude.map_or(true, |ex| *m != ex))
+        .cloned()
+}
+
 #[component]
 pub fn CashuTransferModal(
     on_close: EventHandler<()>,
@@ -25,29 +45,14 @@ pub fn CashuTransferModal(
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
 
-        if source.is_empty() {
-            if let Some(first) = current_mints.first() {
-                source_mint.set(first.clone());
+        if let Some(new_source) = select_valid_mint(&source, &current_mints, None) {
+            if new_source != source {
+                source_mint.set(new_source.clone());
             }
-        } else if !current_mints.contains(&source) {
-            if let Some(first) = current_mints.first() {
-                source_mint.set(first.clone());
-            }
-        }
 
-        if target.is_empty() || target == source {
-            if let Some(second) = current_mints.get(1) {
-                target_mint.set(second.clone());
-            } else if let Some(first) = current_mints.first() {
-                if first != &source {
-                    target_mint.set(first.clone());
-                }
-            }
-        } else if !current_mints.contains(&target) {
-            for mint in &current_mints {
-                if mint != &source {
-                    target_mint.set(mint.clone());
-                    break;
+            if let Some(new_target) = select_valid_mint(&target, &current_mints, Some(&new_source)) {
+                if new_target != target {
+                    target_mint.set(new_target);
                 }
             }
         }
@@ -174,7 +179,11 @@ pub fn CashuTransferModal(
         // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| {
+                if !*is_transferring.read() {
+                    on_close.call(());
+                }
+            },
 
             // Modal content
             div {
@@ -188,10 +197,12 @@ pub fn CashuTransferModal(
                         class: "text-xl font-bold",
                         "Transfer Between Mints"
                     }
-                    button {
-                        class: "text-2xl text-muted-foreground hover:text-foreground transition",
-                        onclick: move |_| on_close.call(()),
-                        "×"
+                    if !*is_transferring.read() {
+                        button {
+                            class: "text-2xl text-muted-foreground hover:text-foreground transition",
+                            onclick: move |_| on_close.call(()),
+                            "×"
+                        }
                     }
                 }
 

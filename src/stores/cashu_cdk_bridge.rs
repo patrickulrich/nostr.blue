@@ -6,6 +6,7 @@
 
 use dioxus::prelude::*;
 use std::sync::Arc;
+use std::collections::HashMap;
 use cdk::wallet::multi_mint_wallet::MultiMintWallet;
 use cdk::nuts::CurrencyUnit;
 
@@ -18,6 +19,11 @@ use super::indexeddb_database::IndexedDbDatabase;
 /// Global MultiMintWallet instance
 /// Replaces the previous WALLET_CACHE HashMap approach
 pub static MULTI_WALLET: GlobalSignal<Option<Arc<MultiMintWallet>>> = Signal::global(|| None);
+
+/// Cache for mint MPP support: mint_url -> (timestamp_ms, supports_mpp)
+/// TTL is 5 minutes (300,000 ms)
+static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = Signal::global(|| HashMap::new());
+const MINT_INFO_CACHE_TTL_MS: f64 = 300_000.0; // 5 minutes
 
 /// Balance breakdown for UI display
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -151,10 +157,10 @@ pub async fn sync_wallet_state() -> Result<(), String> {
     let balances = multi_wallet.get_balances().await
         .map_err(|e| format!("Failed to get balances: {}", e))?;
 
-    // Calculate total balance
+    // Calculate total balance with checked arithmetic
     let total: u64 = balances.values()
-        .map(|amount| u64::from(*amount))
-        .sum();
+        .try_fold(0u64, |acc, amount| acc.checked_add(u64::from(*amount)))
+        .ok_or("Balance overflow")?;
 
     // Update WALLET_BALANCE
     *WALLET_BALANCE.write() = total;
@@ -455,8 +461,12 @@ pub async fn execute_mpp_melt(
         log::info!("MPP contribution from {}: paid={}, fee={}",
             url, u64::from(melted.amount), u64::from(melted.fee_paid));
 
-        total_paid += u64::from(melted.amount);
-        total_fee += u64::from(melted.fee_paid);
+        total_paid = total_paid
+            .checked_add(u64::from(melted.amount))
+            .ok_or("MPP total amount overflow")?;
+        total_fee = total_fee
+            .checked_add(u64::from(melted.fee_paid))
+            .ok_or("MPP total fee overflow")?;
 
         // Get preimage from any contribution (they should all have the same)
         if preimage.is_none() && melted.preimage.is_some() {
@@ -494,8 +504,31 @@ pub struct MppMeltResult {
     pub contributions: usize,
 }
 
-/// Check if a mint supports MPP (NUT-15)
+/// Check if a mint supports MPP (NUT-15) with caching
 pub async fn mint_supports_mpp(mint_url: &str) -> bool {
+    let now = js_sys::Date::now();
+
+    // Check cache first
+    {
+        let cache = MINT_MPP_CACHE.read();
+        if let Some((timestamp, supports)) = cache.get(mint_url) {
+            if now - timestamp < MINT_INFO_CACHE_TTL_MS {
+                return *supports;
+            }
+        }
+    }
+
+    // Cache miss or expired - fetch from network
+    let supports = fetch_mint_mpp_support(mint_url).await;
+
+    // Update cache
+    MINT_MPP_CACHE.write().insert(mint_url.to_string(), (now, supports));
+
+    supports
+}
+
+/// Internal function to fetch MPP support from network
+async fn fetch_mint_mpp_support(mint_url: &str) -> bool {
     let multi_wallet = match MULTI_WALLET.read().as_ref() {
         Some(w) => w.clone(),
         None => return false,

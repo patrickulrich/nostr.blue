@@ -143,8 +143,39 @@ pub fn CashuReceiveLightningModal(
                                             quote_id.clone()
                                         ).await {
                                             Ok(cashu_wallet::QuoteStatus::Paid) => {
-                                                log::info!("Payment detected via HTTP backup check");
-                                                // Let the loop continue and WebSocket will catch the minting
+                                                log::info!("Payment detected via HTTP backup check, minting tokens...");
+                                                gloo_timers::future::TimeoutFuture::new(1000).await;
+
+                                                if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                                    break;
+                                                }
+
+                                                match cashu_wallet::mint_tokens_from_quote(
+                                                    mint_url.clone(),
+                                                    quote_id.clone()
+                                                ).await {
+                                                    Ok(amount) => {
+                                                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                                            break;
+                                                        }
+                                                        success_message.set(Some(format!(
+                                                            "Successfully received {} sats!", amount
+                                                        )));
+                                                        quote_info.set(None);
+                                                        is_polling.set(false);
+
+                                                        spawn(async move {
+                                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                            on_close.call(());
+                                                        });
+                                                    }
+                                                    Err(e) => {
+                                                        error_message.set(Some(format!("Failed to mint tokens: {}", e)));
+                                                        is_polling.set(false);
+                                                        quote_info.set(None);
+                                                    }
+                                                }
+                                                break;
                                             }
                                             _ => {}
                                         }

@@ -50,6 +50,12 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
 /// Uses UTF-8 safe character-based slicing to avoid panic on multi-byte chars
 pub fn shorten_url(url: &str, max_len: usize) -> String {
     let url = url.trim_start_matches("https://").trim_start_matches("http://");
+
+    // Handle very small max_len - return truncated URL without ellipsis
+    if max_len <= 3 {
+        return url.chars().take(max_len).collect();
+    }
+
     // Fast path for ASCII (common case for URLs)
     if url.is_ascii() && url.len() > max_len {
         return format!("{}...", &url[..max_len.saturating_sub(3)]);

@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, DiscoveredMint};
+use crate::utils::format::truncate_pubkey;
 
 #[component]
 pub fn CashuMintDiscoveryModal(
@@ -242,13 +243,13 @@ pub fn CashuMintDiscoveryModal(
                                                 // Author who published the announcement
                                                 span {
                                                     title: "{mint.author_pubkey}",
-                                                    "Announced by: {shorten_pubkey(&mint.author_pubkey)}"
+                                                    "Announced by: {truncate_pubkey(&mint.author_pubkey)}"
                                                 }
                                                 // Mint's own pubkey if available
                                                 if let Some(mint_pk) = &mint.mint_pubkey {
                                                     span {
                                                         title: "{mint_pk}",
-                                                        "Mint key: {shorten_pubkey(mint_pk)}"
+                                                        "Mint key: {truncate_pubkey(mint_pk)}"
                                                     }
                                                 }
                                             }
@@ -281,7 +282,7 @@ pub fn CashuMintDiscoveryModal(
                                                                             p {
                                                                                 class: "text-xs text-muted-foreground mt-1",
                                                                                 title: "{rec.recommender}",
-                                                                                "— {shorten_pubkey(&rec.recommender)}"
+                                                                                "— {truncate_pubkey(&rec.recommender)}"
                                                                             }
                                                                         }
                                                                     }
@@ -337,11 +338,3 @@ pub fn CashuMintDiscoveryModal(
     }
 }
 
-/// Shorten pubkey for display
-fn shorten_pubkey(pubkey: &str) -> String {
-    if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-4..])
-    } else {
-        pubkey.to_string()
-    }
-}

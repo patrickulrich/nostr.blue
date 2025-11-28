@@ -8,6 +8,7 @@ use nostr_sdk::types::time::Timestamp;
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use js_sys;
 
 // CDK database trait for calling methods on IndexedDbDatabase
 use cdk::cdk_database::WalletDatabase;
@@ -633,11 +634,11 @@ pub async fn accept_terms() -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
 
-    // Create content with timestamp and version
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // Ensure relays are ready before publishing
+    nostr_client::ensure_relays_ready(&client).await;
+
+    // Create content with timestamp and version (use js_sys for WASM compatibility)
+    let now = (js_sys::Date::now() / 1000.0) as u64;
     let content = serde_json::json!({
         "accepted_at": now,
         "version": 1

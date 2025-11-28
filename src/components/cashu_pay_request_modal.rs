@@ -115,10 +115,12 @@ pub fn CashuPayRequestModal(
                         class: "text-xl font-bold",
                         "Pay Request"
                     }
-                    button {
-                        class: "text-muted-foreground hover:text-foreground transition p-1",
-                        onclick: move |_| on_close.call(()),
-                        "X"
+                    if !matches!(*pay_state.read(), PayState::Paying) {
+                        button {
+                            class: "text-muted-foreground hover:text-foreground transition p-1",
+                            onclick: move |_| on_close.call(()),
+                            "X"
+                        }
                     }
                 }
 

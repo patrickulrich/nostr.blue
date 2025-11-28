@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use futures::future::join_all;
 use crate::stores::{
     cashu_wallet::{self, MeltProgress},
     cashu_cdk_bridge::{self, MppQuoteInfo},
@@ -45,13 +46,23 @@ pub fn CashuSendLightningModal(
                 let all_balances: Vec<_> = balances.iter().map(|b| (b.mint_url.clone(), b.balance)).collect();
                 mint_balances.set(all_balances.clone());
 
-                // Check which mints support MPP
-                let mut mpp_balances = Vec::new();
-                for (mint_url, balance) in &all_balances {
-                    if cashu_cdk_bridge::mint_supports_mpp(mint_url).await {
-                        mpp_balances.push((mint_url.clone(), *balance));
-                    }
-                }
+                // Check which mints support MPP in parallel (now faster with caching)
+                let mpp_futures: Vec<_> = all_balances.iter()
+                    .map(|(mint_url, balance)| {
+                        let url = mint_url.clone();
+                        let bal = *balance;
+                        async move {
+                            if cashu_cdk_bridge::mint_supports_mpp(&url).await {
+                                Some((url, bal))
+                            } else {
+                                None
+                            }
+                        }
+                    })
+                    .collect();
+
+                let results = join_all(mpp_futures).await;
+                let mpp_balances: Vec<_> = results.into_iter().flatten().collect();
                 mpp_mint_balances.set(mpp_balances);
             }
         });
