@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, TokenData, WalletTokensStoreStoreExt};
+use crate::stores::cashu_wallet::{self, TokenData, MintInfoDisplay, WalletTokensStoreStoreExt};
 use crate::utils::format_sats_with_separator;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -11,6 +11,10 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
     let mut is_removing = use_signal(|| false);
     let mut show_confirm = use_signal(|| false);
     let mut remove_error = use_signal(|| Option::<String>::None);
+    let mut show_mint_info = use_signal(|| false);
+    let mut mint_info = use_signal(|| Option::<MintInfoDisplay>::None);
+    let mut mint_info_loading = use_signal(|| false);
+    let mut mint_info_error = use_signal(|| Option::<String>::None);
 
     // Calculate total for this mint
     let total_balance: u64 = tokens_for_mint.iter()
@@ -65,6 +69,22 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
             if is_expanded {
                 div {
                     class: "border-t border-border",
+
+                    // Show empty state for mints with no tokens
+                    if tokens_for_mint.is_empty() {
+                        div {
+                            class: "px-4 py-6 text-center",
+                            p {
+                                class: "text-muted-foreground text-sm",
+                                "No tokens for this mint"
+                            }
+                            p {
+                                class: "text-xs text-muted-foreground mt-1",
+                                "You can remove this mint or deposit tokens to it"
+                            }
+                        }
+                    }
+
                     for (i, token) in tokens_for_mint.iter().enumerate() {
                         div {
                             key: "{token.event_id}",
@@ -116,9 +136,156 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                         }
                     }
 
+                    // Mint info display section
+                    if *show_mint_info.read() {
+                        div {
+                            class: "px-4 py-3 border-t border-border bg-blue-50 dark:bg-blue-950/20",
+
+                            // Loading state
+                            if *mint_info_loading.read() {
+                                div {
+                                    class: "flex items-center justify-center gap-2 py-2",
+                                    div { class: "animate-spin", "!" }
+                                    span { class: "text-sm text-muted-foreground", "Loading mint info..." }
+                                }
+                            }
+
+                            // Error state
+                            if let Some(err) = mint_info_error.read().as_ref() {
+                                div {
+                                    class: "text-sm text-red-600 dark:text-red-400 text-center py-2",
+                                    "Error: {err}"
+                                }
+                            }
+
+                            // Info display
+                            if let Some(info) = mint_info.read().as_ref() {
+                                div {
+                                    class: "space-y-2",
+
+                                    // Header with close button
+                                    div {
+                                        class: "flex items-center justify-between",
+                                        h4 {
+                                            class: "text-sm font-semibold text-blue-800 dark:text-blue-200",
+                                            "Mint Information"
+                                        }
+                                        button {
+                                            class: "text-muted-foreground hover:text-foreground text-lg",
+                                            onclick: move |_| show_mint_info.set(false),
+                                            "×"
+                                        }
+                                    }
+
+                                    // Name and version
+                                    div {
+                                        class: "flex justify-between text-sm",
+                                        if let Some(name) = &info.name {
+                                            span { class: "font-medium", "{name}" }
+                                        } else {
+                                            span { class: "text-muted-foreground", "Unknown Mint" }
+                                        }
+                                        if let Some(version) = &info.version {
+                                            span { class: "text-xs text-muted-foreground font-mono", "v{version}" }
+                                        }
+                                    }
+
+                                    // Description
+                                    if let Some(desc) = &info.description {
+                                        div {
+                                            class: "text-sm text-muted-foreground",
+                                            "{desc}"
+                                        }
+                                    }
+
+                                    // Long description (if different from short)
+                                    if let Some(desc_long) = &info.description_long {
+                                        if info.description.as_ref() != Some(desc_long) {
+                                            div {
+                                                class: "text-xs text-muted-foreground mt-1 bg-background/30 rounded p-2",
+                                                "{desc_long}"
+                                            }
+                                        }
+                                    }
+
+                                    // Supported NUTs
+                                    if !info.supported_nuts.is_empty() {
+                                        div {
+                                            class: "text-sm",
+                                            span { class: "text-muted-foreground", "NUTs: " }
+                                            span { class: "font-mono text-xs",
+                                                {info.supported_nuts.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")}
+                                            }
+                                        }
+                                    }
+
+                                    // MOTD
+                                    if let Some(motd) = &info.motd {
+                                        div {
+                                            class: "text-xs italic bg-background/50 rounded p-2 mt-2",
+                                            "{motd}"
+                                        }
+                                    }
+
+                                    // Contact
+                                    if !info.contact.is_empty() {
+                                        div {
+                                            class: "text-xs text-muted-foreground mt-2",
+                                            for (method, contact_info) in info.contact.iter() {
+                                                span { "{method}: {contact_info} " }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Mint actions
                     div {
                         class: "px-4 py-3 border-t border-border bg-background/30 flex gap-2",
+
+                        // Info button
+                        button {
+                            class: if *mint_info_loading.read() {
+                                "px-3 py-2 text-sm bg-blue-500 text-white rounded-lg opacity-50 cursor-not-allowed"
+                            } else if *show_mint_info.read() {
+                                "px-3 py-2 text-sm bg-blue-600 text-white rounded-lg"
+                            } else {
+                                "px-3 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition"
+                            },
+                            disabled: *mint_info_loading.read(),
+                            onclick: {
+                                let mint_url_clone = mint_url.clone();
+                                move |_| {
+                                    if *show_mint_info.read() {
+                                        show_mint_info.set(false);
+                                    } else {
+                                        let mint_url = mint_url_clone.clone();
+                                        show_mint_info.set(true);
+                                        mint_info_loading.set(true);
+                                        mint_info_error.set(None);
+                                        spawn(async move {
+                                            match cashu_wallet::get_mint_info(&mint_url).await {
+                                                Ok(info) => {
+                                                    mint_info.set(Some(info));
+                                                    mint_info_loading.set(false);
+                                                }
+                                                Err(e) => {
+                                                    mint_info_error.set(Some(e));
+                                                    mint_info_loading.set(false);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            },
+                            if *mint_info_loading.read() {
+                                "..."
+                            } else {
+                                "i"
+                            }
+                        }
 
                         // Cleanup button
                         div {
@@ -155,9 +322,9 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                     }
                                 },
                                 if *is_cleaning.read() {
-                                    "🧹 Cleaning..."
+                                    "Cleaning..."
                                 } else {
-                                    "🧹 Cleanup Spent"
+                                    "Cleanup"
                                 }
                             }
                             if let Some(msg) = cleanup_message.read().as_ref() {
@@ -253,7 +420,11 @@ pub fn TokenList() -> Element {
     let tokens = cashu_wallet::WALLET_TOKENS.read();
     let mut expanded_mints = use_signal(|| std::collections::HashSet::<String>::new());
 
-    if tokens.data().read().is_empty() {
+    // Check if there are any tokens OR any mints (mints without tokens should still be shown)
+    let has_tokens = !tokens.data().read().is_empty();
+    let has_mints = !cashu_wallet::get_mints().is_empty();
+
+    if !has_tokens && !has_mints {
         return rsx! {
             div {
                 class: "bg-card border border-border rounded-lg p-8 text-center",
@@ -285,6 +456,13 @@ pub fn TokenList() -> Element {
             tokens_by_mint.entry(token.mint.clone())
                 .or_insert_with(Vec::new)
                 .push(token.clone());
+        }
+
+        // Also include mints from WALLET_STATE that may have no tokens
+        // This ensures users can manage (remove) mints even when they have no balance
+        let wallet_mints = cashu_wallet::get_mints();
+        for mint_url in wallet_mints {
+            tokens_by_mint.entry(mint_url).or_insert_with(Vec::new);
         }
 
         // Sort mints by total balance (descending) and wrap in Rc

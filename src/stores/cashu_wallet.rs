@@ -2,20 +2,28 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, SecretKey, EventId};
-use nostr_sdk::nips::nip60::{WalletEvent, CashuProof, TransactionDirection, SpendingHistory};
+use nostr_sdk::nips::nip60::{WalletEvent, TransactionDirection, SpendingHistory};
 use nostr_sdk::types::url::Url;
 use nostr_sdk::types::time::Timestamp;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 // CDK database trait for calling methods on IndexedDbDatabase
 use cdk::cdk_database::WalletDatabase;
 
+/// Default unit for Cashu proofs (per NIP-60 spec, defaults to "sat")
+fn default_unit() -> String {
+    "sat".to_string()
+}
+
 /// Custom deserialization structure for token events (more lenient than rust-nostr)
+/// Includes unit field per NIP-60 spec
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TokenEventData {
     pub mint: String,
+    #[serde(default = "default_unit")]
+    pub unit: String,
     pub proofs: Vec<ProofData>,
     #[serde(default)]
     pub del: Vec<String>,
@@ -23,30 +31,34 @@ struct TokenEventData {
 
 /// Extended token event with P2PK support (extends rust-nostr's TokenEvent)
 /// Uses ExtendedCashuProof instead of CashuProof to preserve witness/DLEQ fields
+/// Includes unit field per NIP-60 spec
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExtendedTokenEvent {
     pub mint: String,
+    #[serde(default = "default_unit")]
+    pub unit: String,
     pub proofs: Vec<ExtendedCashuProof>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub del: Vec<String>,
 }
 
 /// DLEQ proof data (preserves P2PK verification capability)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DleqData {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DleqData {
     pub e: String,
     pub s: String,
     pub r: String,
 }
 
 /// Custom deserialization structure for proofs (allows missing fields)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProofData {
+/// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProofData {
     #[serde(default)]
     pub id: String,
     pub amount: u64,
     pub secret: String,
-    #[serde(default)]
+    #[serde(default, rename = "C", alias = "c")]
     pub c: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub witness: Option<String>,
@@ -56,11 +68,13 @@ struct ProofData {
 
 /// Extended Cashu proof with P2PK support (superset of nostr_sdk::nips::nip60::CashuProof)
 /// Preserves witness and DLEQ fields for P2PK verification while maintaining NIP-60 compatibility
+/// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExtendedCashuProof {
     pub id: String,
     pub amount: u64,
     pub secret: String,
+    #[serde(rename = "C", alias = "c")]
     pub c: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub witness: Option<String>,
@@ -90,12 +104,13 @@ pub struct WalletState {
 }
 
 /// Token data with event metadata
+/// Uses ProofData instead of CashuProof to preserve witness/DLEQ for P2PK support
 #[derive(Clone, Debug, PartialEq)]
 pub struct TokenData {
     pub event_id: String,
     pub mint: String,
     pub unit: String,
-    pub proofs: Vec<CashuProof>,
+    pub proofs: Vec<ProofData>,
     pub created_at: u64,
 }
 
@@ -210,18 +225,39 @@ async fn get_shared_localstore() -> Result<std::sync::Arc<crate::stores::indexed
 }
 
 /// Get or create a cached wallet for a mint
+///
+/// Prefers MultiMintWallet when available, falls back to WALLET_CACHE.
 async fn get_or_create_wallet(mint_url: &str) -> Result<std::sync::Arc<cdk::Wallet>, String> {
     use cdk::Wallet;
     use cdk::nuts::CurrencyUnit;
+    use crate::stores::cashu_cdk_bridge;
 
-    // Check cache first
+    // Try MultiMintWallet first (preferred path)
+    if cashu_cdk_bridge::is_initialized() {
+        if let Ok(wallet) = cashu_cdk_bridge::get_wallet(mint_url).await {
+            log::debug!("Using wallet from MultiMintWallet for {}", mint_url);
+            return Ok(std::sync::Arc::new(wallet));
+        }
+
+        // Mint not in MultiMintWallet - try to add it
+        log::info!("Adding mint {} to MultiMintWallet", mint_url);
+        if let Err(e) = cashu_cdk_bridge::add_mint(mint_url).await {
+            log::warn!("Failed to add mint to MultiMintWallet: {}", e);
+            // Fall through to legacy path
+        } else if let Ok(wallet) = cashu_cdk_bridge::get_wallet(mint_url).await {
+            log::info!("Successfully added mint {} to MultiMintWallet", mint_url);
+            return Ok(std::sync::Arc::new(wallet));
+        }
+    }
+
+    // Fallback: Check WALLET_CACHE (legacy path)
     if let Some(wallet) = WALLET_CACHE.read().get(mint_url) {
-        log::debug!("Using cached wallet for {}", mint_url);
+        log::debug!("Using cached wallet for {} (legacy)", mint_url);
         return Ok(wallet.clone());
     }
 
-    // Create new wallet
-    log::info!("Creating new wallet for {}", mint_url);
+    // Create new wallet (legacy path)
+    log::info!("Creating new wallet for {} (legacy path)", mint_url);
 
     let localstore = get_shared_localstore().await?;
     let seed = derive_wallet_seed().await?;
@@ -245,7 +281,7 @@ async fn get_or_create_wallet(mint_url: &str) -> Result<std::sync::Arc<cdk::Wall
     let wallet = std::sync::Arc::new(wallet);
     WALLET_CACHE.write().insert(mint_url.to_string(), wallet.clone());
 
-    log::info!("Cached new wallet for {}", mint_url);
+    log::info!("Cached new wallet for {} (legacy)", mint_url);
     Ok(wallet)
 }
 
@@ -573,6 +609,12 @@ pub async fn init_wallet() -> Result<(), String> {
                             initialized: true,
                         });
 
+                        // Initialize MultiMintWallet with all mints
+                        if let Err(e) = init_multi_mint_wallet(&wallet_data.mints).await {
+                            log::error!("Failed to initialize MultiMintWallet: {}", e);
+                            // Continue without MultiMintWallet - fallback to legacy mode
+                        }
+
                         // Fetch tokens and history
                         if let Err(e) = fetch_tokens().await {
                             log::error!("Failed to fetch tokens: {}", e);
@@ -580,6 +622,11 @@ pub async fn init_wallet() -> Result<(), String> {
 
                         if let Err(e) = fetch_history().await {
                             log::error!("Failed to fetch history: {}", e);
+                        }
+
+                        // Sync MultiMintWallet state to Dioxus signals
+                        if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+                            log::warn!("Failed to sync MultiMintWallet state: {}", e);
                         }
 
                         // Load pending events queue from IndexedDB
@@ -793,9 +840,9 @@ pub async fn fetch_tokens() -> Result<(), String> {
                         // Parse JSON: { mint: string, proofs: [...], del?: [...] }
                         match serde_json::from_str::<TokenEventData>(&decrypted) {
                             Ok(token_event) => {
-                                // Convert ProofData to CashuProof
-                                let proofs: Vec<CashuProof> = token_event.proofs.iter()
-                                    .map(|p| CashuProof {
+                                // Keep proofs as ProofData to preserve witness/DLEQ data
+                                let proofs: Vec<ProofData> = token_event.proofs.iter()
+                                    .map(|p| ProofData {
                                         id: if p.id.is_empty() {
                                             // Generate a placeholder ID if missing
                                             format!("{}_{}", p.secret, p.amount)
@@ -805,6 +852,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                         amount: p.amount,
                                         secret: p.secret.clone(),
                                         c: p.c.clone(),
+                                        witness: p.witness.clone(),  // Preserve witness
+                                        dleq: p.dleq.clone(),        // Preserve DLEQ
                                     })
                                     .collect();
 
@@ -829,7 +878,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                     tokens.push(TokenData {
                                         event_id: event_id_hex,
                                         mint: token_event.mint.clone(),
-                                        unit: "sat".to_string(), // TODO: Parse unit from event
+                                        unit: token_event.unit.clone(),  // Parse unit from event
                                         proofs,
                                         created_at: event.created_at.as_secs(),
                                     });
@@ -1190,6 +1239,94 @@ async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     Err("Seed derivation only available in WASM".to_string())
 }
 
+/// Initialize the MultiMintWallet with all mints from the wallet event
+///
+/// This sets up the CDK MultiMintWallet which manages all mint wallets internally.
+/// Should be called after WALLET_STATE is populated from the wallet event.
+async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(), String> {
+    use crate::stores::cashu_cdk_bridge;
+
+    log::info!("Initializing MultiMintWallet with {} mints", mints.len());
+
+    // Get shared localstore
+    let localstore = get_shared_localstore().await?;
+
+    // Derive wallet seed
+    let seed = derive_wallet_seed().await?;
+
+    // Initialize MultiMintWallet (this also loads existing mints from DB)
+    let multi_wallet = cashu_cdk_bridge::init_multi_wallet(localstore, seed).await?;
+
+    // Add all mints from the wallet event
+    for mint_url in mints {
+        let mint_str = mint_url.to_string();
+        if !cashu_cdk_bridge::has_mint(&mint_str).await {
+            if let Err(e) = cashu_cdk_bridge::add_mint(&mint_str).await {
+                log::warn!("Failed to add mint {}: {}", mint_str, e);
+                // Continue with other mints
+            }
+        }
+    }
+
+    log::info!("MultiMintWallet initialized with {} wallets",
+        multi_wallet.get_wallets().await.len());
+
+    Ok(())
+}
+
+/// Collect all P2PK signing keys that can be used to unlock tokens
+///
+/// This includes:
+/// - The wallet's private key (for tokens locked to wallet pubkey)
+/// - The Nostr identity key (for tokens locked to user's npub)
+///
+/// This enables receiving tokens that are locked to either key.
+async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
+    let mut keys = Vec::new();
+
+    // 1. Wallet's private key (cashu-specific)
+    if let Some(state) = WALLET_STATE.read().as_ref() {
+        if !state.privkey.is_empty() {
+            match cdk::nuts::SecretKey::from_hex(&state.privkey) {
+                Ok(key) => {
+                    log::debug!("Added wallet privkey to P2PK signing keys");
+                    keys.push(key);
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse wallet privkey for P2PK: {}", e);
+                }
+            }
+        }
+    }
+
+    // 2. Nostr identity key (for tokens locked to user's npub)
+    // This allows receiving tokens that were locked to the user's Nostr public key
+    if let Some(nostr_keys) = auth_store::get_keys() {
+        // Convert nostr SecretKey to CDK SecretKey
+        let secret_bytes = nostr_keys.secret_key().to_secret_bytes();
+        match cdk::nuts::SecretKey::from_slice(&secret_bytes) {
+            Ok(key) => {
+                log::debug!("Added Nostr identity key to P2PK signing keys");
+                keys.push(key);
+            }
+            Err(e) => {
+                log::warn!("Failed to convert Nostr key for P2PK: {}", e);
+            }
+        }
+    }
+
+    // Remove duplicates (in case wallet key and nostr key are the same)
+    // CDK SecretKey doesn't implement Hash/Eq, so we compare by serializing
+    let mut seen_keys = std::collections::HashSet::new();
+    keys.retain(|key| {
+        let key_hex = key.to_string();
+        seen_keys.insert(key_hex)
+    });
+
+    log::info!("Collected {} unique P2PK signing keys for token receive", keys.len());
+    keys
+}
+
 /// Convert ProofData (our custom type) to CDK Proof
 fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, String> {
     use cdk::nuts::{Proof, Id, PublicKey, Witness};
@@ -1327,14 +1464,31 @@ async fn create_ephemeral_wallet(
 // Phase 2B: Receive Implementation
 // ============================================================================
 
-/// Receive ecash from a token string
+/// Options for receiving tokens
+#[derive(Clone, Debug, Default)]
+pub struct ReceiveTokensOptions {
+    /// Whether to verify DLEQ proofs before accepting tokens (NUT-12)
+    /// If true and verification fails, the receive will be rejected
+    pub verify_dleq: bool,
+}
+
+/// Receive ecash from a token string (default options - no DLEQ verification)
+#[allow(dead_code)]
 pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
+    receive_tokens_with_options(token_string, ReceiveTokensOptions::default()).await
+}
+
+/// Receive ecash from a token string with options
+///
+/// If `options.verify_dleq` is true, will verify DLEQ proofs (NUT-12) before accepting.
+/// This provides offline verification that the mint's signatures are valid.
+pub async fn receive_tokens_with_options(token_string: String, options: ReceiveTokensOptions) -> Result<u64, String> {
     use cdk::nuts::Token;
     use cdk::wallet::ReceiveOptions;
     use std::str::FromStr;
     use nostr_sdk::signer::NostrSigner;
 
-    log::info!("Receiving token...");
+    log::info!("Receiving token (verify_dleq: {})...", options.verify_dleq);
 
     // Sanitize token string - remove ALL whitespace (spaces, tabs, newlines)
     // This is crucial because copy/paste often adds line breaks in the middle
@@ -1443,11 +1597,46 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     // Create ephemeral wallet
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
 
+    // NUT-12: Verify DLEQ proofs if requested
+    // This provides offline verification that the mint's blind signatures are valid
+    if options.verify_dleq {
+        log::info!("Verifying DLEQ proofs (NUT-12)...");
+        match wallet.verify_token_dleq(&token).await {
+            Ok(()) => {
+                log::info!("DLEQ verification successful - token signatures are valid");
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                if error_msg.contains("MissingDleqProof") || error_msg.contains("missing") {
+                    log::warn!("Token does not contain DLEQ proofs - cannot verify offline");
+                    return Err("Token verification failed: This token does not contain DLEQ proofs for offline verification. The mint may not support NUT-12.".to_string());
+                } else {
+                    log::error!("DLEQ verification failed: {}", e);
+                    return Err(format!("Token verification failed: Invalid DLEQ proof. The mint's signature could not be verified. Error: {}", e));
+                }
+            }
+        }
+    }
+
     // Receive token (contacts mint to swap proofs) with auto-cleanup on spent errors
     // Use the corrected/padded token to ensure padding fix is preserved
+
+    // Collect ALL potential P2PK signing keys for unlock (NUT-11)
+    // This allows receiving tokens locked to various keys we control:
+    // 1. Wallet's private key (cashu-specific)
+    // 2. Nostr identity key (for tokens locked to user's npub)
+    let p2pk_signing_keys = collect_p2pk_signing_keys().await;
+
+    log::debug!("Using {} P2PK signing keys for receive", p2pk_signing_keys.len());
+
+    let receive_opts = ReceiveOptions {
+        p2pk_signing_keys,
+        ..Default::default()
+    };
+
     let amount_received = match wallet.receive(
         &token_to_parse,
-        ReceiveOptions::default()
+        receive_opts
     ).await {
         Ok(amount) => amount,
         Err(e) => {
@@ -1496,6 +1685,7 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
 
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
+        unit: "sat".to_string(),
         proofs: extended_proofs,
         del: vec![],
     };
@@ -1538,12 +1728,7 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
         event_id: event_id.clone(),
         mint: mint_url.clone(),
         unit: "sat".to_string(),
-        proofs: proof_data.iter().map(|p| CashuProof {
-            id: p.id.clone(),
-            amount: p.amount,
-            secret: p.secret.clone(),
-            c: p.c.clone(),
-        }).collect(),
+        proofs: proof_data.clone(),
         created_at: chrono::Utc::now().timestamp() as u64,
     });
 
@@ -1567,6 +1752,11 @@ pub async fn receive_tokens(token_string: String) -> Result<u64, String> {
     if let Err(e) = create_history_event("in", amount, vec![event_id.clone()], vec![]).await {
         log::error!("Failed to create history event: {}", e);
         // Don't fail the whole operation if history event creation fails
+    }
+
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after receive: {}", e);
     }
 
     Ok(amount)
@@ -1611,16 +1801,8 @@ pub async fn send_tokens(
         for token in &mint_tokens {
             event_ids_to_delete.push(token.event_id.clone());
             for proof in &token.proofs {
-                // Convert CashuProof to CDK proof (CashuProof doesn't store witness/dleq)
-                let temp_proof_data = ProofData {
-                    id: proof.id.clone(),
-                    amount: proof.amount,
-                    secret: proof.secret.clone(),
-                    c: proof.c.clone(),
-                    witness: None,
-                    dleq: None,
-                };
-                all_proofs.push(proof_data_to_cdk_proof(&temp_proof_data)?);
+                // Convert ProofData to CDK proof (now preserves witness/dleq)
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
             }
         }
 
@@ -1774,6 +1956,7 @@ pub async fn send_tokens(
 
         let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
+            unit: "sat".to_string(),
             proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
@@ -1833,12 +2016,7 @@ pub async fn send_tokens(
                 event_id: event_id.clone(),
                 mint: mint_url.clone(),
                 unit: "sat".to_string(),
-                proofs: keep_proof_data.iter().map(|p| CashuProof {
-                    id: p.id.clone(),
-                    amount: p.amount,
-                    secret: p.secret.clone(),
-                    c: p.c.clone(),
-                }).collect(),
+                proofs: keep_proof_data,
                 created_at: chrono::Utc::now().timestamp() as u64,
             });
         }
@@ -1913,7 +2091,235 @@ pub async fn send_tokens(
         log::error!("Failed to create history event: {}", e);
     }
 
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after send: {}", e);
+    }
+
     Ok(token_string)
+}
+
+/// Send ecash tokens locked to a recipient's public key (P2PK / NUT-11)
+///
+/// This creates tokens that can only be spent by the holder of the corresponding
+/// private key. The recipient can be specified as:
+/// - A hex pubkey (64 chars)
+/// - An npub (bech32 encoded)
+///
+/// The resulting token can only be redeemed by signing with the recipient's key.
+pub async fn send_tokens_p2pk(
+    mint_url: String,
+    amount: u64,
+    recipient_pubkey: String,
+) -> Result<String, String> {
+    use cdk::wallet::{SendOptions, SendKind};
+    use cdk::nuts::SpendingConditions;
+    use cdk::Amount;
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Sending {} sats P2PK to {} from {}", amount, recipient_pubkey, mint_url);
+
+    // Parse recipient pubkey (support both hex and npub)
+    let recipient_hex = if recipient_pubkey.starts_with("npub") {
+        // Decode npub to hex
+        nostr_sdk::PublicKey::parse(&recipient_pubkey)
+            .map_err(|e| format!("Invalid npub: {}", e))?
+            .to_hex()
+    } else {
+        recipient_pubkey.clone()
+    };
+
+    // Convert to CDK PublicKey (uses secp256k1 directly, not nostr format)
+    let cdk_pubkey = cdk::nuts::PublicKey::from_hex(&recipient_hex)
+        .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
+
+    // Create P2PK spending conditions
+    let spending_conditions = SpendingConditions::new_p2pk(cdk_pubkey, None);
+
+    // Acquire mint operation lock
+    let _lock_guard = try_acquire_mint_lock(&mint_url)
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
+
+    // Get available proofs
+    let (all_proofs, event_ids_to_delete) = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let mint_tokens: Vec<_> = tokens.iter()
+            .filter(|t| t.mint == mint_url)
+            .collect();
+
+        if mint_tokens.is_empty() {
+            return Err("No tokens found for this mint".to_string());
+        }
+
+        let mut all_proofs = Vec::new();
+        let mut event_ids_to_delete = Vec::new();
+
+        for token in &mint_tokens {
+            event_ids_to_delete.push(token.event_id.clone());
+            for proof in &token.proofs {
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
+            }
+        }
+
+        (all_proofs, event_ids_to_delete)
+    };
+
+    // Check balance
+    let total_available: u64 = all_proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    if total_available < amount {
+        return Err(format!(
+            "Insufficient funds. Available: {} sats, Required: {} sats",
+            total_available, amount
+        ));
+    }
+
+    // Create wallet and send with P2PK conditions
+    let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
+
+    let prepared = wallet.prepare_send(
+        Amount::from(amount),
+        SendOptions {
+            conditions: Some(spending_conditions),
+            include_fee: true,
+            send_kind: SendKind::OnlineTolerance(Amount::from(1)),
+            ..Default::default()
+        }
+    ).await
+    .map_err(|e| format!("Failed to prepare P2PK send: {}", e))?;
+
+    log::info!("P2PK send fee: {} sats", u64::from(prepared.fee()));
+
+    let token = prepared.confirm(None).await
+        .map_err(|e| format!("Failed to confirm P2PK send: {}", e))?;
+
+    let keep_proofs = wallet.get_unspent_proofs().await
+        .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
+
+    let token_string = token.to_string();
+
+    // Update local state (same as regular send)
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    let mut new_event_id: Option<String> = None;
+
+    // Publish remaining proofs as token event
+    if !keep_proofs.is_empty() {
+        let proof_data: Vec<ProofData> = keep_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
+            mint: mint_url.clone(),
+            unit: "sat".to_string(),
+            proofs: extended_proofs,
+            del: event_ids_to_delete.clone(),
+        };
+
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+
+        let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+            .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder).await {
+            Ok(output) => {
+                new_event_id = Some(output.id().to_hex());
+                log::info!("Published P2PK send token event: {}", output.id().to_hex());
+            }
+            Err(e) => {
+                log::warn!("Failed to publish token event: {}", e);
+            }
+        }
+    }
+
+    // Update local state
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data_signal = store.data();
+        let mut tokens = data_signal.write();
+
+        // Remove old tokens
+        tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+
+        // Add new token if we have change
+        if !keep_proofs.is_empty() {
+            let proof_data: Vec<ProofData> = keep_proofs.iter()
+                .map(|p| cdk_proof_to_proof_data(p))
+                .collect();
+
+            tokens.push(TokenData {
+                event_id: new_event_id.clone().unwrap_or_default(),
+                mint: mint_url.clone(),
+                unit: "sat".to_string(),
+                proofs: proof_data,
+                created_at: chrono::Utc::now().timestamp() as u64,
+            });
+        }
+
+        // Update balance
+        let new_balance: u64 = tokens.iter()
+            .flat_map(|t| &t.proofs)
+            .map(|p| p.amount)
+            .fold(0u64, |acc, amount| acc.saturating_add(amount));
+        *WALLET_BALANCE.write() = new_balance;
+    }
+
+    // Create history event
+    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    let valid_destroyed: Vec<String> = event_ids_to_delete.iter()
+        .filter(|id| id.len() == 64)
+        .cloned()
+        .collect();
+
+    if let Err(e) = create_history_event("out", amount, valid_created, valid_destroyed).await {
+        log::error!("Failed to create history event: {}", e);
+    }
+
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after P2PK send: {}", e);
+    }
+
+    log::info!("P2PK send complete: {} sats locked to {}", amount, recipient_hex);
+
+    Ok(token_string)
+}
+
+/// Get the wallet's P2PK public key for receiving locked tokens
+///
+/// Returns the hex-encoded public key derived from the wallet's private key.
+/// Senders can lock tokens to this key using send_tokens_p2pk.
+pub fn get_wallet_pubkey() -> Result<String, String> {
+    let wallet_state = WALLET_STATE.read();
+    let state = wallet_state.as_ref().ok_or("Wallet not initialized")?;
+
+    // Parse the wallet privkey to get the pubkey
+    let secret_key = cdk::nuts::SecretKey::from_hex(&state.privkey)
+        .map_err(|e| format!("Invalid wallet privkey: {}", e))?;
+
+    let pubkey = secret_key.public_key();
+    Ok(pubkey.to_hex())
 }
 
 // ============================================================================
@@ -2117,24 +2523,14 @@ async fn cleanup_spent_proofs_internal(mint_url: String) -> Result<(usize, u64),
             .map(|t| t.event_id.clone())
             .collect();
 
-        let all_proofs: Vec<CashuProof> = mint_tokens.iter()
+        let all_proofs: Vec<ProofData> = mint_tokens.iter()
             .flat_map(|t| &t.proofs)
             .cloned()
             .collect();
 
-        // Convert to CDK proofs
+        // Convert to CDK proofs (now preserves witness/DLEQ)
         let cdk_proofs: Result<Vec<_>, _> = all_proofs.iter()
-            .map(|p| {
-                let temp = ProofData {
-                    id: p.id.clone(),
-                    amount: p.amount,
-                    secret: p.secret.clone(),
-                    c: p.c.clone(),
-                    witness: None,
-                    dleq: None,
-                };
-                proof_data_to_cdk_proof(&temp)
-            })
+            .map(|p| proof_data_to_cdk_proof(p))
             .collect();
 
         (cdk_proofs?, event_ids, all_proofs)
@@ -2170,7 +2566,7 @@ async fn cleanup_spent_proofs_internal(mint_url: String) -> Result<(usize, u64),
     log::info!("Found {} unavailable proofs worth {} sats, cleaning up", unavailable_count, unavailable_amount);
 
     // Filter to keep only available proofs (not spent/reserved/pending)
-    let available_proofs: Vec<CashuProof> = all_mint_proofs.into_iter()
+    let available_proofs: Vec<ProofData> = all_mint_proofs.into_iter()
         .filter(|p| !unavailable_secrets.contains(&p.secret))
         .collect();
 
@@ -2209,6 +2605,7 @@ async fn cleanup_spent_proofs_internal(mint_url: String) -> Result<(usize, u64),
 
         let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
+            unit: "sat".to_string(),
             proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
@@ -2310,11 +2707,6 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
             .filter(|t| t.mint == mint_url)
             .collect();
 
-        if mint_tokens.is_empty() {
-            log::info!("No tokens found for this mint");
-            return Ok((0, 0));
-        }
-
         let event_ids: Vec<String> = mint_tokens.iter()
             .map(|t| t.event_id.clone())
             .collect();
@@ -2329,33 +2721,36 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
 
     log::info!("Found {} token events worth {} sats to remove", token_count, total_amount);
 
-    // Create kind-5 deletion event for all token events
-    let mut tags = Vec::new();
-    for event_id in &event_ids_to_delete {
-        tags.push(nostr_sdk::Tag::event(
-            nostr_sdk::EventId::parse(event_id)
-                .map_err(|e| format!("Invalid event ID: {}", e))?
+    // Only create deletion event if there are tokens to delete
+    if !event_ids_to_delete.is_empty() {
+        // Create kind-5 deletion event for all token events
+        let mut tags = Vec::new();
+        for event_id in &event_ids_to_delete {
+            tags.push(nostr_sdk::Tag::event(
+                nostr_sdk::EventId::parse(event_id)
+                    .map_err(|e| format!("Invalid event ID: {}", e))?
+            ));
+        }
+
+        // Add NIP-60 required tag to indicate we're deleting kind 7375 events
+        tags.push(nostr_sdk::Tag::custom(
+            nostr_sdk::TagKind::custom("k"),
+            ["7375"]
         ));
+
+        let deletion_builder = nostr_sdk::EventBuilder::new(
+            Kind::from(5),
+            format!("Removed mint: {}", mint_url)
+        ).tags(tags);
+
+        let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+            .ok_or("Client not initialized")?.clone();
+
+        client.send_event_builder(deletion_builder).await
+            .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
+
+        log::info!("Published deletion event for {} token events", event_ids_to_delete.len());
     }
-
-    // Add NIP-60 required tag to indicate we're deleting kind 7375 events
-    tags.push(nostr_sdk::Tag::custom(
-        nostr_sdk::TagKind::custom("k"),
-        ["7375"]
-    ));
-
-    let deletion_builder = nostr_sdk::EventBuilder::new(
-        Kind::from(5),
-        format!("Removed mint: {}", mint_url)
-    ).tags(tags);
-
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
-
-    client.send_event_builder(deletion_builder).await
-        .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
-
-    log::info!("Published deletion event for {} token events", event_ids_to_delete.len());
 
     // Update local state - remove all tokens for this mint
     let store = WALLET_TOKENS.read();
@@ -2365,11 +2760,51 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
     drop(tokens_write);
 
     // Remove mint from wallet state
-    let mut state_write = WALLET_STATE.write();
-    if let Some(ref mut state) = *state_write {
-        state.mints.retain(|m| m != &mint_url);
+    {
+        let mut state_write = WALLET_STATE.write();
+        if let Some(ref mut state) = *state_write {
+            state.mints.retain(|m| m != &mint_url);
+        }
     }
-    drop(state_write);
+
+    // Update wallet event on relays to persist the mint removal
+    {
+        use nostr_sdk::signer::NostrSigner;
+
+        let wallet_state = WALLET_STATE.read().clone();
+        if let Some(ref state) = wallet_state {
+            let signer = crate::stores::signer::get_signer()
+                .ok_or("No signer available")?
+                .as_nostr_signer();
+
+            let pubkey_str = auth_store::get_pubkey()
+                .ok_or("Not authenticated")?;
+            let pubkey = PublicKey::parse(&pubkey_str)
+                .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+            let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+                .ok_or("Client not initialized")?.clone();
+
+            // Build wallet event content array following NIP-60 format
+            let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", &state.privkey]];
+            for mint in state.mints.iter() {
+                content_array.push(vec!["mint", mint.as_str()]);
+            }
+
+            let json_content = serde_json::to_string(&content_array)
+                .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
+
+            let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+                .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+            let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
+
+            match client.send_event_builder(builder).await {
+                Ok(_) => log::info!("Published updated wallet event without removed mint"),
+                Err(e) => log::warn!("Failed to publish updated wallet event: {}", e),
+            }
+        }
+    }
 
     // Recalculate balance using checked arithmetic
     let store = WALLET_TOKENS.read();
@@ -2386,6 +2821,11 @@ pub async fn remove_mint(mint_url: String) -> Result<(usize, u64), String> {
 
     // Clear the wallet cache for this mint
     clear_wallet_cache(&mint_url);
+
+    // Also remove from MultiMintWallet if initialized
+    if let Err(e) = cashu_cdk_bridge::remove_mint(&mint_url).await {
+        log::debug!("Note: {}", e); // Not critical if MultiMintWallet wasn't initialized
+    }
 
     log::info!("Mint removed. Deleted {} events worth {} sats. New balance: {} sats",
         token_count, total_amount, new_balance);
@@ -2417,6 +2857,52 @@ pub struct MeltQuoteInfo {
     pub mint_url: String,
 }
 
+/// Mint information for display
+#[derive(Clone, Debug, Default)]
+pub struct MintInfoDisplay {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub description_long: Option<String>,
+    pub supported_nuts: Vec<u8>,
+    pub contact: Vec<(String, String)>,
+    pub motd: Option<String>,
+    pub version: Option<String>,
+}
+
+/// NIP-87: Discovered Cashu mint from kind:38172 events
+#[derive(Clone, Debug)]
+pub struct DiscoveredMint {
+    /// Mint URL
+    pub url: String,
+    /// Mint name (from content metadata or kind:0)
+    pub name: Option<String>,
+    /// Mint description
+    pub description: Option<String>,
+    /// Supported NUTs as comma-separated string
+    pub nuts: Option<String>,
+    /// Network (mainnet, testnet, etc.)
+    pub network: Option<String>,
+    /// Mint pubkey (d tag)
+    pub mint_pubkey: Option<String>,
+    /// Event author pubkey
+    pub author_pubkey: String,
+    /// Number of recommendations
+    pub recommendation_count: usize,
+    /// Recommenders (pubkeys of users who recommended this mint)
+    pub recommenders: Vec<String>,
+    /// Detailed recommendations with comments
+    pub recommendations: Vec<MintRecommendation>,
+}
+
+/// NIP-87: Mint recommendation from kind:38000 events.
+#[derive(Clone, Debug)]
+pub struct MintRecommendation {
+    /// Recommender pubkey
+    pub recommender: String,
+    /// Review/comment content
+    pub content: String,
+}
+
 /// Quote status for polling
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)] // Some variants reserved for future use
@@ -2426,6 +2912,25 @@ pub enum QuoteStatus {
     Pending,
     Failed,
     Expired,
+}
+
+/// Melt (Lightning payment) progress status for UI feedback
+#[derive(Clone, Debug, PartialEq)]
+pub enum MeltProgress {
+    /// Creating melt quote with mint
+    CreatingQuote,
+    /// Quote created, ready to pay
+    QuoteCreated { quote_id: String, amount: u64, fee: u64 },
+    /// Preparing proofs for payment
+    PreparingPayment,
+    /// Sending payment to Lightning Network
+    PayingInvoice,
+    /// Waiting for payment confirmation
+    WaitingForConfirmation,
+    /// Payment completed successfully
+    Completed { preimage: Option<String>, fee_paid: u64 },
+    /// Payment failed
+    Failed { error: String },
 }
 
 /// Store for pending mint quotes with fine-grained reactivity
@@ -2447,6 +2952,10 @@ pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =
 /// Global signal for pending melt quotes
 pub static PENDING_MELT_QUOTES: GlobalSignal<Store<PendingMeltQuotesStore>> =
     Signal::global(|| Store::new(PendingMeltQuotesStore::default()));
+
+/// Global signal for melt (Lightning payment) progress
+/// Used by UI to show real-time payment status
+pub static MELT_PROGRESS: GlobalSignal<Option<MeltProgress>> = Signal::global(|| None);
 
 /// Create a mint quote (request lightning invoice to receive sats)
 pub async fn create_mint_quote(
@@ -2623,6 +3132,7 @@ pub async fn mint_tokens_from_quote(
 
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
+        unit: "sat".to_string(),
         proofs: extended_proofs,
         del: vec![],
     };
@@ -2665,12 +3175,7 @@ pub async fn mint_tokens_from_quote(
         event_id: event_id.clone(),
         mint: mint_url.clone(),
         unit: "sat".to_string(),
-        proofs: proof_data.iter().map(|p| CashuProof {
-            id: p.id.clone(),
-            amount: p.amount,
-            secret: p.secret.clone(),
-            c: p.c.clone(),
-        }).collect(),
+        proofs: proof_data.clone(),
         created_at: chrono::Utc::now().timestamp() as u64,
     });
     drop(tokens);
@@ -2697,6 +3202,11 @@ pub async fn mint_tokens_from_quote(
     }
     PENDING_MINT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after mint: {}", e);
+    }
+
     log::info!("Mint complete: {} sats", amount_minted);
 
     Ok(amount_minted)
@@ -2709,14 +3219,27 @@ pub async fn create_melt_quote(
 ) -> Result<MeltQuoteInfo, String> {
     log::info!("Creating melt quote for invoice at {}", mint_url);
 
+    // Set progress: Creating quote
+    *MELT_PROGRESS.write() = Some(MeltProgress::CreatingQuote);
+
     // Create ephemeral wallet
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
 
     // Create melt quote
     let quote = wallet.melt_quote(invoice.clone(), None).await
-        .map_err(|e| format!("Failed to create melt quote: {}", e))?;
+        .map_err(|e| {
+            *MELT_PROGRESS.write() = Some(MeltProgress::Failed { error: e.to_string() });
+            format!("Failed to create melt quote: {}", e)
+        })?;
 
     log::info!("Melt quote created: {}", quote.id);
+
+    // Set progress: Quote created
+    *MELT_PROGRESS.write() = Some(MeltProgress::QuoteCreated {
+        quote_id: quote.id.clone(),
+        amount: u64::from(quote.amount),
+        fee: u64::from(quote.fee_reserve),
+    });
 
     let quote_info = MeltQuoteInfo {
         quote_id: quote.id.clone(),
@@ -2783,9 +3306,17 @@ pub async fn melt_tokens(
 
     log::info!("Melting tokens to pay invoice via quote: {}", quote_id);
 
+    // Reset progress at start
+    *MELT_PROGRESS.write() = Some(MeltProgress::PreparingPayment);
+
     // Acquire mint operation lock to prevent concurrent operations
     let _lock_guard = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
+        .ok_or_else(|| {
+            *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+                error: format!("Another operation is in progress for mint: {}", mint_url)
+            });
+            format!("Another operation is in progress for mint: {}", mint_url)
+        })?;
 
     // Get melt quote details
     let quote_info = PENDING_MELT_QUOTES.read().data().read()
@@ -2816,15 +3347,8 @@ pub async fn melt_tokens(
         for token in &mint_tokens {
             event_ids_to_delete.push(token.event_id.clone());
             for proof in &token.proofs {
-                let temp_proof_data = ProofData {
-                    id: proof.id.clone(),
-                    amount: proof.amount,
-                    secret: proof.secret.clone(),
-                    c: proof.c.clone(),
-                    witness: None,
-                    dleq: None,
-                };
-                all_proofs.push(proof_data_to_cdk_proof(&temp_proof_data)?);
+                // Convert ProofData to CDK proof (now preserves witness/dleq)
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
             }
         }
 
@@ -2842,6 +3366,9 @@ pub async fn melt_tokens(
             amount_needed, quote_info.amount, quote_info.fee_reserve, total_available
         ));
     }
+
+    // Update progress before melt
+    *MELT_PROGRESS.write() = Some(MeltProgress::PayingInvoice);
 
     // Melt with auto-retry on spent proofs
     let (melted, keep_proofs) = {
@@ -2922,6 +3449,11 @@ pub async fn melt_tokens(
                     }
                     PENDING_MELT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
+                    // Update progress to failed
+                    *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+                        error: e.to_string()
+                    });
+
                     return Err(format!("Failed to melt: {}. Quote has been cleaned up, please try again with a new quote.", e));
                 }
             }
@@ -2933,6 +3465,16 @@ pub async fn melt_tokens(
     let fee_paid = u64::from(melted.fee_paid);
 
     log::info!("Melt result: paid={}, fee_paid={}", paid, fee_paid);
+
+    // Update progress based on payment state
+    if paid {
+        *MELT_PROGRESS.write() = Some(MeltProgress::Completed {
+            preimage: preimage.clone(),
+            fee_paid,
+        });
+    } else {
+        *MELT_PROGRESS.write() = Some(MeltProgress::WaitingForConfirmation);
+    }
 
     // Prepare event data before updating local state
     let signer = crate::stores::signer::get_signer()
@@ -2963,6 +3505,7 @@ pub async fn melt_tokens(
 
         let token_event_data = ExtendedTokenEvent {
             mint: mint_url.clone(),
+            unit: "sat".to_string(),
             proofs: extended_proofs,
             del: event_ids_to_delete.clone(),
         };
@@ -3008,12 +3551,7 @@ pub async fn melt_tokens(
                 event_id: event_id.clone(),
                 mint: mint_url.clone(),
                 unit: "sat".to_string(),
-                proofs: proof_data.iter().map(|p| CashuProof {
-                    id: p.id.clone(),
-                    amount: p.amount,
-                    secret: p.secret.clone(),
-                    c: p.c.clone(),
-                }).collect(),
+                proofs: proof_data,
                 created_at: chrono::Utc::now().timestamp() as u64,
             });
         }
@@ -3096,9 +3634,582 @@ pub async fn melt_tokens(
     }
     PENDING_MELT_QUOTES.read().data().write().retain(|q| q.quote_id != quote_id);
 
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after melt: {}", e);
+    }
+
     log::info!("Melt complete: paid={}, amount={}, fee={}", paid, quote_info.amount, fee_paid);
 
     Ok((paid, preimage, fee_paid))
+}
+
+/// Result of a proof consolidation operation
+#[derive(Clone, Debug)]
+pub struct ConsolidationResult {
+    /// Number of proofs before consolidation
+    pub proofs_before: usize,
+    /// Number of proofs after consolidation
+    pub proofs_after: usize,
+    /// Fee paid for the swap (usually 0)
+    pub fee_paid: u64,
+}
+
+/// Consolidate proofs for a single mint to optimize denominations
+///
+/// This swaps multiple small proofs into fewer larger proofs using
+/// power-of-2 denomination targets, which is more efficient for future spending.
+pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult, String> {
+    use cdk::amount::SplitTarget;
+    use cdk::Amount;
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Consolidating proofs for mint: {}", mint_url);
+
+    // Acquire mint operation lock
+    let _lock_guard = try_acquire_mint_lock(&mint_url)
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
+
+    // Get all proofs for this mint
+    let (all_proofs, event_ids_to_delete) = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let mint_tokens: Vec<_> = tokens.iter()
+            .filter(|t| t.mint == mint_url)
+            .collect();
+
+        if mint_tokens.is_empty() {
+            return Err("No tokens found for this mint".to_string());
+        }
+
+        let mut all_proofs = Vec::new();
+        let mut event_ids = Vec::new();
+
+        for token in &mint_tokens {
+            event_ids.push(token.event_id.clone());
+            for proof in &token.proofs {
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
+            }
+        }
+
+        (all_proofs, event_ids)
+    };
+
+    let proofs_before = all_proofs.len();
+
+    // Skip if already optimized (8 or fewer proofs is reasonable)
+    if proofs_before <= 8 {
+        log::info!("Wallet already optimized with {} proofs", proofs_before);
+        return Ok(ConsolidationResult {
+            proofs_before,
+            proofs_after: proofs_before,
+            fee_paid: 0,
+        });
+    }
+
+    // Calculate total amount
+    let total_amount: u64 = all_proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    log::info!("Consolidating {} proofs worth {} sats", proofs_before, total_amount);
+
+    // Create wallet and swap proofs
+    let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
+
+    let new_proofs = wallet.swap(
+        Some(Amount::from(total_amount)),
+        SplitTarget::default(),  // PowerOfTwo split
+        all_proofs,
+        None,   // No spending conditions
+        false,  // Don't add fees to amount
+    ).await
+        .map_err(|e| format!("Swap failed: {}", e))?
+        .ok_or_else(|| "Swap returned no proofs".to_string())?;
+
+    let proofs_after = new_proofs.len();
+    log::info!("Consolidated to {} proofs", proofs_after);
+
+    // Prepare event data
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    // Convert new proofs to ProofData
+    let proof_data: Vec<ProofData> = new_proofs.iter()
+        .map(|p| cdk_proof_to_proof_data(p))
+        .collect();
+
+    // Create extended proofs for NIP-60 event
+    let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = ExtendedTokenEvent {
+        mint: mint_url.clone(),
+        unit: "sat".to_string(),
+        proofs: extended_proofs,
+        del: event_ids_to_delete.clone(),
+    };
+
+    let json_content = serde_json::to_string(&token_event_data)
+        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+
+    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+    // Publish new token event
+    let new_event_id = match client.send_event_builder(builder.clone()).await {
+        Ok(event_output) => {
+            let id = event_output.id().to_hex();
+            log::info!("Published consolidated token event: {}", id);
+            id
+        }
+        Err(e) => {
+            log::error!("Failed to publish token event: {}", e);
+            return Err(format!("Failed to publish: {}", e));
+        }
+    };
+
+    // Update local state with new proofs
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data_signal = store.data();
+        let mut data = data_signal.write();
+
+        // Remove old token events
+        data.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+
+        // Add new consolidated token
+        data.push(TokenData {
+            event_id: new_event_id.clone(),
+            mint: mint_url.clone(),
+            unit: "sat".to_string(),
+            proofs: proof_data,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        });
+    }
+
+    // Publish deletion event for old tokens
+    use nostr::nips::nip09::EventDeletionRequest;
+    let mut deletion_request = EventDeletionRequest::new();
+    for event_id_str in &event_ids_to_delete {
+        if let Ok(event_id) = nostr_sdk::EventId::from_hex(event_id_str) {
+            deletion_request = deletion_request.id(event_id);
+        }
+    }
+    let delete_builder = nostr_sdk::EventBuilder::delete(deletion_request);
+    if let Err(e) = client.send_event_builder(delete_builder).await {
+        log::warn!("Failed to publish deletion event: {}", e);
+    }
+
+    // Recalculate balance from all tokens
+    {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let new_balance: u64 = tokens.iter()
+            .flat_map(|t| &t.proofs)
+            .map(|p| p.amount)
+            .fold(0u64, |acc, amount| acc.saturating_add(amount));
+        *WALLET_BALANCE.write() = new_balance;
+    }
+
+    // Sync MultiMintWallet state (non-critical)
+    if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync MultiMintWallet state after consolidation: {}", e);
+    }
+
+    log::info!("Consolidation complete: {} -> {} proofs", proofs_before, proofs_after);
+
+    Ok(ConsolidationResult {
+        proofs_before,
+        proofs_after,
+        fee_paid: 0,
+    })
+}
+
+/// Consolidate proofs across all mints
+pub async fn consolidate_all_mints() -> Result<Vec<(String, ConsolidationResult)>, String> {
+    let mints = get_mints();
+    let mut results = Vec::new();
+
+    for mint in mints {
+        match consolidate_proofs(mint.clone()).await {
+            Ok(result) => {
+                results.push((mint, result));
+            }
+            Err(e) => {
+                log::warn!("Failed to consolidate {}: {}", mint, e);
+                // Continue with other mints even if one fails
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Get proof count for a specific mint
+pub fn get_mint_proof_count(mint_url: &str) -> usize {
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    tokens.iter()
+        .filter(|t| t.mint == mint_url)
+        .map(|t| t.proofs.len())
+        .sum()
+}
+
+/// Get total proof count across all mints
+pub fn get_total_proof_count() -> usize {
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    tokens.iter()
+        .map(|t| t.proofs.len())
+        .sum()
+}
+
+/// Fetch mint info for display
+///
+/// Connects to the mint and fetches its info endpoint to get name, description,
+/// supported NUTs, contact info, etc.
+pub async fn get_mint_info(mint_url: &str) -> Result<MintInfoDisplay, String> {
+    log::info!("Fetching mint info for: {}", mint_url);
+
+    // Create ephemeral wallet to fetch mint info
+    let wallet = create_ephemeral_wallet(mint_url, vec![]).await?;
+
+    let mint_info = wallet.fetch_mint_info().await
+        .map_err(|e| format!("Failed to fetch mint info: {}", e))?
+        .ok_or("Mint info not available")?;
+
+    // Extract supported NUTs from the nuts field
+    // NUT-04 and NUT-05 are always present (mint/melt), check if they have methods
+    let mut supported_nuts: Vec<u8> = Vec::new();
+
+    // NUT-04 (minting) - check if methods list is not empty
+    if !mint_info.nuts.nut04.methods.is_empty() {
+        supported_nuts.push(4);
+    }
+    // NUT-05 (melting) - check if methods list is not empty
+    if !mint_info.nuts.nut05.methods.is_empty() {
+        supported_nuts.push(5);
+    }
+    // Other NUTs with SupportedSettings - check supported field
+    if mint_info.nuts.nut07.supported { supported_nuts.push(7); }
+    if mint_info.nuts.nut08.supported { supported_nuts.push(8); }
+    if mint_info.nuts.nut09.supported { supported_nuts.push(9); }
+    if mint_info.nuts.nut10.supported { supported_nuts.push(10); }
+    if mint_info.nuts.nut11.supported { supported_nuts.push(11); }
+    if mint_info.nuts.nut12.supported { supported_nuts.push(12); }
+    if mint_info.nuts.nut14.supported { supported_nuts.push(14); }
+    if mint_info.nuts.nut20.supported { supported_nuts.push(20); }
+
+    supported_nuts.sort();
+
+    // Extract contact info
+    let contact: Vec<(String, String)> = mint_info.contact
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| (c.method.to_string(), c.info))
+        .collect();
+
+    Ok(MintInfoDisplay {
+        name: mint_info.name,
+        description: mint_info.description,
+        description_long: mint_info.description_long,
+        supported_nuts,
+        contact,
+        motd: mint_info.motd,
+        version: mint_info.version.map(|v| v.to_string()),
+    })
+}
+
+/// Add a new mint to the wallet
+///
+/// This function:
+/// 1. Validates the URL format
+/// 2. Fetches mint info to verify connectivity
+/// 3. Verifies minimum NUT support (NUT-4, NUT-5)
+/// 4. Adds the mint to WALLET_STATE
+/// 5. Updates the wallet event on relays
+pub async fn add_mint(mint_url: String) -> Result<MintInfoDisplay, String> {
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Adding mint: {}", mint_url);
+
+    // Validate URL format
+    let url = Url::parse(&mint_url)
+        .map_err(|e| format!("Invalid URL format: {}", e))?;
+
+    // Ensure it's https (or http for localhost testing)
+    if url.scheme() != "https" && !url.host_str().unwrap_or("").contains("localhost") {
+        return Err("Mint URL must use HTTPS".to_string());
+    }
+
+    // Check if mint already exists
+    let existing_mints = get_mints();
+    if existing_mints.contains(&mint_url) {
+        return Err("Mint already exists in wallet".to_string());
+    }
+
+    // Fetch mint info to verify connectivity and get display info
+    let mint_info = get_mint_info(&mint_url).await?;
+
+    // Verify minimum NUT support (NUT-4 for minting, NUT-5 for melting)
+    let has_nut4 = mint_info.supported_nuts.contains(&4);
+    let has_nut5 = mint_info.supported_nuts.contains(&5);
+
+    if !has_nut4 || !has_nut5 {
+        return Err(format!(
+            "Mint doesn't support required features. NUT-4: {}, NUT-5: {}",
+            has_nut4, has_nut5
+        ));
+    }
+
+    // Update WALLET_STATE with new mint
+    {
+        let mut state = WALLET_STATE.write();
+        if let Some(ref mut wallet_state) = *state {
+            wallet_state.mints.push(mint_url.clone());
+        } else {
+            return Err("Wallet not initialized".to_string());
+        }
+    }
+
+    // Update wallet event on relays
+    let wallet_state = WALLET_STATE.read().clone()
+        .ok_or("Wallet state not available")?;
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    // Build wallet event content array following NIP-60 format
+    // Format: [["privkey", "hex"], ["mint", "url"], ["mint", "url2"], ...]
+    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", &wallet_state.privkey]];
+    for mint in wallet_state.mints.iter() {
+        content_array.push(vec!["mint", mint.as_str()]);
+    }
+
+    let json_content = serde_json::to_string(&content_array)
+        .map_err(|e| format!("Failed to serialize wallet data: {}", e))?;
+
+    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
+
+    // Publish
+    match client.send_event_builder(builder).await {
+        Ok(_) => log::info!("Published updated wallet event with new mint"),
+        Err(e) => log::warn!("Failed to publish wallet event: {}", e),
+    }
+
+    log::info!("Successfully added mint: {}", mint_url);
+
+    Ok(mint_info)
+}
+
+/// NIP-87: Discover Cashu mints from Nostr events
+///
+/// This function queries for:
+/// 1. kind:38172 - Cashu mint announcements
+/// 2. kind:38000 - User recommendations (filtered by k=38172)
+///
+/// Returns a list of discovered mints with recommendation counts.
+pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
+    use std::collections::HashMap;
+
+    log::info!("Discovering mints via NIP-87");
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    // Ensure relays are ready
+    nostr_client::ensure_relays_ready(&client).await;
+
+    // Query for kind:38172 (Cashu mint announcements)
+    let mint_filter = Filter::new()
+        .kind(Kind::from(38172))
+        .limit(50);
+
+    // Query for kind:38000 (recommendations) with k=38172
+    let recommendation_filter = Filter::new()
+        .kind(Kind::from(38000))
+        .custom_tag(
+            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::K),
+            "38172"
+        )
+        .limit(100);
+
+    // Fetch both in parallel
+    let (mint_events, recommendation_events) = futures::join!(
+        client.fetch_events(mint_filter, Duration::from_secs(10)),
+        client.fetch_events(recommendation_filter, Duration::from_secs(10))
+    );
+
+    let mint_events = mint_events.map_err(|e| format!("Failed to fetch mint events: {}", e))?;
+    let recommendation_events = recommendation_events.map_err(|e| format!("Failed to fetch recommendations: {}", e))?;
+
+    log::info!("Found {} mint announcements, {} recommendations",
+        mint_events.len(), recommendation_events.len());
+
+    // Parse mint announcements into a map by URL
+    let mut mints_by_url: HashMap<String, DiscoveredMint> = HashMap::new();
+
+    for event in mint_events.iter() {
+        // Extract u tag (mint URL)
+        let url = event.tags.iter()
+            .find_map(|tag| {
+                let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if values.first() == Some(&"u") {
+                    values.get(1).map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+
+        let Some(url) = url else { continue };
+
+        // Extract d tag (mint pubkey)
+        let mint_pubkey = event.tags.iter()
+            .find_map(|tag| {
+                let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if values.first() == Some(&"d") {
+                    values.get(1).map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+
+        // Extract nuts tag
+        let nuts = event.tags.iter()
+            .find_map(|tag| {
+                let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if values.first() == Some(&"nuts") {
+                    values.get(1).map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+
+        // Extract n tag (network)
+        let network = event.tags.iter()
+            .find_map(|tag| {
+                let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                if values.first() == Some(&"n") {
+                    values.get(1).map(|s| s.to_string())
+                } else {
+                    None
+                }
+            });
+
+        // Parse content for metadata (kind:0 style)
+        let (name, description) = if !event.content.is_empty() {
+            if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&event.content) {
+                (
+                    metadata.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    metadata.get("about").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                )
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        mints_by_url.insert(url.clone(), DiscoveredMint {
+            url,
+            name,
+            description,
+            nuts,
+            network,
+            mint_pubkey,
+            author_pubkey: event.pubkey.to_hex(),
+            recommendation_count: 0,
+            recommenders: Vec::new(),
+            recommendations: Vec::new(),
+        });
+    }
+
+    // Process recommendations to count endorsements and store detailed recommendation data
+    for event in recommendation_events.iter() {
+        // Extract u tags with cashu type
+        for tag in event.tags.iter() {
+            let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+            if values.first() == Some(&"u") {
+                if let Some(url) = values.get(1) {
+                    // Check if it's a cashu URL (not fedimint)
+                    let is_cashu = values.get(2).map(|t| *t == "cashu").unwrap_or(true);
+                    if is_cashu && url.starts_with("http") {
+                        let recommender = event.pubkey.to_hex();
+
+                        // Create recommendation struct with content/review
+                        let recommendation = MintRecommendation {
+                            recommender: recommender.clone(),
+                            content: event.content.clone(),
+                        };
+
+                        if let Some(mint) = mints_by_url.get_mut(*url) {
+                            if !mint.recommenders.contains(&recommender) {
+                                mint.recommenders.push(recommender);
+                                mint.recommendation_count += 1;
+                                mint.recommendations.push(recommendation);
+                            }
+                        } else {
+                            // Mint not in announcements but recommended
+                            mints_by_url.insert(url.to_string(), DiscoveredMint {
+                                url: url.to_string(),
+                                name: None,
+                                description: None,
+                                nuts: None,
+                                network: Some("mainnet".to_string()),
+                                mint_pubkey: None,
+                                author_pubkey: String::new(),
+                                recommendation_count: 1,
+                                recommenders: vec![recommender],
+                                recommendations: vec![recommendation],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert to sorted list (by recommendation count, descending)
+    let mut mints: Vec<DiscoveredMint> = mints_by_url.into_values().collect();
+    mints.sort_by(|a, b| b.recommendation_count.cmp(&a.recommendation_count));
+
+    log::info!("Discovered {} unique mints", mints.len());
+
+    Ok(mints)
 }
 
 /// Extended history event creation with operation type and invoice
@@ -3272,6 +4383,1281 @@ pub async fn process_pending_events() -> Result<usize, String> {
     }
 
     Ok(processed_count)
+}
+
+// ============================================================================
+// Cross-Mint Transfer Implementation
+// ============================================================================
+
+/// Transfer progress status for UI feedback
+#[derive(Clone, Debug, PartialEq)]
+pub enum TransferProgress {
+    /// Creating mint quote at target mint
+    CreatingMintQuote,
+    /// Creating melt quote at source mint
+    CreatingMeltQuote,
+    /// Quote created, ready to transfer
+    QuotesReady { amount: u64, fee_estimate: u64 },
+    /// Executing melt (paying lightning invoice)
+    Melting,
+    /// Waiting for payment confirmation
+    WaitingForPayment,
+    /// Minting tokens at target
+    Minting,
+    /// Transfer completed successfully
+    Completed { amount_received: u64, fees_paid: u64 },
+    /// Transfer failed
+    Failed { error: String },
+}
+
+/// Global signal for transfer progress
+pub static TRANSFER_PROGRESS: GlobalSignal<Option<TransferProgress>> = Signal::global(|| None);
+
+/// Result of a cross-mint transfer
+#[derive(Clone, Debug)]
+pub struct TransferResult {
+    /// Amount deducted from source mint
+    pub amount_sent: u64,
+    /// Amount received at target mint
+    pub amount_received: u64,
+    /// Total fees paid for the transfer
+    pub fees_paid: u64,
+}
+
+/// Estimate fees for a cross-mint transfer
+///
+/// This creates temporary quotes to determine the fee, then cancels them.
+/// Returns (estimated_fee, amount_to_receive) for the given send_amount.
+pub async fn estimate_transfer_fees(
+    source_mint: String,
+    target_mint: String,
+    amount: u64,
+) -> Result<(u64, u64), String> {
+    use cdk::Amount;
+
+    log::info!("Estimating transfer fees: {} sats from {} to {}",
+        amount, source_mint, target_mint);
+
+    if source_mint == target_mint {
+        return Err("Source and target mints must be different".to_string());
+    }
+
+    if amount == 0 {
+        return Err("Amount must be greater than 0".to_string());
+    }
+
+    // Create wallet for target mint to get a mint quote (Lightning invoice)
+    let target_wallet = get_or_create_wallet(&target_mint).await?;
+
+    // Create mint quote at target to get invoice amount
+    let mint_quote = target_wallet.mint_quote(Amount::from(amount), None).await
+        .map_err(|e| format!("Failed to create mint quote: {}", e))?;
+
+    // Create wallet for source mint to get melt quote (fee estimate)
+    let source_wallet = get_or_create_wallet(&source_mint).await?;
+
+    // Create melt quote to see what fees would be
+    let melt_quote = source_wallet.melt_quote(mint_quote.request.clone(), None).await
+        .map_err(|e| format!("Failed to create melt quote: {}", e))?;
+
+    let fee_estimate = u64::from(melt_quote.fee_reserve);
+    let total_needed = amount + fee_estimate;
+
+    log::info!("Transfer fee estimate: {} sats (total needed: {} sats)",
+        fee_estimate, total_needed);
+
+    Ok((fee_estimate, amount))
+}
+
+/// Get balance for a specific mint
+pub fn get_mint_balance(mint_url: &str) -> u64 {
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    tokens.iter()
+        .filter(|t| t.mint == mint_url)
+        .flat_map(|t| t.proofs.iter())
+        .map(|p| p.amount)
+        .sum()
+}
+
+/// Transfer tokens from one mint to another via Lightning
+///
+/// This performs a melt at the source mint and mint at the target mint,
+/// effectively moving tokens between mints via Lightning payment.
+pub async fn transfer_between_mints(
+    source_mint: String,
+    target_mint: String,
+    amount: u64,
+) -> Result<TransferResult, String> {
+    use cdk::Amount;
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Starting cross-mint transfer: {} sats from {} to {}",
+        amount, source_mint, target_mint);
+
+    // Reset progress
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMintQuote);
+
+    // Validate inputs
+    if source_mint == target_mint {
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+            error: "Source and target mints must be different".to_string()
+        });
+        return Err("Source and target mints must be different".to_string());
+    }
+
+    if amount == 0 {
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+            error: "Amount must be greater than 0".to_string()
+        });
+        return Err("Amount must be greater than 0".to_string());
+    }
+
+    // Check source balance
+    let source_balance = get_mint_balance(&source_mint);
+    if source_balance < amount {
+        let error = format!(
+            "Insufficient balance at source mint. Have: {} sats, need: {} sats",
+            source_balance, amount
+        );
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+        return Err(error);
+    }
+
+    // Acquire lock for source mint
+    let _source_lock = try_acquire_mint_lock(&source_mint)
+        .ok_or_else(|| {
+            let error = format!("Another operation is in progress for source mint: {}", source_mint);
+            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+            error
+        })?;
+
+    // STEP 1: Create mint quote at target mint (get Lightning invoice)
+    log::info!("Creating mint quote at target mint for {} sats", amount);
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMintQuote);
+
+    let target_wallet = get_or_create_wallet(&target_mint).await?;
+    let mint_quote = target_wallet.mint_quote(Amount::from(amount), None).await
+        .map_err(|e| {
+            let error = format!("Failed to create mint quote at target: {}", e);
+            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+            error
+        })?;
+
+    log::info!("Mint quote created: {}", mint_quote.id);
+
+    // STEP 2: Create melt quote at source mint for that invoice
+    log::info!("Creating melt quote at source mint");
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMeltQuote);
+
+    let source_wallet = get_or_create_wallet(&source_mint).await?;
+    let melt_quote = source_wallet.melt_quote(mint_quote.request.clone(), None).await
+        .map_err(|e| {
+            let error = format!("Failed to create melt quote at source: {}", e);
+            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+            error
+        })?;
+
+    let fee_estimate = u64::from(melt_quote.fee_reserve);
+    let total_needed = amount + fee_estimate;
+
+    log::info!("Melt quote created: {}, fee reserve: {} sats", melt_quote.id, fee_estimate);
+
+    // Verify we have enough balance including fees
+    if source_balance < total_needed {
+        let error = format!(
+            "Insufficient balance including fees. Have: {} sats, need: {} sats (amount: {} + fee: {})",
+            source_balance, total_needed, amount, fee_estimate
+        );
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+        return Err(error);
+    }
+
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::QuotesReady {
+        amount,
+        fee_estimate
+    });
+
+    // STEP 3: Get proofs from source mint and execute melt
+    log::info!("Preparing proofs for melt");
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::Melting);
+
+    let (all_proofs, event_ids_to_delete) = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let mint_tokens: Vec<_> = tokens.iter()
+            .filter(|t| t.mint == source_mint)
+            .collect();
+
+        let mut all_proofs = Vec::new();
+        let mut event_ids = Vec::new();
+
+        for token in &mint_tokens {
+            event_ids.push(token.event_id.clone());
+            for proof in &token.proofs {
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
+            }
+        }
+
+        (all_proofs, event_ids)
+    };
+
+    // Create wallet with proofs and execute melt
+    let wallet_with_proofs = create_ephemeral_wallet(&source_mint, all_proofs).await?;
+
+    let melted = wallet_with_proofs.melt(&melt_quote.id).await
+        .map_err(|e| {
+            let error = format!("Failed to melt tokens: {}", e);
+            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+            error
+        })?;
+
+    let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
+    let fee_paid = u64::from(melted.fee_paid);
+
+    log::info!("Melt result: paid={}, fee_paid={} sats", paid, fee_paid);
+
+    if !paid {
+        let error = "Lightning payment failed".to_string();
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+        return Err(error);
+    }
+
+    // Get remaining proofs at source after melt
+    let source_keep_proofs = wallet_with_proofs.get_unspent_proofs().await
+        .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
+
+    // STEP 4: Wait for payment confirmation and mint at target
+    log::info!("Payment sent, waiting for mint quote to be paid");
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::WaitingForPayment);
+
+    // Poll for mint quote status (will be replaced with WebSocket in Phase 3)
+    let max_attempts = 60; // 2 minutes with 2-second intervals
+    let mut mint_quote_paid = false;
+
+    for attempt in 0..max_attempts {
+        let state = target_wallet.mint_quote_state(&mint_quote.id).await
+            .map_err(|e| format!("Failed to check mint quote status: {}", e))?;
+
+        if state.state == cdk::nuts::MintQuoteState::Paid {
+            mint_quote_paid = true;
+            log::info!("Mint quote is paid after {} attempts", attempt + 1);
+            break;
+        }
+
+        if state.state == cdk::nuts::MintQuoteState::Issued {
+            // Already minted elsewhere? This shouldn't happen in normal flow
+            let error = "Mint quote was already issued".to_string();
+            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+            return Err(error);
+        }
+
+        // Wait 2 seconds before next check
+        #[cfg(target_arch = "wasm32")]
+        {
+            use gloo_timers::future::TimeoutFuture;
+            TimeoutFuture::new(2000).await;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+
+    if !mint_quote_paid {
+        let error = "Timeout waiting for Lightning payment confirmation".to_string();
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+        return Err(error);
+    }
+
+    // STEP 5: Mint tokens at target
+    log::info!("Minting tokens at target mint");
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::Minting);
+
+    let target_proofs = target_wallet.mint(
+        &mint_quote.id,
+        cdk::amount::SplitTarget::default(),
+        None
+    ).await
+    .map_err(|e| {
+        let error = format!("Failed to mint tokens at target: {}", e);
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed { error: error.clone() });
+        error
+    })?;
+
+    let amount_received: u64 = target_proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    log::info!("Minted {} sats at target mint ({} proofs)", amount_received, target_proofs.len());
+
+    // STEP 6: Update local state and publish to Nostr
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    // Publish source mint token event (remaining proofs)
+    let mut source_new_event_id: Option<String> = None;
+    if !source_keep_proofs.is_empty() {
+        let proof_data: Vec<ProofData> = source_keep_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
+            mint: source_mint.clone(),
+            unit: "sat".to_string(),
+            proofs: extended_proofs,
+            del: event_ids_to_delete.clone(),
+        };
+
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+
+        let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                source_new_event_id = Some(event_output.id().to_hex());
+                log::info!("Published source token event: {:?}", source_new_event_id);
+            }
+            Err(e) => {
+                log::warn!("Failed to publish source token event: {}", e);
+                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            }
+        }
+    } else {
+        // No remaining proofs - publish deletion for all old events
+        if !event_ids_to_delete.is_empty() {
+            use nostr::nips::nip09::EventDeletionRequest;
+            let mut deletion_request = EventDeletionRequest::new();
+            for event_id_str in &event_ids_to_delete {
+                if let Ok(event_id) = EventId::parse(event_id_str) {
+                    deletion_request = deletion_request.id(event_id);
+                }
+            }
+
+            let builder = nostr_sdk::EventBuilder::delete(deletion_request);
+            if let Err(e) = client.send_event_builder(builder.clone()).await {
+                log::warn!("Failed to publish deletion event: {}", e);
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent).await;
+            }
+        }
+    }
+
+    // Publish target mint token event (new proofs)
+    let mut target_new_event_id: Option<String> = None;
+    {
+        let proof_data: Vec<ProofData> = target_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
+            mint: target_mint.clone(),
+            unit: "sat".to_string(),
+            proofs: extended_proofs,
+            del: vec![],
+        };
+
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize target token event: {}", e))?;
+
+        let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+            .map_err(|e| format!("Failed to encrypt target token event: {}", e))?;
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                target_new_event_id = Some(event_output.id().to_hex());
+                log::info!("Published target token event: {:?}", target_new_event_id);
+            }
+            Err(e) => {
+                log::warn!("Failed to publish target token event: {}", e);
+                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            }
+        }
+    }
+
+    // Update local state
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens = data.write();
+
+        // Remove old source tokens
+        tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+
+        // Add new source tokens (if any remain)
+        if !source_keep_proofs.is_empty() {
+            let proof_data: Vec<ProofData> = source_keep_proofs.iter()
+                .map(|p| cdk_proof_to_proof_data(p))
+                .collect();
+
+            tokens.push(TokenData {
+                event_id: source_new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp())),
+                mint: source_mint.clone(),
+                unit: "sat".to_string(),
+                proofs: proof_data,
+                created_at: chrono::Utc::now().timestamp() as u64,
+            });
+        }
+
+        // Add new target tokens
+        let target_proof_data: Vec<ProofData> = target_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        tokens.push(TokenData {
+            event_id: target_new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp())),
+            mint: target_mint.clone(),
+            unit: "sat".to_string(),
+            proofs: target_proof_data,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        });
+    }
+
+    // Update balance
+    {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let new_balance: u64 = tokens.iter()
+            .flat_map(|t| &t.proofs)
+            .map(|p| p.amount)
+            .fold(0u64, |acc, amount| acc.saturating_add(amount));
+        *WALLET_BALANCE.write() = new_balance;
+    }
+
+    // Calculate result
+    let amount_sent = amount + fee_paid;
+    let result = TransferResult {
+        amount_sent,
+        amount_received,
+        fees_paid: fee_paid,
+    };
+
+    log::info!("Transfer complete: sent {} sats, received {} sats, fees {} sats",
+        amount_sent, amount_received, fee_paid);
+
+    *TRANSFER_PROGRESS.write() = Some(TransferProgress::Completed {
+        amount_received,
+        fees_paid: fee_paid
+    });
+
+    Ok(result)
+}
+
+// ============================================================================
+// Payment Request (NUT-18) Implementation
+// ============================================================================
+
+/// Payment request data for creating requests
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaymentRequestData {
+    /// Unique request ID
+    #[serde(rename = "i", skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Amount in sats (optional - allows any amount if not set)
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u64>,
+    /// Currency unit (e.g., "sat")
+    #[serde(rename = "u", skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Single use flag
+    #[serde(rename = "s", skip_serializing_if = "Option::is_none")]
+    pub single_use: Option<bool>,
+    /// Accepted mints
+    #[serde(rename = "m", skip_serializing_if = "Option::is_none")]
+    pub mints: Option<Vec<String>>,
+    /// Description
+    #[serde(rename = "d", skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Transport methods
+    #[serde(rename = "t", skip_serializing_if = "Vec::is_empty", default)]
+    pub transports: Vec<PaymentTransport>,
+}
+
+/// Payment transport (Nostr or HTTP)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaymentTransport {
+    /// Transport type ("nostr" or "http")
+    #[serde(rename = "t")]
+    pub transport_type: String,
+    /// Target (nprofile for Nostr, URL for HTTP)
+    #[serde(rename = "a")]
+    pub target: String,
+    /// Tags (e.g., [["n", "17"]] for NIP-17)
+    #[serde(rename = "g", skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<Vec<String>>>,
+}
+
+/// Info needed to wait for a Nostr payment
+#[derive(Clone, Debug)]
+pub struct NostrPaymentWaitInfo {
+    /// Ephemeral secret key for receiving
+    pub secret_key: nostr_sdk::SecretKey,
+    /// Relays to listen on
+    pub relays: Vec<String>,
+    /// Public key to receive on
+    pub pubkey: nostr_sdk::PublicKey,
+}
+
+/// Payment request payload (what's sent via transport)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PaymentRequestPayload {
+    /// Request ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Optional memo
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memo: Option<String>,
+    /// Mint URL
+    pub mint: String,
+    /// Currency unit
+    pub unit: String,
+    /// Proofs
+    pub proofs: Vec<ProofData>,
+}
+
+/// Progress for creating a payment request
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaymentRequestProgress {
+    /// Waiting for payment
+    WaitingForPayment,
+    /// Payment received
+    Received { amount: u64 },
+    /// Timeout or cancelled
+    Cancelled,
+    /// Error
+    Error { message: String },
+}
+
+/// Global signal for payment request progress
+pub static PAYMENT_REQUEST_PROGRESS: GlobalSignal<Option<PaymentRequestProgress>> = Signal::global(|| None);
+
+/// Pending payment requests awaiting Nostr payments
+pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<std::collections::HashMap<String, NostrPaymentWaitInfo>> =
+    Signal::global(|| std::collections::HashMap::new());
+
+const PAYMENT_REQUEST_PREFIX: &str = "creqA";
+
+/// Create a payment request (NUT-18)
+///
+/// Returns the request string (creqA...) and optionally NostrPaymentWaitInfo
+/// if Nostr transport is enabled.
+pub async fn create_payment_request(
+    amount: Option<u64>,
+    description: Option<String>,
+    use_nostr_transport: bool,
+) -> Result<(String, Option<NostrPaymentWaitInfo>), String> {
+    use base64::Engine;
+    use nostr_sdk::ToBech32;
+
+    log::info!("Creating payment request: amount={:?}, nostr={}", amount, use_nostr_transport);
+
+    let mints = get_mints();
+    if mints.is_empty() {
+        return Err("No mints available. Add a mint first.".to_string());
+    }
+
+    let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
+
+    // Build transport
+    let (transports, nostr_info): (Vec<PaymentTransport>, Option<NostrPaymentWaitInfo>) = if use_nostr_transport {
+        // Generate ephemeral keys for receiving
+        let keys = nostr_sdk::Keys::generate();
+
+        // Get user's relays
+        let relays = crate::services::profile_search::get_user_relays().await;
+        if relays.is_empty() {
+            return Err("No relays configured for Nostr transport".to_string());
+        }
+
+        // Create nprofile with relays
+        let relay_urls: Vec<nostr_sdk::RelayUrl> = relays.iter()
+            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+            .collect();
+
+        let nprofile = nostr_sdk::nips::nip19::Nip19Profile::new(
+            keys.public_key(),
+            relay_urls
+        );
+
+        let nprofile_str = nprofile.to_bech32()
+            .map_err(|e| format!("Failed to encode nprofile: {}", e))?;
+
+        let transport = PaymentTransport {
+            transport_type: "nostr".to_string(),
+            target: nprofile_str,
+            tags: Some(vec![vec!["n".to_string(), "17".to_string()]]),
+        };
+
+        let wait_info = NostrPaymentWaitInfo {
+            secret_key: keys.secret_key().clone(),
+            relays,
+            pubkey: keys.public_key(),
+        };
+
+        (vec![transport], Some(wait_info))
+    } else {
+        (vec![], None)
+    };
+
+    // Build request
+    let request = PaymentRequestData {
+        id: Some(request_id.clone()),
+        amount,
+        unit: Some("sat".to_string()),
+        single_use: Some(true),
+        mints: Some(mints),
+        description,
+        transports,
+    };
+
+    // Encode as CBOR then base64
+    let mut cbor_data = Vec::new();
+    ciborium::into_writer(&request, &mut cbor_data)
+        .map_err(|e| format!("Failed to encode request: {}", e))?;
+
+    let encoded = base64::engine::general_purpose::URL_SAFE.encode(&cbor_data);
+    let request_string = format!("{}{}", PAYMENT_REQUEST_PREFIX, encoded);
+
+    // Store wait info for later if Nostr transport is enabled
+    if let Some(ref info) = nostr_info {
+        PENDING_PAYMENT_REQUESTS.write().insert(request_id, info.clone());
+    }
+
+    log::info!("Created payment request: {}", &request_string[..50.min(request_string.len())]);
+
+    Ok((request_string, nostr_info))
+}
+
+/// Parse a payment request string (creqA...)
+pub fn parse_payment_request(request_string: &str) -> Result<PaymentRequestData, String> {
+    use base64::Engine;
+
+    let request_string = request_string.trim();
+
+    if !request_string.starts_with(PAYMENT_REQUEST_PREFIX) {
+        return Err(format!(
+            "Invalid payment request. Must start with '{}'. Got: '{}'",
+            PAYMENT_REQUEST_PREFIX,
+            &request_string[..10.min(request_string.len())]
+        ));
+    }
+
+    let encoded = &request_string[PAYMENT_REQUEST_PREFIX.len()..];
+
+    // Decode base64
+    let cbor_data = base64::engine::general_purpose::URL_SAFE
+        .decode(encoded)
+        .or_else(|_| {
+            // Try with standard base64 as fallback
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)
+        })
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    // Decode CBOR
+    let request: PaymentRequestData = ciborium::from_reader(&cbor_data[..])
+        .map_err(|e| format!("Failed to decode CBOR: {}", e))?;
+
+    Ok(request)
+}
+
+/// Pay a payment request
+///
+/// Parses the request, prepares tokens, and sends via the appropriate transport.
+pub async fn pay_payment_request(
+    request_string: String,
+    custom_amount: Option<u64>,
+) -> Result<u64, String> {
+    use nostr_sdk::nips::nip19::Nip19Profile;
+    use nostr_sdk::FromBech32;
+
+    log::info!("Paying payment request");
+
+    // Parse the request
+    let request = parse_payment_request(&request_string)?;
+
+    // Determine amount
+    let amount = request.amount.or(custom_amount)
+        .ok_or("Amount required but not specified in request or provided")?;
+
+    if amount == 0 {
+        return Err("Amount must be greater than 0".to_string());
+    }
+
+    // Find a compatible mint
+    let our_mints = get_mints();
+    let compatible_mint = if let Some(accepted_mints) = &request.mints {
+        our_mints.iter()
+            .find(|m| accepted_mints.contains(m))
+            .cloned()
+    } else {
+        // If no mints specified, use our first mint
+        our_mints.first().cloned()
+    };
+
+    let mint_url = compatible_mint
+        .ok_or("No compatible mint found. You don't have tokens from any of the accepted mints.")?;
+
+    // Check balance
+    let balance = get_mint_balance(&mint_url);
+    if balance < amount {
+        return Err(format!(
+            "Insufficient balance at {}. Have: {} sats, need: {} sats",
+            shorten_url_internal(&mint_url), balance, amount
+        ));
+    }
+
+    // Acquire lock
+    let _lock = try_acquire_mint_lock(&mint_url)
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
+
+    // Get proofs and send
+    let (all_proofs, event_ids_to_delete) = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let mint_tokens: Vec<_> = tokens.iter()
+            .filter(|t| t.mint == mint_url)
+            .collect();
+
+        let mut all_proofs = Vec::new();
+        let mut event_ids = Vec::new();
+
+        for token in &mint_tokens {
+            event_ids.push(token.event_id.clone());
+            for proof in &token.proofs {
+                all_proofs.push(proof_data_to_cdk_proof(proof)?);
+            }
+        }
+
+        (all_proofs, event_ids)
+    };
+
+    // Prepare send
+    let wallet = create_ephemeral_wallet(&mint_url, all_proofs).await?;
+
+    let prepared = wallet.prepare_send(
+        cdk::Amount::from(amount),
+        cdk::wallet::SendOptions {
+            include_fee: true,
+            ..Default::default()
+        }
+    ).await
+    .map_err(|e| format!("Failed to prepare send: {}", e))?;
+
+    let token = prepared.confirm(None).await
+        .map_err(|e| format!("Failed to confirm send: {}", e))?;
+
+    // Get remaining proofs
+    let keep_proofs = wallet.get_unspent_proofs().await
+        .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
+
+    // Get keysets to extract proofs from token
+    let keysets_info = wallet.get_mint_keysets().await
+        .map_err(|e| format!("Failed to get keysets: {}", e))?;
+
+    // Convert token proofs to our format
+    let proofs = token.proofs(&keysets_info)
+        .map_err(|e| format!("Failed to extract proofs from token: {}", e))?;
+    let token_proofs: Vec<ProofData> = proofs.iter()
+        .map(|p| cdk_proof_to_proof_data(p))
+        .collect();
+
+    // Build payload
+    let payload = PaymentRequestPayload {
+        id: request.id.clone(),
+        memo: None,
+        mint: mint_url.clone(),
+        unit: "sat".to_string(),
+        proofs: token_proofs,
+    };
+
+    // Find transport
+    let transport = request.transports.iter()
+        .find(|t| t.transport_type == "nostr")
+        .or_else(|| request.transports.iter().find(|t| t.transport_type == "http"));
+
+    if let Some(transport) = transport {
+        match transport.transport_type.as_str() {
+            "nostr" => {
+                // Send via Nostr gift wrap
+                log::info!("Sending payment via Nostr transport");
+
+                // Parse nprofile
+                let nprofile = Nip19Profile::from_bech32(&transport.target)
+                    .map_err(|e| format!("Invalid nprofile: {}", e))?;
+
+                // Create ephemeral client
+                let ephemeral_keys = nostr_sdk::Keys::generate();
+                let client = nostr_sdk::Client::new(ephemeral_keys);
+
+                // Add relays
+                for relay in &nprofile.relays {
+                    if let Err(e) = client.add_write_relay(relay.clone()).await {
+                        log::warn!("Failed to add relay {}: {}", relay, e);
+                    }
+                }
+
+                client.connect().await;
+
+                // Create rumor (kind 14 - gift wrap payload)
+                let payload_json = serde_json::to_string(&payload)
+                    .map_err(|e| format!("Failed to serialize payload: {}", e))?;
+
+                let rumor = nostr_sdk::EventBuilder::new(
+                    nostr_sdk::Kind::from_u16(14),
+                    payload_json
+                ).build(nprofile.public_key);
+
+                // Send gift wrap
+                let result = client.gift_wrap_to(
+                    nprofile.relays.clone(),
+                    &nprofile.public_key,
+                    rumor,
+                    None
+                ).await
+                .map_err(|e| format!("Failed to send gift wrap: {}", e))?;
+
+                log::info!("Payment sent via Nostr: {} successes, {} failures",
+                    result.success.len(), result.failed.len());
+
+                if result.success.is_empty() {
+                    return Err("Failed to deliver payment to any relay".to_string());
+                }
+            }
+            "http" => {
+                // Send via HTTP POST
+                log::info!("Sending payment via HTTP transport to {}", transport.target);
+
+                let http_client = reqwest::Client::new();
+                let response = http_client
+                    .post(&transport.target)
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(format!("HTTP request failed with status {}: {}", status, body));
+                }
+
+                log::info!("Payment sent via HTTP");
+            }
+            _ => {
+                return Err(format!("Unknown transport type: {}", transport.transport_type));
+            }
+        }
+    } else {
+        return Err("No transport available in payment request. Cannot deliver payment.".to_string());
+    }
+
+    // Update local state - remove old tokens, add remaining
+    use nostr_sdk::signer::NostrSigner;
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    // Publish new token event (remaining proofs)
+    let mut new_event_id: Option<String> = None;
+    if !keep_proofs.is_empty() {
+        let proof_data: Vec<ProofData> = keep_proofs.iter()
+            .map(|p| cdk_proof_to_proof_data(p))
+            .collect();
+
+        let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = ExtendedTokenEvent {
+            mint: mint_url.clone(),
+            unit: "sat".to_string(),
+            proofs: extended_proofs,
+            del: event_ids_to_delete.clone(),
+        };
+
+        let json_content = serde_json::to_string(&token_event_data)
+            .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+
+        let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+            .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(event_output) => {
+                new_event_id = Some(event_output.id().to_hex());
+            }
+            Err(e) => {
+                log::warn!("Failed to publish token event: {}", e);
+                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            }
+        }
+    } else {
+        // No remaining proofs - publish deletion
+        if !event_ids_to_delete.is_empty() {
+            use nostr::nips::nip09::EventDeletionRequest;
+            let mut deletion_request = EventDeletionRequest::new();
+            for event_id_str in &event_ids_to_delete {
+                if let Ok(event_id) = EventId::parse(event_id_str) {
+                    deletion_request = deletion_request.id(event_id);
+                }
+            }
+
+            let builder = nostr_sdk::EventBuilder::delete(deletion_request);
+            if let Err(e) = client.send_event_builder(builder.clone()).await {
+                log::warn!("Failed to publish deletion event: {}", e);
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent).await;
+            }
+        }
+    }
+
+    // Update local state
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens = data.write();
+
+        // Remove old tokens
+        tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+
+        // Add remaining tokens
+        if !keep_proofs.is_empty() {
+            let proof_data: Vec<ProofData> = keep_proofs.iter()
+                .map(|p| cdk_proof_to_proof_data(p))
+                .collect();
+
+            tokens.push(TokenData {
+                event_id: new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp())),
+                mint: mint_url,
+                unit: "sat".to_string(),
+                proofs: proof_data,
+                created_at: chrono::Utc::now().timestamp() as u64,
+            });
+        }
+    }
+
+    // Update balance
+    {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let new_balance: u64 = tokens.iter()
+            .flat_map(|t| &t.proofs)
+            .map(|p| p.amount)
+            .fold(0u64, |acc, amount| acc.saturating_add(amount));
+        *WALLET_BALANCE.write() = new_balance;
+    }
+
+    log::info!("Payment request paid: {} sats", amount);
+
+    Ok(amount)
+}
+
+/// Wait for a Nostr payment for a created request
+///
+/// This listens for gift-wrapped events on the relays and processes
+/// incoming payments.
+pub async fn wait_for_nostr_payment(
+    request_id: String,
+    timeout_secs: u64,
+) -> Result<u64, String> {
+    use nostr_sdk::prelude::*;
+
+    log::info!("Waiting for Nostr payment for request: {}", request_id);
+
+    *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::WaitingForPayment);
+
+    // Get wait info
+    let wait_info = PENDING_PAYMENT_REQUESTS.read()
+        .get(&request_id)
+        .cloned()
+        .ok_or("No pending request found for this ID")?;
+
+    // Create client with ephemeral keys
+    let keys = nostr_sdk::Keys::new(wait_info.secret_key);
+    let client = nostr_sdk::Client::new(keys);
+
+    // Add relays
+    for relay in &wait_info.relays {
+        if let Err(e) = client.add_read_relay(relay.clone()).await {
+            log::warn!("Failed to add relay {}: {}", relay, e);
+        }
+    }
+
+    client.connect().await;
+
+    // Subscribe to events for our pubkey
+    let filter = Filter::new().pubkey(wait_info.pubkey);
+    client.subscribe(filter, None).await
+        .map_err(|e| format!("Failed to subscribe: {}", e))?;
+
+    // Wait for notifications with timeout
+    let start = chrono::Utc::now().timestamp() as u64;
+    let mut notifications = client.notifications();
+
+    loop {
+        // Check timeout
+        let elapsed = chrono::Utc::now().timestamp() as u64 - start;
+        if elapsed > timeout_secs {
+            *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Cancelled);
+            PENDING_PAYMENT_REQUESTS.write().remove(&request_id);
+            return Err("Timeout waiting for payment".to_string());
+        }
+
+        // Wait for next notification with timeout
+        let notification = {
+            #[cfg(target_arch = "wasm32")]
+            {
+                use gloo_timers::future::TimeoutFuture;
+                use futures::future::{select, Either};
+                use futures::pin_mut;
+
+                let timeout_fut = TimeoutFuture::new(5000); // 5 second intervals
+                let recv_fut = notifications.recv();
+                pin_mut!(timeout_fut);
+                pin_mut!(recv_fut);
+
+                match select(recv_fut, timeout_fut).await {
+                    Either::Left((Ok(n), _)) => Some(n),
+                    Either::Left((Err(_), _)) => break, // Channel closed
+                    Either::Right((_, _)) => continue, // Timeout, check again
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    notifications.recv()
+                ).await {
+                    Ok(Ok(n)) => Some(n),
+                    Ok(Err(_)) => break, // Channel closed
+                    Err(_) => continue, // Timeout, check again
+                }
+            }
+        };
+
+        if let Some(RelayPoolNotification::Event { event, .. }) = notification {
+            // Try to unwrap gift wrap
+            match client.unwrap_gift_wrap(&event).await {
+                Ok(unwrapped) => {
+                    let rumor = unwrapped.rumor;
+
+                    // Try to parse payload
+                    match serde_json::from_str::<PaymentRequestPayload>(&rumor.content) {
+                        Ok(payload) => {
+                            log::info!("Received payment payload: {} proofs", payload.proofs.len());
+
+                            // Calculate amount
+                            let amount: u64 = payload.proofs.iter()
+                                .map(|p| p.amount)
+                                .sum();
+
+                            // Receive the tokens
+                            match receive_payment_proofs(&payload.mint, payload.proofs).await {
+                                Ok(_) => {
+                                    *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Received { amount });
+                                    PENDING_PAYMENT_REQUESTS.write().remove(&request_id);
+                                    return Ok(amount);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to receive payment proofs: {}", e);
+                                    // Continue listening - might be a different payment
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::debug!("Failed to parse payment payload: {}", e);
+                            // Continue listening
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Failed to unwrap gift wrap: {}", e);
+                    // Continue listening
+                }
+            }
+        }
+    }
+
+    *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Error {
+        message: "Connection closed".to_string()
+    });
+    PENDING_PAYMENT_REQUESTS.write().remove(&request_id);
+    Err("Connection closed while waiting for payment".to_string())
+}
+
+/// Receive proofs from a payment request payload
+async fn receive_payment_proofs(
+    mint_url: &str,
+    proofs: Vec<ProofData>,
+) -> Result<u64, String> {
+    use nostr_sdk::signer::NostrSigner;
+
+    log::info!("Receiving {} proofs from {}", proofs.len(), mint_url);
+
+    // Convert to CDK proofs
+    let cdk_proofs: Vec<cdk::nuts::Proof> = proofs.iter()
+        .map(|p| proof_data_to_cdk_proof(p))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Calculate amount
+    let amount: u64 = cdk_proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    // Acquire lock
+    let _lock = try_acquire_mint_lock(mint_url)
+        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
+
+    // Create wallet and receive
+    let wallet = create_ephemeral_wallet(mint_url, cdk_proofs.clone()).await?;
+
+    // Swap proofs to ensure they're ours (contacts mint)
+    // Use swap with the proofs to get fresh ones
+    let swapped = wallet.swap(
+        None, // amount - None means all
+        cdk::amount::SplitTarget::default(),
+        cdk_proofs.clone(),
+        None, // spending_conditions
+        true, // include_fees
+    ).await
+    .map_err(|e| format!("Failed to swap proofs: {}", e))?;
+
+    // Get final proofs
+    let final_proofs = if let Some(swap_result) = swapped {
+        swap_result
+    } else {
+        // Swap returned None, meaning proofs were already valid
+        cdk_proofs
+    };
+
+    // Publish to Nostr
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?.clone();
+
+    let proof_data: Vec<ProofData> = final_proofs.iter()
+        .map(|p| cdk_proof_to_proof_data(p))
+        .collect();
+
+    let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = ExtendedTokenEvent {
+        mint: mint_url.to_string(),
+        unit: "sat".to_string(),
+        proofs: extended_proofs,
+        del: vec![],
+    };
+
+    let json_content = serde_json::to_string(&token_event_data)
+        .map_err(|e| format!("Failed to serialize token event: {}", e))?;
+
+    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+        .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+    let new_event_id = match client.send_event_builder(builder.clone()).await {
+        Ok(event_output) => Some(event_output.id().to_hex()),
+        Err(e) => {
+            log::warn!("Failed to publish token event: {}", e);
+            queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+            None
+        }
+    };
+
+    // Update local state
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens = data.write();
+
+        tokens.push(TokenData {
+            event_id: new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp())),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: proof_data,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        });
+    }
+
+    // Update balance
+    {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        let new_balance: u64 = tokens.iter()
+            .flat_map(|t| &t.proofs)
+            .map(|p| p.amount)
+            .fold(0u64, |acc, amount| acc.saturating_add(amount));
+        *WALLET_BALANCE.write() = new_balance;
+    }
+
+    log::info!("Received {} sats from payment request", amount);
+
+    Ok(amount)
+}
+
+/// Cancel waiting for a payment request
+pub fn cancel_payment_request(request_id: &str) {
+    PENDING_PAYMENT_REQUESTS.write().remove(request_id);
+    *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Cancelled);
+}
+
+/// Helper to shorten URL for display (internal use)
+fn shorten_url_internal(url: &str) -> String {
+    let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    if url.len() > 30 {
+        format!("{}...", &url[..27])
+    } else {
+        url.to_string()
+    }
 }
 
 /// Publish a single pending event

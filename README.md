@@ -326,7 +326,9 @@ Production builds are optimized with:
 - Single codegen unit for minimal binary size
 - Panic abort for smaller WASM binaries
 
-## 🔌 Nostr Protocol Support
+## 🔌 Protocol Support
+
+### Nostr
 
 This client implements the following Nostr Improvement Proposals (NIPs):
 
@@ -359,16 +361,54 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
+| [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Cashu mint discovery | ✅ |
 | [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls (single/multiple choice with results) | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web bookmarks | ✅ |
 
-### Blossom Protocol Support
+### Blossom
 
 | BUD | Description | Status |
 |-----|-------------|--------|
 | [BUD-01](https://github.com/hzrd149/blossom) | Core Blossom protocol for decentralized blob storage | ✅ |
+
+### Cashu
+
+The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc/cdk) with a custom IndexedDB storage backend for browser persistence.
+
+| NUT | Description | Status |
+|-----|-------------|--------|
+| [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) | Notation, terminology, and encoding | ✅ |
+| [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md) | Mint public key exchange | ✅ |
+| [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md) | Keysets and keyset IDs | ✅ |
+| [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md) | Swapping tokens (proof consolidation) | ✅ |
+| [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md) | Minting tokens (Lightning deposits) | ✅ |
+| [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md) | Melting tokens (Lightning withdrawals) | ✅ |
+| [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md) | Mint information | ✅ |
+| [NUT-07](https://github.com/cashubtc/nuts/blob/main/07.md) | Token state check (spent proof cleanup) | ✅ |
+| [NUT-08](https://github.com/cashubtc/nuts/blob/main/08.md) | Lightning fee return (overpaid fees) | ✅ |
+| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore | ❌ |
+| [NUT-10](https://github.com/cashubtc/nuts/blob/main/10.md) | Spending conditions | ✅ |
+| [NUT-11](https://github.com/cashubtc/nuts/blob/main/11.md) | Pay-to-Public-Key (P2PK) | ✅ |
+| [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) | DLEQ proofs (optional verification) | ✅ |
+| [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
+| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | Hashed Timelock Contracts (HTLC) | ❌ |
+| [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments (MPP) | ✅ |
+| [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
+| [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
+
+**Wallet Features:**
+- Multi-mint support via CDK's `MultiMintWallet`
+- NIP-60 integration (encrypted token storage on Nostr relays)
+- NIP-87 mint discovery (find mints recommended by the community)
+- Deterministic seed derivation from Nostr keys (survives app reinstall)
+- Atomic keyset counter management in IndexedDB
+- WebSocket quote status with HTTP polling fallback
+- P2PK token locking to npub recipients
+- Optional DLEQ verification on receive
+- Proof optimization (consolidate many small proofs)
+- Inter-mint transfers via Lightning
 
 ## 🔧 Configuration
 

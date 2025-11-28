@@ -1,5 +1,18 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::{
+    cashu_wallet::{self, MeltProgress},
+    cashu_cdk_bridge::{self, MppQuoteInfo},
+    cashu_ws,
+};
+
+/// Payment mode for Lightning send
+#[derive(Clone, Debug, PartialEq)]
+enum PaymentMode {
+    /// Single mint payment (default)
+    Single,
+    /// Multi-path payment across multiple mints (NUT-15)
+    Mpp,
+}
 
 #[component]
 pub fn CashuSendLightningModal(
@@ -13,6 +26,35 @@ pub fn CashuSendLightningModal(
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut quote_info = use_signal(|| Option::<cashu_wallet::MeltQuoteInfo>::None);
     let mut payment_result = use_signal(|| Option::<(bool, Option<String>, u64)>::None);
+
+    // MPP state
+    let mut payment_mode = use_signal(|| PaymentMode::Single);
+    let mut mpp_quote = use_signal(|| Option::<MppQuoteInfo>::None);
+    let mut mpp_allocations = use_signal(|| Vec::<(String, u64)>::new());
+    let mut mint_balances = use_signal(|| Vec::<(String, u64)>::new());
+    let mut mpp_mint_balances = use_signal(|| Vec::<(String, u64)>::new()); // Only MPP-supporting mints
+
+    // Read melt progress for UI updates
+    let melt_progress = cashu_wallet::MELT_PROGRESS.read();
+
+    // Load mint balances on mount and check MPP support
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(balances) = cashu_cdk_bridge::get_balances_per_mint().await {
+                let all_balances: Vec<_> = balances.iter().map(|b| (b.mint_url.clone(), b.balance)).collect();
+                mint_balances.set(all_balances.clone());
+
+                // Check which mints support MPP
+                let mut mpp_balances = Vec::new();
+                for (mint_url, balance) in &all_balances {
+                    if cashu_cdk_bridge::mint_supports_mpp(mint_url).await {
+                        mpp_balances.push((mint_url.clone(), *balance));
+                    }
+                }
+                mpp_mint_balances.set(mpp_balances);
+            }
+        });
+    });
 
     // Keep selected_mint in sync with available mints
     use_effect(move || {
@@ -32,9 +74,19 @@ pub fn CashuSendLightningModal(
         }
     });
 
+    // Get balance for selected mint
+    let selected_mint_balance = {
+        let mint = selected_mint.read().clone();
+        mint_balances.read().iter()
+            .find(|(url, _)| *url == mint)
+            .map(|(_, b)| *b)
+            .unwrap_or(0)
+    };
+
     let on_create_quote = move |_| {
         let invoice_str = invoice.read().clone().trim().to_string();
         let mint = selected_mint.read().clone();
+        let mode = payment_mode.read().clone();
 
         if invoice_str.is_empty() {
             error_message.set(Some("Please enter a lightning invoice".to_string()));
@@ -46,58 +98,161 @@ pub fn CashuSendLightningModal(
             return;
         }
 
-        if mint.is_empty() {
-            error_message.set(Some("Please select a mint".to_string()));
-            return;
-        }
-
         is_creating_quote.set(true);
         error_message.set(None);
         payment_result.set(None);
 
-        spawn(async move {
-            match cashu_wallet::create_melt_quote(mint, invoice_str).await {
-                Ok(quote) => {
-                    quote_info.set(Some(quote));
+        match mode {
+            PaymentMode::Single => {
+                if mint.is_empty() {
+                    error_message.set(Some("Please select a mint".to_string()));
                     is_creating_quote.set(false);
+                    return;
                 }
-                Err(e) => {
-                    error_message.set(Some(format!("Failed to create quote: {}", e)));
-                    is_creating_quote.set(false);
-                }
+
+                spawn(async move {
+                    match cashu_wallet::create_melt_quote(mint, invoice_str).await {
+                        Ok(q) => {
+                            quote_info.set(Some(q));
+                            mpp_quote.set(None);
+                            is_creating_quote.set(false);
+                        }
+                        Err(e) => {
+                            error_message.set(Some(format!("Failed to create quote: {}", e)));
+                            is_creating_quote.set(false);
+                        }
+                    }
+                });
             }
-        });
+            PaymentMode::Mpp => {
+                let allocations = mpp_allocations.read().clone();
+                if allocations.is_empty() {
+                    error_message.set(Some("No MPP allocations configured".to_string()));
+                    is_creating_quote.set(false);
+                    return;
+                }
+
+                spawn(async move {
+                    match cashu_cdk_bridge::create_mpp_melt_quotes(invoice_str, allocations).await {
+                        Ok(q) => {
+                            mpp_quote.set(Some(q));
+                            quote_info.set(None);
+                            is_creating_quote.set(false);
+                        }
+                        Err(e) => {
+                            error_message.set(Some(format!("Failed to create MPP quotes: {}", e)));
+                            is_creating_quote.set(false);
+                        }
+                    }
+                });
+            }
+        }
     };
 
     let on_pay = move |_| {
-        if let Some(quote) = quote_info.read().as_ref() {
-            let quote_id = quote.quote_id.clone();
-            let mint = quote.mint_url.clone();
+        let mode = payment_mode.read().clone();
 
-            is_paying.set(true);
-            error_message.set(None);
+        match mode {
+            PaymentMode::Single => {
+                if let Some(q) = quote_info.read().as_ref() {
+                    let quote_id = q.quote_id.clone();
+                    let mint = q.mint_url.clone();
 
-            spawn(async move {
-                match cashu_wallet::melt_tokens(mint, quote_id).await {
-                    Ok((paid, preimage, fee)) => {
-                        payment_result.set(Some((paid, preimage, fee)));
-                        is_paying.set(false);
+                    is_paying.set(true);
+                    error_message.set(None);
 
-                        if paid {
-                            // Auto-close after 3 seconds
-                            spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(3000).await;
-                                on_close.call(());
-                            });
+                    // WebSocket subscription for status
+                    let mint_for_ws = mint.clone();
+                    let quote_id_for_ws = quote_id.clone();
+                    spawn(async move {
+                        if let Ok(mut rx) = cashu_ws::subscribe_to_quote(
+                            mint_for_ws,
+                            quote_id_for_ws,
+                            cashu_ws::SubscriptionKind::Bolt11MeltQuote,
+                        ).await {
+                            while let Some(status) = rx.recv().await {
+                                if matches!(status, cashu_ws::QuoteStatus::Paid) {
+                                    break;
+                                }
+                            }
                         }
-                    }
-                    Err(e) => {
-                        error_message.set(Some(format!("Payment failed: {}", e)));
-                        is_paying.set(false);
-                    }
+                    });
+
+                    spawn(async move {
+                        match cashu_wallet::melt_tokens(mint, quote_id).await {
+                            Ok((paid, preimage, fee)) => {
+                                payment_result.set(Some((paid, preimage, fee)));
+                                is_paying.set(false);
+                                *cashu_wallet::MELT_PROGRESS.write() = None;
+
+                                if paid {
+                                    spawn(async move {
+                                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                                        on_close.call(());
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                error_message.set(Some(format!("Payment failed: {}", e)));
+                                is_paying.set(false);
+                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                            }
+                        }
+                    });
                 }
-            });
+            }
+            PaymentMode::Mpp => {
+                if let Some(q) = mpp_quote.read().as_ref() {
+                    let contributions = q.contributions.clone();
+
+                    is_paying.set(true);
+                    error_message.set(None);
+
+                    spawn(async move {
+                        match cashu_cdk_bridge::execute_mpp_melt(contributions).await {
+                            Ok(result) => {
+                                payment_result.set(Some((
+                                    result.paid,
+                                    result.preimage,
+                                    result.total_fee_paid,
+                                )));
+                                is_paying.set(false);
+                                *cashu_wallet::MELT_PROGRESS.write() = None;
+
+                                if result.paid {
+                                    spawn(async move {
+                                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                                        on_close.call(());
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                error_message.set(Some(format!("MPP payment failed: {}", e)));
+                                is_paying.set(false);
+                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                            }
+                        }
+                    });
+                }
+            }
         }
+    };
+
+    // Auto-calculate MPP when switching to MPP mode or when invoice changes
+    // Only uses MPP-supporting mints
+    let on_auto_split = move |amount: u64| {
+        let mpp_mints: Vec<String> = mpp_mint_balances.read().iter().map(|(url, _)| url.clone()).collect();
+        spawn(async move {
+            let include_mints = if mpp_mints.is_empty() { None } else { Some(mpp_mints) };
+            match cashu_cdk_bridge::calculate_mpp_split(amount, include_mints).await {
+                Ok(allocations) => {
+                    mpp_allocations.set(allocations);
+                }
+                Err(e) => {
+                    error_message.set(Some(format!("Cannot split payment: {}", e)));
+                }
+            }
+        });
     };
 
     rsx! {
@@ -108,7 +263,7 @@ pub fn CashuSendLightningModal(
 
             // Modal content
             div {
-                class: "bg-card border border-border rounded-lg max-w-md w-full shadow-xl",
+                class: "bg-card border border-border rounded-lg max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
 
                 // Header
@@ -116,13 +271,13 @@ pub fn CashuSendLightningModal(
                     class: "px-6 py-4 border-b border-border flex items-center justify-between",
                     h3 {
                         class: "text-xl font-bold flex items-center gap-2",
-                        span { "⚡" }
+                        span { "lightning" }
                         "Send Lightning"
                     }
                     button {
                         class: "text-2xl text-muted-foreground hover:text-foreground transition",
                         onclick: move |_| on_close.call(()),
-                        "×"
+                        "x"
                     }
                 }
 
@@ -133,16 +288,19 @@ pub fn CashuSendLightningModal(
                     // Payment result
                     if let Some((paid, preimage, fee)) = payment_result.read().as_ref() {
                         if *paid {
-                            // Success case: payment was settled
                             div {
                                 class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2",
                                 div {
                                     class: "flex items-start gap-3",
-                                    div { class: "text-2xl", "✅" }
+                                    div { class: "text-2xl", "+" }
                                     div {
                                         p {
                                             class: "text-sm font-semibold text-green-800 dark:text-green-200",
-                                            "Payment successful!"
+                                            if *payment_mode.read() == PaymentMode::Mpp {
+                                                "MPP Payment successful!"
+                                            } else {
+                                                "Payment successful!"
+                                            }
                                         }
                                         if let Some(pre) = preimage {
                                             p {
@@ -158,20 +316,15 @@ pub fn CashuSendLightningModal(
                                 }
                             }
                         } else {
-                            // Unpaid/pending case: payment not settled
                             div {
                                 class: "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2",
                                 div {
                                     class: "flex items-start gap-3",
-                                    div { class: "text-2xl", "⏳" }
+                                    div { class: "text-2xl", "..." }
                                     div {
                                         p {
                                             class: "text-sm font-semibold text-yellow-800 dark:text-yellow-200",
                                             "Payment pending or unpaid"
-                                        }
-                                        p {
-                                            class: "text-xs text-yellow-700 dark:text-yellow-300 mt-1",
-                                            "The payment has not been settled yet. Please check the status or try again."
                                         }
                                     }
                                 }
@@ -185,7 +338,7 @@ pub fn CashuSendLightningModal(
                             class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
                             div {
                                 class: "flex items-start gap-3",
-                                div { class: "text-2xl", "⚠️" }
+                                div { class: "text-2xl", "!" }
                                 div {
                                     p {
                                         class: "text-sm text-red-800 dark:text-red-200",
@@ -196,42 +349,99 @@ pub fn CashuSendLightningModal(
                         }
                     }
 
-                    // Quote display
-                    if let Some(quote) = quote_info.read().as_ref() {
+                    // Single mint quote display
+                    if let Some(q) = quote_info.read().as_ref() {
                         div {
                             class: "bg-accent/50 rounded-lg p-4 space-y-2",
-                            h4 {
-                                class: "text-sm font-semibold mb-2",
-                                "Payment Details"
-                            }
+                            h4 { class: "text-sm font-semibold mb-2", "Payment Details" }
                             div {
                                 class: "space-y-2 text-sm",
-                                div {
-                                    class: "flex justify-between",
+                                div { class: "flex justify-between",
                                     span { class: "text-muted-foreground", "Amount:" }
-                                    span { class: "font-mono font-semibold", "{quote.amount} sats" }
+                                    span { class: "font-mono font-semibold", "{q.amount} sats" }
                                 }
-                                div {
-                                    class: "flex justify-between",
+                                div { class: "flex justify-between",
                                     span { class: "text-muted-foreground", "Fee reserve:" }
-                                    span { class: "font-mono", "{quote.fee_reserve} sats" }
+                                    span { class: "font-mono", "{q.fee_reserve} sats" }
                                 }
-                                div {
-                                    class: "flex justify-between border-t border-border pt-2",
+                                div { class: "flex justify-between border-t border-border pt-2",
                                     span { class: "font-semibold", "Total:" }
-                                    span { class: "font-mono font-semibold", "{quote.amount + quote.fee_reserve} sats" }
+                                    span { class: "font-mono font-semibold", "{q.amount + q.fee_reserve} sats" }
                                 }
                             }
                         }
                     }
 
-                    // Invoice input (before quote created)
-                    if quote_info.read().is_none() && payment_result.read().is_none() {
+                    // MPP quote display
+                    if let Some(q) = mpp_quote.read().as_ref() {
                         div {
-                            label {
-                                class: "block text-sm font-semibold mb-2",
-                                "Lightning Invoice"
+                            class: "bg-accent/50 rounded-lg p-4 space-y-2",
+                            h4 { class: "text-sm font-semibold mb-2", "MPP Payment Details (NUT-15)" }
+                            div {
+                                class: "space-y-2 text-sm",
+                                // Show each mint contribution
+                                for contrib in &q.contributions {
+                                    div { class: "flex justify-between text-xs",
+                                        span { class: "text-muted-foreground truncate max-w-[150px]", "{shorten_url(&contrib.mint_url)}" }
+                                        span { class: "font-mono", "{contrib.amount} + {contrib.fee_reserve} sats" }
+                                    }
+                                }
+                                div { class: "flex justify-between border-t border-border pt-2",
+                                    span { class: "text-muted-foreground", "Total amount:" }
+                                    span { class: "font-mono font-semibold", "{q.total_amount} sats" }
+                                }
+                                div { class: "flex justify-between",
+                                    span { class: "text-muted-foreground", "Total fees:" }
+                                    span { class: "font-mono", "{q.total_fee_reserve} sats" }
+                                }
+                                div { class: "flex justify-between border-t border-border pt-2",
+                                    span { class: "font-semibold", "Grand Total:" }
+                                    span { class: "font-mono font-semibold", "{q.total_amount + q.total_fee_reserve} sats" }
+                                }
                             }
+                        }
+                    }
+
+                    // Progress displays
+                    if *is_creating_quote.read() {
+                        div {
+                            class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4",
+                            div {
+                                class: "flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300",
+                                div { class: "animate-spin text-lg", "lightning" }
+                                span {
+                                    if *payment_mode.read() == PaymentMode::Mpp {
+                                        "Creating MPP quotes..."
+                                    } else {
+                                        "Creating quote..."
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if *is_paying.read() {
+                        div {
+                            class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4",
+                            h4 { class: "text-sm font-semibold mb-3 text-blue-800 dark:text-blue-200", "Payment Progress" }
+                            div {
+                                class: "space-y-2",
+                                ProgressStep { label: "Preparing payment", is_active: matches!(*melt_progress, Some(MeltProgress::PreparingPayment)), is_complete: matches!(*melt_progress, Some(MeltProgress::PayingInvoice) | Some(MeltProgress::WaitingForConfirmation) | Some(MeltProgress::Completed { .. })) }
+                                ProgressStep { label: "Sending to Lightning Network", is_active: matches!(*melt_progress, Some(MeltProgress::PayingInvoice)), is_complete: matches!(*melt_progress, Some(MeltProgress::WaitingForConfirmation) | Some(MeltProgress::Completed { .. })) }
+                                ProgressStep { label: "Waiting for confirmation", is_active: matches!(*melt_progress, Some(MeltProgress::WaitingForConfirmation)), is_complete: matches!(*melt_progress, Some(MeltProgress::Completed { .. })) }
+                            }
+                            div {
+                                class: "flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300 mt-4",
+                                div { class: "animate-spin text-lg", "lightning" }
+                                span { "Processing..." }
+                            }
+                        }
+                    }
+
+                    // Invoice input (before quote)
+                    if quote_info.read().is_none() && mpp_quote.read().is_none() && payment_result.read().is_none() {
+                        div {
+                            label { class: "block text-sm font-semibold mb-2", "Lightning Invoice" }
                             textarea {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg font-mono text-sm min-h-[100px]",
                                 placeholder: "lnbc...",
@@ -240,13 +450,47 @@ pub fn CashuSendLightningModal(
                             }
                         }
 
-                        // Mint selection
-                        if !mints.is_empty() {
+                        // Payment mode toggle
+                        if mints.len() > 1 {
                             div {
-                                label {
-                                    class: "block text-sm font-semibold mb-2",
-                                    "Pay from Mint"
+                                class: "flex items-center gap-3 p-3 bg-accent/30 rounded-lg",
+                                input {
+                                    r#type: "checkbox",
+                                    id: "mpp-mode",
+                                    class: "w-4 h-4 rounded border-border",
+                                    checked: *payment_mode.read() == PaymentMode::Mpp,
+                                    onchange: move |evt| {
+                                        let is_mpp = evt.checked();
+                                        payment_mode.set(if is_mpp { PaymentMode::Mpp } else { PaymentMode::Single });
+
+                                        // Auto-calculate split when enabling MPP (using only MPP-supporting mints)
+                                        if is_mpp {
+                                            let mpp_total: u64 = mpp_mint_balances.read().iter().map(|(_, b)| b).sum();
+                                            if mpp_total > 0 {
+                                                on_auto_split(mpp_total);
+                                            }
+                                        }
+                                    }
                                 }
+                                div {
+                                    class: "flex-1",
+                                    label {
+                                        r#for: "mpp-mode",
+                                        class: "text-sm font-medium cursor-pointer",
+                                        "Multi-path payment (NUT-15)"
+                                    }
+                                    p {
+                                        class: "text-xs text-muted-foreground mt-1",
+                                        "Split payment across multiple mints"
+                                    }
+                                }
+                            }
+                        }
+
+                        // Single mint selection (when not MPP)
+                        if *payment_mode.read() == PaymentMode::Single && !mints.is_empty() {
+                            div {
+                                label { class: "block text-sm font-semibold mb-2", "Pay from Mint" }
                                 select {
                                     class: "w-full px-4 py-3 bg-background border border-border rounded-lg",
                                     value: selected_mint.read().clone(),
@@ -254,17 +498,55 @@ pub fn CashuSendLightningModal(
                                     for mint_url in mints.iter() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url)}"
+                                            "{shorten_url(mint_url)} ({get_mint_balance(&mint_balances.read(), mint_url)} sats)"
+                                        }
+                                    }
+                                }
+                                p {
+                                    class: "text-xs text-muted-foreground mt-1",
+                                    "Selected mint balance: {selected_mint_balance} sats"
+                                }
+                            }
+                        }
+
+                        // MPP mint balances display
+                        if *payment_mode.read() == PaymentMode::Mpp {
+                            div {
+                                class: "space-y-2",
+                                label { class: "block text-sm font-semibold", "MPP-Supported Mints" }
+
+                                if mpp_mint_balances.read().is_empty() {
+                                    div {
+                                        class: "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3",
+                                        p {
+                                            class: "text-sm text-yellow-800 dark:text-yellow-200",
+                                            "No mints support MPP (NUT-15). Add a mint that supports multi-path payments to use this feature."
+                                        }
+                                    }
+                                } else {
+                                    div {
+                                        class: "bg-background border border-border rounded-lg p-3 space-y-2",
+                                        for (mint_url, balance) in mpp_mint_balances.read().iter() {
+                                            div {
+                                                class: "flex justify-between text-sm",
+                                                span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint_url)}" }
+                                                span { class: "font-mono", "{balance} sats" }
+                                            }
+                                        }
+                                        div {
+                                            class: "border-t border-border pt-2 flex justify-between text-sm font-semibold",
+                                            span { "MPP Balance:" }
+                                            span { class: "font-mono", "{mpp_mint_balances.read().iter().map(|(_, b)| b).sum::<u64>()} sats" }
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Wallet balance info
+                        // Balance info
                         div {
                             class: "text-sm text-muted-foreground",
-                            "Available balance: ",
+                            "Total available: ",
                             span { class: "font-mono font-semibold", "{*cashu_wallet::WALLET_BALANCE.read()} sats" }
                         }
                     }
@@ -277,6 +559,7 @@ pub fn CashuSendLightningModal(
                         class: "flex-1 px-4 py-3 bg-accent hover:bg-accent/80 rounded-lg transition",
                         onclick: move |_| {
                             quote_info.set(None);
+                            mpp_quote.set(None);
                             payment_result.set(None);
                             error_message.set(None);
                             on_close.call(());
@@ -284,10 +567,8 @@ pub fn CashuSendLightningModal(
                         if payment_result.read().is_some() { "Close" } else { "Cancel" }
                     }
 
-                    // Show appropriate action button
                     if payment_result.read().is_none() {
-                        if quote_info.read().is_some() {
-                            // Pay button (when quote is created)
+                        if quote_info.read().is_some() || mpp_quote.read().is_some() {
                             button {
                                 class: if *is_paying.read() {
                                     "flex-1 px-4 py-3 bg-orange-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
@@ -298,12 +579,13 @@ pub fn CashuSendLightningModal(
                                 onclick: on_pay,
                                 if *is_paying.read() {
                                     "Paying..."
+                                } else if *payment_mode.read() == PaymentMode::Mpp {
+                                    "Pay with MPP"
                                 } else {
                                     "Pay Invoice"
                                 }
                             }
                         } else {
-                            // Create quote button (when no quote yet)
                             button {
                                 class: if *is_creating_quote.read() || invoice.read().is_empty() {
                                     "flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
@@ -329,9 +611,45 @@ pub fn CashuSendLightningModal(
 /// Shorten URL for display
 fn shorten_url(url: &str) -> String {
     let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 35 {
-        format!("{}...", &url[..32])
+    if url.len() > 30 {
+        format!("{}...", &url[..27])
     } else {
         url.to_string()
+    }
+}
+
+/// Get balance for a specific mint from balances list
+fn get_mint_balance(balances: &[(String, u64)], mint_url: &str) -> u64 {
+    balances.iter()
+        .find(|(url, _)| url == mint_url)
+        .map(|(_, b)| *b)
+        .unwrap_or(0)
+}
+
+/// Progress step indicator component
+#[component]
+fn ProgressStep(label: &'static str, is_active: bool, is_complete: bool) -> Element {
+    let (icon, icon_class) = if is_complete {
+        ("*", "text-green-500")
+    } else if is_active {
+        ("o", "text-blue-500 animate-pulse")
+    } else {
+        ("-", "text-muted-foreground")
+    };
+
+    let label_class = if is_active {
+        "font-medium text-foreground"
+    } else if is_complete {
+        "text-green-700 dark:text-green-300"
+    } else {
+        "text-muted-foreground"
+    };
+
+    rsx! {
+        div {
+            class: "flex items-center gap-3",
+            span { class: "{icon_class} text-sm", "{icon}" }
+            span { class: "text-sm {label_class}", "{label}" }
+        }
     }
 }

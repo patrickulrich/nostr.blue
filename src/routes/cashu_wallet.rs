@@ -11,6 +11,12 @@ pub fn CashuWallet() -> Element {
     let mut show_receive_modal = use_signal(|| false);
     let mut show_lightning_deposit_modal = use_signal(|| false);
     let mut show_lightning_withdraw_modal = use_signal(|| false);
+    let mut show_optimize_modal = use_signal(|| false);
+    let mut show_add_mint_modal = use_signal(|| false);
+    let mut show_discover_modal = use_signal(|| false);
+    let mut show_transfer_modal = use_signal(|| false);
+    let mut show_create_request_modal = use_signal(|| false);
+    let mut show_pay_request_modal = use_signal(|| false);
 
     // Initialize wallet on mount
     use_effect(move || {
@@ -209,14 +215,36 @@ pub fn CashuWallet() -> Element {
                         on_receive: move |_| show_receive_modal.set(true),
                         on_lightning_deposit: move |_| show_lightning_deposit_modal.set(true),
                         on_lightning_withdraw: move |_| show_lightning_withdraw_modal.set(true),
+                        on_optimize: move |_| show_optimize_modal.set(true),
+                        on_transfer: move |_| show_transfer_modal.set(true),
+                        on_create_request: move |_| show_create_request_modal.set(true),
+                        on_pay_request: move |_| show_pay_request_modal.set(true),
                     }
 
                     // Tokens section
                     div {
                         class: "mt-6",
-                        h3 {
-                            class: "text-lg font-bold mb-3",
-                            "Tokens by Mint"
+                        div {
+                            class: "flex items-center justify-between mb-3",
+                            h3 {
+                                class: "text-lg font-bold",
+                                "Tokens by Mint"
+                            }
+                            div {
+                                class: "flex items-center gap-2",
+                                button {
+                                    class: "px-3 py-1 text-sm bg-purple-500/20 hover:bg-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg transition flex items-center gap-1",
+                                    onclick: move |_| show_discover_modal.set(true),
+                                    span { "!" }
+                                    "Discover"
+                                }
+                                button {
+                                    class: "px-3 py-1 text-sm bg-accent hover:bg-accent/80 rounded-lg transition flex items-center gap-1",
+                                    onclick: move |_| show_add_mint_modal.set(true),
+                                    span { "+" }
+                                    "Add Mint"
+                                }
+                            }
                         }
                         crate::components::TokenList {}
                     }
@@ -258,6 +286,64 @@ pub fn CashuWallet() -> Element {
             if *show_lightning_withdraw_modal.read() {
                 crate::components::CashuSendLightningModal {
                     on_close: move |_| show_lightning_withdraw_modal.set(false),
+                }
+            }
+
+            // Optimize modal
+            if *show_optimize_modal.read() {
+                crate::components::CashuOptimizeModal {
+                    on_close: move |_| show_optimize_modal.set(false),
+                }
+            }
+
+            // Add mint modal
+            if *show_add_mint_modal.read() {
+                crate::components::CashuAddMintModal {
+                    on_close: move |_| show_add_mint_modal.set(false),
+                    on_mint_added: move |_| {
+                        // Refresh wallet to pick up the new mint
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                                log::error!("Failed to refresh after adding mint: {}", e);
+                            }
+                        });
+                    },
+                }
+            }
+
+            // Discover mints modal (NIP-87)
+            if *show_discover_modal.read() {
+                crate::components::CashuMintDiscoveryModal {
+                    on_close: move |_| show_discover_modal.set(false),
+                    on_mint_selected: move |_| {
+                        // Refresh wallet to pick up the new mint
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                                log::error!("Failed to refresh after adding mint: {}", e);
+                            }
+                        });
+                    },
+                }
+            }
+
+            // Transfer between mints modal
+            if *show_transfer_modal.read() {
+                crate::components::CashuTransferModal {
+                    on_close: move |_| show_transfer_modal.set(false),
+                }
+            }
+
+            // Create payment request modal (NUT-18)
+            if *show_create_request_modal.read() {
+                crate::components::CashuCreateRequestModal {
+                    on_close: move |_| show_create_request_modal.set(false),
+                }
+            }
+
+            // Pay payment request modal (NUT-18)
+            if *show_pay_request_modal.read() {
+                crate::components::CashuPayRequestModal {
+                    on_close: move |_| show_pay_request_modal.set(false),
                 }
             }
         }

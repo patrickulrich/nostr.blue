@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu_wallet::{self, ReceiveTokensOptions};
 
 #[component]
 pub fn CashuReceiveModal(
@@ -9,6 +9,7 @@ pub fn CashuReceiveModal(
     let mut is_receiving = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut success_message = use_signal(|| Option::<String>::None);
+    let mut verify_dleq = use_signal(|| false); // NUT-12 DLEQ verification toggle
 
     let on_receive = move |_| {
         let token = token_string.read().trim().to_string();
@@ -17,14 +18,24 @@ pub fn CashuReceiveModal(
             return;
         }
 
+        let should_verify_dleq = *verify_dleq.read();
         is_receiving.set(true);
         error_message.set(None);
         success_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::receive_tokens(token).await {
+            let options = ReceiveTokensOptions {
+                verify_dleq: should_verify_dleq,
+            };
+
+            match cashu_wallet::receive_tokens_with_options(token, options).await {
                 Ok(amount) => {
-                    success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                    let msg = if should_verify_dleq {
+                        format!("Successfully received {} sats (DLEQ verified)", amount)
+                    } else {
+                        format!("Successfully received {} sats!", amount)
+                    };
+                    success_message.set(Some(msg));
                     is_receiving.set(false);
                     // Clear token input
                     token_string.set(String::new());
@@ -58,7 +69,7 @@ pub fn CashuReceiveModal(
                     button {
                         class: "text-2xl text-muted-foreground hover:text-foreground transition",
                         onclick: move |_| on_close.call(()),
-                        "×"
+                        "x"
                     }
                 }
 
@@ -84,6 +95,30 @@ pub fn CashuReceiveModal(
                         }
                     }
 
+                    // NUT-12 DLEQ Verification toggle
+                    div {
+                        class: "flex items-start gap-3 p-3 bg-accent/30 rounded-lg",
+                        input {
+                            r#type: "checkbox",
+                            id: "verify-dleq",
+                            class: "mt-1 w-4 h-4 rounded border-border",
+                            checked: *verify_dleq.read(),
+                            onchange: move |evt| verify_dleq.set(evt.checked())
+                        }
+                        div {
+                            class: "flex-1",
+                            label {
+                                r#for: "verify-dleq",
+                                class: "text-sm font-medium cursor-pointer",
+                                "Verify signatures (NUT-12)"
+                            }
+                            p {
+                                class: "text-xs text-muted-foreground mt-1",
+                                "Cryptographically verify the mint's blind signatures before accepting. Rejects tokens without DLEQ proofs."
+                            }
+                        }
+                    }
+
                     // Success message
                     if let Some(msg) = success_message.read().as_ref() {
                         div {
@@ -92,7 +127,7 @@ pub fn CashuReceiveModal(
                                 class: "flex items-start gap-3",
                                 div {
                                     class: "text-2xl",
-                                    "✅"
+                                    "+"
                                 }
                                 div {
                                     p {
@@ -112,7 +147,7 @@ pub fn CashuReceiveModal(
                                 class: "flex items-start gap-3",
                                 div {
                                     class: "text-2xl",
-                                    "⚠️"
+                                    "!"
                                 }
                                 div {
                                     p {
@@ -135,9 +170,16 @@ pub fn CashuReceiveModal(
                             class: "text-sm text-muted-foreground space-y-1",
                             li { "1. Paste the token string from sender" }
                             li { "2. Token is validated and decoded" }
-                            li { "3. Proofs are redeemed at the mint" }
-                            li { "4. New token event is created (kind 7375)" }
-                            li { "5. Balance is updated" }
+                            if *verify_dleq.read() {
+                                li { "3. DLEQ proofs are verified (NUT-12)" }
+                                li { "4. Proofs are redeemed at the mint" }
+                                li { "5. New token event is created (kind 7375)" }
+                                li { "6. Balance is updated" }
+                            } else {
+                                li { "3. Proofs are redeemed at the mint" }
+                                li { "4. New token event is created (kind 7375)" }
+                                li { "5. Balance is updated" }
+                            }
                         }
                     }
                 }
@@ -159,7 +201,11 @@ pub fn CashuReceiveModal(
                         disabled: *is_receiving.read() || token_string.read().is_empty(),
                         onclick: on_receive,
                         if *is_receiving.read() {
-                            "Receiving..."
+                            if *verify_dleq.read() {
+                                "Verifying & Receiving..."
+                            } else {
+                                "Receiving..."
+                            }
                         } else {
                             "Receive Tokens"
                         }

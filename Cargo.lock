@@ -296,7 +296,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sync_wrapper",
+ "sync_wrapper 1.0.2",
  "tower",
  "tower-layer",
  "tower-service",
@@ -315,7 +315,7 @@ dependencies = [
  "http-body-util",
  "mime",
  "pin-project-lite",
- "sync_wrapper",
+ "sync_wrapper 1.0.2",
  "tower-layer",
  "tower-service",
 ]
@@ -356,6 +356,12 @@ checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
 
 [[package]]
 name = "bech32"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+
+[[package]]
+name = "bech32"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
@@ -381,7 +387,7 @@ checksum = "0fda569d741b895131a88ee5589a467e73e9c4718e958ac9308e4f7dc44b6945"
 dependencies = [
  "base58ck",
  "base64 0.21.7",
- "bech32",
+ "bech32 0.11.0",
  "bitcoin-internals 0.3.0",
  "bitcoin-io",
  "bitcoin-units",
@@ -533,9 +539,9 @@ dependencies = [
 
 [[package]]
 name = "cashu"
-version = "0.14.1"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497d60819fc2d2787cb8b4d380a53b418b41f580b3fd689cf07379310abc3de8"
+checksum = "f9796290f134768002351695e696dfefb4be457966edba5245e3d53c5a3a7bfd"
 dependencies = [
  "bitcoin",
  "cbor-diag",
@@ -599,13 +605,14 @@ dependencies = [
 
 [[package]]
 name = "cdk"
-version = "0.14.1"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a8e400d608376d265b5170566d8cea71c72b838605baf775c94ed3090f1f2d6"
+checksum = "a0e101dde5a5713f35c8030bfc9c69b070d4679ea022a0d583a5fd74d8123ecf"
 dependencies = [
  "anyhow",
  "arc-swap",
  "async-trait",
+ "bech32 0.9.1",
  "bitcoin",
  "cbor-diag",
  "cdk-common",
@@ -623,6 +630,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sync_wrapper 0.1.2",
  "thiserror 2.0.17",
  "tokio",
  "tokio-tungstenite",
@@ -630,15 +638,17 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-time",
  "zeroize",
 ]
 
 [[package]]
 name = "cdk-common"
-version = "0.14.1"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e20fc8a337000d3aca1bf14da5137f9cfff7f98e5c9cd25893db9274684e1564"
+checksum = "eda3fd702fe61e77d463b921287118cd535929725bad461e8c415e995a32e94c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -647,28 +657,23 @@ dependencies = [
  "cbor-diag",
  "ciborium",
  "futures",
- "getrandom 0.2.16",
  "lightning",
  "lightning-invoice",
- "parking_lot",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror 2.0.17",
- "tokio",
  "tracing",
  "url",
  "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-time",
 ]
 
 [[package]]
 name = "cdk-signatory"
-version = "0.14.1"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b036973ca0e2adbf98eb1ed3863c3e3bd0905928e0eab55c56e2048f6d8e14e"
+checksum = "bb05053cfe93d3e49e8e6e1400d18ecdd56a2d644fe8f0794c9a2db8dc111b59"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2671,7 +2676,7 @@ version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc19846267fc5406a43bed1ca00621a74752b26998ee4eae9f532386b9bee59e"
 dependencies = [
- "bech32",
+ "bech32 0.11.0",
  "bitcoin",
  "dnssec-prover",
  "hashbrown 0.13.2",
@@ -2687,7 +2692,7 @@ version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11209f386879b97198b2bfc9e9c1e5d42870825c6bd4376f17f95357244d6600"
 dependencies = [
- "bech32",
+ "bech32 0.11.0",
  "bitcoin",
  "lightning-types",
  "serde",
@@ -3060,7 +3065,7 @@ checksum = "d3595fecf0e0aaacb69a0dc0101a4453f3c76eda333d6bbc49f68f64390b3d85"
 dependencies = [
  "aes",
  "base64 0.22.1",
- "bech32",
+ "bech32 0.11.0",
  "bip39",
  "bitcoin_hashes 0.14.0",
  "cbc",
@@ -3202,10 +3207,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "bech32",
+ "bech32 0.11.0",
  "cdk",
  "cdk-common",
  "chrono",
+ "ciborium",
  "console_error_panic_hook",
  "dioxus",
  "dioxus-primitives",
@@ -3905,7 +3911,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "sync_wrapper",
+ "sync_wrapper 1.0.2",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -4507,6 +4513,12 @@ dependencies = [
 
 [[package]]
 name = "sync_wrapper"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
+
+[[package]]
+name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
@@ -4772,7 +4784,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "pin-project-lite",
- "sync_wrapper",
+ "sync_wrapper 1.0.2",
  "tokio",
  "tower-layer",
  "tower-service",
