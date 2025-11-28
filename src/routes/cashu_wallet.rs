@@ -35,6 +35,9 @@ pub fn CashuWallet() -> Element {
         .map(|w| !w.initialized)
         .unwrap_or(false) || *show_setup_wizard.read();
 
+    // Cache client_initialized once for use throughout the render
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
     rsx! {
         div {
             class: "min-h-screen bg-background",
@@ -83,8 +86,9 @@ pub fn CashuWallet() -> Element {
                         "Connect your account to create or access your Cashu wallet"
                     }
                 }
-            } else if !*nostr_client::CLIENT_INITIALIZED.read() || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+            } else if !client_initialized || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
                 // Client initializing or wallet loading - show bouncing N logo animation
+
                 div {
                     class: "flex flex-col items-center justify-center py-20",
 
@@ -105,7 +109,7 @@ pub fn CashuWallet() -> Element {
                         class: "text-center",
                         h2 {
                             class: "text-xl font-semibold text-foreground mb-2",
-                            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                            if !client_initialized {
                                 "Client Initializing"
                             } else {
                                 "Loading Wallet"
@@ -113,7 +117,7 @@ pub fn CashuWallet() -> Element {
                         }
                         p {
                             class: "text-sm text-muted-foreground",
-                            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                            if !client_initialized {
                                 "Connecting to the Nostr network..."
                             } else {
                                 "Fetching your Cashu wallet..."
@@ -121,38 +125,22 @@ pub fn CashuWallet() -> Element {
                         }
                     }
 
-                    // Animated dots
+                    // Animated dots (wallet-pulse animation defined in tailwind.css)
                     div {
                         class: "flex gap-2 mt-6",
                         div {
                             class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: pulse 1.5s ease-in-out 0s infinite;",
+                            style: "animation: wallet-pulse 1.5s ease-in-out 0s infinite;",
                         }
                         div {
                             class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: pulse 1.5s ease-in-out 0.2s infinite;",
+                            style: "animation: wallet-pulse 1.5s ease-in-out 0.2s infinite;",
                         }
                         div {
                             class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: pulse 1.5s ease-in-out 0.4s infinite;",
+                            style: "animation: wallet-pulse 1.5s ease-in-out 0.4s infinite;",
                         }
                     }
-                }
-
-                // Add custom animation keyframes
-                style {
-                    r#"
-                    @keyframes pulse {{
-                        0%, 100% {{
-                            opacity: 0.3;
-                            transform: scale(0.8);
-                        }}
-                        50% {{
-                            opacity: 1;
-                            transform: scale(1.2);
-                        }}
-                    }}
-                    "#
                 }
             } else if let cashu_wallet::WalletStatus::Error(error_msg) = &*wallet_status {
                 // Error state

@@ -425,6 +425,7 @@ pub fn ReplyComposer(
                                 button {
                                     class: "p-2 rounded-full hover:bg-accent transition",
                                     title: "Create poll",
+                                    "aria-label": "Create poll",
                                     onclick: move |_| show_poll_modal.set(true),
                                     disabled: *is_publishing.read(),
                                     BarChartIcon { class: "w-5 h-5".to_string() }
@@ -483,10 +484,11 @@ fn to_char_boundary(s: &str, pos: usize) -> usize {
     if s.is_char_boundary(pos) {
         return pos;
     }
-    // Search backwards for a valid boundary
-    s.char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= pos)
-        .last()
-        .unwrap_or(0)
+    // Scan backwards at most 3 bytes (UTF-8 chars are max 4 bytes)
+    for offset in 1..=3 {
+        if pos >= offset && s.is_char_boundary(pos - offset) {
+            return pos - offset;
+        }
+    }
+    0
 }
