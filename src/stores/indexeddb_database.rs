@@ -345,8 +345,7 @@ impl IndexedDbDatabase {
     pub async fn get_all_pending_events(
         &self,
     ) -> Result<Vec<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
-        let results = self.get_all_key_values(STORE_PENDING_EVENTS).await?;
-        Ok(results.into_iter().map(|(_, event)| event).collect())
+        self.get_all_values(STORE_PENDING_EVENTS).await
     }
 
     /// Remove a pending event

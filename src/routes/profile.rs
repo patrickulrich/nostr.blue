@@ -311,10 +311,35 @@ pub fn Profile(pubkey: String) -> Element {
                             });
                         } else {
                             log::info!("Phase 2: no new events from relays (all already in DB)");
+                            // Mark as loaded even with no new events to prevent re-fetch loop
+                            if !existing_data.loaded {
+                                let mut data_map = tab_data.read().clone();
+                                data_map.insert(tab_for_relay.clone(), TabData {
+                                    events: existing_data.events,
+                                    oldest_timestamp: existing_data.oldest_timestamp,
+                                    has_more: false,
+                                    loaded: true,
+                                });
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(false);
+                            }
                         }
                     }
                     Err(e) => {
                         log::warn!("Relay phase failed: {}, using DB results only", e);
+                        // Mark as loaded even on error to prevent infinite re-fetch loop
+                        let mut data_map = tab_data.read().clone();
+                        let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                        if !existing_data.loaded {
+                            data_map.insert(tab_for_relay.clone(), TabData {
+                                events: existing_data.events,
+                                oldest_timestamp: existing_data.oldest_timestamp,
+                                has_more: false,
+                                loaded: true,
+                            });
+                            tab_data.set(data_map);
+                            current_tab_has_more.set(false);
+                        }
                     }
                 }
 

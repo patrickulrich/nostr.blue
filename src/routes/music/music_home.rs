@@ -50,9 +50,11 @@ pub fn MusicHome() -> Element {
 
     // Search handler - navigates to dedicated search page
     let handle_search = move |_| {
-        let query = search_query.read().clone();
-        if !query.trim().is_empty() {
-            navigator.push(crate::routes::Route::MusicSearch { q: query });
+        let query = search_query.read().trim().to_string();
+        if !query.is_empty() {
+            // URL-encode the query to handle special characters like &, #, ?
+            let encoded_query = urlencoding::encode(&query).to_string();
+            navigator.push(crate::routes::Route::MusicSearch { q: encoded_query });
         }
     };
 

@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{PollOptionList, PollOptionData};
-use crate::utils::generate_option_id;
-use nostr_sdk::{nips::nip88::{PollType, PollOption}, Timestamp};
+use crate::utils::{generate_option_id, time::calculate_end_time};
+use nostr_sdk::nips::nip88::{PollType, PollOption};
 use once_cell::sync::Lazy;
 
 #[component]
@@ -379,45 +379,6 @@ pub fn PollNew() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Calculate end timestamp based on preset or custom time
-fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
-    let now = Timestamp::now();
-
-    match preset {
-        "1hour" => Some(Timestamp::from(now.as_secs() + 3600)),
-        "1day" => Some(Timestamp::from(now.as_secs() + 86400)),
-        "3days" => Some(Timestamp::from(now.as_secs() + 259200)),
-        "1week" => Some(Timestamp::from(now.as_secs() + 604800)),
-        "custom" => {
-            if custom_time.is_empty() {
-                return None;
-            }
-            // Parse datetime-local format (YYYY-MM-DDTHH:MM)
-            use chrono::{NaiveDateTime, Local, TimeZone, Utc};
-
-            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
-                // Convert from local time to UTC
-                if let Some(local_dt) = Local.from_local_datetime(&naive_dt).single() {
-                    let utc_dt = local_dt.with_timezone(&Utc);
-                    let timestamp = utc_dt.timestamp();
-
-                    // Verify timestamp is valid (non-negative and in the future)
-                    if timestamp >= 0 && timestamp > Utc::now().timestamp() {
-                        Some(Timestamp::from(timestamp as u64))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-        _ => Some(Timestamp::from(now.as_secs() + 86400)), // Default to 1 day
     }
 }
 

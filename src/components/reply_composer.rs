@@ -112,23 +112,30 @@ pub fn ReplyComposer(
         cursor_position.set(pos + text.len());
     };
 
-    // Helper to insert text with smart spacing (space before if needed, space after)
+    // Helper to insert text with smart spacing (space before if needed, space after only if needed)
     let mut insert_with_spacing = move |text: String| {
         let mut text_with_space = text;
+        let current = content.read().clone();
+        let pos = (*cursor_position.read()).min(current.len());
+
         // Add space before if not at start and not preceded by whitespace
-        {
-            let current = content.read();
-            let pos = *cursor_position.read();
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        text_with_space.insert(0, ' ');
-                    }
+        if pos > 0 {
+            if let Some(prev_char) = current[..pos].chars().last() {
+                if !prev_char.is_whitespace() {
+                    text_with_space.insert(0, ' ');
                 }
             }
         }
-        // Add space after
-        text_with_space.push(' ');
+
+        // Add space after only if next char exists and is not whitespace
+        if pos < current.len() {
+            if let Some(next_char) = current[pos..].chars().next() {
+                if !next_char.is_whitespace() {
+                    text_with_space.push(' ');
+                }
+            }
+        }
+
         insert_at_cursor(text_with_space);
     };
 

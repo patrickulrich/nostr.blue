@@ -170,7 +170,7 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         if let Some(event) = events_map.get(&item.event_id) {
             let stats = stats_map.get(&item.event_id).cloned();
 
-            // Convert tags to Vec<Vec<String>> (use as_slice for zero-copy access)
+            // Convert tags to Vec<Vec<String>> (allocates String copies from each tag element)
             let tags: Vec<Vec<String>> = event
                 .tags
                 .iter()

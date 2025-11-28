@@ -138,6 +138,11 @@ where
             // Skip if no more items (sentinel won't be in DOM)
             if !has_more_value {
                 log::debug!("[InfiniteScroll] has_more is false, skipping observer setup");
+                // Disconnect any existing observer to prevent leaks
+                if let Some((observer, _)) = observer_handles.borrow_mut().take() {
+                    observer.disconnect();
+                    log::debug!("[InfiniteScroll] Disconnected existing observer");
+                }
                 // Reset the setup flag so observer can be recreated when has_more becomes true again
                 observer_setup_done.set(false);
                 return;
@@ -149,13 +154,17 @@ where
                 return;
             }
 
+            // Set flag synchronously BEFORE spawn to prevent race condition
+            // where concurrent effect runs could pass the guard
+            observer_setup_done.set(true);
+
             log::info!("[InfiniteScroll] Setting up IntersectionObserver (has_more became true)");
 
             let id = id_for_effect.clone();
             let mut trigger_clone = trigger.clone();
             let observer_handles_clone = observer_handles.clone();
             let mut last_check_for_callback = last_check.clone();
-            let mut observer_setup_done_clone = observer_setup_done.clone();
+            let mut observer_setup_done_for_reset = observer_setup_done.clone();
 
             spawn(async move {
                 log::info!("[InfiniteScroll] Async task started");
@@ -164,6 +173,7 @@ where
                     Some(w) => w,
                     None => {
                         log::error!("[InfiniteScroll] Failed to get window");
+                        observer_setup_done_for_reset.set(false);
                         return;
                     }
                 };
@@ -172,6 +182,7 @@ where
                     Some(d) => d,
                     None => {
                         log::error!("[InfiniteScroll] Failed to get document");
+                        observer_setup_done_for_reset.set(false);
                         return;
                     }
                 };
@@ -195,6 +206,7 @@ where
                     Some(e) => e,
                     None => {
                         log::warn!("[InfiniteScroll] Sentinel element never found after 20 attempts: {}", id);
+                        observer_setup_done_for_reset.set(false);
                         return;
                     }
                 };
@@ -246,6 +258,7 @@ where
                     },
                     Err(e) => {
                         log::error!("[InfiniteScroll] Failed to create IntersectionObserver: {:?}", e);
+                        observer_setup_done_for_reset.set(false);
                         return;
                     }
                 };
@@ -254,10 +267,8 @@ where
                 observer.observe(&element);
                 log::info!("[InfiniteScroll] IntersectionObserver now watching sentinel element - setup complete");
 
-                // Mark observer as set up
-                observer_setup_done_clone.set(true);
-
                 // Store observer and callback for cleanup on unmount
+                // Note: flag was already set synchronously before spawn to prevent race conditions
                 *observer_handles_clone.borrow_mut() = Some((observer, callback));
             });
         });

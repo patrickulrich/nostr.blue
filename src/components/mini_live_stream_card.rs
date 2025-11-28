@@ -72,7 +72,8 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
-            let pk = event.pubkey.to_string();
+            // Use author_pubkey (which may be host_pubkey) for consistent fallback display
+            let pk = author_pubkey.clone();
             if pk.len() > 16 {
                 format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
             } else {

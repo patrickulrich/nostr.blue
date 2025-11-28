@@ -414,6 +414,16 @@ pub async fn publish_user_servers() -> Result<String, String> {
 
     nostr_client::ensure_relays_ready(&client).await;
 
+    // Verify at least one relay is connected before publishing
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    let relays = client.relays().await;
+    let connected_count = relays.values()
+        .filter(|r| r.status() == PoolRelayStatus::Connected)
+        .count();
+    if connected_count == 0 {
+        return Err("No relays connected. Cannot publish server list.".to_string());
+    }
+
     match client.send_event(&event).await {
         Ok(output) => {
             log::info!("Published Blossom server list: {}", output.id());
