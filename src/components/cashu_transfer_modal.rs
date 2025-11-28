@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, TransferProgress, TRANSFER_PROGRESS};
+use crate::utils::shorten_url;
 
 #[component]
 pub fn CashuTransferModal(
@@ -128,12 +129,14 @@ pub fn CashuTransferModal(
             return;
         }
 
-        // Check balance
+        // Check balance (including estimated fee)
         let balance = cashu_wallet::get_mint_balance(&source);
-        if balance < amount_sats {
+        let fee = fee_estimate.read().unwrap_or(0);
+        let required = amount_sats.saturating_add(fee);
+        if balance < required {
             error_message.set(Some(format!(
-                "Insufficient balance. Have: {} sats, need: {} sats",
-                balance, amount_sats
+                "Insufficient balance. Have: {} sats, need: {} sats (incl. ~{} fee)",
+                balance, required, fee
             )));
             return;
         }
@@ -213,7 +216,7 @@ pub fn CashuTransferModal(
                                 for mint_url in mints.iter() {
                                     option {
                                         value: mint_url.clone(),
-                                        "{shorten_url(mint_url)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                        "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
                                     }
                                 }
                             }
@@ -263,7 +266,7 @@ pub fn CashuTransferModal(
                                     if mint_url != &*source_mint.read() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                            "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
                                         }
                                     }
                                 }
@@ -442,15 +445,5 @@ pub fn CashuTransferModal(
                 }
             }
         }
-    }
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 30 {
-        format!("{}...", &url[..27])
-    } else {
-        url.to_string()
     }
 }

@@ -103,6 +103,7 @@ pub fn CashuReceiveModal(
                             id: "verify-dleq",
                             class: "mt-1 w-4 h-4 rounded border-border",
                             checked: *verify_dleq.read(),
+                            disabled: *is_receiving.read(),
                             onchange: move |evt| verify_dleq.set(evt.checked())
                         }
                         div {

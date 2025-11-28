@@ -97,7 +97,10 @@ pub fn CashuPayRequestModal(
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
             onclick: move |e| {
                 e.stop_propagation();
-                on_close.call(());
+                // Don't close while payment is in progress
+                if !matches!(*pay_state.read(), PayState::Paying) {
+                    on_close.call(());
+                }
             },
 
             // Modal content
@@ -278,46 +281,40 @@ pub fn CashuPayRequestModal(
                                     }
                                 }
 
-                                // Insufficient balance warning
+                                // Calculate pay amount once for warning and button state
                                 {
                                     let pay_amount = if amount_specified {
                                         request_amount
                                     } else {
                                         custom_amount.read().parse::<u64>().unwrap_or(0)
                                     };
+                                    let insufficient_balance = pay_amount > balance;
+                                    let pay_disabled = pay_amount == 0 || insufficient_balance;
 
-                                    if pay_amount > balance {
-                                        rsx! {
+                                    rsx! {
+                                        // Insufficient balance warning
+                                        if insufficient_balance {
                                             div {
                                                 class: "mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-600 dark:text-yellow-400 text-sm",
                                                 "Insufficient balance. You need {pay_amount} sats but only have {balance} sats."
                                             }
                                         }
-                                    } else {
-                                        rsx! {}
-                                    }
-                                }
 
-                                // Action buttons
-                                div {
-                                    class: "flex gap-3",
-                                    button {
-                                        class: "flex-1 py-3 bg-accent hover:bg-accent/80 rounded-lg font-semibold transition",
-                                        onclick: handle_back,
-                                        "Back"
-                                    }
-                                    button {
-                                        class: "flex-1 py-3 bg-green-500 hover:bg-green-600 disabled:bg-muted disabled:cursor-not-allowed text-white rounded-lg font-semibold transition",
-                                        disabled: {
-                                            if amount_specified {
-                                                request_amount > balance
-                                            } else {
-                                                let amt = custom_amount.read().parse::<u64>().unwrap_or(0);
-                                                amt == 0 || amt > balance
+                                        // Action buttons
+                                        div {
+                                            class: "flex gap-3",
+                                            button {
+                                                class: "flex-1 py-3 bg-accent hover:bg-accent/80 rounded-lg font-semibold transition",
+                                                onclick: handle_back,
+                                                "Back"
                                             }
-                                        },
-                                        onclick: handle_pay,
-                                        "Pay"
+                                            button {
+                                                class: "flex-1 py-3 bg-green-500 hover:bg-green-600 disabled:bg-muted disabled:cursor-not-allowed text-white rounded-lg font-semibold transition",
+                                                disabled: pay_disabled,
+                                                onclick: handle_pay,
+                                                "Pay"
+                                            }
+                                        }
                                     }
                                 }
                             }

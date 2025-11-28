@@ -23,7 +23,7 @@ pub fn CashuAddMintModal(
 
         // Basic URL validation
         if !url.starts_with("https://") && !url.starts_with("http://") {
-            error_message.set(Some("URL must start with https://".to_string()));
+            error_message.set(Some("URL must start with http:// or https://".to_string()));
             return;
         }
 
@@ -197,11 +197,11 @@ pub fn CashuAddMintModal(
                                 class: "flex gap-4 mt-2",
                                 div {
                                     class: if info.supported_nuts.contains(&4) { "text-green-500 text-sm" } else { "text-red-500 text-sm" },
-                                    if info.supported_nuts.contains(&4) { "! NUT-4 (Mint)" } else { "! NUT-4 (Mint)" }
+                                    if info.supported_nuts.contains(&4) { "✓ NUT-4 (Mint)" } else { "✗ NUT-4 (Mint)" }
                                 }
                                 div {
                                     class: if info.supported_nuts.contains(&5) { "text-green-500 text-sm" } else { "text-red-500 text-sm" },
-                                    if info.supported_nuts.contains(&5) { "! NUT-5 (Melt)" } else { "! NUT-5 (Melt)" }
+                                    if info.supported_nuts.contains(&5) { "✓ NUT-5 (Melt)" } else { "✗ NUT-5 (Melt)" }
                                 }
                             }
 

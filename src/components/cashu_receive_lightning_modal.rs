@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{cashu_wallet, cashu_ws};
+use crate::utils::shorten_url;
 use qrcode::{QrCode, render::svg};
 
 #[component]
@@ -453,7 +454,7 @@ pub fn CashuReceiveLightningModal(
                                     for mint_url in mints.iter() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url)}"
+                                            "{shorten_url(mint_url, 35)}"
                                         }
                                     }
                                 }
@@ -512,15 +513,5 @@ fn generate_qr_svg(data: &str) -> String {
         Err(_) => {
             "<div>Failed to generate QR code</div>".to_string()
         }
-    }
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 35 {
-        format!("{}...", &url[..32])
-    } else {
-        url.to_string()
     }
 }

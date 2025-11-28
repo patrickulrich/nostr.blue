@@ -52,10 +52,10 @@ pub fn CashuCreateRequestModal(
 
                     // If using Nostr transport, start waiting for payment
                     if let Some(info) = nostr_info {
-                        current_request_id.set(Some(info.pubkey.to_string()));
+                        current_request_id.set(Some(info.request_id.clone()));
 
                         // Start waiting in background
-                        let request_id = info.pubkey.to_string();
+                        let request_id = info.request_id.clone();
                         spawn(async move {
                             match cashu_wallet::wait_for_nostr_payment(request_id.clone(), 300).await {
                                 Ok(amount) => {

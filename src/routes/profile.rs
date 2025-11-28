@@ -1244,31 +1244,34 @@ pub fn Profile(pubkey: String) -> Element {
                         // P2PK Cashu pubkey (only for own profile when wallet is initialized)
                         if is_own_profile {
                             if let Ok(p2pk_pubkey) = crate::stores::cashu_wallet::get_wallet_pubkey() {
-                                div {
-                                    label {
-                                        class: "block text-sm font-medium mb-1",
-                                        "Cashu P2PK Pubkey"
-                                    }
-                                    p {
-                                        class: "text-xs text-muted-foreground mb-2",
-                                        "Others can send you locked ecash tokens that only you can redeem"
-                                    }
-                                    div {
-                                        class: "flex items-center gap-2",
+                                {
+                                    let pubkey_for_copy = p2pk_pubkey.clone();
+                                    rsx! {
                                         div {
-                                            class: "flex-1 p-2 bg-muted rounded border border-border text-xs font-mono break-all",
-                                            "{p2pk_pubkey}"
-                                        }
-                                        button {
-                                            class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
-                                            onclick: move |_| {
-                                                if let Ok(pubkey) = crate::stores::cashu_wallet::get_wallet_pubkey() {
-                                                    if let Some(window) = web_sys::window() {
-                                                        let _ = window.navigator().clipboard().write_text(&pubkey);
-                                                    }
+                                            label {
+                                                class: "block text-sm font-medium mb-1",
+                                                "Cashu P2PK Pubkey"
+                                            }
+                                            p {
+                                                class: "text-xs text-muted-foreground mb-2",
+                                                "Others can send you locked ecash tokens that only you can redeem"
+                                            }
+                                            div {
+                                                class: "flex items-center gap-2",
+                                                div {
+                                                    class: "flex-1 p-2 bg-muted rounded border border-border text-xs font-mono break-all",
+                                                    "{p2pk_pubkey}"
                                                 }
-                                            },
-                                            "Copy"
+                                                button {
+                                                    class: "px-3 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 transition",
+                                                    onclick: move |_| {
+                                                        if let Some(window) = web_sys::window() {
+                                                            let _ = window.navigator().clipboard().write_text(&pubkey_for_copy);
+                                                        }
+                                                    },
+                                                    "Copy"
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -176,7 +176,15 @@ pub async fn sync_wallet_state() -> Result<(), String> {
             amount: u64::from(p.amount),
             secret: p.secret.to_string(),
             c: p.c.to_string(),
-            witness: p.witness.as_ref().map(|w| serde_json::to_string(w).unwrap_or_default()),
+            witness: p.witness.as_ref().and_then(|w| {
+                match serde_json::to_string(w) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        log::warn!("Failed to serialize witness for proof {}: {}", p.keyset_id, e);
+                        None
+                    }
+                }
+            }),
             dleq: p.dleq.as_ref().map(|d| super::cashu_wallet::DleqData {
                 e: d.e.to_string(),
                 s: d.s.to_string(),
@@ -397,8 +405,14 @@ pub async fn create_mpp_melt_quotes(
         })
         .collect();
 
-    let total_amount = contributions.iter().map(|c| c.amount).sum();
-    let total_fee_reserve = contributions.iter().map(|c| c.fee_reserve).sum();
+    let total_amount = contributions.iter()
+        .map(|c| c.amount)
+        .try_fold(0u64, |acc, v| acc.checked_add(v))
+        .ok_or("MPP quote total amount overflow")?;
+    let total_fee_reserve = contributions.iter()
+        .map(|c| c.fee_reserve)
+        .try_fold(0u64, |acc, v| acc.checked_add(v))
+        .ok_or("MPP quote fee reserve overflow")?;
 
     Ok(MppQuoteInfo {
         contributions,
@@ -456,7 +470,9 @@ pub async fn execute_mpp_melt(
     }
 
     // Sync wallet state after melt
-    sync_wallet_state().await.ok();
+    if let Err(e) = sync_wallet_state().await {
+        log::warn!("Failed to sync wallet state after MPP melt: {}", e);
+    }
 
     Ok(MppMeltResult {
         paid: all_paid,

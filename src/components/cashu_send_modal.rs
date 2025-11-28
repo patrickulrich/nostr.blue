@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 use crate::stores::cashu_wallet;
+use crate::utils::shorten_url;
 
 #[component]
 pub fn CashuSendModal(
@@ -63,9 +65,16 @@ pub fn CashuSendModal(
         }
 
         // Validate recipient for P2PK
-        if is_p2pk && recipient.is_empty() {
-            error_message.set(Some("Please enter a recipient npub or public key".to_string()));
-            return;
+        if is_p2pk {
+            if recipient.is_empty() {
+                error_message.set(Some("Please enter a recipient npub or public key".to_string()));
+                return;
+            }
+            // Validate pubkey format using nostr-sdk (supports npub, hex, NIP-21)
+            if PublicKey::parse(&recipient).is_err() {
+                error_message.set(Some("Invalid pubkey format. Use npub1... or 64-char hex".to_string()));
+                return;
+            }
         }
 
         is_sending.set(true);
@@ -156,7 +165,7 @@ pub fn CashuSendModal(
                                 for mint_url in mints.iter() {
                                     option {
                                         value: mint_url.clone(),
-                                        "{shorten_url(mint_url)}"
+                                        "{shorten_url(mint_url, 35)}"
                                     }
                                 }
                             }
@@ -185,6 +194,10 @@ pub fn CashuSendModal(
                             onclick: move |_| {
                                 let current = *p2pk_enabled.read();
                                 p2pk_enabled.set(!current);
+                                // Clear recipient when disabling P2PK
+                                if current {
+                                    recipient_pubkey.set(String::new());
+                                }
                             },
                             div {
                                 class: if *p2pk_enabled.read() {
@@ -381,16 +394,6 @@ pub fn CashuSendModal(
                 }
             }
         }
-    }
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 35 {
-        format!("{}...", &url[..32])
-    } else {
-        url.to_string()
     }
 }
 

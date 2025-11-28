@@ -4,6 +4,7 @@ use crate::stores::{
     cashu_cdk_bridge::{self, MppQuoteInfo},
     cashu_ws,
 };
+use crate::utils::shorten_url;
 
 /// Payment mode for Lightning send
 #[derive(Clone, Debug, PartialEq)]
@@ -238,9 +239,9 @@ pub fn CashuSendLightningModal(
         }
     };
 
-    // Auto-calculate MPP when switching to MPP mode or when invoice changes
+    // Auto-calculate MPP split (can be used for manual "Auto-split" button in future)
     // Only uses MPP-supporting mints
-    let on_auto_split = move |amount: u64| {
+    let _on_auto_split = move |amount: u64| {
         let mpp_mints: Vec<String> = mpp_mint_balances.read().iter().map(|(url, _)| url.clone()).collect();
         spawn(async move {
             let include_mints = if mpp_mints.is_empty() { None } else { Some(mpp_mints) };
@@ -382,7 +383,7 @@ pub fn CashuSendLightningModal(
                                 // Show each mint contribution
                                 for contrib in &q.contributions {
                                     div { class: "flex justify-between text-xs",
-                                        span { class: "text-muted-foreground truncate max-w-[150px]", "{shorten_url(&contrib.mint_url)}" }
+                                        span { class: "text-muted-foreground truncate max-w-[150px]", "{shorten_url(&contrib.mint_url, 30)}" }
                                         span { class: "font-mono", "{contrib.amount} + {contrib.fee_reserve} sats" }
                                     }
                                 }
@@ -462,13 +463,10 @@ pub fn CashuSendLightningModal(
                                     onchange: move |evt| {
                                         let is_mpp = evt.checked();
                                         payment_mode.set(if is_mpp { PaymentMode::Mpp } else { PaymentMode::Single });
-
-                                        // Auto-calculate split when enabling MPP (using only MPP-supporting mints)
+                                        // Clear allocations when switching modes
+                                        // User should configure allocations after getting quote
                                         if is_mpp {
-                                            let mpp_total: u64 = mpp_mint_balances.read().iter().map(|(_, b)| b).sum();
-                                            if mpp_total > 0 {
-                                                on_auto_split(mpp_total);
-                                            }
+                                            mpp_allocations.set(Vec::new());
                                         }
                                     }
                                 }
@@ -498,7 +496,7 @@ pub fn CashuSendLightningModal(
                                     for mint_url in mints.iter() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url)} ({get_mint_balance(&mint_balances.read(), mint_url)} sats)"
+                                            "{shorten_url(mint_url, 30)} ({get_mint_balance(&mint_balances.read(), mint_url)} sats)"
                                         }
                                     }
                                 }
@@ -529,7 +527,7 @@ pub fn CashuSendLightningModal(
                                         for (mint_url, balance) in mpp_mint_balances.read().iter() {
                                             div {
                                                 class: "flex justify-between text-sm",
-                                                span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint_url)}" }
+                                                span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint_url, 30)}" }
                                                 span { class: "font-mono", "{balance} sats" }
                                             }
                                         }
@@ -605,16 +603,6 @@ pub fn CashuSendLightningModal(
                 }
             }
         }
-    }
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 30 {
-        format!("{}...", &url[..27])
-    } else {
-        url.to_string()
     }
 }
 

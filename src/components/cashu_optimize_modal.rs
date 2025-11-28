@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu_wallet::{self, ConsolidationResult};
+use crate::utils::shorten_url;
 
 #[component]
 pub fn CashuOptimizeModal(
@@ -133,7 +134,7 @@ pub fn CashuOptimizeModal(
                                     class: "flex flex-col py-2 border-b border-border last:border-0",
                                     div {
                                         class: "flex justify-between items-center text-sm",
-                                        span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint)}" }
+                                        span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint, 30)}" }
                                         span { class: "font-mono", "{result.proofs_before} → {result.proofs_after}" }
                                     }
                                     if result.fee_paid > 0 {
@@ -160,7 +161,7 @@ pub fn CashuOptimizeModal(
                                 for (mint, count) in mint_proof_counts.iter() {
                                     div {
                                         class: "flex justify-between",
-                                        span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint)}" }
+                                        span { class: "text-muted-foreground truncate max-w-[200px]", "{shorten_url(mint, 30)}" }
                                         span {
                                             class: if *count > 8 { "font-mono text-orange-500" } else { "font-mono text-green-500" },
                                             "{count} proofs"
@@ -225,15 +226,5 @@ pub fn CashuOptimizeModal(
                 }
             }
         }
-    }
-}
-
-/// Shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
-    if url.len() > 30 {
-        format!("{}...", &url[..27])
-    } else {
-        url.to_string()
     }
 }

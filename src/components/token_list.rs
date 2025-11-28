@@ -261,22 +261,25 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                     if *show_mint_info.read() {
                                         show_mint_info.set(false);
                                     } else {
-                                        let mint_url = mint_url_clone.clone();
                                         show_mint_info.set(true);
-                                        mint_info_loading.set(true);
-                                        mint_info_error.set(None);
-                                        spawn(async move {
-                                            match cashu_wallet::get_mint_info(&mint_url).await {
-                                                Ok(info) => {
-                                                    mint_info.set(Some(info));
-                                                    mint_info_loading.set(false);
+                                        // Only fetch if not already cached
+                                        if mint_info.read().is_none() {
+                                            let mint_url = mint_url_clone.clone();
+                                            mint_info_loading.set(true);
+                                            mint_info_error.set(None);
+                                            spawn(async move {
+                                                match cashu_wallet::get_mint_info(&mint_url).await {
+                                                    Ok(info) => {
+                                                        mint_info.set(Some(info));
+                                                        mint_info_loading.set(false);
+                                                    }
+                                                    Err(e) => {
+                                                        mint_info_error.set(Some(e));
+                                                        mint_info_loading.set(false);
+                                                    }
                                                 }
-                                                Err(e) => {
-                                                    mint_info_error.set(Some(e));
-                                                    mint_info_loading.set(false);
-                                                }
-                                            }
-                                        });
+                                            });
+                                        }
                                     }
                                 }
                             },

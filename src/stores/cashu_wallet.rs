@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, SecretKey, EventId};
+use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, SecretKey, EventId, Tag};
 use nostr_sdk::nips::nip60::{WalletEvent, TransactionDirection, SpendingHistory};
 use nostr_sdk::types::url::Url;
 use nostr_sdk::types::time::Timestamp;
@@ -164,6 +164,13 @@ pub static WALLET_BALANCE: GlobalSignal<u64> = Signal::global(|| 0);
 
 /// Global signal for wallet status
 pub static WALLET_STATUS: GlobalSignal<WalletStatus> = Signal::global(|| WalletStatus::Uninitialized);
+
+/// Global signal for terms acceptance status
+/// None = not yet checked, Some(true) = accepted, Some(false) = not accepted
+pub static TERMS_ACCEPTED: GlobalSignal<Option<bool>> = Signal::global(|| None);
+
+/// NIP-78 d-tag identifier for Cashu wallet terms agreement
+const TERMS_D_TAG: &str = "nostr.blue/cashu/terms";
 
 /// Operation lock to prevent concurrent wallet operations on the same mint
 /// Uses GlobalSignal with HashSet to track mints currently being operated on
@@ -566,6 +573,90 @@ async fn delete_quote_event(event_id: &str) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Check if user has accepted Cashu wallet terms (NIP-78)
+/// Returns true if the terms agreement event exists, false otherwise
+pub async fn check_terms_accepted() -> Result<bool, String> {
+    log::info!("Checking Cashu wallet terms acceptance (NIP-78)...");
+
+    // Get pubkey
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    // Get client
+    let client = nostr_client::NOSTR_CLIENT.read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // Build filter for terms agreement event
+    let filter = Filter::new()
+        .author(pubkey)
+        .kind(Kind::from(30078))
+        .identifier(TERMS_D_TAG)
+        .limit(1);
+
+    // Ensure relays are ready
+    nostr_client::ensure_relays_ready(&client).await;
+
+    // Fetch terms agreement event
+    match client.fetch_events(filter, Duration::from_secs(5)).await {
+        Ok(events) => {
+            let accepted = !events.is_empty();
+            log::info!("Terms acceptance check: {}", if accepted { "accepted" } else { "not accepted" });
+            *TERMS_ACCEPTED.write() = Some(accepted);
+            Ok(accepted)
+        }
+        Err(e) => {
+            log::warn!("Failed to check terms acceptance: {}", e);
+            *TERMS_ACCEPTED.write() = Some(false);
+            Err(format!("Failed to check terms: {}", e))
+        }
+    }
+}
+
+/// Accept Cashu wallet terms by publishing a NIP-78 event
+pub async fn accept_terms() -> Result<(), String> {
+    log::info!("Accepting Cashu wallet terms (NIP-78)...");
+
+    // Check if authenticated
+    if !auth_store::is_authenticated() {
+        return Err("Not authenticated".to_string());
+    }
+
+    // Get client
+    let client = nostr_client::NOSTR_CLIENT.read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // Create content with timestamp and version
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let content = serde_json::json!({
+        "accepted_at": now,
+        "version": 1
+    }).to_string();
+
+    // Build NIP-78 event (kind 30078 with d-tag)
+    let builder = EventBuilder::new(Kind::from(30078), content)
+        .tag(Tag::identifier(TERMS_D_TAG));
+
+    // Publish to relays
+    client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish terms acceptance: {}", e))?;
+
+    log::info!("Terms acceptance published successfully");
+
+    // Update signal
+    *TERMS_ACCEPTED.write() = Some(true);
+
+    Ok(())
 }
 
 /// Initialize wallet by fetching from relays
@@ -4916,6 +5007,8 @@ pub struct PaymentTransport {
 /// Info needed to wait for a Nostr payment
 #[derive(Clone, Debug)]
 pub struct NostrPaymentWaitInfo {
+    /// Request ID (UUID) for looking up this request
+    pub request_id: String,
     /// Ephemeral secret key for receiving
     pub secret_key: nostr_sdk::SecretKey,
     /// Relays to listen on
@@ -5015,6 +5108,7 @@ pub async fn create_payment_request(
         };
 
         let wait_info = NostrPaymentWaitInfo {
+            request_id: request_id.clone(),
             secret_key: keys.secret_key().clone(),
             relays,
             pubkey: keys.public_key(),

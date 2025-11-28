@@ -1,7 +1,13 @@
 //! WebSocket management for Cashu mint subscriptions (NUT-17)
 //!
 //! Provides real-time quote status updates via WebSocket with HTTP polling fallback.
+//!
+//! Follows nostr-sdk patterns for proper WebSocket lifecycle management:
+//! - No Closure::forget() - closures stored for explicit cleanup
+//! - Explicit close() for resource cleanup
+//! - Subscribe sent in onopen callback (no timing races)
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::prelude::*;
@@ -17,6 +23,23 @@ static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 /// Global signal tracking active WebSocket connections by mint URL
 pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> = GlobalSignal::new(HashMap::new);
 
+// Thread-local storage for WebSocket closures (closures aren't Clone, so can't store in GlobalSignal)
+thread_local! {
+    static WS_CLOSURES: RefCell<HashMap<String, WsClosures>> = RefCell::new(HashMap::new());
+}
+
+/// Stored closures for a WebSocket connection
+struct WsClosures {
+    #[allow(dead_code)]
+    onopen: Closure<dyn FnMut(web_sys::Event)>,
+    #[allow(dead_code)]
+    onmessage: Closure<dyn FnMut(MessageEvent)>,
+    #[allow(dead_code)]
+    onerror: Closure<dyn FnMut(ErrorEvent)>,
+    #[allow(dead_code)]
+    onclose: Closure<dyn FnMut(CloseEvent)>,
+}
+
 /// State of a WebSocket connection
 #[derive(Clone, Debug)]
 pub struct WsConnectionState {
@@ -24,6 +47,30 @@ pub struct WsConnectionState {
     pub connected: bool,
     /// Active subscriptions (sub_id -> quote_id)
     pub subscriptions: HashMap<String, String>,
+    /// WebSocket handle for explicit cleanup (WebSocket is Clone - it's a JS handle)
+    pub ws: Option<WebSocket>,
+}
+
+/// Close a WebSocket connection and clean up all resources
+pub fn close_connection(mint_url: &str) {
+    // Close WebSocket and update state
+    let mut connections = WS_CONNECTIONS.write();
+    if let Some(state) = connections.remove(mint_url) {
+        if let Some(ws) = state.ws {
+            if let Err(e) = ws.close() {
+                log::error!("Failed to close WebSocket for {}: {:?}", mint_url, e);
+            } else {
+                log::debug!("WebSocket connection closed for {}", mint_url);
+            }
+        }
+    }
+
+    // Drop closures (this is what prevents memory leaks)
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().remove(mint_url);
+    });
+
+    log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }
 
 /// Subscription kind for NUT-17
@@ -115,13 +162,13 @@ enum WsMessage {
     },
     Error {
         jsonrpc: String,
-        error: WsError,
+        error: WsJsonRpcError,
         id: u64,
     },
 }
 
 #[derive(Debug, Deserialize)]
-struct WsError {
+struct WsJsonRpcError {
     code: i32,
     message: String,
 }
@@ -156,6 +203,11 @@ pub type QuoteCallback = Box<dyn Fn(QuoteStatus) + Send + Sync + 'static>;
 ///
 /// Returns a channel receiver for status updates. Falls back to HTTP polling
 /// if WebSocket connection fails.
+///
+/// Following nostr-sdk patterns:
+/// - No Closure::forget() - closures stored in thread_local for cleanup
+/// - Subscribe sent in onopen callback (no timing races)
+/// - WebSocket stored for explicit cleanup
 pub async fn subscribe_to_quote(
     mint_url: String,
     quote_id: String,
@@ -174,26 +226,55 @@ pub async fn subscribe_to_quote(
 
     ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
-    // Clone values for closures
-    let sub_id_clone = sub_id.clone();
-    let quote_id_clone = quote_id.clone();
-    let mint_url_clone = mint_url.clone();
+    // Clone WebSocket for use in onopen callback (WebSocket is Clone - it's a JS handle)
+    let ws_for_onopen = ws.clone();
 
-    // Set up onopen handler
+    // Clone values for onopen closure
+    let sub_id_for_onopen = sub_id.clone();
+    let quote_id_for_onopen = quote_id.clone();
+    let mint_url_for_onopen = mint_url.clone();
+    let kind_str = kind.as_str().to_string();
+
+    // Set up onopen handler - sends subscribe request immediately when connection opens
     let onopen_callback = Closure::wrap(Box::new(move |_: web_sys::Event| {
-        log::info!("WebSocket connected to {}", mint_url_clone);
+        log::info!("WebSocket connected to {}", mint_url_for_onopen);
 
-        // Update connection state
+        // Update connection state (ws is stored separately after all closures are set up)
         let mut connections = WS_CONNECTIONS.write();
-        connections.entry(mint_url_clone.clone()).or_insert_with(|| WsConnectionState {
-            connected: true,
+        let state = connections.entry(mint_url_for_onopen.clone()).or_insert_with(|| WsConnectionState {
+            connected: false,
             subscriptions: HashMap::new(),
-        }).subscriptions.insert(sub_id_clone.clone(), quote_id_clone.clone());
+            ws: None,
+        });
+        state.connected = true;
+        state.subscriptions.insert(sub_id_for_onopen.clone(), quote_id_for_onopen.clone());
+        drop(connections); // Release lock before sending
 
+        // Send subscribe request immediately (connection is now open - no timing race!)
+        let request = SubscribeRequest {
+            jsonrpc: "2.0",
+            method: "subscribe",
+            params: SubscribeParams {
+                kind: kind_str.clone(),
+                sub_id: sub_id_for_onopen.clone(),
+                filters: vec![quote_id_for_onopen.clone()],
+            },
+            id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
+        };
+
+        match serde_json::to_string(&request) {
+            Ok(json) => {
+                if let Err(e) = ws_for_onopen.send_with_str(&json) {
+                    log::error!("Failed to send subscribe request: {:?}", e);
+                } else {
+                    log::debug!("Sent subscribe request for quote {}", quote_id_for_onopen);
+                }
+            }
+            Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
+        }
     }) as Box<dyn FnMut(web_sys::Event)>);
 
     ws.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
-    onopen_callback.forget();
 
     // Clone for message handler
     let sub_id_for_msg = sub_id.clone();
@@ -208,7 +289,10 @@ pub async fn subscribe_to_quote(
                 Ok(WsMessage::Notification { params, .. }) => {
                     if params.sub_id == sub_id_for_msg {
                         let status = QuoteStatus::from(params.payload.state.as_str());
-                        let _ = tx_for_msg.try_send(status);
+                        // Log when channel is full (following nostr-sdk pattern)
+                        if let Err(e) = tx_for_msg.try_send(status) {
+                            log::warn!("Channel full, dropping quote status update for {}: {:?}", sub_id_for_msg, e);
+                        }
                     }
                 }
                 Ok(WsMessage::Response { .. }) => {
@@ -225,7 +309,6 @@ pub async fn subscribe_to_quote(
     }) as Box<dyn FnMut(MessageEvent)>);
 
     ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
-    onmessage_callback.forget();
 
     // Set up onerror handler
     let mint_url_for_error = mint_url.clone();
@@ -234,7 +317,6 @@ pub async fn subscribe_to_quote(
     }) as Box<dyn FnMut(ErrorEvent)>);
 
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
-    onerror_callback.forget();
 
     // Set up onclose handler
     let mint_url_for_close = mint_url.clone();
@@ -253,56 +335,51 @@ pub async fn subscribe_to_quote(
     }) as Box<dyn FnMut(CloseEvent)>);
 
     ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
-    onclose_callback.forget();
 
-    // Wait for connection to be established
-    let ws_clone = ws.clone();
-    let sub_id_for_send = sub_id.clone();
-    let kind_for_send = kind;
-    let quote_id_for_send = quote_id.clone();
-
-    // Use a small delay to let the connection establish, then send subscribe
-    wasm_bindgen_futures::spawn_local(async move {
-        // Wait a bit for connection
-        gloo_timers::future::TimeoutFuture::new(100).await;
-
-        if ws_clone.ready_state() == WebSocket::OPEN {
-            // Send subscribe request
-            let request = SubscribeRequest {
-                jsonrpc: "2.0",
-                method: "subscribe",
-                params: SubscribeParams {
-                    kind: kind_for_send.as_str().to_string(),
-                    sub_id: sub_id_for_send,
-                    filters: vec![quote_id_for_send],
-                },
-                id: REQUEST_ID.fetch_add(1, Ordering::SeqCst),
-            };
-
-            if let Ok(json) = serde_json::to_string(&request) {
-                if let Err(e) = ws_clone.send_with_str(&json) {
-                    log::error!("Failed to send subscribe request: {:?}", e);
-                } else {
-                    log::debug!("Sent subscribe request");
-                }
-            }
-        } else {
-            log::warn!("WebSocket not ready, state: {}", ws_clone.ready_state());
-        }
+    // Store closures in thread_local to keep them alive (instead of forget())
+    // This allows proper cleanup when close_connection is called
+    WS_CLOSURES.with(|closures| {
+        closures.borrow_mut().insert(mint_url.clone(), WsClosures {
+            onopen: onopen_callback,
+            onmessage: onmessage_callback,
+            onerror: onerror_callback,
+            onclose: onclose_callback,
+        });
     });
 
-    // Store the WebSocket for later cleanup (using a static or global wouldn't work well here,
-    // so we rely on the closures keeping it alive)
+    // Store WebSocket in connection state for explicit cleanup
+    {
+        let mut connections = WS_CONNECTIONS.write();
+        let state = connections.entry(mint_url.clone()).or_insert_with(|| WsConnectionState {
+            connected: false,
+            subscriptions: HashMap::new(),
+            ws: None,
+        });
+        state.ws = Some(ws);
+    }
 
     Ok(rx)
 }
 
 /// Unsubscribe from quote updates
+///
+/// If this is the last subscription for this mint, closes the connection
+/// and cleans up all resources (following nostr-sdk pattern).
 #[allow(dead_code)]
 pub fn unsubscribe(mint_url: &str, sub_id: &str) {
-    let mut connections = WS_CONNECTIONS.write();
-    if let Some(state) = connections.get_mut(mint_url) {
-        state.subscriptions.remove(sub_id);
+    let should_close = {
+        let mut connections = WS_CONNECTIONS.write();
+        if let Some(state) = connections.get_mut(mint_url) {
+            state.subscriptions.remove(sub_id);
+            state.subscriptions.is_empty()
+        } else {
+            false
+        }
+    };
+
+    // Close connection if no remaining subscriptions
+    if should_close {
+        close_connection(mint_url);
     }
 }
 

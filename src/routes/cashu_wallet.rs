@@ -6,6 +6,7 @@ pub fn CashuWallet() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let wallet_status = cashu_wallet::WALLET_STATUS.read();
     let wallet_state = cashu_wallet::WALLET_STATE.read();
+    let terms_status = cashu_wallet::TERMS_ACCEPTED.read();
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
@@ -18,7 +19,7 @@ pub fn CashuWallet() -> Element {
     let mut show_create_request_modal = use_signal(|| false);
     let mut show_pay_request_modal = use_signal(|| false);
 
-    // Initialize wallet on mount
+    // Check terms and initialize wallet on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -26,13 +27,39 @@ pub fn CashuWallet() -> Element {
             return;
         }
 
-        // Only initialize if not already loaded
-        if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+        // Check terms status first
+        let terms = *cashu_wallet::TERMS_ACCEPTED.read();
+
+        if terms.is_none() {
+            // Terms not yet checked - check them first
             spawn(async move {
-                if let Err(e) = cashu_wallet::init_wallet().await {
-                    log::error!("Failed to initialize wallet: {}", e);
+                match cashu_wallet::check_terms_accepted().await {
+                    Ok(accepted) => {
+                        if accepted {
+                            // Terms accepted, proceed with wallet init
+                            if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+                                if let Err(e) = cashu_wallet::init_wallet().await {
+                                    log::error!("Failed to initialize wallet: {}", e);
+                                }
+                            }
+                        }
+                        // If not accepted, modal will show via render logic
+                    }
+                    Err(e) => log::error!("Failed to check terms: {}", e),
                 }
             });
+            return;
+        }
+
+        // Terms already checked - if accepted, init wallet
+        if terms == Some(true) {
+            if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+                spawn(async move {
+                    if let Err(e) = cashu_wallet::init_wallet().await {
+                        log::error!("Failed to initialize wallet: {}", e);
+                    }
+                });
+            }
         }
     });
 
@@ -92,7 +119,19 @@ pub fn CashuWallet() -> Element {
                         "Connect your account to create or access your Cashu wallet"
                     }
                 }
-            } else if !client_initialized || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+            } else if *terms_status == Some(false) {
+                // Terms not accepted - show terms modal
+                crate::components::CashuTermsModal {
+                    on_accept: move |_| {
+                        // Terms accepted, trigger wallet init
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::init_wallet().await {
+                                log::error!("Failed to initialize wallet: {}", e);
+                            }
+                        });
+                    }
+                }
+            } else if !client_initialized || terms_status.is_none() || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
                 // Client initializing or wallet loading - show bouncing N logo animation
 
                 div {
@@ -117,6 +156,8 @@ pub fn CashuWallet() -> Element {
                             class: "text-xl font-semibold text-foreground mb-2",
                             if !client_initialized {
                                 "Client Initializing"
+                            } else if terms_status.is_none() {
+                                "Checking Access"
                             } else {
                                 "Loading Wallet"
                             }
@@ -125,6 +166,8 @@ pub fn CashuWallet() -> Element {
                             class: "text-sm text-muted-foreground",
                             if !client_initialized {
                                 "Connecting to the Nostr network..."
+                            } else if terms_status.is_none() {
+                                "Verifying wallet terms acceptance..."
                             } else {
                                 "Fetching your Cashu wallet..."
                             }
