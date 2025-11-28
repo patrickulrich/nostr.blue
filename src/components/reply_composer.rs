@@ -146,15 +146,15 @@ pub fn ReplyComposer(
 
     // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
-        insert_with_spacing(gif_url.clone());
         log::info!("GIF URL inserted: {}", gif_url);
+        insert_with_spacing(gif_url);
     };
 
     // Handler when poll is created
     let handle_poll_created = move |nevent_ref: String| {
-        insert_with_spacing(nevent_ref.clone());
-        show_poll_modal.set(false);
         log::info!("Poll reference inserted: {}", nevent_ref);
+        insert_with_spacing(nevent_ref);
+        show_poll_modal.set(false);
     };
 
     let handle_publish = move |_| {

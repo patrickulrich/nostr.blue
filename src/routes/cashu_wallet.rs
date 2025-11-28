@@ -94,7 +94,7 @@ pub fn CashuWallet() -> Element {
 
                     // Bouncing N animation
                     div {
-                        class: "mb-6 animate-bounce",
+                        class: "mb-6 motion-safe:animate-bounce",
                         div {
                             class: "w-20 h-20 flex items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg",
                             span {
@@ -128,17 +128,12 @@ pub fn CashuWallet() -> Element {
                     // Animated dots (wallet-pulse animation defined in tailwind.css)
                     div {
                         class: "flex gap-2 mt-6",
-                        div {
-                            class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: wallet-pulse 1.5s ease-in-out 0s infinite;",
-                        }
-                        div {
-                            class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: wallet-pulse 1.5s ease-in-out 0.2s infinite;",
-                        }
-                        div {
-                            class: "w-3 h-3 rounded-full bg-purple-500",
-                            style: "animation: wallet-pulse 1.5s ease-in-out 0.4s infinite;",
+                        for (i, delay) in [0.0, 0.2, 0.4].iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                class: "w-3 h-3 rounded-full bg-purple-500",
+                                style: "animation: wallet-pulse 1.5s ease-in-out {delay}s infinite;",
+                            }
                         }
                     }
                 }

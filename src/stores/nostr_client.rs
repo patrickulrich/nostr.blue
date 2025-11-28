@@ -1562,41 +1562,22 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
     let client = NOSTR_CLIENT.read();
     let client = client.as_ref().ok_or("Client not initialized")?;
 
-    let signer_type = get_signer().ok_or("No signer available")?;
+    // Verify signer is available
+    if !*HAS_SIGNER.read() {
+        return Err("No signer available".to_string());
+    }
 
     log::info!("Publishing profile metadata");
 
-    // Build and sign event based on signer type
-    let event = match signer_type {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            EventBuilder::metadata(&metadata)
-                .sign(&keys)
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(signer) => {
-            EventBuilder::metadata(&metadata)
-                .sign(signer.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            EventBuilder::metadata(&metadata)
-                .sign(nostr_connect.as_ref())
-                .await
-                .map_err(|e| format!("Failed to sign metadata event: {}", e))?
-        }
-    };
-
-    // Publish to relays
-    client.send_event(&event).await
+    // Build event and publish using gossip routing (client handles signing)
+    let builder = EventBuilder::metadata(&metadata);
+    let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish metadata: {}", e))?;
 
     log::info!("Metadata published successfully");
 
     // Return event ID
-    Ok(event.id.to_hex())
+    Ok(output.id().to_hex())
 }
 
 /// Update just the profile picture

@@ -82,3 +82,15 @@
     transform: scale(1.2);
   }
 }
+
+/* Reduced motion: remove scale transforms, keep opacity animation */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes wallet-pulse {
+    0%, 100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
