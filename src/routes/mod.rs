@@ -67,7 +67,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch};
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch, MusicTrackNew, MusicPlaylistNew, MusicPlaylistDetail};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
@@ -148,6 +148,15 @@ pub enum Route {
 
         #[route("/music/search?:q")]
         MusicSearch { q: String },
+
+        #[route("/music/track/new")]
+        MusicTrackNew {},
+
+        #[route("/music/playlist/new")]
+        MusicPlaylistNew {},
+
+        #[route("/music/playlist/:naddr")]
+        MusicPlaylistDetail { naddr: String },
 
         #[route("/notifications")]
         Notifications {},
@@ -252,10 +261,11 @@ fn Layout() -> Element {
     let current_route = use_route::<Route>();
     let navigator = navigator();
 
-    // Check if we're on the DMs, Videos, or Wallet pages (hide right sidebar)
+    // Check if we're on the DMs, Videos, Wallet, or Music pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
+    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -964,7 +974,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_wallet_page || is_creation_page {
+                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -995,7 +1005,7 @@ fn Layout() -> Element {
                 }
 
                 // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, and Wallet pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_creation_page {
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1053,7 +1063,7 @@ fn Layout() -> Element {
             crate::components::PersistentMusicPlayer {}
 
             // Global zap dialog (rendered at layout level to escape music player's stacking context)
-            crate::components::WavlakeZapDialog {}
+            crate::components::MusicZapDialog {}
         }
     }
 }
@@ -1082,7 +1092,10 @@ fn NavLink(
         (Route::MusicHome {}, Route::MusicLeaderboard {}) |
         (Route::MusicHome {}, Route::MusicSearch { .. }) |
         (Route::MusicHome {}, Route::MusicArtist { .. }) |
-        (Route::MusicHome {}, Route::MusicAlbum { .. }) => true,
+        (Route::MusicHome {}, Route::MusicAlbum { .. }) |
+        (Route::MusicHome {}, Route::MusicTrackNew {}) |
+        (Route::MusicHome {}, Route::MusicPlaylistNew {}) |
+        (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,

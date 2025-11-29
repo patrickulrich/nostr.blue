@@ -1,9 +1,30 @@
 use dioxus::prelude::*;
 use crate::components::icons::*;
+use crate::components::UnifiedTrackCard;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
+use crate::stores::music_player::MusicTrack;
+use crate::stores::{nostr_client, nostr_music, profiles};
+
+/// Check if the ID is a 64-char hex string (nostr pubkey)
+fn is_nostr_pubkey(id: &str) -> bool {
+    id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
 
 #[component]
 pub fn MusicArtist(artist_id: String) -> Element {
+    // Detect source based on ID format
+    let is_nostr_artist = is_nostr_pubkey(&artist_id);
+
+    if is_nostr_artist {
+        rsx! { NostrArtistSection { pubkey: artist_id } }
+    } else {
+        rsx! { WavlakeArtistSection { artist_id: artist_id } }
+    }
+}
+
+/// Section for displaying Wavlake artists (existing behavior)
+#[component]
+fn WavlakeArtistSection(artist_id: String) -> Element {
     let mut artist_state = use_signal(|| None::<WavlakeArtist>);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
@@ -73,8 +94,8 @@ pub fn MusicArtist(artist_id: String) -> Element {
                     // Artist Profile
                     div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                         div { class: "flex items-start gap-6",
-                            // Artist image
-                            div { class: "w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0",
+                            // Artist image with Wavlake badge
+                            div { class: "relative w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0",
                                 if let Some(art_url) = &artist.artist_art_url {
                                     if !art_url.is_empty() {
                                         img {
@@ -87,6 +108,12 @@ pub fn MusicArtist(artist_id: String) -> Element {
                                     }
                                 } else {
                                     UserIcon { class: "w-16 h-16 text-gray-400" }
+                                }
+                                // Wavlake badge
+                                div {
+                                    class: "absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-orange-500/20 text-orange-400",
+                                    title: "Wavlake Artist",
+                                    "W"
                                 }
                             }
 
@@ -197,6 +224,198 @@ pub fn MusicArtist(artist_id: String) -> Element {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Section for displaying nostr music artists
+#[component]
+fn NostrArtistSection(pubkey: String) -> Element {
+    let mut profile = use_signal(|| None::<profiles::Profile>);
+    let mut tracks = use_signal(|| Vec::<nostr_music::NostrTrack>::new());
+    let mut loading = use_signal(|| true);
+    let mut error_msg = use_signal(|| None::<String>);
+
+    let pubkey_signal = use_signal(|| pubkey.clone());
+
+    // Fetch artist profile and tracks (re-runs when client becomes available)
+    use_effect(move || {
+        let pk = pubkey_signal.read().clone();
+
+        // Read the NOSTR_CLIENT signal to create a reactive dependency
+        // This will re-run the effect when the client becomes available
+        let client_ready = nostr_client::NOSTR_CLIENT.read().is_some();
+
+        // Skip fetch if client not ready yet (will re-run when it is)
+        if !client_ready {
+            loading.set(true);
+            return;
+        }
+
+        loading.set(true);
+        error_msg.set(None);
+
+        spawn(async move {
+            // Fetch profile and tracks in parallel
+            let (profile_result, tracks_result) = futures::join!(
+                profiles::fetch_profile(pk.clone()),
+                nostr_music::fetch_artist_tracks(&pk, 100)
+            );
+
+            match profile_result {
+                Ok(p) => profile.set(Some(p)),
+                Err(e) => log::warn!("Failed to fetch artist profile: {}", e),
+            }
+
+            match tracks_result {
+                Ok(t) => {
+                    tracks.set(t);
+                    loading.set(false);
+                }
+                Err(e) => {
+                    error_msg.set(Some(format!("Failed to load artist tracks: {}", e)));
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Get display info from profile
+    let artist_name = profile.read().as_ref()
+        .map(|p| p.get_display_name())
+        .unwrap_or_else(|| format!("{}...", &pubkey[..8]));
+    let artist_image = profile.read().as_ref()
+        .and_then(|p| p.picture.clone())
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
+    let artist_bio = profile.read().as_ref()
+        .and_then(|p| p.about.clone());
+
+    // Convert tracks to MusicTrack for UnifiedTrackCard
+    let music_tracks: Vec<MusicTrack> = tracks.read().iter()
+        .map(|t| t.clone().into())
+        .collect();
+
+    rsx! {
+        div { class: "container mx-auto px-4 py-8",
+            // Back button
+            a {
+                href: "/music",
+                class: "inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition-colors",
+                ArrowLeftIcon { class: "w-4 h-4" }
+                "Back to Music Discovery"
+            }
+
+            // Loading state
+            if *loading.read() {
+                div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
+                    div { class: "flex items-center gap-6",
+                        div { class: "w-32 h-32 bg-gray-700 rounded-full animate-pulse" }
+                        div { class: "flex-1 space-y-4",
+                            div { class: "h-8 bg-gray-700 rounded w-64 animate-pulse" }
+                            div { class: "h-4 bg-gray-700 rounded w-48 animate-pulse" }
+                            div { class: "h-16 bg-gray-700 rounded w-full animate-pulse" }
+                        }
+                    }
+                }
+            }
+
+            // Error state
+            if let Some(err) = error_msg() {
+                div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-8 text-center",
+                    UserIcon { class: "w-12 h-12 text-gray-400 mx-auto mb-4" }
+                    h2 { class: "text-2xl font-bold mb-2", "Artist Not Found" }
+                    p { class: "text-gray-400", "{err}" }
+                }
+            }
+
+            // Artist content (show when not loading and no error)
+            if !*loading.read() && error_msg().is_none() {
+                div { class: "space-y-6",
+                    // Artist Profile
+                    div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
+                        div { class: "flex items-start gap-6",
+                            // Artist image with Nostr badge
+                            div { class: "relative flex-shrink-0",
+                                img {
+                                    src: "{artist_image}",
+                                    alt: "{artist_name}",
+                                    class: "w-32 h-32 rounded-full object-cover"
+                                }
+                                // Nostr badge
+                                div {
+                                    class: "absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-purple-500/20 text-purple-400",
+                                    title: "Nostr Artist",
+                                    "N"
+                                }
+                            }
+
+                            div { class: "flex-1 space-y-4",
+                                // Name
+                                div {
+                                    h1 { class: "text-3xl font-bold text-white", "{artist_name}" }
+                                }
+
+                                // Stats and actions
+                                div { class: "flex items-center gap-4 flex-wrap",
+                                    span { class: "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gray-700 text-sm text-gray-300",
+                                        MusicIcon { class: "w-3 h-3" }
+                                        "{tracks.read().len()} "
+                                        if tracks.read().len() == 1 { "Track" } else { "Tracks" }
+                                    }
+
+                                    // Link to social profile
+                                    a {
+                                        href: "/profile/{pubkey}",
+                                        class: "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-900/30 text-sm text-purple-300 hover:bg-purple-900/50 transition",
+                                        UserIcon { class: "w-3 h-3" }
+                                        "View Social Profile"
+                                    }
+                                }
+
+                                // Bio
+                                if let Some(ref bio) = artist_bio {
+                                    if !bio.is_empty() {
+                                        p { class: "text-gray-300 leading-relaxed", "{bio}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Tracks
+                    div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
+                        div { class: "flex items-center gap-2 mb-4",
+                            MusicIcon { class: "w-5 h-5 text-purple-400" }
+                            h2 { class: "text-xl font-bold text-white",
+                                "Tracks ({tracks.read().len()})"
+                            }
+                        }
+
+                        if tracks.read().is_empty() {
+                            div { class: "text-center py-12",
+                                MusicIcon { class: "w-16 h-16 text-gray-400 mx-auto mb-4" }
+                                h3 { class: "text-lg font-semibold mb-2 text-white", "No Tracks Found" }
+                                p { class: "text-gray-400",
+                                    "This artist hasn't published any music tracks on Nostr yet."
+                                }
+                            }
+                        } else {
+                            div { class: "space-y-1",
+                                for track in music_tracks.iter() {
+                                    UnifiedTrackCard {
+                                        key: "{track.id}",
+                                        track: track.clone(),
+                                        show_album: false,
+                                        show_sats: true,
+                                        show_source_badge: false,
+                                        playlist: Some(music_tracks.clone())
                                     }
                                 }
                             }
