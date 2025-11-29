@@ -115,7 +115,6 @@ pub fn CashuMintDiscoveryModal(
                     if *is_loading.read() {
                         div {
                             class: "flex flex-col items-center justify-center py-12",
-                            div { class: "animate-spin text-3xl mb-4", "!" }
                             p { class: "text-muted-foreground", "Discovering mints via NIP-87..." }
                         }
                     } else if discovered_mints.read().is_empty() {

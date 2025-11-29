@@ -349,28 +349,18 @@ pub fn CashuTransferModal(
                     if *is_transferring.read() {
                         div {
                             class: "bg-muted rounded-lg p-4",
-                            div {
-                                class: "flex items-center gap-3",
-                                div {
-                                    class: "animate-spin text-2xl",
-                                    "⟳"
-                                }
-                                div {
-                                    class: "flex-1",
-                                    p {
-                                        class: "text-sm font-medium",
-                                        match &progress {
-                                            Some(TransferProgress::CreatingMintQuote) => "Creating invoice at target mint...",
-                                            Some(TransferProgress::CreatingMeltQuote) => "Creating payment quote at source...",
-                                            Some(TransferProgress::QuotesReady { .. }) => "Quotes ready, preparing transfer...",
-                                            Some(TransferProgress::Melting) => "Paying Lightning invoice...",
-                                            Some(TransferProgress::WaitingForPayment) => "Waiting for payment confirmation...",
-                                            Some(TransferProgress::Minting) => "Minting tokens at target...",
-                                            Some(TransferProgress::Completed { .. }) => "Transfer complete!",
-                                            Some(TransferProgress::Failed { .. }) => "Transfer failed",
-                                            None => "Processing...",
-                                        }
-                                    }
+                            p {
+                                class: "text-sm font-medium text-center",
+                                match &progress {
+                                    Some(TransferProgress::CreatingMintQuote) => "Creating invoice at target mint...",
+                                    Some(TransferProgress::CreatingMeltQuote) => "Creating payment quote at source...",
+                                    Some(TransferProgress::QuotesReady { .. }) => "Quotes ready, preparing transfer...",
+                                    Some(TransferProgress::Melting) => "Paying Lightning invoice...",
+                                    Some(TransferProgress::WaitingForPayment) => "Waiting for payment confirmation...",
+                                    Some(TransferProgress::Minting) => "Minting tokens at target...",
+                                    Some(TransferProgress::Completed { .. }) => "Transfer complete!",
+                                    Some(TransferProgress::Failed { .. }) => "Transfer failed",
+                                    None => "Processing...",
                                 }
                             }
                         }

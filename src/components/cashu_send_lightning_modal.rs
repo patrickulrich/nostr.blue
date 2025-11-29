@@ -424,14 +424,11 @@ pub fn CashuSendLightningModal(
                         div {
                             class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4",
                             div {
-                                class: "flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300",
-                                div { class: "animate-spin text-lg", "lightning" }
-                                span {
-                                    if *payment_mode.read() == PaymentMode::Mpp {
-                                        "Creating MPP quotes..."
-                                    } else {
-                                        "Creating quote..."
-                                    }
+                                class: "flex items-center justify-center text-sm text-blue-700 dark:text-blue-300",
+                                if *payment_mode.read() == PaymentMode::Mpp {
+                                    "Creating MPP quotes..."
+                                } else {
+                                    "Creating quote..."
                                 }
                             }
                         }
@@ -448,9 +445,8 @@ pub fn CashuSendLightningModal(
                                 ProgressStep { label: "Waiting for confirmation", is_active: matches!(*melt_progress, Some(MeltProgress::WaitingForConfirmation)), is_complete: matches!(*melt_progress, Some(MeltProgress::Completed { .. })) }
                             }
                             div {
-                                class: "flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300 mt-4",
-                                div { class: "animate-spin text-lg", "lightning" }
-                                span { "Processing..." }
+                                class: "flex items-center justify-center text-sm text-blue-700 dark:text-blue-300 mt-4",
+                                "Processing..."
                             }
                         }
                     }

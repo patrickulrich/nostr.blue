@@ -333,9 +333,6 @@ pub fn CashuPayRequestModal(
                     PayState::Paying => rsx! {
                         div {
                             class: "text-center py-8",
-                            div {
-                                class: "w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"
-                            }
                             p {
                                 class: "text-muted-foreground",
                                 "Sending payment..."

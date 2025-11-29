@@ -453,9 +453,8 @@ pub fn CashuReceiveLightningModal(
                             // Waiting message
                             if *is_polling.read() {
                                 div {
-                                    class: "flex items-center justify-center gap-2 text-sm text-muted-foreground",
-                                    div { class: "animate-spin", "⚡" }
-                                    span { "Waiting for payment..." }
+                                    class: "flex items-center justify-center text-sm text-muted-foreground",
+                                    "Waiting for payment..."
                                 }
                             }
                         }
