@@ -18,7 +18,8 @@ pub fn CashuPayRequestModal(
     let mut custom_amount = use_signal(|| String::new());
     let mut pay_state = use_signal(|| PayState::Input);
 
-    let balance = *cashu_wallet::WALLET_BALANCE.read();
+    // Use memo for reactive balance updates while modal is open
+    let balance = use_memo(move || *cashu_wallet::WALLET_BALANCE.read());
 
     // Handle paste from clipboard
     let handle_paste = move |_| {
@@ -162,7 +163,7 @@ pub fn CashuPayRequestModal(
                             // Balance info
                             p {
                                 class: "text-xs text-muted-foreground mt-3 text-center",
-                                "Your balance: {balance} sats"
+                                "Your balance: {balance()} sats"
                             }
                         }
                     },
@@ -290,7 +291,8 @@ pub fn CashuPayRequestModal(
                                     } else {
                                         custom_amount.read().parse::<u64>().unwrap_or(0)
                                     };
-                                    let insufficient_balance = pay_amount > balance;
+                                    let current_balance = balance();
+                                    let insufficient_balance = pay_amount > current_balance;
                                     let pay_disabled = pay_amount == 0 || insufficient_balance;
 
                                     rsx! {
@@ -298,7 +300,7 @@ pub fn CashuPayRequestModal(
                                         if insufficient_balance {
                                             div {
                                                 class: "mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-600 dark:text-yellow-400 text-sm",
-                                                "Insufficient balance. You need {pay_amount} sats but only have {balance} sats."
+                                                "Insufficient balance. You need {pay_amount} sats but only have {current_balance} sats."
                                             }
                                         }
 

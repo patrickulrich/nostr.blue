@@ -34,7 +34,7 @@ struct TokenEventData {
 /// Uses ExtendedCashuProof instead of CashuProof to preserve witness/DLEQ fields
 /// Includes unit field per NIP-60 spec
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ExtendedTokenEvent {
+pub(crate) struct ExtendedTokenEvent {
     pub mint: String,
     #[serde(default = "default_unit")]
     pub unit: String,
@@ -71,7 +71,7 @@ pub struct ProofData {
 /// Preserves witness and DLEQ fields for P2PK verification while maintaining NIP-60 compatibility
 /// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ExtendedCashuProof {
+pub(crate) struct ExtendedCashuProof {
     pub id: String,
     pub amount: u64,
     pub secret: String,
@@ -426,7 +426,7 @@ async fn queue_signed_event_for_retry(event: nostr_sdk::Event, event_type: Pendi
 /// Queue an EventBuilder for retry when initial publication fails
 ///
 /// Signs the event using the current signer and queues for later retry.
-async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
+pub(crate) async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
     let signer = match crate::stores::signer::get_signer() {
         Some(s) => s,
         None => {
@@ -1473,7 +1473,7 @@ fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, String>
 }
 
 /// Convert CDK Proof to ProofData (our custom type)
-fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
+pub(crate) fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
     // Serialize witness if present
     let witness = proof.witness.as_ref()
         .and_then(|w| serde_json::to_string(w).ok());
@@ -4330,7 +4330,7 @@ pub async fn discover_mints() -> Result<Vec<DiscoveredMint>, String> {
 /// - `invoice`: Lightning invoice (for lightning operations) - for reference/debugging
 ///
 /// Other NIP-60 clients will ignore these extension fields per standard JSON parsing behavior.
-async fn create_history_event_with_type(
+pub(crate) async fn create_history_event_with_type(
     direction: &str,
     amount: u64,
     created_tokens: Vec<String>,
@@ -5536,6 +5536,11 @@ pub async fn wait_for_nostr_payment(
     let mut notifications = client.notifications();
 
     loop {
+        // Check if cancelled (request removed from pending map by cancel_payment_request)
+        if !PENDING_PAYMENT_REQUESTS.read().contains_key(&request_id) {
+            return Err("Payment request cancelled".to_string());
+        }
+
         // Check timeout
         let elapsed = chrono::Utc::now().timestamp() as u64 - start;
         if elapsed > timeout_secs {
@@ -5617,6 +5622,11 @@ pub async fn wait_for_nostr_payment(
                 }
             }
         }
+    }
+
+    // Check if we exited due to cancellation (request already removed)
+    if !PENDING_PAYMENT_REQUESTS.read().contains_key(&request_id) {
+        return Err("Payment request cancelled".to_string());
     }
 
     *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Error {

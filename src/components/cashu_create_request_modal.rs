@@ -13,6 +13,7 @@ pub fn CashuCreateRequestModal(
     let mut is_creating = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut copied = use_signal(|| false);
+    let mut copy_error = use_signal(|| Option::<String>::None);
 
     let progress = cashu_wallet::PAYMENT_REQUEST_PROGRESS.read();
     let balance = *cashu_wallet::WALLET_BALANCE.read();
@@ -62,7 +63,8 @@ pub fn CashuCreateRequestModal(
                                     log::info!("Received payment of {} sats", amount);
                                 }
                                 Err(e) => {
-                                    if !e.contains("cancelled") {
+                                    // Don't log error for intentional cancellations (user closed modal)
+                                    if e != "Payment request cancelled" {
                                         log::error!("Payment wait error: {}", e);
                                     }
                                 }
@@ -84,17 +86,35 @@ pub fn CashuCreateRequestModal(
     let handle_copy = move |_| {
         if let Some(req) = request_string.read().as_ref() {
             let req_clone = req.clone();
+            // Clear any previous error when attempting copy
+            copy_error.set(None);
             spawn(async move {
                 if let Some(window) = web_sys::window() {
                     let clipboard = window.navigator().clipboard();
-                    let _ = wasm_bindgen_futures::JsFuture::from(
+                    match wasm_bindgen_futures::JsFuture::from(
                         clipboard.write_text(&req_clone)
-                    ).await;
-                    copied.set(true);
-
-                    // Reset copied state after 2 seconds
-                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                    copied.set(false);
+                    ).await {
+                        Ok(_) => {
+                            copied.set(true);
+                            // Reset copied state after 2 seconds
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            copied.set(false);
+                        }
+                        Err(e) => {
+                            let err_msg = format!("{:?}", e);
+                            log::error!("Failed to copy to clipboard: {}", err_msg);
+                            copy_error.set(Some("Copy failed".to_string()));
+                            // Clear error after 3 seconds
+                            gloo_timers::future::TimeoutFuture::new(3000).await;
+                            copy_error.set(None);
+                        }
+                    }
+                } else {
+                    log::error!("Failed to copy: window not available");
+                    copy_error.set(Some("Copy failed".to_string()));
+                    // Clear error after 3 seconds
+                    gloo_timers::future::TimeoutFuture::new(3000).await;
+                    copy_error.set(None);
                 }
             });
         }
@@ -187,9 +207,15 @@ pub fn CashuCreateRequestModal(
 
                         // Copy button
                         button {
-                            class: "w-full py-3 bg-accent hover:bg-accent/80 rounded-lg font-semibold transition flex items-center justify-center gap-2 mb-4",
+                            class: if copy_error.read().is_some() {
+                                "w-full py-3 bg-red-500/20 border border-red-500/50 text-red-500 rounded-lg font-semibold transition flex items-center justify-center gap-2 mb-4"
+                            } else {
+                                "w-full py-3 bg-accent hover:bg-accent/80 rounded-lg font-semibold transition flex items-center justify-center gap-2 mb-4"
+                            },
                             onclick: handle_copy,
-                            if *copied.read() {
+                            if let Some(err) = copy_error.read().as_ref() {
+                                span { "{err}" }
+                            } else if *copied.read() {
                                 span { "Copied!" }
                             } else {
                                 span { "Copy to Clipboard" }
