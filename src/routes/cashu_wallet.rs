@@ -6,27 +6,70 @@ pub fn CashuWallet() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let wallet_status = cashu_wallet::WALLET_STATUS.read();
     let wallet_state = cashu_wallet::WALLET_STATE.read();
+    let terms_status = cashu_wallet::TERMS_ACCEPTED.read();
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
     let mut show_lightning_deposit_modal = use_signal(|| false);
     let mut show_lightning_withdraw_modal = use_signal(|| false);
+    let mut show_optimize_modal = use_signal(|| false);
+    let mut show_add_mint_modal = use_signal(|| false);
+    let mut show_discover_modal = use_signal(|| false);
+    let mut show_transfer_modal = use_signal(|| false);
+    let mut show_create_request_modal = use_signal(|| false);
+    let mut show_pay_request_modal = use_signal(|| false);
 
-    // Initialize wallet on mount
+    // Track if we've already started the init sequence to prevent duplicate spawns
+    let mut init_started = use_signal(|| false);
+
+    // Check terms and initialize wallet on mount
     use_effect(move || {
+        // Early exit if init already started
+        if *init_started.peek() {
+            return;
+        }
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !auth_store::is_authenticated() || !client_initialized {
             return;
         }
 
-        // Only initialize if not already loaded
-        if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+        // Check terms status first
+        let terms = *cashu_wallet::TERMS_ACCEPTED.read();
+
+        if terms.is_none() {
+            // Mark init as started to prevent duplicate spawns
+            init_started.set(true);
+            // Terms not yet checked - check them first
             spawn(async move {
-                if let Err(e) = cashu_wallet::init_wallet().await {
-                    log::error!("Failed to initialize wallet: {}", e);
+                match cashu_wallet::check_terms_accepted().await {
+                    Ok(accepted) => {
+                        if accepted {
+                            // Terms accepted, proceed with wallet init
+                            if let Err(e) = cashu_wallet::init_wallet().await {
+                                log::error!("Failed to initialize wallet: {}", e);
+                            }
+                        }
+                        // If not accepted, modal will show via render logic
+                    }
+                    Err(e) => log::error!("Failed to check terms: {}", e),
                 }
             });
+            return;
+        }
+
+        // Terms already checked - if accepted, init wallet
+        if terms == Some(true) {
+            if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+                // Mark init as started to prevent duplicate spawns
+                init_started.set(true);
+                spawn(async move {
+                    if let Err(e) = cashu_wallet::init_wallet().await {
+                        log::error!("Failed to initialize wallet: {}", e);
+                    }
+                });
+            }
         }
     });
 
@@ -86,7 +129,19 @@ pub fn CashuWallet() -> Element {
                         "Connect your account to create or access your Cashu wallet"
                     }
                 }
-            } else if !client_initialized || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+            } else if *terms_status == Some(false) {
+                // Terms not accepted - show terms modal
+                crate::components::CashuTermsModal {
+                    on_accept: move |_| {
+                        // Terms accepted, trigger wallet init
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::init_wallet().await {
+                                log::error!("Failed to initialize wallet: {}", e);
+                            }
+                        });
+                    }
+                }
+            } else if !client_initialized || terms_status.is_none() || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
                 // Client initializing or wallet loading - show bouncing N logo animation
 
                 div {
@@ -111,6 +166,8 @@ pub fn CashuWallet() -> Element {
                             class: "text-xl font-semibold text-foreground mb-2",
                             if !client_initialized {
                                 "Client Initializing"
+                            } else if terms_status.is_none() {
+                                "Checking Access"
                             } else {
                                 "Loading Wallet"
                             }
@@ -119,6 +176,8 @@ pub fn CashuWallet() -> Element {
                             class: "text-sm text-muted-foreground",
                             if !client_initialized {
                                 "Connecting to the Nostr network..."
+                            } else if terms_status.is_none() {
+                                "Verifying wallet terms acceptance..."
                             } else {
                                 "Fetching your Cashu wallet..."
                             }
@@ -209,14 +268,36 @@ pub fn CashuWallet() -> Element {
                         on_receive: move |_| show_receive_modal.set(true),
                         on_lightning_deposit: move |_| show_lightning_deposit_modal.set(true),
                         on_lightning_withdraw: move |_| show_lightning_withdraw_modal.set(true),
+                        on_optimize: move |_| show_optimize_modal.set(true),
+                        on_transfer: move |_| show_transfer_modal.set(true),
+                        on_create_request: move |_| show_create_request_modal.set(true),
+                        on_pay_request: move |_| show_pay_request_modal.set(true),
                     }
 
                     // Tokens section
                     div {
                         class: "mt-6",
-                        h3 {
-                            class: "text-lg font-bold mb-3",
-                            "Tokens by Mint"
+                        div {
+                            class: "flex items-center justify-between mb-3",
+                            h3 {
+                                class: "text-lg font-bold",
+                                "Tokens by Mint"
+                            }
+                            div {
+                                class: "flex items-center gap-2",
+                                button {
+                                    class: "px-3 py-1 text-sm bg-purple-500/20 hover:bg-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg transition flex items-center gap-1",
+                                    onclick: move |_| show_discover_modal.set(true),
+                                    span { "!" }
+                                    "Discover"
+                                }
+                                button {
+                                    class: "px-3 py-1 text-sm bg-accent hover:bg-accent/80 rounded-lg transition flex items-center gap-1",
+                                    onclick: move |_| show_add_mint_modal.set(true),
+                                    span { "+" }
+                                    "Add Mint"
+                                }
+                            }
                         }
                         crate::components::TokenList {}
                     }
@@ -258,6 +339,64 @@ pub fn CashuWallet() -> Element {
             if *show_lightning_withdraw_modal.read() {
                 crate::components::CashuSendLightningModal {
                     on_close: move |_| show_lightning_withdraw_modal.set(false),
+                }
+            }
+
+            // Optimize modal
+            if *show_optimize_modal.read() {
+                crate::components::CashuOptimizeModal {
+                    on_close: move |_| show_optimize_modal.set(false),
+                }
+            }
+
+            // Add mint modal
+            if *show_add_mint_modal.read() {
+                crate::components::CashuAddMintModal {
+                    on_close: move |_| show_add_mint_modal.set(false),
+                    on_mint_added: move |_| {
+                        // Refresh wallet to pick up the new mint
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                                log::error!("Failed to refresh after adding mint: {}", e);
+                            }
+                        });
+                    },
+                }
+            }
+
+            // Discover mints modal (NIP-87)
+            if *show_discover_modal.read() {
+                crate::components::CashuMintDiscoveryModal {
+                    on_close: move |_| show_discover_modal.set(false),
+                    on_mint_selected: move |_| {
+                        // Refresh wallet to pick up the new mint
+                        spawn(async move {
+                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                                log::error!("Failed to refresh after adding mint: {}", e);
+                            }
+                        });
+                    },
+                }
+            }
+
+            // Transfer between mints modal
+            if *show_transfer_modal.read() {
+                crate::components::CashuTransferModal {
+                    on_close: move |_| show_transfer_modal.set(false),
+                }
+            }
+
+            // Create payment request modal (NUT-18)
+            if *show_create_request_modal.read() {
+                crate::components::CashuCreateRequestModal {
+                    on_close: move |_| show_create_request_modal.set(false),
+                }
+            }
+
+            // Pay payment request modal (NUT-18)
+            if *show_pay_request_modal.read() {
+                crate::components::CashuPayRequestModal {
+                    on_close: move |_| show_pay_request_modal.set(false),
                 }
             }
         }

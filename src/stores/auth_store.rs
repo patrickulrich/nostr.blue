@@ -496,6 +496,9 @@ pub async fn logout() {
     // Stop real-time notification subscription
     crate::stores::notifications::stop_realtime_subscription().await;
 
+    // Clear Cashu wallet state
+    crate::stores::cashu_cdk_bridge::clear_multi_wallet();
+
     // Unset signer from client
     let _ = nostr_client::set_read_only().await;
 
