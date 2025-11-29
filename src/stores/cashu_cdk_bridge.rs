@@ -41,8 +41,10 @@ pub async fn init_multi_wallet(
     localstore: Arc<IndexedDbDatabase>,
     seed: [u8; 64],
 ) -> Result<Arc<MultiMintWallet>, String> {
-    // Clear any existing wallet state first to prevent stale UI data
-    clear_multi_wallet();
+    // Clear CDK-specific state (but NOT WALLET_STATUS - that would trigger init loop)
+    // The clear_multi_wallet() function is for logout; here we only reset CDK internals
+    *MULTI_WALLET.write() = None;
+    *WALLET_BALANCES.write() = WalletBalances::default();
 
     log::info!("Initializing MultiMintWallet");
 

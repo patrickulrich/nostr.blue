@@ -662,6 +662,15 @@ pub async fn accept_terms() -> Result<(), String> {
 
 /// Initialize wallet by fetching from relays
 pub async fn init_wallet() -> Result<(), String> {
+    // Guard against concurrent initialization - skip if already loading or ready
+    {
+        let status = WALLET_STATUS.read();
+        if matches!(*status, WalletStatus::Loading | WalletStatus::Ready) {
+            log::debug!("Wallet init skipped - already {:?}", *status);
+            return Ok(());
+        }
+    }
+
     *WALLET_STATUS.write() = WalletStatus::Loading;
 
     let pubkey_str = auth_store::get_pubkey()

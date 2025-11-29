@@ -19,8 +19,16 @@ pub fn CashuWallet() -> Element {
     let mut show_create_request_modal = use_signal(|| false);
     let mut show_pay_request_modal = use_signal(|| false);
 
+    // Track if we've already started the init sequence to prevent duplicate spawns
+    let mut init_started = use_signal(|| false);
+
     // Check terms and initialize wallet on mount
     use_effect(move || {
+        // Early exit if init already started
+        if *init_started.peek() {
+            return;
+        }
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !auth_store::is_authenticated() || !client_initialized {
@@ -31,16 +39,16 @@ pub fn CashuWallet() -> Element {
         let terms = *cashu_wallet::TERMS_ACCEPTED.read();
 
         if terms.is_none() {
+            // Mark init as started to prevent duplicate spawns
+            init_started.set(true);
             // Terms not yet checked - check them first
             spawn(async move {
                 match cashu_wallet::check_terms_accepted().await {
                     Ok(accepted) => {
                         if accepted {
                             // Terms accepted, proceed with wallet init
-                            if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
-                                if let Err(e) = cashu_wallet::init_wallet().await {
-                                    log::error!("Failed to initialize wallet: {}", e);
-                                }
+                            if let Err(e) = cashu_wallet::init_wallet().await {
+                                log::error!("Failed to initialize wallet: {}", e);
                             }
                         }
                         // If not accepted, modal will show via render logic
@@ -54,6 +62,8 @@ pub fn CashuWallet() -> Element {
         // Terms already checked - if accepted, init wallet
         if terms == Some(true) {
             if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+                // Mark init as started to prevent duplicate spawns
+                init_started.set(true);
                 spawn(async move {
                     if let Err(e) = cashu_wallet::init_wallet().await {
                         log::error!("Failed to initialize wallet: {}", e);
