@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.6.3-blue)
+![Version](https://img.shields.io/badge/version-0.6.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -38,7 +38,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
 - ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
-- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, persistent IndexedDB storage, atomic keyset counter management, and automatic cleanup of spent proofs with browser extension signer compatibility
+- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, WebSocket subscriptions (NUT-17), payment requests (NUT-18), P2PK locking (NUT-11), persistent IndexedDB storage, and automatic cleanup of spent proofs
 - ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
 
 ### User Experience
@@ -46,6 +46,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Responsive Design** - Mobile-first design with desktop optimization
 - ✅ **Infinite Scroll** - Smooth pagination across all feeds
 - ✅ **Rich Content** - Embedded images, videos, and link previews with proper parsing
+- ✅ **Collapsible Notes** - Long notes collapse with "Show More" button for cleaner feeds
 - ✅ **NIP-19 Support** - Full support for npub, note, nprofile, nevent identifiers
 - ✅ **Browser Extension** - NIP-07 signing with Alby, nos2x, etc.
 - ✅ **Remote Signer (NIP-46)** - Secure signing with Amber, nsecBunker via bunker:// URIs
@@ -53,8 +54,8 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Real-Time Updates** - Live feed and notification updates
 - ✅ **Offline Support** - Browse cached content without internet
 - ✅ **Instant Loading** - Sub-100ms load times with IndexedDB cache
-- ✅ **Blossom Media Storage** - Decentralized image uploads with quality control
-- ✅ **Enhanced Emoji Picker** - 600+ emojis across 11 categories with NIP-51 custom emoji support
+- ✅ **Blossom Media Storage (NIP-B7)** - Decentralized image uploads with quality control and multi-server support
+- ✅ **Enhanced Emoji Picker** - 1500+ emojis across all categories with NIP-51 custom emoji support
 - ✅ **GIF Search (NIP-50)** - Search and insert GIFs directly from the post composer using relay search
 - ✅ **Username Autocomplete** - @ mention autocomplete in all composers with relay search
 - ✅ **Video Sharing Modal** - Share videos via link, Nostr post, or encrypted DM

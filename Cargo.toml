@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.6.3"
+version = "0.6.4"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
