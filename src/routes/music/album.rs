@@ -36,20 +36,8 @@ pub fn MusicAlbum(album_id: String) -> Element {
     });
 
     // Convert tracks to MusicTrack format
-    let music_tracks = album_state().map(|album| {
-        album.tracks.iter().map(|track| MusicTrack {
-            id: track.id.clone(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: Some(track.album_title.clone()),
-            media_url: track.media_url.clone(),
-            album_art_url: Some(track.album_art_url.clone()),
-            artist_art_url: Some(track.artist_art_url.clone()),
-            duration: Some(track.duration),
-            artist_id: Some(track.artist_id.clone()),
-            album_id: Some(track.album_id.clone()),
-            artist_npub: track.artist_npub.clone(),
-        }).collect::<Vec<_>>()
+    let music_tracks: Option<Vec<MusicTrack>> = album_state().map(|album| {
+        album.tracks.iter().map(|track| track.clone().into()).collect()
     });
 
     let play_track = move |track: MusicTrack, playlist: Vec<MusicTrack>, index: usize| {
