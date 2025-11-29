@@ -287,6 +287,11 @@ pub fn CashuReceiveLightningModal(
     });
 
     let on_generate = move |_| {
+        // Early guard: prevent duplicate submissions if already generating
+        if *is_generating.read() {
+            return;
+        }
+
         let amount_str = amount.read().clone();
         let mint = selected_mint.read().clone();
 

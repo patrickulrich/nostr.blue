@@ -20,6 +20,11 @@ pub fn CashuCreateRequestModal(
 
     // Handle creating a new request
     let handle_create = move |_| {
+        // Early guard: prevent duplicate submissions if already creating
+        if *is_creating.read() {
+            return;
+        }
+
         let amount_str = amount_input.read().clone();
         let description = description_input.read().clone();
         let use_nostr = *use_nostr_transport.read();

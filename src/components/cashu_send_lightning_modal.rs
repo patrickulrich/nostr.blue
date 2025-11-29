@@ -162,6 +162,11 @@ pub fn CashuSendLightningModal(
     };
 
     let on_pay = move |_| {
+        // Early guard: prevent duplicate submissions if already paying
+        if *is_paying.read() {
+            return;
+        }
+
         let mode = payment_mode.read().clone();
 
         match mode {

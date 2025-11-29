@@ -57,6 +57,11 @@ pub fn CashuPayRequestModal(
 
     // Handle paying the request
     let handle_pay = move |_| {
+        // Early guard: prevent duplicate submissions if already paying
+        if matches!(*pay_state.read(), PayState::Paying) {
+            return;
+        }
+
         let request_str = request_input.read().trim().to_string();
         let custom_amt_str = custom_amount.read().clone();
 
