@@ -48,8 +48,21 @@ pub fn CashuMintDiscoveryModal(
         });
     };
 
-    // Get existing mints to filter out already added ones
-    let existing_mints = cashu_wallet::get_mints();
+    // Get existing mints to filter out already added ones (memoized to avoid cloning on every render)
+    let existing_mints = use_memo(move || cashu_wallet::get_mints());
+
+    // Precompute display names for discovered mints to avoid URL parsing on every render
+    let mints_with_display = use_memo(move || {
+        discovered_mints.read().iter().map(|mint| {
+            let display_name = mint.name.clone().unwrap_or_else(|| {
+                url::Url::parse(&mint.url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| h.to_string()))
+                    .unwrap_or_else(|| mint.url.clone())
+            });
+            (mint.clone(), display_name)
+        }).collect::<Vec<_>>()
+    });
 
     rsx! {
         // Modal overlay
@@ -126,10 +139,10 @@ pub fn CashuMintDiscoveryModal(
                                 "Mints discovered via NIP-87. Sorted by recommendation count."
                             }
 
-                            for mint in discovered_mints.read().iter() {
+                            for (mint, display_name) in mints_with_display.read().iter() {
                                 {
                                     let url = mint.url.clone();
-                                    let is_already_added = existing_mints.contains(&url);
+                                    let is_already_added = existing_mints.read().contains(&url);
                                     let is_selected = selected_mint.read().as_ref() == Some(&url);
                                     let is_mainnet = mint.network.as_ref().map(|n| n == "mainnet").unwrap_or(true);
 
@@ -157,20 +170,10 @@ pub fn CashuMintDiscoveryModal(
                                                 class: "flex items-start justify-between gap-2",
                                                 div {
                                                     class: "flex-1 min-w-0",
-                                                    // Name
+                                                    // Name (precomputed display_name avoids URL parsing on each render)
                                                     h4 {
                                                         class: "font-semibold truncate",
-                                                        if let Some(name) = &mint.name {
-                                                            "{name}"
-                                                        } else {
-                                                            // Extract domain from URL
-                                                            {
-                                                                url::Url::parse(&mint.url)
-                                                                    .ok()
-                                                                    .and_then(|u| u.host_str().map(|h| h.to_string()))
-                                                                    .unwrap_or_else(|| mint.url.clone())
-                                                            }
-                                                        }
+                                                        "{display_name}"
                                                     }
                                                     // URL
                                                     p {

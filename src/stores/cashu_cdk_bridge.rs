@@ -41,6 +41,9 @@ pub async fn init_multi_wallet(
     localstore: Arc<IndexedDbDatabase>,
     seed: [u8; 64],
 ) -> Result<Arc<MultiMintWallet>, String> {
+    // Clear any existing wallet state first to prevent stale UI data
+    clear_multi_wallet();
+
     log::info!("Initializing MultiMintWallet");
 
     // Create MultiMintWallet - it automatically loads existing mints from the database
@@ -243,12 +246,26 @@ pub async fn sync_balance_only() -> Result<u64, String> {
     Ok(total)
 }
 
-/// Clear the MultiMintWallet (for logout)
+/// Clear the MultiMintWallet and all related UI signals (for logout)
 #[allow(dead_code)]
 pub fn clear_multi_wallet() {
+    // Clear CDK wallet (triggers Drop which zeroizes the seed)
     *MULTI_WALLET.write() = None;
+
+    // Clear balance signals
     *WALLET_BALANCES.write() = WalletBalances::default();
-    log::info!("Cleared MultiMintWallet");
+    *WALLET_BALANCE.write() = 0;
+
+    // Clear token data
+    *WALLET_TOKENS.read().data().write() = Vec::new();
+
+    // Reset status to uninitialized
+    *WALLET_STATUS.write() = WalletStatus::Uninitialized;
+
+    // Clear wallet state (mints, etc.)
+    *super::cashu_wallet::WALLET_STATE.write() = None;
+
+    log::info!("Cleared MultiMintWallet and all wallet signals");
 }
 
 /// Check if MultiMintWallet is initialized
@@ -340,8 +357,11 @@ pub async fn calculate_mpp_split(
         return Err("No mints with available balance".to_string());
     }
 
-    // Calculate total available
-    let total_available: u64 = available.iter().map(|b| b.balance).sum();
+    // Calculate total available with checked arithmetic
+    let total_available: u64 = available.iter()
+        .map(|b| b.balance)
+        .try_fold(0u64, |acc, v| acc.checked_add(v))
+        .ok_or("Balance sum overflow in MPP split calculation")?;
     if total_available < target_amount {
         return Err(format!(
             "Insufficient total balance: {} sats available, {} sats needed",

@@ -2962,7 +2962,7 @@ pub struct MintInfoDisplay {
 }
 
 /// NIP-87: Discovered Cashu mint from kind:38172 events
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DiscoveredMint {
     /// Mint URL
     pub url: String,
@@ -2987,7 +2987,7 @@ pub struct DiscoveredMint {
 }
 
 /// NIP-87: Mint recommendation from kind:38000 events.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MintRecommendation {
     /// Recommender pubkey
     pub recommender: String,
