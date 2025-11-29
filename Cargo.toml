@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.6.3"
+version = "0.6.4"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -24,8 +24,8 @@ nostr-relay-pool = { version = "0.44" }
 nwc = { version = "0.44" }
 
 # Cashu ecash protocol
-cdk = { version = "0.14", default-features = false, features = ["wallet"] }
-cdk-common = { version = "0.14", default-features = false, features = ["wallet"] }
+cdk = { version = "0.13.4", default-features = false, features = ["wallet"] }
+cdk-common = { version = "0.13.4", default-features = false, features = ["wallet"] }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -120,6 +120,7 @@ gloo-net = "0.5"
 bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
+ciborium = "0.2"
 hex = "0.4"
 lru = "0.12"
 instant = { version = "0.1", features = ["wasm-bindgen"] }

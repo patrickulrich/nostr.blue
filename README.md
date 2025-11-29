@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.6.3-blue)
+![Version](https://img.shields.io/badge/version-0.6.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -38,7 +38,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
 - ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
 - ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
-- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, persistent IndexedDB storage, atomic keyset counter management, and automatic cleanup of spent proofs with browser extension signer compatibility
+- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, WebSocket subscriptions (NUT-17), payment requests (NUT-18), P2PK locking (NUT-11), persistent IndexedDB storage, and automatic cleanup of spent proofs
 - ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
 
 ### User Experience
@@ -46,6 +46,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Responsive Design** - Mobile-first design with desktop optimization
 - ✅ **Infinite Scroll** - Smooth pagination across all feeds
 - ✅ **Rich Content** - Embedded images, videos, and link previews with proper parsing
+- ✅ **Collapsible Notes** - Long notes collapse with "Show More" button for cleaner feeds
 - ✅ **NIP-19 Support** - Full support for npub, note, nprofile, nevent identifiers
 - ✅ **Browser Extension** - NIP-07 signing with Alby, nos2x, etc.
 - ✅ **Remote Signer (NIP-46)** - Secure signing with Amber, nsecBunker via bunker:// URIs
@@ -53,8 +54,8 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - ✅ **Real-Time Updates** - Live feed and notification updates
 - ✅ **Offline Support** - Browse cached content without internet
 - ✅ **Instant Loading** - Sub-100ms load times with IndexedDB cache
-- ✅ **Blossom Media Storage** - Decentralized image uploads with quality control
-- ✅ **Enhanced Emoji Picker** - 600+ emojis across 11 categories with NIP-51 custom emoji support
+- ✅ **Blossom Media Storage (NIP-B7)** - Decentralized image uploads with quality control and multi-server support
+- ✅ **Enhanced Emoji Picker** - 1500+ emojis across all categories with NIP-51 custom emoji support
 - ✅ **GIF Search (NIP-50)** - Search and insert GIFs directly from the post composer using relay search
 - ✅ **Username Autocomplete** - @ mention autocomplete in all composers with relay search
 - ✅ **Video Sharing Modal** - Share videos via link, Nostr post, or encrypted DM
@@ -326,7 +327,9 @@ Production builds are optimized with:
 - Single codegen unit for minimal binary size
 - Panic abort for smaller WASM binaries
 
-## 🔌 Nostr Protocol Support
+## 🔌 Protocol Support
+
+### Nostr
 
 This client implements the following Nostr Improvement Proposals (NIPs):
 
@@ -359,16 +362,54 @@ This client implements the following Nostr Improvement Proposals (NIPs):
 | [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
 | [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
+| [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Cashu mint discovery | ✅ |
 | [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls (single/multiple choice with results) | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web bookmarks | ✅ |
 
-### Blossom Protocol Support
+### Blossom
 
 | BUD | Description | Status |
 |-----|-------------|--------|
 | [BUD-01](https://github.com/hzrd149/blossom) | Core Blossom protocol for decentralized blob storage | ✅ |
+
+### Cashu
+
+The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc/cdk) with a custom IndexedDB storage backend for browser persistence.
+
+| NUT | Description | Status |
+|-----|-------------|--------|
+| [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) | Notation, terminology, and encoding | ✅ |
+| [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md) | Mint public key exchange | ✅ |
+| [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md) | Keysets and keyset IDs | ✅ |
+| [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md) | Swapping tokens (proof consolidation) | ✅ |
+| [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md) | Minting tokens (Lightning deposits) | ✅ |
+| [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md) | Melting tokens (Lightning withdrawals) | ✅ |
+| [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md) | Mint information | ✅ |
+| [NUT-07](https://github.com/cashubtc/nuts/blob/main/07.md) | Token state check (spent proof cleanup) | ✅ |
+| [NUT-08](https://github.com/cashubtc/nuts/blob/main/08.md) | Lightning fee return (overpaid fees) | ✅ |
+| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore | ❌ |
+| [NUT-10](https://github.com/cashubtc/nuts/blob/main/10.md) | Spending conditions | ✅ |
+| [NUT-11](https://github.com/cashubtc/nuts/blob/main/11.md) | Pay-to-Public-Key (P2PK) | ✅ |
+| [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) | DLEQ proofs (optional verification) | ✅ |
+| [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
+| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | Hashed Timelock Contracts (HTLC) | ❌ |
+| [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments (MPP) | ✅ |
+| [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
+| [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
+
+**Wallet Features:**
+- Multi-mint support via CDK's `MultiMintWallet`
+- NIP-60 integration (encrypted token storage on Nostr relays)
+- NIP-87 mint discovery (find mints recommended by the community)
+- Deterministic seed derivation from Nostr keys (survives app reinstall)
+- Atomic keyset counter management in IndexedDB
+- WebSocket quote status with HTTP polling fallback
+- P2PK token locking to npub recipients
+- Optional DLEQ verification on receive
+- Proof optimization (consolidate many small proofs)
+- Inter-mint transfers via Lightning
 
 ## 🔧 Configuration
 
