@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
+use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::components::icons;
 use js_sys::eval;
@@ -195,8 +196,8 @@ pub fn PersistentMusicPlayer() -> Element {
                         div {
                             class: "text-xs text-muted-foreground truncate",
                             if let Some(artist_id) = &track.artist_id {
-                                a {
-                                    href: "/music/artist/{artist_id}",
+                                Link {
+                                    to: Route::MusicArtist { artist_id: artist_id.clone() },
                                     class: "hover:text-foreground hover:underline",
                                     "{track.artist}"
                                 }

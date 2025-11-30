@@ -14,7 +14,8 @@ pub struct MusicSourceTabsProps {
 /// Source filter tabs for music discovery
 #[component]
 pub fn MusicSourceTabs(props: MusicSourceTabsProps) -> Element {
-    let is_authenticated = auth_store::is_authenticated();
+    // Use reactive signal so tabs update on login/logout
+    let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
 
     let tabs = if is_authenticated {
         vec![
@@ -72,7 +73,8 @@ pub struct DiscoveryTabsProps {
 
 #[component]
 pub fn DiscoveryTabs(props: DiscoveryTabsProps) -> Element {
-    let is_authenticated = auth_store::is_authenticated();
+    // Use reactive signal so tabs update on login/logout
+    let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
 
     let tabs = if is_authenticated {
         vec![

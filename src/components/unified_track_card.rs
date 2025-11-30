@@ -2,6 +2,7 @@
 // Handles both Wavlake and Nostr tracks with source-aware zaps and prominent sats display
 
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
@@ -26,8 +27,18 @@ pub struct UnifiedTrackCardProps {
 pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let track = props.track.clone();
     let track_id = track.id.clone();
-    let track_id_for_effect = track_id.clone();
-    let mut is_playing = use_signal(|| false);
+    let track_id_for_memo = track_id.clone();
+
+    // Reactively check if this track is currently playing
+    // Use memo so it re-evaluates when MUSIC_PLAYER changes
+    let is_playing = use_memo(move || {
+        let player_state = music_player::MUSIC_PLAYER.read();
+        if let Some(ref current) = player_state.current_track {
+            current.id == track_id_for_memo && player_state.is_playing
+        } else {
+            false
+        }
+    });
 
     // For nostr tracks, we need to fetch the artist profile
     let artist_pubkey = track.artist_npub.clone();
@@ -45,16 +56,6 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     }
                 });
             }
-        }
-    });
-
-    // Check if this track is currently playing
-    use_effect(move || {
-        let player_state = music_player::MUSIC_PLAYER.read();
-        if let Some(ref current) = player_state.current_track {
-            is_playing.set(current.id == track_id_for_effect && player_state.is_playing);
-        } else {
-            is_playing.set(false);
         }
     });
 
@@ -110,10 +111,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let artwork_url = track.album_art_url.clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
 
-    // Build artist link based on source (both go to music artist page)
-    let artist_link = match &track.source {
-        TrackSource::Wavlake { artist_id, .. } => format!("/music/artist/{}", artist_id),
-        TrackSource::Nostr { pubkey, .. } => format!("/music/artist/{}", pubkey),
+    // Build artist route based on source (both go to music artist page)
+    let artist_route = match &track.source {
+        TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist { artist_id: artist_id.clone() },
+        TrackSource::Nostr { pubkey, .. } => Route::MusicArtist { artist_id: pubkey.clone() },
     };
 
     rsx! {
@@ -167,10 +168,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 }
                 div {
                     class: "text-xs text-muted-foreground truncate",
-                    a {
-                        href: "{artist_link}",
+                    Link {
+                        to: artist_route.clone(),
                         class: "hover:text-foreground hover:underline",
-                        onclick: move |e| e.stop_propagation(),
+                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
                         "{artist_name}"
                     }
                 }
@@ -180,10 +181,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                             class: "text-xs text-muted-foreground truncate",
                             match &track.source {
                                 TrackSource::Wavlake { album_id, .. } => rsx! {
-                                    a {
-                                        href: "/music/album/{album_id}",
+                                    Link {
+                                        to: Route::MusicAlbum { album_id: album_id.clone() },
                                         class: "hover:text-foreground hover:underline",
-                                        onclick: move |e| e.stop_propagation(),
+                                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
                                         "{album}"
                                     }
                                 },

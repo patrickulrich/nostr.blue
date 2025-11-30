@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
@@ -99,20 +100,20 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 }
                 div {
                     class: "text-xs text-muted-foreground truncate",
-                    a {
-                        href: "/music/artist/{track.artist_id}",
+                    Link {
+                        to: Route::MusicArtist { artist_id: track.artist_id.clone() },
                         class: "hover:text-foreground hover:underline",
-                        onclick: move |e| e.stop_propagation(),
+                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
                         "{track.artist}"
                     }
                 }
                 if props.show_album {
                     div {
                         class: "text-xs text-muted-foreground truncate",
-                        a {
-                            href: "/music/album/{track.album_id}",
+                        Link {
+                            to: Route::MusicAlbum { album_id: track.album_id.clone() },
                             class: "hover:text-foreground hover:underline",
-                            onclick: move |e| e.stop_propagation(),
+                            onclick: move |e: Event<MouseData>| e.stop_propagation(),
                             "{track.album_title}"
                         }
                     }

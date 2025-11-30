@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::components::icons::*;
 use crate::components::UnifiedTrackCard;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
@@ -58,8 +59,8 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
     rsx! {
         div { class: "container mx-auto px-4 py-8",
             // Back button
-            a {
-                href: "/music",
+            Link {
+                to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition-colors",
                 ArrowLeftIcon { class: "w-4 h-4" }
                 "Back to Music Discovery"
@@ -189,8 +190,8 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
 
                                             // Play overlay
                                             div { class: "absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
-                                                a {
-                                                    href: "/music/album/{album.id}",
+                                                Link {
+                                                    to: Route::MusicAlbum { album_id: album.id.clone() },
                                                     class: "bg-purple-600 hover:bg-purple-500 text-white rounded-full p-4 shadow-lg transition-colors",
                                                     PlayIcon { class: "w-6 h-6" }
                                                 }
@@ -214,8 +215,8 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
                                                 }
                                             }
 
-                                            a {
-                                                href: "/music/album/{album.id}",
+                                            Link {
+                                                to: Route::MusicAlbum { album_id: album.id.clone() },
                                                 class: "block w-full",
                                                 button {
                                                     class: "w-full px-4 py-2 rounded border border-gray-600 hover:border-purple-500 text-sm text-gray-300 hover:text-white transition-colors inline-flex items-center justify-center gap-2",
@@ -305,8 +306,8 @@ fn NostrArtistSection(pubkey: String) -> Element {
     rsx! {
         div { class: "container mx-auto px-4 py-8",
             // Back button
-            a {
-                href: "/music",
+            Link {
+                to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition-colors",
                 ArrowLeftIcon { class: "w-4 h-4" }
                 "Back to Music Discovery"
@@ -371,8 +372,8 @@ fn NostrArtistSection(pubkey: String) -> Element {
                                     }
 
                                     // Link to social profile
-                                    a {
-                                        href: "/profile/{pubkey}",
+                                    Link {
+                                        to: Route::Profile { pubkey: pubkey.clone() },
                                         class: "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-900/30 text-sm text-purple-300 hover:bg-purple-900/50 transition",
                                         UserIcon { class: "w-3 h-3" }
                                         "View Social Profile"

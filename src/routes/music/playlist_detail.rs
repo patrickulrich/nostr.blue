@@ -2,6 +2,7 @@
 // Shows a single playlist with its tracks and allows playback
 
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::stores::{nostr_music, music_player, profiles};
 use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
 
@@ -84,8 +85,8 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
             class: "max-w-4xl mx-auto p-4",
 
             // Back button
-            a {
-                href: "/music",
+            Link {
+                to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition",
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
@@ -160,8 +161,8 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                         class: "text-muted-foreground font-medium",
                         "{err}"
                     }
-                    a {
-                        href: "/music",
+                    Link {
+                        to: Route::MusicHome {},
                         class: "inline-flex items-center gap-2 mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition text-sm font-medium",
                         "Back to Music"
                     }

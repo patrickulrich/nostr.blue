@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::services::wavlake::{WavlakeAPI, WavlakeSearchResult, WavlakeTrack, WavlakePlaylist};
 use crate::components::{TrackCard, ArtistCard, ArtistCardSkeleton, AlbumCard, AlbumCardSkeleton, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::components::icons::ArrowLeftIcon;
@@ -542,8 +543,8 @@ fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
 
     rsx! {
-        a {
-            href: "/music/artist/{pubkey}",
+        Link {
+            to: Route::MusicArtist { artist_id: pubkey.clone() },
             class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
 
             // Artist image with nostr badge

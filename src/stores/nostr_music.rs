@@ -436,7 +436,7 @@ pub async fn fetch_track_zap_totals(
         filter = filter.since(since);
     }
 
-    // Add each track coordinate to the filter
+    // Add each track coordinate to the filter (custom_tag extends values with each call)
     for coord in &track_coordinates {
         filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.clone());
     }

@@ -8,6 +8,7 @@ use crate::services::lnurl;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use nostr_sdk::{PublicKey, RelayUrl};
+use nostr_sdk::nips::nip01::Coordinate;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LnurlPayParams {
@@ -522,7 +523,7 @@ fn generate_qr_code(invoice: &str) -> Result<String, String> {
 /// Generate invoice for Nostr tracks using NIP-57 zap flow
 async fn generate_nostr_zap_invoice(
     artist_pubkey: &str,
-    _track_coordinate: Option<&String>,
+    track_coordinate: Option<&String>,
     profile: Option<&profiles::Profile>,
     amount_sats: u64,
     comment: &str,
@@ -548,24 +549,48 @@ async fn generate_nostr_zap_invoice(
     let recipient_pubkey = PublicKey::parse(artist_pubkey)
         .map_err(|e| format!("Invalid artist pubkey: {}", e))?;
 
-    // Get relays for zap request
-    let relays: Vec<RelayUrl> = vec![
-        RelayUrl::parse("wss://relay.damus.io").ok(),
-        RelayUrl::parse("wss://nos.lol").ok(),
-        RelayUrl::parse("wss://relay.nostr.band").ok(),
-    ].into_iter().flatten().collect();
+    // Get relays from client, falling back to defaults
+    let relays: Vec<RelayUrl> = {
+        if let Some(client) = nostr_client::get_client() {
+            let client_relays = client.relays().await;
+            let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
+            if urls.is_empty() {
+                // Fallback to defaults
+                vec![
+                    RelayUrl::parse("wss://relay.damus.io").ok(),
+                    RelayUrl::parse("wss://nos.lol").ok(),
+                    RelayUrl::parse("wss://relay.nostr.band").ok(),
+                ].into_iter().flatten().collect()
+            } else {
+                // Limit to reasonable number for zap request
+                urls.truncate(5);
+                urls
+            }
+        } else {
+            // No client, use defaults
+            vec![
+                RelayUrl::parse("wss://relay.damus.io").ok(),
+                RelayUrl::parse("wss://nos.lol").ok(),
+                RelayUrl::parse("wss://relay.nostr.band").ok(),
+            ].into_iter().flatten().collect()
+        }
+    };
 
     // Create zap request event
     let message = if comment.is_empty() { None } else { Some(comment.to_string()) };
 
-    // We don't have an event_id for tracks since they're addressable events (use a-tag instead)
-    // For simplicity, we'll send the zap to the artist profile
+    // Parse the track coordinate for 'a' tag (NIP-57 for addressable events)
+    let event_coordinate = track_coordinate.and_then(|coord| {
+        Coordinate::parse(coord).ok()
+    });
+
     let builder = lnurl::create_zap_request_unsigned(
         recipient_pubkey,
         relays,
         amount_msats,
         message,
         None, // No event_id for addressable events
+        event_coordinate, // 'a' tag for Kind 36787 tracks
     );
 
     // Sign the zap request

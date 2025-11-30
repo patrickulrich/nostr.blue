@@ -1064,19 +1064,19 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
                         }
                         div {
                             class: "text-xs text-muted-foreground truncate",
-                            a {
-                                href: "/music/artist/{track.artist_id}",
+                            Link {
+                                to: Route::MusicArtist { artist_id: track.artist_id.clone() },
                                 class: "hover:text-foreground hover:underline",
-                                onclick: move |e| e.stop_propagation(),
+                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
                                 "{track.artist}"
                             }
                         }
                         div {
                             class: "text-xs text-muted-foreground/80 truncate mt-1",
-                            a {
-                                href: "/music/album/{track.album_id}",
+                            Link {
+                                to: Route::MusicAlbum { album_id: track.album_id.clone() },
                                 class: "hover:text-foreground hover:underline",
-                                onclick: move |e| e.stop_propagation(),
+                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
                                 "{track.album_title}"
                             }
                         }

@@ -1026,26 +1026,26 @@ fn Layout() -> Element {
                         // Footer Links
                         div {
                             class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto flex-shrink-0",
-                            a {
-                                href: "/terms",
+                            Link {
+                                to: Route::Terms {},
                                 class: "hover:underline",
                                 "Terms of Service"
                             }
                             span { "·" }
-                            a {
-                                href: "/privacy",
+                            Link {
+                                to: Route::Privacy {},
                                 class: "hover:underline",
                                 "Privacy Policy"
                             }
                             span { "·" }
-                            a {
-                                href: "/cookies",
+                            Link {
+                                to: Route::Cookies {},
                                 class: "hover:underline",
                                 "Cookie Policy"
                             }
                             span { "·" }
-                            a {
-                                href: "/about",
+                            Link {
+                                to: Route::About {},
                                 class: "hover:underline",
                                 "About"
                             }

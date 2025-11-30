@@ -1,4 +1,5 @@
 use nostr_sdk::{Event, EventBuilder, EventId, PublicKey, RelayUrl, JsonUtil};
+use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip57::ZapRequestData;
 use serde::{Deserialize, Serialize};
 
@@ -122,12 +123,15 @@ pub async fn get_lnurl_pay_info(lud16: Option<&str>, lud06: Option<&str>) -> Res
 }
 
 /// Create a zap request event unsigned (to be signed by caller)
+/// For addressable events (like Kind 36787 tracks), pass the event_coordinate
+/// to include the 'a' tag per NIP-57.
 pub fn create_zap_request_unsigned(
     recipient_pubkey: PublicKey,
     relays: Vec<RelayUrl>,
     amount_msats: u64,
     message: Option<String>,
     event_id: Option<EventId>,
+    event_coordinate: Option<Coordinate>,
 ) -> EventBuilder {
     let mut data = ZapRequestData::new(recipient_pubkey, relays)
         .amount(amount_msats);
@@ -138,6 +142,11 @@ pub fn create_zap_request_unsigned(
 
     if let Some(eid) = event_id {
         data = data.event_id(eid);
+    }
+
+    // Set event coordinate for addressable events (NIP-57 'a' tag)
+    if let Some(coord) = event_coordinate {
+        data = data.event_coordinate(coord);
     }
 
     EventBuilder::public_zap_request(data)

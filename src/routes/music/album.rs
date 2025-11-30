@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::components::icons::*;
 use crate::services::wavlake::{get_album, WavlakeAlbum};
 use crate::stores::music_player::{self, MusicTrack};
@@ -59,8 +60,8 @@ pub fn MusicAlbum(album_id: String) -> Element {
     rsx! {
         div { class: "container mx-auto px-4 py-8",
             // Back button
-            a {
-                href: "/music",
+            Link {
+                to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition-colors",
                 ArrowLeftIcon { class: "w-4 h-4" }
                 "Back to Music Discovery"

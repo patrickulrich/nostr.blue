@@ -56,11 +56,12 @@ pub fn MusicHome() -> Element {
             let mut all_tracks: Vec<MusicTrack> = Vec::new();
 
             // Fetch based on platform filter and discovery tab
+            // Following tab is Nostr-only; when Following is selected, platform is forced to "nostr" in the UI
             let should_fetch_wavlake = platform == "all" || platform == "wavlake";
-            // For Following tab, only fetch nostr tracks from people the user follows
+            // For Following tab, always fetch nostr tracks from people the user follows
             // Also check if nostr client is initialized
             let nostr_client_ready = crate::stores::nostr_client::get_client().is_some();
-            let should_fetch_nostr = nostr_client_ready && ((platform == "all" || platform == "nostr") || tab == DiscoveryTab::Following);
+            let should_fetch_nostr = nostr_client_ready && (platform == "all" || platform == "nostr" || tab == DiscoveryTab::Following);
 
             // Fetch Wavlake tracks
             if should_fetch_wavlake {
@@ -239,7 +240,13 @@ pub fn MusicHome() -> Element {
             // Discovery Tabs (Trending | New | Playlists | Following)
             DiscoveryTabs {
                 selected: discovery_tab.read().clone(),
-                on_change: move |tab| discovery_tab.set(tab)
+                on_change: move |tab: DiscoveryTab| {
+                    discovery_tab.set(tab.clone());
+                    // Following tab is Nostr-only, auto-switch platform
+                    if tab == DiscoveryTab::Following {
+                        selected_platform.set("nostr".to_string());
+                    }
+                }
             }
 
             // Contextual Filters (hide for Playlists tab)
@@ -429,9 +436,17 @@ fn PlaylistSection(platform_filter: String) -> Element {
     let mut playlists = use_signal(|| Vec::<nostr_music::NostrPlaylist>::new());
     let mut loading = use_signal(|| true);
 
-    // Fetch playlists
+    // Track platform_filter prop as a signal so effect reruns when it changes
+    let mut platform_signal = use_signal(|| platform_filter.clone());
+
+    // Update signal when prop changes
     use_effect(move || {
-        let platform = platform_filter.clone();
+        platform_signal.set(platform_filter.clone());
+    });
+
+    // Fetch playlists - reactively reads platform_signal
+    use_effect(move || {
+        let platform = platform_signal.read().clone();
         loading.set(true);
 
         spawn(async move {

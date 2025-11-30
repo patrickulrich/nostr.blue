@@ -2,7 +2,21 @@
 // Allows users to publish Kind 36787 music tracks to nostr
 
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
+
+/// Slugify a string for use as a d-tag
+fn slugify(input: &str) -> String {
+    input
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
 
 #[component]
 pub fn MusicTrackNew() -> Element {
@@ -35,8 +49,8 @@ pub fn MusicTrackNew() -> Element {
                         class: "text-muted-foreground mb-6",
                         "You need to sign in to publish tracks."
                     }
-                    a {
-                        href: "/",
+                    Link {
+                        to: Route::Home {},
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                         "Go Home"
                     }
@@ -83,7 +97,7 @@ pub fn MusicTrackNew() -> Element {
 
             // Generate a unique d-tag based on title and timestamp
             let d_tag = format!("{}-{}",
-                title_val.to_lowercase().replace(' ', "-"),
+                slugify(&title_val),
                 chrono::Utc::now().timestamp()
             );
 
@@ -115,8 +129,8 @@ pub fn MusicTrackNew() -> Element {
             // Header
             div {
                 class: "flex items-center gap-4 mb-8",
-                a {
-                    href: "/music",
+                Link {
+                    to: Route::MusicHome {},
                     class: "p-2 hover:bg-muted rounded-full transition",
                     svg {
                         xmlns: "http://www.w3.org/2000/svg",

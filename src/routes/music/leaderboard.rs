@@ -5,7 +5,7 @@ use crate::stores::music_player::{MusicTrack, KIND_MUSIC_VOTE};
 use crate::stores::nostr_music::TrackSource;
 use crate::services::wavlake::WavlakeAPI;
 use nostr_sdk::{Filter, Kind, TagKind, Timestamp, SingleLetterTag, Alphabet};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 /// Track reference extracted from vote event
@@ -25,7 +25,7 @@ struct VoteData {
     artist: String,
     image: Option<String>,
     votes: usize,
-    voters: Vec<String>,
+    voters: HashSet<String>, // O(1) lookup for deduplication
 }
 
 /// Leaderboard entry with resolved track for playback
@@ -333,9 +333,10 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             .and_modify(|data| {
                 // Each pubkey only counts once (addressable events mean latest vote wins per user)
                 // But we still dedupe in case of relay inconsistencies
+                // HashSet provides O(1) contains check
                 if !data.voters.contains(&voter_pubkey) {
                     data.votes += 1;
-                    data.voters.push(voter_pubkey.clone());
+                    data.voters.insert(voter_pubkey.clone());
                 }
             })
             .or_insert(VoteData {
@@ -344,7 +345,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 artist,
                 image,
                 votes: 1,
-                voters: vec![voter_pubkey],
+                voters: HashSet::from([voter_pubkey]),
             });
     }
 
