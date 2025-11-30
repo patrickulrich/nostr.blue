@@ -384,11 +384,29 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     let pubkey = parts[1].to_string();
                     let d_tag = parts[2..].join(":"); // Handle d-tags with colons
 
-                    Some(create_fallback_track(&vote_data, TrackSource::Nostr {
-                        coordinate: coordinate.clone(),
-                        pubkey,
-                        d_tag,
-                    }))
+                    // Try to fetch the actual track first for proper playback
+                    match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(&pubkey, &d_tag).await {
+                        Ok(Some(nostr_track)) => {
+                            log::info!("Successfully fetched Nostr track: {}", coordinate);
+                            Some(MusicTrack::from(nostr_track))
+                        }
+                        Ok(None) => {
+                            log::warn!("Nostr track not found, using fallback: {}", coordinate);
+                            Some(create_fallback_track(&vote_data, TrackSource::Nostr {
+                                coordinate: coordinate.clone(),
+                                pubkey,
+                                d_tag,
+                            }))
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to fetch Nostr track {}: {}, using fallback", coordinate, e);
+                            Some(create_fallback_track(&vote_data, TrackSource::Nostr {
+                                coordinate: coordinate.clone(),
+                                pubkey,
+                                d_tag,
+                            }))
+                        }
+                    }
                 } else {
                     log::warn!("Invalid Nostr coordinate: {}", coordinate);
                     None
