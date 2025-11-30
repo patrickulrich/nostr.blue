@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, FromBech32};
-use crate::components::{LiveStreamPlayer, LiveChat, StreamStatus};
+use crate::components::{LiveStreamPlayer, LiveChat, StreamStatus, ZapModal, LiveStreamShareModal};
 use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta};
-use crate::components::icons::ArrowLeftIcon;
+use crate::components::icons::{ArrowLeftIcon, ZapIcon, ShareIcon};
 use crate::routes::Route;
-use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED};
+use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
 use std::time::Duration;
 
@@ -18,6 +18,11 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     let mut stream_meta = use_signal(|| None::<LiveStreamMeta>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+
+    // Modal state
+    let mut show_zap_modal = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
+    let has_signer = *HAS_SIGNER.read();
 
     // Get author metadata from profile store (use host from p tag if available)
     let author_metadata = use_memo(move || {
@@ -284,7 +289,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                 div {
                                     class: "space-y-4",
 
-                                    // Author info
+                                    // Author info with share/zap buttons
                                     if let Some(event) = stream_event.read().as_ref() {
                                         div {
                                             class: "flex items-center gap-3",
@@ -319,9 +324,10 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                         .map(|s| s.as_str())
                                                         .unwrap_or(&event_pubkey);
 
+                                                    let host_verified = meta.host_verified;
                                                     rsx! {
                                                         div {
-                                                            class: "font-semibold",
+                                                            class: "font-semibold flex items-center gap-1",
                                                             if let Some(metadata) = author_metadata.read().as_ref() {
                                                                 if let Some(name) = &metadata.name {
                                                                     "{name}"
@@ -331,6 +337,24 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                             } else {
                                                                 "{truncate_pubkey(author_identifier)}"
                                                             }
+                                                            // Show verified badge if host proof is valid
+                                                            if host_verified {
+                                                                span {
+                                                                    class: "text-green-500",
+                                                                    title: "Verified host",
+                                                                    svg {
+                                                                        class: "w-4 h-4",
+                                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                                        fill: "currentColor",
+                                                                        view_box: "0 0 20 20",
+                                                                        path {
+                                                                            fill_rule: "evenodd",
+                                                                            d: "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+                                                                            clip_rule: "evenodd"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -339,6 +363,26 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                         class: "text-sm text-muted-foreground",
                                                         "{viewers} watching"
                                                     }
+                                                }
+                                            }
+
+                                            // Share and Zap buttons
+                                            div {
+                                                class: "flex items-center gap-2",
+                                                // Share button
+                                                button {
+                                                    class: "p-2 rounded-full hover:bg-accent transition-colors",
+                                                    title: "Share",
+                                                    onclick: move |_| show_share_modal.set(true),
+                                                    ShareIcon { class: "w-5 h-5".to_string() }
+                                                }
+                                                // Zap button
+                                                button {
+                                                    class: "p-2 rounded-full hover:bg-accent transition-colors text-yellow-500 hover:text-yellow-400",
+                                                    title: if has_signer { "Send Zap" } else { "Login to Zap" },
+                                                    disabled: !has_signer,
+                                                    onclick: move |_| show_zap_modal.set(true),
+                                                    ZapIcon { class: "w-5 h-5".to_string() }
                                                 }
                                             }
                                         }
@@ -386,6 +430,51 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Zap Modal
+            if *show_zap_modal.read() {
+                if let Some(meta) = stream_meta.read().as_ref() {
+                    if let Some(event) = stream_event.read().as_ref() {
+                        {
+                            // Get the host pubkey (from p tag) or fall back to event publisher
+                            let recipient_pubkey = meta.host_pubkey.clone()
+                                .unwrap_or_else(|| event.pubkey.to_string());
+                            let recipient_name = author_metadata.read().as_ref()
+                                .and_then(|m| m.name.clone())
+                                .unwrap_or_else(|| truncate_pubkey(&recipient_pubkey));
+                            let lud16 = author_metadata.read().as_ref()
+                                .and_then(|m| m.lud16.clone());
+                            let lud06 = author_metadata.read().as_ref()
+                                .and_then(|m| m.lud06.clone());
+
+                            rsx! {
+                                ZapModal {
+                                    recipient_pubkey: recipient_pubkey,
+                                    recipient_name: recipient_name,
+                                    lud16: lud16,
+                                    lud06: lud06,
+                                    event_id: Some(event.id.to_hex()),
+                                    on_close: move |_| show_zap_modal.set(false)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Share Modal
+            if *show_share_modal.read() {
+                if let Some(meta) = stream_meta.read().as_ref() {
+                    if let Some(event) = stream_event.read().as_ref() {
+                        LiveStreamShareModal {
+                            event: event.clone(),
+                            d_tag: meta.d_tag.clone(),
+                            title: meta.title.clone(),
+                            on_close: move |_| show_share_modal.set(false)
                         }
                     }
                 }

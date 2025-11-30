@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use dioxus::events::MouseData;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, FromBech32, Timestamp, JsonUtil};
+use nostr_sdk::{Event as NostrEvent, Timestamp};
 use crate::routes::Route;
-use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED};
-use crate::components::{StreamStatus, parse_nip53_live_event};
-use std::time::Duration;
+use crate::stores::nostr_client::CLIENT_INITIALIZED;
+use crate::stores::profiles;
+use crate::components::{StreamStatus, parse_nip53_live_event, extract_live_event_host};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
@@ -17,8 +17,10 @@ pub struct LiveStreamMeta {
     pub current_participants: Option<u64>,
     pub starts: Option<Timestamp>,
     pub tags: Vec<String>,
-    /// The host pubkey from p tag with Host marker
+    /// The host pubkey from p tag with Host marker (case-insensitive)
     pub host_pubkey: Option<String>,
+    /// Whether the host has a valid proof signature per NIP-53
+    pub host_verified: bool,
 }
 
 /// Parse NIP-53 Kind 30311 live streaming event into LiveStreamCard's meta format
@@ -32,8 +34,27 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         live_event.status
     );
 
-    // Extract host pubkey
-    let host_pubkey = live_event.host.as_ref().map(|h| h.public_key.to_string());
+    // Extract host with case-insensitive fallback and proof verification
+    let host = extract_live_event_host(event, &live_event);
+    let host_pubkey = host.as_ref().map(|h| h.public_key.clone());
+    let host_verified = host.as_ref().map(|h| h.is_verified).unwrap_or(false);
+
+    // Get raw status and apply stale check
+    let raw_status = live_event.status.as_ref()
+        .map(StreamStatus::from)
+        .unwrap_or(StreamStatus::Planned);
+    let effective_status = StreamStatus::effective_status(raw_status, event.created_at);
+
+    // Get hashtags from SDK, or fallback to manual "t" tag extraction
+    let tags = if !live_event.hashtags.is_empty() {
+        live_event.hashtags
+    } else {
+        // Fallback: manually extract "t" tags
+        event.tags.iter()
+            .filter(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("t"))
+            .filter_map(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
+            .collect()
+    };
 
     Some(LiveStreamMeta {
         d_tag: live_event.id,
@@ -41,11 +62,12 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         summary: live_event.summary,
         image: live_event.image.map(|(url, _dims)| url.to_string()),
         streaming_url: live_event.streaming.map(|url| url.to_string()),
-        status: live_event.status.as_ref().map(StreamStatus::from).unwrap_or(StreamStatus::Planned),
+        status: effective_status,
         current_participants: live_event.current_participants,
         starts: live_event.starts,
-        tags: live_event.hashtags,
+        tags,
         host_pubkey,
+        host_verified,
     })
 }
 
@@ -62,43 +84,24 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
         .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let author_pubkey_display = author_pubkey.clone();
+    let host_verified = stream_meta.host_verified;
     let created_at = event.created_at;
 
     // Create naddr for the livestream (still uses event publisher for fetching)
     let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    // Get author metadata from profile store (uses LRU cache + database, much faster)
+    let author_metadata = use_memo(move || {
+        profiles::get_profile(&author_pubkey_for_fetch)
+    });
 
-    // Fetch author profile
-    use_effect(use_reactive((&author_pubkey_for_fetch, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
-        // Short-circuit until client is ready
+    // Fetch author profile in background if not cached
+    use_effect(use_reactive((&author_pubkey_display, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
         if !client_initialized {
             return;
         }
-
         spawn(async move {
-            if let Ok(pubkey) = PublicKey::from_bech32(&pk).or_else(|_| PublicKey::parse(&pk)) {
-                if let Some(client) = get_client() {
-                    let filter = Filter::new()
-                        .kind(Kind::Metadata)
-                        .author(pubkey)
-                        .limit(1);
-
-                    match client.fetch_events(filter, Duration::from_secs(5)).await {
-                        Ok(events) => {
-                            if let Some(event) = events.first() {
-                                if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
-                                    author_metadata.set(Some(metadata));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch author metadata: {}", e);
-                        }
-                    }
-                }
-            }
+            let _ = profiles::fetch_profile(pk).await;
         });
     }));
 
@@ -112,7 +115,7 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     };
 
     let author_picture = author_metadata.read().as_ref()
-        .and_then(|m| m.picture.clone());
+        .and_then(|m| m.picture.as_ref().map(|u| u.to_string()));
 
     rsx! {
         div {
@@ -140,8 +143,26 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
                     div {
                         class: "flex-1",
                         div {
-                            class: "font-semibold",
+                            class: "font-semibold flex items-center gap-1",
                             "{author_name}"
+                            // Show verified badge if host proof is valid
+                            if host_verified {
+                                span {
+                                    class: "text-green-500",
+                                    title: "Verified host",
+                                    svg {
+                                        class: "w-4 h-4",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        fill: "currentColor",
+                                        view_box: "0 0 20 20",
+                                        path {
+                                            fill_rule: "evenodd",
+                                            d: "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+                                            clip_rule: "evenodd"
+                                        }
+                                    }
+                                }
+                            }
                         }
                         div {
                             class: "text-sm text-muted-foreground",
