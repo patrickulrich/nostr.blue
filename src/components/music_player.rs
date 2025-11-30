@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
+use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::components::icons;
 use js_sys::eval;
@@ -123,7 +124,6 @@ pub fn PersistentMusicPlayer() -> Element {
     }
 
     let track = state.current_track.as_ref().unwrap();
-    let track_id = track.id.clone();
 
     let progress = if state.duration > 0.0 {
         (state.current_time / state.duration * 100.0).min(100.0)
@@ -196,8 +196,8 @@ pub fn PersistentMusicPlayer() -> Element {
                         div {
                             class: "text-xs text-muted-foreground truncate",
                             if let Some(artist_id) = &track.artist_id {
-                                a {
-                                    href: "/music/artist/{artist_id}",
+                                Link {
+                                    to: Route::MusicArtist { artist_id: artist_id.clone() },
                                     class: "hover:text-foreground hover:underline",
                                     "{track.artist}"
                                 }
@@ -348,15 +348,13 @@ pub fn PersistentMusicPlayer() -> Element {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
                         title: "Vote for this track",
                         onclick: {
-                            let track_id_clone = track_id.clone();
-                            let track_title = track.title.clone();
-                            let track_artist_clone = track.artist.clone();
+                            let vote_track = track.clone();
                             move |_| {
-                                let track_id = track_id_clone.clone();
-                                let title = track_title.clone();
-                                let artist = track_artist_clone.clone();
+                                let t = vote_track.clone();
                                 spawn(async move {
-                                    music_player::vote_for_track(&track_id, &title, &artist).await;
+                                    if let Err(e) = music_player::vote_for_music(&t).await {
+                                        log::error!("Vote failed: {}", e);
+                                    }
                                 });
                             }
                         },

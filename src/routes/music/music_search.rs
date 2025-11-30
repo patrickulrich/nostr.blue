@@ -1,8 +1,11 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::services::wavlake::{WavlakeAPI, WavlakeSearchResult, WavlakeTrack, WavlakePlaylist};
-use crate::components::{TrackCard, TrackCardSkeleton, ArtistCard, ArtistCardSkeleton, AlbumCard, AlbumCardSkeleton};
+use crate::components::{TrackCard, ArtistCard, ArtistCardSkeleton, AlbumCard, AlbumCardSkeleton, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::components::icons::ArrowLeftIcon;
 use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::nostr_music;
+use crate::stores::profiles;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum MusicSearchTab {
@@ -30,11 +33,15 @@ pub fn MusicSearch(q: String) -> Element {
     // State
     let mut active_tab = use_signal(|| MusicSearchTab::Tracks);
     let mut loading = use_signal(|| true);
+    let mut nostr_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Search results categorized
-    let mut track_results = use_signal(|| Vec::<WavlakeTrack>::new());
+    // Unified track results (merged Wavlake + Nostr)
+    let mut unified_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    // Keep separate for Artists/Albums tabs
     let mut artist_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
+    let mut nostr_artist_results = use_signal(|| Vec::<(String, profiles::Profile)>::new());
+    let mut nostr_artist_loading = use_signal(|| true);
     let mut album_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
 
     // Playlist state
@@ -48,21 +55,32 @@ pub fn MusicSearch(q: String) -> Element {
         let search_query = q.clone();
 
         if search_query.is_empty() {
-            track_results.set(Vec::new());
+            unified_tracks.set(Vec::new());
             artist_results.set(Vec::new());
+            nostr_artist_results.set(Vec::new());
             album_results.set(Vec::new());
             loading.set(false);
+            nostr_loading.set(false);
+            nostr_artist_loading.set(false);
             return;
         }
 
         loading.set(true);
+        nostr_loading.set(true);
+        nostr_artist_loading.set(true);
         error.set(None);
 
+        // Clone for async moves
+        let query_for_wavlake = search_query.clone();
+        let query_for_nostr = search_query.clone();
+        let query_for_nostr_artists = search_query.clone();
+
+        // Spawn Wavlake search
         spawn(async move {
-            log::info!("Music search for: {}", search_query);
+            log::info!("Wavlake search for: {}", query_for_wavlake);
             let api = WavlakeAPI::new();
 
-            match api.search_content(&search_query).await {
+            match api.search_content(&query_for_wavlake).await {
                 Ok(results) => {
                     // Categorize results by type
                     let mut tracks = Vec::new();
@@ -78,10 +96,9 @@ pub fn MusicSearch(q: String) -> Element {
                         }
                     }
 
-                    log::info!("Found {} tracks, {} artists, {} albums", tracks.len(), artists.len(), albums.len());
+                    log::info!("Found {} Wavlake tracks, {} artists, {} albums", tracks.len(), artists.len(), albums.len());
 
                     // Fetch full track details for playability (in parallel)
-                    // Create API instance once and share via Arc for efficiency
                     let api = std::sync::Arc::new(WavlakeAPI::new());
                     let track_futures: Vec<_> = tracks.into_iter().map(|track_result| {
                         let api = api.clone();
@@ -96,21 +113,92 @@ pub fn MusicSearch(q: String) -> Element {
                         }
                     }).collect();
 
-                    let full_tracks: Vec<_> = futures::future::join_all(track_futures)
+                    let full_tracks: Vec<WavlakeTrack> = futures::future::join_all(track_futures)
                         .await
                         .into_iter()
                         .flatten()
                         .collect();
 
-                    track_results.set(full_tracks);
+                    // Convert to MusicTrack and merge with existing
+                    let wavlake_music_tracks: Vec<MusicTrack> = full_tracks.into_iter()
+                        .map(|t| t.into())
+                        .collect();
+
+                    // Merge with any existing nostr tracks
+                    let mut current = unified_tracks.read().clone();
+                    // Remove any existing Wavlake tracks (in case of re-search)
+                    current.retain(|t| !matches!(t.source, crate::stores::nostr_music::TrackSource::Wavlake { .. }));
+                    current.extend(wavlake_music_tracks);
+                    unified_tracks.set(current);
+
                     artist_results.set(artists);
                     album_results.set(albums);
                     loading.set(false);
                 }
                 Err(e) => {
-                    log::error!("Search failed: {}", e);
+                    log::error!("Wavlake search failed: {}", e);
                     error.set(Some(format!("Search failed: {}", e)));
                     loading.set(false);
+                }
+            }
+        });
+
+        // Spawn Nostr search in parallel (only if client is initialized)
+        spawn(async move {
+            // Check if nostr client is initialized
+            if crate::stores::nostr_client::get_client().is_none() {
+                log::debug!("Nostr client not initialized, skipping nostr search");
+                nostr_loading.set(false);
+                return;
+            }
+
+            log::info!("Nostr music search for: {}", query_for_nostr);
+
+            match nostr_music::search_nostr_tracks(&query_for_nostr, 100).await {
+                Ok(tracks) => {
+                    log::info!("Found {} nostr tracks", tracks.len());
+
+                    // Convert to MusicTrack
+                    let nostr_music_tracks: Vec<MusicTrack> = tracks.into_iter()
+                        .map(|t| t.into())
+                        .collect();
+
+                    // Merge with any existing Wavlake tracks
+                    let mut current = unified_tracks.read().clone();
+                    // Remove any existing nostr tracks (in case of re-search)
+                    current.retain(|t| !matches!(t.source, crate::stores::nostr_music::TrackSource::Nostr { .. }));
+                    current.extend(nostr_music_tracks);
+                    unified_tracks.set(current);
+
+                    nostr_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("Nostr search failed: {}", e);
+                    nostr_loading.set(false);
+                }
+            }
+        });
+
+        // Spawn Nostr artist search in parallel
+        spawn(async move {
+            // Check if nostr client is initialized
+            if crate::stores::nostr_client::get_client().is_none() {
+                log::debug!("Nostr client not initialized, skipping nostr artist search");
+                nostr_artist_loading.set(false);
+                return;
+            }
+
+            log::info!("Nostr artist search for: {}", query_for_nostr_artists);
+
+            match nostr_music::search_nostr_artists(&query_for_nostr_artists, 50).await {
+                Ok(artists) => {
+                    log::info!("Found {} nostr artists", artists.len());
+                    nostr_artist_results.set(artists);
+                    nostr_artist_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("Nostr artist search failed: {}", e);
+                    nostr_artist_loading.set(false);
                 }
             }
         });
@@ -124,9 +212,11 @@ pub fn MusicSearch(q: String) -> Element {
     ];
 
     // Count badges for tabs
-    let track_count = track_results.read().len();
-    let artist_count = artist_results.read().len();
+    let track_count = unified_tracks.read().len();
+    let artist_count = artist_results.read().len() + nostr_artist_results.read().len();
     let album_count = album_results.read().len();
+    let both_loading = *loading.read() && *nostr_loading.read();
+    let artists_loading = *loading.read() && *nostr_artist_loading.read();
 
     rsx! {
         div {
@@ -215,11 +305,11 @@ pub fn MusicSearch(q: String) -> Element {
                     MusicSearchTab::Tracks => rsx! {
                         div {
                             class: "space-y-1",
-                            if *loading.read() {
+                            if both_loading {
                                 for _ in 0..8 {
-                                    TrackCardSkeleton {}
+                                    UnifiedTrackCardSkeleton {}
                                 }
-                            } else if track_results.read().is_empty() {
+                            } else if unified_tracks.read().is_empty() {
                                 div {
                                     class: "text-center py-12 text-muted-foreground",
                                     p { "No tracks found" }
@@ -229,11 +319,20 @@ pub fn MusicSearch(q: String) -> Element {
                                     }
                                 }
                             } else {
-                                for track in track_results.read().iter() {
-                                    TrackCard {
+                                // Show loading indicator if one source is still loading
+                                if *loading.read() || *nostr_loading.read() {
+                                    div {
+                                        class: "text-sm text-muted-foreground py-2",
+                                        if *loading.read() { "Loading Wavlake results..." }
+                                        else { "Loading Nostr results..." }
+                                    }
+                                }
+                                for track in unified_tracks.read().iter() {
+                                    UnifiedTrackCard {
                                         key: "{track.id}",
                                         track: track.clone(),
-                                        show_album: true
+                                        show_album: true,
+                                        show_sats: true
                                     }
                                 }
                             }
@@ -242,11 +341,11 @@ pub fn MusicSearch(q: String) -> Element {
                     MusicSearchTab::Artists => rsx! {
                         div {
                             class: "space-y-1",
-                            if *loading.read() {
+                            if artists_loading {
                                 for _ in 0..8 {
                                     ArtistCardSkeleton {}
                                 }
-                            } else if artist_results.read().is_empty() {
+                            } else if artist_results.read().is_empty() && nostr_artist_results.read().is_empty() {
                                 div {
                                     class: "text-center py-12 text-muted-foreground",
                                     p { "No artists found" }
@@ -256,10 +355,29 @@ pub fn MusicSearch(q: String) -> Element {
                                     }
                                 }
                             } else {
+                                // Show loading indicator if one source is still loading
+                                if *loading.read() || *nostr_artist_loading.read() {
+                                    div {
+                                        class: "text-sm text-muted-foreground py-2",
+                                        if *loading.read() { "Loading Wavlake artists..." }
+                                        else { "Loading Nostr artists..." }
+                                    }
+                                }
+
+                                // Wavlake artists
                                 for artist in artist_results.read().iter() {
                                     ArtistCard {
                                         key: "{artist.id}",
                                         result: artist.clone()
+                                    }
+                                }
+
+                                // Nostr artists
+                                for (pubkey, profile) in nostr_artist_results.read().iter() {
+                                    NostrArtistCard {
+                                        key: "{pubkey}",
+                                        pubkey: pubkey.clone(),
+                                        profile: profile.clone()
                                     }
                                 }
                             }
@@ -411,6 +529,51 @@ pub fn MusicSearch(q: String) -> Element {
                             }
                         }
                     },
+                }
+            }
+        }
+    }
+}
+
+/// Card component for displaying nostr music artists in search results
+#[component]
+fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
+    let artist_name = profile.get_display_name();
+    let artist_image = profile.picture.clone()
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
+
+    rsx! {
+        Link {
+            to: Route::MusicArtist { artist_id: pubkey.clone() },
+            class: "flex items-center gap-3 p-3 hover:bg-muted/50 rounded-lg transition group",
+
+            // Artist image with nostr badge
+            div {
+                class: "relative flex-shrink-0",
+                img {
+                    src: "{artist_image}",
+                    alt: "{artist_name}",
+                    class: "w-14 h-14 rounded-full object-cover",
+                    loading: "lazy"
+                }
+                // Nostr badge
+                div {
+                    class: "absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-purple-500/20 text-purple-400",
+                    title: "Nostr Artist",
+                    "N"
+                }
+            }
+
+            // Artist info
+            div {
+                class: "flex-1 min-w-0",
+                div {
+                    class: "font-medium text-sm truncate",
+                    "{artist_name}"
+                }
+                div {
+                    class: "text-xs text-muted-foreground truncate",
+                    "Nostr Music Artist"
                 }
             }
         }
