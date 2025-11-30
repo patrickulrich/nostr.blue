@@ -1570,6 +1570,7 @@ fn YouTubeRenderer(video_id: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden bg-black aspect-video max-w-full",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1635,6 +1636,7 @@ fn SpotifyRenderer(content_type: String, content_id: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1692,6 +1694,7 @@ fn SoundCloudRenderer(url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1755,6 +1758,7 @@ fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",
@@ -1814,6 +1818,7 @@ fn MixCloudRenderer(username: String, mix_name: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1888,6 +1893,7 @@ fn RumbleRenderer(embed_url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden bg-black aspect-video max-w-full",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",
@@ -1945,6 +1951,7 @@ fn TidalRenderer(embed_url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",
