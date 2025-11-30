@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::events::MouseData;
-use nostr_sdk::{Event as NostrEvent, Timestamp};
+use nostr_sdk::{Event as NostrEvent, Timestamp, Kind};
+use nostr_sdk::prelude::{Coordinate, ToBech32};
 use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
@@ -87,8 +88,12 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let host_verified = stream_meta.host_verified;
     let created_at = event.created_at;
 
-    // Create naddr for the livestream (still uses event publisher for fetching)
-    let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
+    // Create bech32 naddr for the livestream
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
+        .identifier(&stream_meta.d_tag);
+    let naddr = coord.to_bech32().unwrap_or_else(|_| {
+        format!("30311:{}:{}", event.pubkey, stream_meta.d_tag)
+    });
 
     // Get author metadata from profile store (uses LRU cache + database, much faster)
     let author_metadata = use_memo(move || {

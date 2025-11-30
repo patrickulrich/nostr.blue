@@ -45,35 +45,20 @@ pub fn LiveStreamShareModal(
             .unwrap_or_else(|| "Check out this livestream".to_string())
     });
 
-    // Generate nostr.blue URL using naddr format
-    let naddr = format!("30311:{}:{}", event.pubkey, d_tag);
-    let stream_url = format!("https://nostr.blue/videos/live/{}", naddr);
+    // Generate NIP-19 bech32 naddr for consistent URLs
+    use nostr_sdk::prelude::Coordinate;
+    use nostr_sdk::ToBech32;
 
-    // Generate NIP-19 naddr identifier
-    let stream_nip19 = use_signal(|| String::new());
-    {
-        let event_clone = event.clone();
-        let d_tag_clone = d_tag.clone();
-        let mut stream_nip19_clone = stream_nip19.clone();
-        use_effect(move || {
-            let d_tag_inner = d_tag_clone.clone();
-            let event_inner = event_clone.clone();
-            spawn(async move {
-                use nostr_sdk::prelude::Coordinate;
-                use nostr_sdk::ToBech32;
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
+        .identifier(&d_tag);
+    let naddr_bech32 = coord.to_bech32().unwrap_or_else(|_| {
+        // Fallback to raw format if bech32 encoding fails
+        format!("30311:{}:{}", event.pubkey, d_tag)
+    });
 
-                // Create naddr coordinate
-                let coord = Coordinate::new(Kind::from(30311), event_inner.pubkey)
-                    .identifier(&d_tag_inner);
-
-                let naddr_bech32 = coord.to_bech32().unwrap_or_else(|_| {
-                    format!("30311:{}:{}", event_inner.pubkey, d_tag_inner)
-                });
-
-                stream_nip19_clone.set(format!("nostr:{}", naddr_bech32));
-            });
-        });
-    }
+    // Use bech32 naddr for both URL and Nostr reference
+    let stream_url = format!("https://nostr.blue/videos/live/{}", naddr_bech32);
+    let stream_nip19 = format!("nostr:{}", naddr_bech32);
 
     let handle_copy_link = {
         let stream_url = stream_url.clone();
@@ -377,23 +362,23 @@ pub fn LiveStreamShareModal(
                                     Link2Icon { class: "w-3 h-3" }
                                     "nostr.blue Link"
                                 }
-                                button {
-                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
-                                    onclick: move |_| {
-                                        let nip19_value = stream_nip19.read().clone();
-                                        if nip19_value.is_empty() || nip19_value == "nostr:" {
-                                            return;
+                                {
+                                    let stream_nip19_for_btn = stream_nip19.clone();
+                                    rsx! {
+                                        button {
+                                            class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                            onclick: move |_| {
+                                                let mut current = nostr_text.read().clone();
+                                                if !current.is_empty() {
+                                                    current.push(' ');
+                                                }
+                                                current.push_str(&stream_nip19_for_btn);
+                                                nostr_text.set(current);
+                                            },
+                                            HashIcon { class: "w-3 h-3" }
+                                            "Nostr Event"
                                         }
-                                        let mut current = nostr_text.read().clone();
-                                        if !current.is_empty() {
-                                            current.push(' ');
-                                        }
-                                        current.push_str(&nip19_value);
-                                        nostr_text.set(current);
-                                    },
-                                    disabled: stream_nip19.read().is_empty() || *stream_nip19.read() == "nostr:",
-                                    HashIcon { class: "w-3 h-3" }
-                                    "Nostr Event"
+                                    }
                                 }
                             }
 

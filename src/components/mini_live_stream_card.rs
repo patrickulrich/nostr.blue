@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use nostr_sdk::{Event as NostrEvent, Kind};
+use nostr_sdk::prelude::{Coordinate, ToBech32};
 use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
@@ -57,8 +58,12 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let author_pubkey_for_fetch = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
 
-    // Create naddr for the livestream (still uses event publisher for fetching)
-    let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
+    // Create bech32 naddr for the livestream
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
+        .identifier(&stream_meta.d_tag);
+    let naddr = coord.to_bech32().unwrap_or_else(|_| {
+        format!("30311:{}:{}", event.pubkey, stream_meta.d_tag)
+    });
 
     // Get author metadata from profile store (uses LRU cache + database, much faster)
     let author_metadata = use_memo(move || {
