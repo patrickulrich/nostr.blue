@@ -128,7 +128,7 @@ pub async fn init_wallet() -> Result<(), String> {
     // Guard against concurrent initialization - atomic check-and-set
     {
         let mut status = WALLET_STATUS.write();
-        if matches!(*status, WalletStatus::Loading | WalletStatus::Ready) {
+        if matches!(*status, WalletStatus::Loading | WalletStatus::Ready | WalletStatus::Recovering) {
             log::debug!("Wallet init skipped - already {:?}", *status);
             return Ok(());
         }
@@ -280,6 +280,11 @@ pub async fn init_wallet() -> Result<(), String> {
 
 /// Create a new wallet with generated P2PK key
 pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
+    // Guard against overwriting existing wallet
+    if is_wallet_initialized() {
+        return Err("Wallet already exists. Cannot overwrite existing wallet.".to_string());
+    }
+
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
@@ -303,8 +308,18 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
 
     log::info!("Creating new wallet with {} mints", mints.len());
 
-    // Parse mint URLs
-    let mint_urls: Vec<Url> = mints.iter().filter_map(|m| Url::parse(m).ok()).collect();
+    // Validate and parse mint URLs - fail on any invalid URL
+    let mut mint_urls = Vec::new();
+    let mut invalid_mints = Vec::new();
+    for m in &mints {
+        match Url::parse(m) {
+            Ok(url) => mint_urls.push(url),
+            Err(e) => invalid_mints.push(format!("{}: {}", m, e)),
+        }
+    }
+    if !invalid_mints.is_empty() {
+        return Err(format!("Invalid mint URLs: {}", invalid_mints.join(", ")));
+    }
 
     // Build wallet data following rust-nostr's internal format
     let wallet_event = WalletEvent::new(wallet_privkey.clone(), mint_urls);

@@ -36,8 +36,15 @@ pub fn MusicSearch(q: String) -> Element {
     let mut nostr_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Unified track results (merged Wavlake + Nostr)
-    let mut unified_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    // Separate track results to avoid race conditions during parallel search
+    let mut wavlake_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    let mut nostr_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    // Compute unified tracks reactively - no race condition
+    let unified_tracks = use_memo(move || {
+        let mut combined = wavlake_tracks.read().clone();
+        combined.extend(nostr_tracks.read().iter().cloned());
+        combined
+    });
     // Keep separate for Artists/Albums tabs
     let mut artist_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
     let mut nostr_artist_results = use_signal(|| Vec::<(String, profiles::Profile)>::new());
@@ -55,7 +62,8 @@ pub fn MusicSearch(q: String) -> Element {
         let search_query = q.clone();
 
         if search_query.is_empty() {
-            unified_tracks.set(Vec::new());
+            wavlake_tracks.set(Vec::new());
+            nostr_tracks.set(Vec::new());
             artist_results.set(Vec::new());
             nostr_artist_results.set(Vec::new());
             album_results.set(Vec::new());
@@ -119,17 +127,11 @@ pub fn MusicSearch(q: String) -> Element {
                         .flatten()
                         .collect();
 
-                    // Convert to MusicTrack and merge with existing
+                    // Convert to MusicTrack and set directly (no merge needed with separate signals)
                     let wavlake_music_tracks: Vec<MusicTrack> = full_tracks.into_iter()
                         .map(|t| t.into())
                         .collect();
-
-                    // Merge with any existing nostr tracks
-                    let mut current = unified_tracks.read().clone();
-                    // Remove any existing Wavlake tracks (in case of re-search)
-                    current.retain(|t| !matches!(t.source, crate::stores::nostr_music::TrackSource::Wavlake { .. }));
-                    current.extend(wavlake_music_tracks);
-                    unified_tracks.set(current);
+                    wavlake_tracks.set(wavlake_music_tracks);
 
                     artist_results.set(artists);
                     album_results.set(albums);
@@ -158,17 +160,11 @@ pub fn MusicSearch(q: String) -> Element {
                 Ok(tracks) => {
                     log::info!("Found {} nostr tracks", tracks.len());
 
-                    // Convert to MusicTrack
+                    // Convert to MusicTrack and set directly (no merge needed with separate signals)
                     let nostr_music_tracks: Vec<MusicTrack> = tracks.into_iter()
                         .map(|t| t.into())
                         .collect();
-
-                    // Merge with any existing Wavlake tracks
-                    let mut current = unified_tracks.read().clone();
-                    // Remove any existing nostr tracks (in case of re-search)
-                    current.retain(|t| !matches!(t.source, crate::stores::nostr_music::TrackSource::Nostr { .. }));
-                    current.extend(nostr_music_tracks);
-                    unified_tracks.set(current);
+                    nostr_tracks.set(nostr_music_tracks);
 
                     nostr_loading.set(false);
                 }
@@ -212,7 +208,7 @@ pub fn MusicSearch(q: String) -> Element {
     ];
 
     // Count badges for tabs
-    let track_count = unified_tracks.read().len();
+    let track_count = unified_tracks().len();
     let artist_count = artist_results.read().len() + nostr_artist_results.read().len();
     let album_count = album_results.read().len();
     let both_loading = *loading.read() && *nostr_loading.read();
@@ -309,7 +305,7 @@ pub fn MusicSearch(q: String) -> Element {
                                 for _ in 0..8 {
                                     UnifiedTrackCardSkeleton {}
                                 }
-                            } else if unified_tracks.read().is_empty() {
+                            } else if unified_tracks().is_empty() {
                                 div {
                                     class: "text-center py-12 text-muted-foreground",
                                     p { "No tracks found" }
@@ -327,7 +323,7 @@ pub fn MusicSearch(q: String) -> Element {
                                         else { "Loading Nostr results..." }
                                     }
                                 }
-                                for track in unified_tracks.read().iter() {
+                                for track in unified_tracks().iter() {
                                     UnifiedTrackCard {
                                         key: "{track.id}",
                                         track: track.clone(),

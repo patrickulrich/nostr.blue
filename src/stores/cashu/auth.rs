@@ -171,6 +171,7 @@ pub fn is_protected_mint(mint_info: &serde_json::Value) -> bool {
 pub fn add_auth_header(
     headers: &mut Vec<(String, String)>,
     auth_state: &MintAuthState,
+    mint_url: &str,
     endpoint: &ProtectedEndpoint,
 ) -> Result<(), String> {
     if let Some(auth_required) = auth_state.endpoint_requires_auth(endpoint) {
@@ -184,9 +185,14 @@ pub fn add_auth_header(
                 }
             }
             AuthRequired::Blind => {
-                // Blind auth would need to consume an auth proof from storage
-                // For now, return error - full implementation would fetch from auth proof store
-                Err("Blind auth required - auth proof needed".to_string())
+                // Get blind auth token from cache
+                if let Some(token) = get_blind_auth_for_request(mint_url) {
+                    if let AuthToken::BlindAuth(bat) = token {
+                        headers.push(("Blind-auth".to_string(), bat.to_string()));
+                        return Ok(());
+                    }
+                }
+                Err("Blind auth required but no tokens available. Please request blind auth tokens.".to_string())
             }
         }
     } else {
@@ -199,25 +205,29 @@ pub fn add_auth_header(
 pub fn add_auth_header_for(
     headers: &mut Vec<(String, String)>,
     auth_state: &MintAuthState,
+    mint_url: &str,
     method: HttpMethod,
     path: RoutePath,
 ) -> Result<(), String> {
     let endpoint = ProtectedEndpoint::new(method, path);
-    add_auth_header(headers, auth_state, &endpoint)
+    add_auth_header(headers, auth_state, mint_url, &endpoint)
 }
 
 /// Check if an error response indicates auth is required
+///
+/// Uses CDK error codes: 30001 (ClearAuthRequired), 31001 (BlindAuthRequired)
 pub fn is_auth_required_error(status: u16, body: &str) -> Option<AuthRequired> {
     // NUT-21/22 error codes
     if status == 401 || status == 403 {
-        if body.contains("10020") || body.contains("clear_auth_required") || body.contains("Clear-auth") {
+        // CDK error codes: 30001=ClearAuth, 31001=BlindAuth
+        if body.contains("30001") || body.contains("clear_auth_required") || body.contains("Clear-auth") {
             return Some(AuthRequired::Clear);
         }
-        if body.contains("10021") || body.contains("blind_auth_required") || body.contains("Blind-auth") {
+        if body.contains("31001") || body.contains("blind_auth_required") || body.contains("Blind-auth") {
             return Some(AuthRequired::Blind);
         }
-        // Generic auth required
-        return Some(AuthRequired::Clear);
+        // Ambiguous 401/403 without explicit NUT-21/22 markers - don't assume auth type
+        return None;
     }
     None
 }
@@ -394,20 +404,33 @@ mod tests {
 
     #[test]
     fn test_is_auth_required_error() {
-        // Clear auth error
+        // Clear auth error (CDK error code 30001)
         assert_eq!(
-            is_auth_required_error(401, "error code 10020"),
+            is_auth_required_error(401, "error code 30001"),
+            Some(AuthRequired::Clear)
+        );
+        assert_eq!(
+            is_auth_required_error(401, "Clear-auth required"),
             Some(AuthRequired::Clear)
         );
 
-        // Blind auth error
+        // Blind auth error (CDK error code 31001)
         assert_eq!(
-            is_auth_required_error(403, "error code 10021"),
+            is_auth_required_error(403, "error code 31001"),
+            Some(AuthRequired::Blind)
+        );
+        assert_eq!(
+            is_auth_required_error(403, "Blind-auth required"),
             Some(AuthRequired::Blind)
         );
 
-        // No auth required
+        // Ambiguous 401/403 without specific markers - returns None
+        assert_eq!(is_auth_required_error(401, "unauthorized"), None);
+        assert_eq!(is_auth_required_error(403, "forbidden"), None);
+
+        // No auth required (non-401/403)
         assert_eq!(is_auth_required_error(200, "ok"), None);
+        assert_eq!(is_auth_required_error(500, "internal error"), None);
     }
 
     #[test]

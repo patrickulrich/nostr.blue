@@ -14,13 +14,9 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
-    // Store naddr in a signal to track changes and re-run effect
-    let naddr_signal = use_signal(|| naddr.clone());
-
-    // Parse naddr and fetch playlist - re-runs when naddr_signal changes
-    use_effect(move || {
-        // Read the signal inside effect to create reactive dependency
-        let naddr_clone = naddr_signal.read().clone();
+    // Parse naddr and fetch playlist - reacts directly to naddr prop changes
+    use_effect(use_reactive!(|naddr| {
+        let naddr_clone = naddr.clone();
         loading.set(true);
         error_msg.set(None);
 
@@ -72,7 +68,7 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     let play_playlist = move |_| {
         let playlist_tracks = tracks.read().clone();

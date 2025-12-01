@@ -274,7 +274,13 @@ pub fn CashuReceiveLightningModal(
                                     Err(e) => {
                                         // Error checking status - could be expired quote or network issue
                                         log::error!("Failed to check quote status: {}", e);
-                                        if e.contains("expired") || e.contains("not found") {
+                                        // Check for known error patterns from CDK
+                                        let e_lower = e.to_lowercase();
+                                        let is_expired = e_lower.contains("expired")
+                                            || e_lower.contains("not found")
+                                            || e_lower.contains("quote not found")
+                                            || e_lower.contains("unknown quote");
+                                        if is_expired {
                                             error_message.set(Some("Invoice expired".to_string()));
                                             is_polling.set(false);
                                             mint_status.set(None);

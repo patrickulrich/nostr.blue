@@ -35,7 +35,8 @@ pub fn LiveStreamShareModal(
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);
 
-    let has_signer = *HAS_SIGNER.read();
+    // Make HAS_SIGNER reactive so it updates if user logs in/out
+    let has_signer = use_memo(move || *HAS_SIGNER.read());
 
     // Extract livestream title
     let content_title = title.unwrap_or_else(|| {
@@ -84,6 +85,8 @@ pub fn LiveStreamShareModal(
 
     // Clone URLs for button handlers
     let stream_url_for_button = stream_url.clone();
+    // Capture event id for the tag (used to reference the livestream in shared notes)
+    let event_id = event.id;
 
     let handle_share_to_nostr = move |_| {
         let text = nostr_text.read().trim().to_string();
@@ -104,7 +107,9 @@ pub fn LiveStreamShareModal(
                 }
             };
 
-            let builder = EventBuilder::text_note(&text);
+            // Add event tag to reference the livestream being shared
+            let builder = EventBuilder::text_note(&text)
+                .tag(nostr_sdk::Tag::event(event_id));
 
             match client.send_event_builder(builder).await {
                 Ok(output) => {
@@ -285,7 +290,7 @@ pub fn LiveStreamShareModal(
                             button {
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
-                                disabled: !has_signer,
+                                disabled: !has_signer(),
                                 MessageCircleIcon { class: "w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -295,7 +300,7 @@ pub fn LiveStreamShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Post about this livestream" } else { "Login required" }
+                                        if has_signer() { "Post about this livestream" } else { "Login required" }
                                     }
                                 }
                             }
@@ -304,7 +309,7 @@ pub fn LiveStreamShareModal(
                             button {
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
-                                disabled: !has_signer,
+                                disabled: !has_signer(),
                                 SendIcon { class: "w-5 h-5 text-pink-500 flex-shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -314,7 +319,7 @@ pub fn LiveStreamShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Send privately to someone" } else { "Login required" }
+                                        if has_signer() { "Send privately to someone" } else { "Login required" }
                                     }
                                 }
                             }

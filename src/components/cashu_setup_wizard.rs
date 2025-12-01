@@ -79,6 +79,10 @@ pub fn CashuSetupWizard(
                         class: "text-xs text-muted-foreground mt-4",
                         "Default mint: ", {DEFAULT_MINT_URL}
                     }
+                    p {
+                        class: "text-xs text-muted-foreground mt-2",
+                        "You can add more mints later from the wallet settings."
+                    }
                 }
             }
         }

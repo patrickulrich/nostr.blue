@@ -153,15 +153,6 @@ pub const MAX_PROOFS_PER_TX: usize = 20;
 // SplitTarget Helpers
 // =============================================================================
 
-/// Create SplitTarget for a specific count of equal denominations
-pub fn split_target_count(count: usize) -> SplitTarget {
-    if count == 0 {
-        SplitTarget::None
-    } else {
-        SplitTarget::Value(cdk::Amount::from(count as u64))
-    }
-}
-
 /// Get the default SplitTarget for the wallet
 pub fn default_split_target() -> SplitTarget {
     SplitTarget::default()

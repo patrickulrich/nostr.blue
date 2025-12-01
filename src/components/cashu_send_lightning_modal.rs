@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 use futures::future::join_all;
 use crate::stores::cashu::{
     get_mints, create_melt_quote, melt_tokens,
@@ -33,6 +34,12 @@ pub fn CashuSendLightningModal(
     let mut payment_result = use_signal(|| Option::<(bool, Option<String>, u64)>::None);
     // Real-time melt status from NUT-17 WebSocket
     let mut melt_status = use_signal(|| Option::<String>::None);
+
+    // Track if component is still mounted (to prevent stale signal updates)
+    let mut mounted = use_signal(|| true);
+    use_drop(move || {
+        mounted.set(false);
+    });
 
     // MPP state
     let mut payment_mode = use_signal(|| PaymentMode::Single);
@@ -193,8 +200,12 @@ pub fn CashuSendLightningModal(
                             quote_id_for_ws,
                             cashu_ws::SubscriptionKind::Bolt11MeltQuote,
                         ).await {
+                            // Check if still mounted before updating signals
+                            if !*mounted.peek() { return; }
                             melt_status.set(Some("Processing payment...".to_string()));
                             while let Some(status) = rx.recv().await {
+                                // Check if still mounted before each update
+                                if !*mounted.peek() { break; }
                                 match status {
                                     cashu_ws::QuoteStatus::Pending => {
                                         melt_status.set(Some("Payment pending...".to_string()));
@@ -210,7 +221,7 @@ pub fn CashuSendLightningModal(
                                     _ => {}
                                 }
                             }
-                        } else {
+                        } else if *mounted.peek() {
                             melt_status.set(Some("Processing...".to_string()));
                         }
                     });

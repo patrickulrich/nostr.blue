@@ -436,17 +436,9 @@ fn PlaylistSection(platform_filter: String) -> Element {
     let mut playlists = use_signal(|| Vec::<nostr_music::NostrPlaylist>::new());
     let mut loading = use_signal(|| true);
 
-    // Track platform_filter prop as a signal so effect reruns when it changes
-    let mut platform_signal = use_signal(|| platform_filter.clone());
-
-    // Update signal when prop changes
-    use_effect(move || {
-        platform_signal.set(platform_filter.clone());
-    });
-
-    // Fetch playlists - reactively reads platform_signal
-    use_effect(move || {
-        let platform = platform_signal.read().clone();
+    // Fetch playlists - reacts directly to platform_filter prop changes
+    use_effect(use_reactive!(|platform_filter| {
+        let platform = platform_filter.clone();
         loading.set(true);
 
         spawn(async move {
@@ -468,7 +460,7 @@ fn PlaylistSection(platform_filter: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         if *loading.read() {
