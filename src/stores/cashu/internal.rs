@@ -424,16 +424,17 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                 // (orphaned reserves). Proofs with transaction_id are part of
                 // active operations and should not be deleted.
                 if local_proof.transaction_id.is_none() {
+                    // Log amount instead of secret (CDK pattern: never log secrets)
                     log::debug!(
-                        "Removing orphaned reserved proof (no transaction_id): {}...",
-                        &proof.secret.to_string()[..8.min(proof.secret.to_string().len())]
+                        "Removing orphaned reserved proof (no transaction_id): {} sats",
+                        u64::from(proof.amount)
                     );
                     unavailable_secrets.insert(proof.secret.to_string());
                     unavailable_amount += u64::from(proof.amount);
                 } else {
                     log::debug!(
-                        "Preserving reserved proof with active transaction: {}...",
-                        &proof.secret.to_string()[..8.min(proof.secret.to_string().len())]
+                        "Preserving reserved proof with active transaction: {} sats",
+                        u64::from(proof.amount)
                     );
                 }
             }

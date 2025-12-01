@@ -83,8 +83,9 @@ pub fn get_dust_stats(mint_url: &str, threshold: u64) -> DustStats {
     // Estimate fee: 1 sat per proof (typical)
     let estimated_fee = count as u64;
 
+    // Use > (not >=) to align with consolidate_dust which rejects when value <= fee
     let should_consolidate =
-        count >= MIN_DUST_COUNT && total_value >= estimated_fee && total_value <= MAX_DUST_TOTAL;
+        count >= MIN_DUST_COUNT && total_value > estimated_fee && total_value <= MAX_DUST_TOTAL;
 
     DustStats {
         count,
@@ -276,7 +277,10 @@ pub fn get_total_dust_stats() -> DustStats {
 
     if total.count > 0 {
         total.avg_value = total.total_value / total.count as u64;
-        total.should_consolidate = total.count >= MIN_DUST_COUNT && total.total_value > total.estimated_fee;
+        // Add MAX_DUST_TOTAL check to match per-mint logic in get_dust_stats
+        total.should_consolidate = total.count >= MIN_DUST_COUNT
+            && total.total_value > total.estimated_fee
+            && total.total_value <= MAX_DUST_TOTAL;
     }
 
     total

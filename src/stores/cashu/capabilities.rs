@@ -202,13 +202,23 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
             .map(|m| m.method.to_string())
             .collect();
 
-        // Extract limits if available
+        // Extract limits if available - aggregate across methods
+        // Use min of max_amounts (most restrictive upper bound)
+        // Use max of min_amounts (most restrictive lower bound)
         for method in &mint_info.nuts.nut04.methods {
             if let Some(max) = method.max_amount {
-                caps.max_mint_amount = Some(u64::from(max));
+                let amt = u64::from(max);
+                caps.max_mint_amount = Some(match caps.max_mint_amount {
+                    None => amt,
+                    Some(prev) => prev.min(amt),
+                });
             }
             if let Some(min) = method.min_amount {
-                caps.min_mint_amount = Some(u64::from(min));
+                let amt = u64::from(min);
+                caps.min_mint_amount = Some(match caps.min_mint_amount {
+                    None => amt,
+                    Some(prev) => prev.max(amt),
+                });
             }
         }
     }
@@ -225,12 +235,21 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
             .map(|m| m.method.to_string())
             .collect();
 
+        // Aggregate melt limits across methods (same pattern as mint)
         for method in &mint_info.nuts.nut05.methods {
             if let Some(max) = method.max_amount {
-                caps.max_melt_amount = Some(u64::from(max));
+                let amt = u64::from(max);
+                caps.max_melt_amount = Some(match caps.max_melt_amount {
+                    None => amt,
+                    Some(prev) => prev.min(amt),
+                });
             }
             if let Some(min) = method.min_amount {
-                caps.min_melt_amount = Some(u64::from(min));
+                let amt = u64::from(min);
+                caps.min_melt_amount = Some(match caps.min_melt_amount {
+                    None => amt,
+                    Some(prev) => prev.max(amt),
+                });
             }
         }
     }
