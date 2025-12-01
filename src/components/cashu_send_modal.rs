@@ -19,6 +19,8 @@ pub fn CashuSendModal(
     // Fee estimation
     let mut estimated_fee = use_signal(|| Option::<u64>::None);
     let mut is_estimating_fee = use_signal(|| false);
+    // Request ID to prevent race conditions in async fee estimation
+    let mut fee_request_id = use_signal(|| 0u32);
     // Token claim tracking (NUT-17)
     // None = no token yet, Some(false) = pending, Some(true) = claimed
     let mut token_claimed = use_signal(|| Option::<bool>::None);
@@ -64,19 +66,29 @@ pub fn CashuSendModal(
             return;
         }
 
+        // Increment request ID and capture current value to prevent race conditions
+        let current_id = fee_request_id.read().wrapping_add(1);
+        fee_request_id.set(current_id);
         is_estimating_fee.set(true);
 
         spawn(async move {
             match cashu::estimate_send_fee(mint, amount_sats).await {
                 Ok(fee) => {
-                    estimated_fee.set(Some(fee));
+                    // Only update if this is still the latest request
+                    if *fee_request_id.read() == current_id {
+                        estimated_fee.set(Some(fee));
+                        is_estimating_fee.set(false);
+                    }
                 }
                 Err(e) => {
-                    log::debug!("Fee estimation failed: {}", e);
-                    estimated_fee.set(None);
+                    // Only update if this is still the latest request
+                    if *fee_request_id.read() == current_id {
+                        log::debug!("Fee estimation failed: {}", e);
+                        estimated_fee.set(None);
+                        is_estimating_fee.set(false);
+                    }
                 }
             }
-            is_estimating_fee.set(false);
         });
     });
 

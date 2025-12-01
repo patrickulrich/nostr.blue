@@ -45,6 +45,7 @@ pub mod fees;
 pub mod pagination;
 pub mod dust;
 pub mod enriched_history;
+pub mod ws;
 
 // Re-export commonly used types
 pub use types::*;
@@ -120,7 +121,7 @@ pub use lightning::create_history_event_with_type;
 // NUT-17 support detection and proof state functions
 // Note: ProofState renamed to MintProofState to avoid conflict with types::ProofState
 #[allow(unused_imports)]
-pub use crate::stores::cashu_ws::{
+pub use self::ws::{
     mint_supports_websocket,
     subscribe_to_proof_states,
     poll_proof_states,

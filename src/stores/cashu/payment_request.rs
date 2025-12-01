@@ -21,6 +21,7 @@ use cdk::nuts::{
 use cdk::mint_url::MintUrl;
 use cdk::Amount;
 
+use crate::utils::shorten_url;
 use super::events::queue_event_for_retry;
 use super::types::PendingEventType;
 use super::internal::create_ephemeral_wallet;
@@ -213,7 +214,7 @@ pub async fn pay_payment_request(
     if balance < amount {
         return Err(format!(
             "Insufficient balance at {}. Have: {} sats, need: {} sats",
-            shorten_url(&mint_url),
+            shorten_url(&mint_url, 30),
             balance,
             amount
         ));
@@ -798,16 +799,4 @@ pub fn cancel_payment_request(request_id: &str) {
 /// Alias for API compatibility
 pub fn cancel_payment_request_wait(request_id: &str) {
     cancel_payment_request(request_id);
-}
-
-/// Helper to shorten URL for display
-fn shorten_url(url: &str) -> String {
-    let url = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    if url.len() > 30 {
-        format!("{}...", &url[..27])
-    } else {
-        url.to_string()
-    }
 }

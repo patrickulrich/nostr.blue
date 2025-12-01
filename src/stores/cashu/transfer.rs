@@ -79,6 +79,18 @@ pub async fn transfer_between_mints(
         error
     })?;
 
+    // Acquire lock for target mint to prevent concurrent operations
+    let _target_lock = try_acquire_mint_lock(&target_mint).ok_or_else(|| {
+        let error = format!(
+            "Another operation is in progress for target mint: {}",
+            target_mint
+        );
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+            error: error.clone(),
+        });
+        error
+    })?;
+
     // STEP 1: Create mint quote at target mint (get Lightning invoice)
     log::info!("Creating mint quote at target mint for {} sats", amount);
     *TRANSFER_PROGRESS.write() = Some(TransferProgress::CreatingMintQuote);
@@ -407,7 +419,7 @@ pub async fn transfer_between_mints(
                 .collect();
 
             let event_id = source_new_event_id
-                .unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+                .unwrap_or_else(|| format!("local-{}-src-{:08x}", chrono::Utc::now().timestamp_millis(), rand::random::<u32>()));
             tokens.push(TokenData {
                 event_id: event_id.clone(),
                 mint: source_mint.clone(),
@@ -427,7 +439,7 @@ pub async fn transfer_between_mints(
             .collect();
 
         let target_event_id = target_new_event_id
-            .unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+            .unwrap_or_else(|| format!("local-{}-tgt-{:08x}", chrono::Utc::now().timestamp_millis(), rand::random::<u32>()));
         tokens.push(TokenData {
             event_id: target_event_id.clone(),
             mint: target_mint.clone(),

@@ -1,14 +1,12 @@
 use dioxus::prelude::*;
 use futures::future::join_all;
-use crate::stores::{
-    cashu::{
-        get_mints, create_melt_quote, melt_tokens,
-        MeltProgress, MeltQuoteInfo, MELT_PROGRESS, WALLET_BALANCE,
-        // MPP types and functions
-        MppQuoteInfo, get_balances_per_mint, mint_supports_mpp,
-        calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt,
-    },
-    cashu_ws,
+use crate::stores::cashu::{
+    get_mints, create_melt_quote, melt_tokens,
+    MeltProgress, MeltQuoteInfo, MELT_PROGRESS, WALLET_BALANCE,
+    // MPP types and functions
+    MppQuoteInfo, get_balances_per_mint, mint_supports_mpp,
+    calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt,
+    ws as cashu_ws,
 };
 use crate::utils::shorten_url;
 

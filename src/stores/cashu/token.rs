@@ -150,25 +150,29 @@ pub fn create_token(
 
 /// Convert a V3 token to V4 format
 ///
-/// Parses a token and re-serializes it as V4.
+/// Uses CDK's TryFrom conversion. Note that multi-mint V3 tokens cannot be
+/// converted to V4 format (V4 only supports single-mint tokens).
 pub fn convert_to_v4(token_str: &str) -> Result<String, String> {
-    use cdk::nuts::Token;
+    use cdk::nuts::{TokenV3, TokenV4};
+    use std::convert::TryFrom;
 
-    let token = Token::from_str(token_str.trim())
-        .map_err(|e| format!("Failed to parse token: {}", e))?;
+    let trimmed = token_str.trim();
 
     // If already V4, just return it
-    if matches!(TokenFormat::detect(token_str), TokenFormat::V4) {
-        return Ok(token_str.trim().to_string());
+    if matches!(TokenFormat::detect(trimmed), TokenFormat::V4) {
+        return Ok(trimmed.to_string());
     }
 
-    // Get token details (kept for future use in token conversion)
-    let _mint_url = token.mint_url()
-        .map_err(|e| format!("Failed to get mint URL: {}", e))?;
+    // Parse as V3 token
+    let token_v3 = TokenV3::from_str(trimmed)
+        .map_err(|e| format!("Failed to parse V3 token: {}", e))?;
 
-    // We can't get proofs without keyset info, so just return the token as-is
-    // CDK will handle it properly when receiving
-    Ok(token.to_string())
+    // Convert to V4 using CDK's TryFrom (fails for multi-mint tokens)
+    let token_v4 = TokenV4::try_from(token_v3)
+        .map_err(|e| format!("Cannot convert to V4 format: {} (multi-mint tokens not supported in V4)", e))?;
+
+    // Return V4 token string (cashuB prefix with CBOR encoding)
+    Ok(token_v4.to_string())
 }
 
 // =============================================================================

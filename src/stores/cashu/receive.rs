@@ -165,15 +165,14 @@ pub async fn receive_tokens_with_options(
     // NUT-13: Validate keyset is active before receiving
     // Inactive keysets indicate the mint has rotated keys - tokens should be
     // migrated to a new keyset rather than accepted as-is
-    // Note: We check the keyset by examining the token's proofs directly
-    // since CDK's Token type requires keysets for proofs() call
-    if let Ok(proofs) = token.proofs(&[]) {
-        if let Some(first_proof) = proofs.first() {
-            let keyset_id = first_proof.keyset_id;
+    // Note: CDK's Token::proofs() requires KeySetInfo to convert short keyset IDs to full IDs
+    match wallet.get_mint_keysets().await {
+        Ok(keysets) => {
+            // Pass keyset info to token.proofs() for proper keyset ID conversion
+            if let Ok(proofs) = token.proofs(&keysets) {
+                if let Some(first_proof) = proofs.first() {
+                    let keyset_id = first_proof.keyset_id;
 
-            // Try to get keyset info by fetching all keysets and finding ours
-            match wallet.get_mint_keysets().await {
-                Ok(keysets) => {
                     if let Some(keyset_info) = keysets.iter().find(|k| k.id == keyset_id) {
                         if !keyset_info.active {
                             log::warn!(
@@ -188,11 +187,11 @@ pub async fn receive_tokens_with_options(
                         // Proceed - mint will reject if truly invalid
                     }
                 }
-                Err(e) => {
-                    log::debug!("Could not fetch keysets to verify status: {}", e);
-                    // Proceed - mint will reject if truly invalid
-                }
             }
+        }
+        Err(e) => {
+            log::debug!("Could not fetch keysets to verify status: {}", e);
+            // Proceed without keyset validation - mint will reject if truly invalid
         }
     }
 

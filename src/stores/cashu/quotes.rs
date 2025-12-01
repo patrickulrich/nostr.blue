@@ -12,6 +12,7 @@ use super::signals::{PENDING_MELT_QUOTES, PENDING_MINT_QUOTES};
 use super::types::{
     MeltQuoteInfo, MintQuoteInfo, PendingMeltQuotesStoreStoreExt, PendingMintQuotesStoreStoreExt,
 };
+use super::utils::now_secs;
 
 // =============================================================================
 // Quote Expiry Types
@@ -43,11 +44,6 @@ pub mod thresholds {
 // =============================================================================
 // Quote Expiry Checking
 // =============================================================================
-
-/// Get current timestamp in seconds
-fn now_secs() -> u64 {
-    js_sys::Date::now() as u64 / 1000
-}
 
 /// Check if a quote is expired
 pub fn is_quote_expired(expiry: Option<u64>) -> bool {

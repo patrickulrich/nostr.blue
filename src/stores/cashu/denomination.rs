@@ -35,11 +35,17 @@ pub enum DenominationStrategy {
 
 impl DenominationStrategy {
     /// Convert to CDK's SplitTarget
+    ///
+    /// CDK SplitTarget semantics (from crates/cashu/src/amount.rs):
+    /// - SplitTarget::None = "least amount of proofs" (larger denominations, power-of-two)
+    /// - SplitTarget::Value(Amount) = "most proofs that add up to value" (many small proofs)
     pub fn to_split_target(&self) -> SplitTarget {
         match self {
             Self::PowerOfTwo => SplitTarget::default(),
-            Self::Large => SplitTarget::Value(cdk::Amount::from(1u64)),
-            Self::Small => SplitTarget::None,
+            // CDK: None = "least amount of proofs" = larger denominations
+            Self::Large => SplitTarget::None,
+            // CDK: Value(1) = many 1-sat proofs = smaller denominations
+            Self::Small => SplitTarget::Value(cdk::Amount::from(1u64)),
             Self::Balanced => SplitTarget::default(),
             Self::Adaptive => SplitTarget::default(),
         }

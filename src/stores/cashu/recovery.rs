@@ -260,6 +260,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                 }
                 State::Pending => {
                     // Proof is pending at mint (lightning in-flight)
+                    result.pending_found += 1;
                     if !is_proof_pending_at_mint(&proof.secret) {
                         register_proofs_pending_at_mint(&[proof.secret.clone()]);
                         log::debug!("Proof {} registered as pending at mint", &proof.secret[..8]);
@@ -307,6 +308,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                 State::PendingSpent => {
                     // Proof was sent but not yet confirmed
                     // This is similar to Pending - keep it pending until mint confirms
+                    result.pending_found += 1;
                     if !is_proof_pending_at_mint(&proof.secret) {
                         register_proofs_pending_at_mint(&[proof.secret.clone()]);
                         log::debug!("Proof {} registered as pending (PendingSpent)", &proof.secret[..8]);
@@ -315,7 +317,9 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
             }
         }
 
-        result.proofs_cleaned += batch.len();
+        // Only count proofs that were actually checked (states.len() accounts for
+        // conversion failures that reduced cdk_proofs from the original batch)
+        result.proofs_cleaned += states.len();
     }
 
     // Sync CDK state to Dioxus signals
@@ -839,6 +843,11 @@ pub struct RecoverySummary {
 /// overhead and improving send operation efficiency.
 ///
 /// Returns the total amount consolidated across all mints.
+///
+/// TODO: This is a global consolidation function intended for wallet-wide optimization.
+/// A per-mint version exists in mint_mgmt.rs::consolidate_proofs(mint_url) which is
+/// currently used. Wire this up to UI or remove if per-mint consolidation is sufficient.
+#[allow(dead_code)]
 pub async fn consolidate_proofs() -> Result<ConsolidationSummary, String> {
     use crate::stores::cashu_cdk_bridge;
 
@@ -1105,42 +1114,53 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
 
     log::info!("Processing {} pending mint quotes", quotes.len());
 
-    let mut checked = 0;
-    let mut paid = 0;
-    let mut total_minted: u64 = 0;
-
+    let checked = quotes.len();
     let now = js_sys::Date::now() as u64 / 1000;
 
-    for quote in quotes {
-        checked += 1;
-
-        // Check expiry first
+    // First, remove expired quotes
+    let mut expired_ids = Vec::new();
+    for quote in &quotes {
         if let Some(expiry) = quote.expiry {
             if now >= expiry {
                 log::info!("Quote {} expired, removing", quote.quote_id);
-                remove_expired_mint_quote(&quote.quote_id);
-                continue;
-            }
-        }
-
-        // Check quote status at mint using CDK's method
-        if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
-            match multi_wallet.check_all_mint_quotes(None).await {
-                Ok(amount) => {
-                    let minted = u64::from(amount);
-                    if minted > 0 {
-                        paid += 1;
-                        total_minted += minted;
-                        // Remove from pending since CDK processed it
-                        remove_paid_mint_quote(&quote.quote_id);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to check mint quote {}: {}", quote.quote_id, e);
-                }
+                expired_ids.push(quote.quote_id.clone());
             }
         }
     }
+    for id in &expired_ids {
+        remove_expired_mint_quote(id);
+    }
+
+    // Call check_all_mint_quotes once (not in a loop)
+    // CDK's check_all_mint_quotes processes all pending quotes and mints any paid ones
+    let (paid, total_minted) = if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
+        match multi_wallet.check_all_mint_quotes(None).await {
+            Ok(amount) => {
+                let minted = u64::from(amount);
+                if minted > 0 {
+                    // CDK processed paid quotes - clear our pending tracking
+                    // We don't know exactly which quotes were paid, so clear all non-expired
+                    let non_expired_ids: Vec<_> = quotes.iter()
+                        .filter(|q| !expired_ids.contains(&q.quote_id))
+                        .map(|q| q.quote_id.clone())
+                        .collect();
+                    let paid_count = non_expired_ids.len();
+                    for id in non_expired_ids {
+                        remove_paid_mint_quote(&id);
+                    }
+                    (paid_count, minted)
+                } else {
+                    (0, 0)
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to check mint quotes: {}", e);
+                (0, 0)
+            }
+        }
+    } else {
+        (0, 0)
+    };
 
     if paid > 0 {
         log::info!("Minted {} sats from {} paid quotes", total_minted, paid);
@@ -1148,7 +1168,7 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
         let _ = cashu_cdk_bridge::sync_wallet_state().await;
     }
 
-    Ok((checked, paid, total_minted))
+    Ok((checked, paid, total_minted as u64))
 }
 
 /// Check and process all pending melt quotes
@@ -1226,13 +1246,14 @@ pub async fn check_all_pending_proofs() -> Result<(usize, usize, usize), String>
     let mints = get_mints();
     let mut total_checked = 0;
     let mut total_spent = 0;
-    let total_pending = 0;
+    let mut total_pending = 0;
 
     for mint_url in mints {
         match sync_state_with_mint(&mint_url).await {
             Ok(result) => {
                 total_checked += result.proofs_cleaned;
                 total_spent += result.spent_found;
+                total_pending += result.pending_found;
             }
             Err(e) => {
                 log::warn!("Failed to check proofs for {}: {}", mint_url, e);

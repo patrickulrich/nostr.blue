@@ -169,6 +169,12 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
         return Ok(seed);
     }
 
+    // WARNING: NIP-07 seed derivation is non-deterministic across signer implementations.
+    // Different browser extensions may produce different signatures due to aux_rand in Schnorr.
+    // This means the wallet seed could differ if the user switches extensions.
+    // For guaranteed deterministic seeds, use nsec (private key) login instead.
+    // A future improvement could persist the derived seed after first derivation.
+    //
     // For browser extension or remote signer, use NIP-07 to sign a deterministic challenge
     log::info!("Using browser extension - deriving seed from NIP-07 signature");
 
@@ -220,12 +226,9 @@ pub(crate) fn is_insufficient_funds_error_string(error_msg: &str) -> bool {
 }
 
 /// Check if a CDK error indicates tokens are already spent
-pub(crate) fn is_token_already_spent_error(error: &cdk::Error) -> bool {
-    match error {
-        cdk::Error::TokenAlreadySpent => true,
-        _ => is_token_spent_error_string(&error.to_string()),
-    }
-}
+/// Re-export from errors module for convenience - the canonical implementation
+/// handles both TokenAlreadySpent and TokenPending cases
+pub(crate) use super::errors::is_token_already_spent_error;
 
 /// Check if a CDK error indicates insufficient funds
 pub(crate) fn is_insufficient_funds_error(error: &cdk::Error) -> bool {
@@ -551,12 +554,16 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             });
         }
 
-        // Update balance with overflow protection
+        // Update balance with overflow protection (following CDK try_sum pattern)
         let new_balance: u64 = tokens_write
             .iter()
             .flat_map(|t| &t.proofs)
             .map(|p| p.amount)
-            .fold(0u64, |acc, amt| acc.saturating_add(amt));
+            .try_fold(0u64, |acc, amt| acc.checked_add(amt))
+            .unwrap_or_else(|| {
+                log::error!("Balance overflow detected during cleanup!");
+                u64::MAX
+            });
 
         *super::signals::WALLET_BALANCE.write() = new_balance;
     }
@@ -582,8 +589,8 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
 
     // 1. Wallet's private key (cashu-specific)
     if let Some(state) = WALLET_STATE.read().as_ref() {
-        if !state.privkey.is_empty() {
-            match cdk::nuts::SecretKey::from_hex(&state.privkey) {
+        if let Some(ref privkey) = state.privkey {
+            match cdk::nuts::SecretKey::from_hex(privkey) {
                 Ok(key) => {
                     log::debug!("Added wallet privkey to P2PK signing keys");
                     keys.push(key);
@@ -625,8 +632,10 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
 
 /// Convert a Nostr public key to a CDK public key for P2PK spending conditions
 ///
-/// Nostr uses 32-byte x-only public keys, while CDK/Cashu uses 33-byte compressed
-/// secp256k1 public keys. This handles the conversion by assuming even Y parity.
+/// Nostr uses 32-byte x-only public keys (BIP340), while CDK/Cashu uses 33-byte
+/// compressed secp256k1 public keys. Per BIP340 convention, x-only pubkeys
+/// implicitly represent the point with even Y parity, so we try 02 prefix first.
+/// Falls back to 03 (odd parity) if even fails validation.
 pub(crate) fn nostr_pubkey_to_cdk_pubkey(nostr_pubkey: &str) -> Result<cdk::nuts::PublicKey, String> {
     // Parse the Nostr pubkey (supports npub, hex, NIP-21)
     let parsed = nostr_sdk::PublicKey::parse(nostr_pubkey)
@@ -635,12 +644,17 @@ pub(crate) fn nostr_pubkey_to_cdk_pubkey(nostr_pubkey: &str) -> Result<cdk::nuts
     // Get the 32-byte hex (x-only format)
     let x_only_hex = parsed.to_hex();
 
-    // Convert to 33-byte compressed format by prepending 02 (even Y parity)
-    let compressed_hex = format!("02{}", x_only_hex);
+    // Try even Y parity first (02 prefix) - this is the BIP340 convention
+    // which Nostr follows, so should work for all standard Nostr pubkeys
+    let compressed_even = format!("02{}", x_only_hex);
+    if let Ok(pk) = cdk::nuts::PublicKey::from_hex(&compressed_even) {
+        return Ok(pk);
+    }
 
-    // Parse as CDK PublicKey
-    cdk::nuts::PublicKey::from_hex(&compressed_hex)
-        .map_err(|e| format!("Failed to create CDK pubkey: {}", e))
+    // Fallback to odd Y parity (03 prefix) in case of non-standard keys
+    let compressed_odd = format!("03{}", x_only_hex);
+    cdk::nuts::PublicKey::from_hex(&compressed_odd)
+        .map_err(|e| format!("Failed to create CDK pubkey from either parity: {}", e))
 }
 
 // =============================================================================

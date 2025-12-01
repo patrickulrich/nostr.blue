@@ -156,10 +156,10 @@ pub fn count_proofs_by_status(mint_url: &str) -> (usize, usize, u64, u64) {
         for proof in &token.proofs {
             if active_keysets.contains(&proof.id) {
                 active_count += 1;
-                active_value += proof.amount;
+                active_value = active_value.saturating_add(proof.amount);
             } else {
                 inactive_count += 1;
-                inactive_value += proof.amount;
+                inactive_value = inactive_value.saturating_add(proof.amount);
             }
         }
     }

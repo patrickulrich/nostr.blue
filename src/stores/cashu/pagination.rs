@@ -205,11 +205,14 @@ pub struct ProofPaginator {
 
 impl ProofPaginator {
     /// Create new paginator
+    ///
+    /// Note: batch_size of 0 is clamped to 1 to prevent division by zero
     pub fn new(proofs: Vec<ProofData>, batch_size: usize) -> Self {
+        debug_assert!(batch_size > 0, "batch_size must be > 0");
         Self {
             proofs,
             position: 0,
-            batch_size,
+            batch_size: batch_size.max(1), // Prevent division by zero
         }
     }
 

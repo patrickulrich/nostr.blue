@@ -238,7 +238,7 @@ pub async fn send_tokens_p2pk(
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| id.len() == 64)
+        .filter(|id| EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
@@ -268,8 +268,9 @@ pub async fn send_tokens_p2pk(
 pub fn get_wallet_pubkey() -> Result<String, String> {
     let wallet_state = WALLET_STATE.read();
     let state = wallet_state.as_ref().ok_or("Wallet not initialized")?;
+    let privkey = state.privkey.as_ref().ok_or("Wallet private key not available")?;
 
-    let secret_key = cdk::nuts::SecretKey::from_hex(&state.privkey)
+    let secret_key = cdk::nuts::SecretKey::from_hex(privkey)
         .map_err(|e| format!("Invalid wallet privkey: {}", e))?;
 
     let pubkey = secret_key.public_key();
@@ -649,7 +650,7 @@ pub fn watch_sent_token_claims<F>(
     F: FnMut() + 'static,
 {
     use dioxus::prelude::spawn;
-    use crate::stores::cashu_ws;
+    use super::ws as cashu_ws;
 
     if y_values.is_empty() {
         log::warn!("watch_sent_token_claims called with empty Y values");
@@ -689,7 +690,7 @@ async fn poll_for_token_claims<F>(
 ) where
     F: FnMut() + 'static,
 {
-    use crate::stores::cashu_ws;
+    use super::ws as cashu_ws;
 
     let poll_interval_ms = 5000u32; // 5 seconds
     let max_polls = 60; // 5 minutes max

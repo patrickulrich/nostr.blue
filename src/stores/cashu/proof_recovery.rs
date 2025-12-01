@@ -14,6 +14,7 @@ use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{WALLET_BALANCE, WALLET_TOKENS};
 use super::types::{ProofData, ProofState, WalletTokensStoreStoreExt};
+use super::utils::now_secs;
 
 // =============================================================================
 // Recovery Constants
@@ -45,11 +46,6 @@ pub struct TrackedProofState {
     pub transaction_id: Option<u64>,
     /// Mint URL
     pub mint_url: String,
-}
-
-/// Get current timestamp
-fn now_secs() -> u64 {
-    js_sys::Date::now() as u64 / 1000
 }
 
 // =============================================================================
@@ -239,11 +235,28 @@ async fn check_and_recover_proofs(
 ) -> Result<ProofRecoveryResult, String> {
     let wallet = get_or_create_wallet(mint_url).await?;
 
-    // Convert to CDK proofs for checking
-    let cdk_proofs: Vec<cdk::nuts::Proof> = proofs
+    // Convert to CDK proofs for checking, tracking conversion errors
+    let conversion_results: Vec<_> = proofs
         .iter()
-        .filter_map(|p| proof_data_to_cdk_proof(p).ok())
+        .enumerate()
+        .map(|(idx, p)| (idx, proof_data_to_cdk_proof(p)))
         .collect();
+
+    let mut cdk_proofs = Vec::new();
+    let mut conversion_errors = 0usize;
+    for (idx, result) in conversion_results {
+        match result {
+            Ok(proof) => cdk_proofs.push(proof),
+            Err(e) => {
+                conversion_errors += 1;
+                log::warn!("Failed to convert proof {} for recovery: {}", idx, e);
+            }
+        }
+    }
+
+    if conversion_errors > 0 {
+        log::warn!("Skipped {} proofs due to conversion errors", conversion_errors);
+    }
 
     if cdk_proofs.is_empty() {
         return Ok(ProofRecoveryResult::default());

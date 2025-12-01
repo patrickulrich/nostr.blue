@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::ReadableExt;
 
+use crate::stores::cashu_cdk_bridge;
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
@@ -173,14 +174,18 @@ pub async fn consolidate_dust(
         ));
     }
 
-    // Convert to CDK proofs
+    // Convert to CDK proofs - fail if any conversion fails to prevent inconsistent state
     let cdk_proofs: Vec<cdk::nuts::Proof> = dust_proofs
         .iter()
-        .filter_map(|p| proof_data_to_cdk_proof(p).ok())
-        .collect();
+        .enumerate()
+        .map(|(idx, p)| {
+            proof_data_to_cdk_proof(p)
+                .map_err(|e| format!("Failed to convert proof at index {}: {}", idx, e))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     if cdk_proofs.is_empty() {
-        return Err("Failed to convert dust proofs".to_string());
+        return Err("No proofs to consolidate".to_string());
     }
 
     // Get wallet and execute swap
@@ -210,6 +215,11 @@ pub async fn consolidate_dust(
         output_proofs.len(),
         fee_paid
     );
+
+    // Sync wallet state to update UI signals
+    if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
+        log::warn!("Failed to sync wallet state after dust consolidation: {}", e);
+    }
 
     Ok(DustConsolidationResult {
         proofs_consolidated: count,

@@ -233,5 +233,17 @@ pub fn reset_wallet_state() {
     *PAYMENT_REQUEST_PROGRESS.write() = None;
     PENDING_PAYMENT_REQUESTS.write().clear();
 
+    // Clear pending quote stores
+    {
+        let store = PENDING_MINT_QUOTES.read();
+        let mut data = store.data();
+        data.write().clear();
+    }
+    {
+        let store = PENDING_MELT_QUOTES.read();
+        let mut data = store.data();
+        data.write().clear();
+    }
+
     log::info!("Reset all wallet state");
 }

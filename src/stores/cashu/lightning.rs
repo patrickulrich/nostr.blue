@@ -470,9 +470,13 @@ pub async fn melt_tokens(
         .cloned()
         .collect();
 
+    // Use checked_add to prevent overflow (following CDK pattern)
+    let total_amount = quote_info.amount.checked_add(fee_paid)
+        .ok_or_else(|| "Overflow adding quote amount and fee".to_string())?;
+
     create_history_event_with_type(
         "out",
-        quote_info.amount + fee_paid,
+        total_amount,
         valid_created,
         valid_destroyed,
         Some("lightning_melt"),

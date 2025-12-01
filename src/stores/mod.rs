@@ -18,7 +18,6 @@ pub mod gif_store;
 pub mod relay_metadata;
 pub mod voice_messages_store;
 pub mod webbookmarks;
-pub mod cashu_ws;
 pub mod cashu_cdk_bridge;
 pub mod cashu;  // NIP-60 Cashu wallet
 pub mod nwc_store;

@@ -165,7 +165,7 @@ pub async fn init_wallet() -> Result<(), String> {
                         log::info!("Wallet loaded with {} mints", wallet_data.mints.len());
 
                         *WALLET_STATE.write() = Some(WalletState {
-                            privkey: wallet_data.privkey.clone(),
+                            privkey: Some(wallet_data.privkey.clone()),
                             mints: wallet_data.mints.iter().map(|u| u.to_string()).collect(),
                             initialized: true,
                         });
@@ -197,6 +197,9 @@ pub async fn init_wallet() -> Result<(), String> {
 
                         // Start background processor for pending events
                         start_pending_events_processor();
+
+                        // Set status to Recovering while background sync runs
+                        *WALLET_STATUS.write() = WalletStatus::Recovering;
 
                         // Run recovery in background to not block UI
                         spawn(async move {
@@ -235,9 +238,9 @@ pub async fn init_wallet() -> Result<(), String> {
                             }
 
                             log::info!("Wallet recovery complete");
+                            *WALLET_STATUS.write() = WalletStatus::Ready;
                         });
 
-                        *WALLET_STATUS.write() = WalletStatus::Ready;
                         Ok(())
                     }
                     Err(e) => {
@@ -250,7 +253,7 @@ pub async fn init_wallet() -> Result<(), String> {
             } else {
                 log::info!("No wallet found");
                 *WALLET_STATE.write() = Some(WalletState {
-                    privkey: String::new(),
+                    privkey: None, // No wallet exists yet
                     mints: Vec::new(),
                     initialized: false,
                 });
@@ -322,7 +325,7 @@ pub async fn create_wallet(mints: Vec<String>) -> Result<(), String> {
 
             // Update local state
             *WALLET_STATE.write() = Some(WalletState {
-                privkey: wallet_privkey,
+                privkey: Some(wallet_privkey),
                 mints: mints.clone(),
                 initialized: true,
             });

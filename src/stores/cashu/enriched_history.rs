@@ -353,11 +353,8 @@ pub fn create_p2pk_send_history(
     recipient: String,
     created_at: u64,
 ) -> EnrichedHistoryItem {
-    let recipient_short = if recipient.len() >= 8 {
-        &recipient[..8]
-    } else {
-        &recipient
-    };
+    // Use UTF-8 safe character slicing to avoid panic on multi-byte chars
+    let recipient_short: String = recipient.chars().take(8).collect();
     EnrichedHistoryItem {
         base: HistoryItemData {
             event_id,

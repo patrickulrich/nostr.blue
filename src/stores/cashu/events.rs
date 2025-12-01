@@ -472,6 +472,10 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 log::info!("Incremental sync: {} total tokens, {} sats (fetched {} new events)",
                     merged_tokens.len(), total_balance, new_token_count);
 
+                // Note: Token and balance updates are not atomic but are calculated from the same
+                // data (total_balance is computed from merged_tokens before either write).
+                // Both writes happen synchronously on the same thread. If inconsistency occurs
+                // (e.g., crash between writes), recalculate_balance() can restore consistency.
                 *WALLET_TOKENS.read().data().write() = merged_tokens;
             } else {
                 log::info!("Full sync: {} token events with {} sats", tokens.len(), total_balance);
@@ -719,16 +723,14 @@ pub async fn process_pending_events() -> Result<usize, String> {
 }
 
 /// Start background task to process pending events periodically
+#[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
     use dioxus::prelude::spawn;
+    use gloo_timers::future::TimeoutFuture;
 
     spawn(async {
         loop {
-            #[cfg(target_arch = "wasm32")]
-            {
-                use gloo_timers::future::TimeoutFuture;
-                TimeoutFuture::new(5 * 60 * 1000).await;
-            }
+            TimeoutFuture::new(5 * 60 * 1000).await;
 
             if let Err(e) = process_pending_events().await {
                 log::error!("Error processing pending events: {}", e);
@@ -737,4 +739,10 @@ pub fn start_pending_events_processor() {
     });
 
     log::info!("Started pending events background processor (5 minute interval)");
+}
+
+/// No-op on non-WASM targets (gloo_timers is WASM-only)
+#[cfg(not(target_arch = "wasm32"))]
+pub fn start_pending_events_processor() {
+    log::debug!("Pending events processor only runs in WASM");
 }

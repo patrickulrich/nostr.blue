@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::{cashu, cashu_ws};
+use crate::stores::cashu;
+use crate::stores::cashu::ws as cashu_ws;
 use crate::utils::shorten_url;
 use qrcode::{QrCode, render::svg};
 
@@ -145,7 +146,7 @@ pub fn CashuReceiveLightningModal(
                                             }
                                         }
                                     }
-                                    _ = gloo_timers::future::TimeoutFuture::new(30000) => {
+                                    _ = gloo_timers::future::TimeoutFuture::new(5000) => {
                                         // Timeout waiting for WebSocket, check via HTTP as backup
                                         match cashu::check_mint_quote_status(
                                             mint_url.clone(),

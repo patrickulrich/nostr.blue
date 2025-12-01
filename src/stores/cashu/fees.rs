@@ -86,7 +86,9 @@ impl P2pkComplexity {
             Self::None => 0,
             Self::SingleSig => P2PK_WITNESS_OVERHEAD,
             Self::MultiSig { required, .. } => {
-                P2PK_WITNESS_OVERHEAD + (*required as usize - 1) * MULTISIG_SIGNATURE_OVERHEAD
+                // Use saturating_sub to prevent underflow when required == 0
+                let extra_sigs = (*required as usize).saturating_sub(1);
+                P2PK_WITNESS_OVERHEAD + extra_sigs * MULTISIG_SIGNATURE_OVERHEAD
             }
             Self::Htlc => HTLC_WITNESS_OVERHEAD,
             Self::HtlcP2pk => HTLC_WITNESS_OVERHEAD + P2PK_WITNESS_OVERHEAD,
@@ -153,7 +155,8 @@ pub async fn estimate_p2pk_send_fee(
     let witness_size = complexity.witness_size();
     let witness_fee = if witness_size > 0 {
         // Estimate 1 sat per 100 bytes of witness data per proof
-        let fee_per_proof = (witness_size / 100).max(1) as u64;
+        // Use ceiling division: (n + 99) / 100 rounds up
+        let fee_per_proof = ((witness_size + 99) / 100).max(1) as u64;
         fee_per_proof * proof_count as u64
     } else {
         0
@@ -204,8 +207,9 @@ pub async fn estimate_p2pk_receive_fee(
     let has_witness = proofs.iter().any(|p| p.witness.is_some());
     let witness_fee = if has_witness {
         // Assume single-sig P2PK if witness present
+        // Use ceiling division: (n + 99) / 100 rounds up
         let witness_size = P2PK_WITNESS_OVERHEAD;
-        (witness_size / 100).max(1) as u64 * proof_count as u64
+        ((witness_size + 99) / 100).max(1) as u64 * proof_count as u64
     } else {
         0
     };

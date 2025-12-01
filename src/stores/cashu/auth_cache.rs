@@ -12,6 +12,8 @@ use dioxus::prelude::*;
 // Use CDK's BlindAuthToken type directly
 use cdk_common::BlindAuthToken;
 
+use super::utils::now_secs;
+
 // =============================================================================
 // Auth Token Cache
 // =============================================================================
@@ -165,11 +167,6 @@ pub const MIN_TOKEN_REQUEST: u32 = 5;
 pub static BLIND_AUTH_CACHE: GlobalSignal<BlindAuthCache> =
     GlobalSignal::new(BlindAuthCache::new);
 
-/// Get current timestamp
-fn now_secs() -> u64 {
-    js_sys::Date::now() as u64 / 1000
-}
-
 // =============================================================================
 // Public API
 // =============================================================================
@@ -259,14 +256,24 @@ pub async fn ensure_tokens_available(mint_url: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let tokens = request_blind_auth_tokens(mint_url, MIN_TOKEN_REQUEST).await?;
-
-    // Calculate expiry (1 hour from now)
-    let expires_at = Some(now_secs() + DEFAULT_TOKEN_TTL);
-
-    cache_tokens(mint_url, tokens, expires_at);
-
-    Ok(())
+    match request_blind_auth_tokens(mint_url, MIN_TOKEN_REQUEST).await {
+        Ok(tokens) => {
+            // Calculate expiry (1 hour from now)
+            let expires_at = Some(now_secs() + DEFAULT_TOKEN_TTL);
+            cache_tokens(mint_url, tokens, expires_at);
+            Ok(())
+        }
+        Err(e) => {
+            // Handle "not implemented" error gracefully - NUT-22 is optional
+            // This allows operations to continue without blind auth when CDK support is missing
+            if e.contains("not yet implemented") || e.contains("not implemented") {
+                log::warn!("Blind auth tokens not available for {}: {}", mint_url, e);
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 // =============================================================================

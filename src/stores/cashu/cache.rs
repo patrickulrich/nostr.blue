@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+use super::utils::{now_secs, normalize_mint_url};
 
 // =============================================================================
 // Cache Configuration
@@ -16,11 +17,6 @@ use serde::{Deserialize, Serialize};
 
 /// Default cache TTL in seconds (5 minutes)
 const DEFAULT_TTL_SECS: u64 = 300;
-
-/// Get current timestamp in seconds
-fn now_secs() -> u64 {
-    instant::Instant::now().elapsed().as_secs()
-}
 
 // =============================================================================
 // Cached Types
@@ -107,12 +103,12 @@ impl MintCacheEntry {
         }
     }
 
-    /// Check if keysets are still valid
-    pub fn are_keysets_valid(&self, ttl_secs: u64) -> bool {
+    /// Check if at least one keyset is still valid (within TTL)
+    pub fn has_valid_keyset(&self, ttl_secs: u64) -> bool {
         if self.keysets.is_empty() {
             return false;
         }
-        // Check if any keyset is still within TTL
+        // Returns true if ANY keyset is still within TTL
         self.keysets.values().any(|ks| {
             now_secs().saturating_sub(ks.cached_at) < ttl_secs
         })
@@ -223,7 +219,7 @@ impl MintMetadataCache {
     /// Check if keysets are cached and valid
     pub fn has_valid_keysets(&self, mint_url: &str) -> bool {
         self.get_mint(mint_url)
-            .map(|e| e.are_keysets_valid(self.ttl_secs))
+            .map(|e| e.has_valid_keyset(self.ttl_secs))
             .unwrap_or(false)
     }
 
@@ -283,11 +279,6 @@ pub struct CacheStats {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-/// Normalize mint URL for cache key
-fn normalize_mint_url(url: &str) -> String {
-    url.trim_end_matches('/').to_lowercase()
-}
 
 /// Parse mint info from JSON response into cached format
 pub fn parse_mint_info_to_cache(json: &serde_json::Value) -> CachedMintInfo {
@@ -556,21 +547,24 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
 
 /// Fetch mint info with caching
 pub async fn cached_fetch_mint_info(mint_url: &str) -> Result<serde_json::Value, String> {
-    let url = format!("{}/v1/info", mint_url.trim_end_matches('/'));
+    let normalized = normalize_mint_url(mint_url);
+    let url = format!("{}/v1/info", normalized);
     let body = cached_fetch(&url, ttls::MINT_INFO).await?;
     serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {}", e))
 }
 
 /// Fetch keysets with caching
 pub async fn cached_fetch_keysets(mint_url: &str) -> Result<serde_json::Value, String> {
-    let url = format!("{}/v1/keysets", mint_url.trim_end_matches('/'));
+    let normalized = normalize_mint_url(mint_url);
+    let url = format!("{}/v1/keysets", normalized);
     let body = cached_fetch(&url, ttls::KEYSETS).await?;
     serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {}", e))
 }
 
 /// Fetch keys for a keyset with caching
 pub async fn cached_fetch_keys(mint_url: &str, keyset_id: &str) -> Result<serde_json::Value, String> {
-    let url = format!("{}/v1/keys/{}", mint_url.trim_end_matches('/'), keyset_id);
+    let normalized = normalize_mint_url(mint_url);
+    let url = format!("{}/v1/keys/{}", normalized, keyset_id);
     let body = cached_fetch(&url, ttls::KEYS).await?;
     serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {}", e))
 }

@@ -25,6 +25,10 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, nostr_client};
 
+/// Maximum number of proofs to swap in a single batch (CDK pattern)
+/// Mints may reject requests with too many input proofs
+const BATCH_PROOF_SIZE: usize = 100;
+
 // =============================================================================
 // Keyset Collision Detection
 // =============================================================================
@@ -469,7 +473,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         return Err("Mint URL must use HTTPS".to_string());
     }
 
-    // Check if mint already exists (compare normalized URLs)
+    // Early check if mint already exists (fast path, but we re-check atomically later)
     let existing_mints = get_mints();
     let normalized_existing: Vec<String> = existing_mints.iter().map(|m| normalize_mint_url(m)).collect();
     if normalized_existing.contains(&mint_url) {
@@ -519,10 +523,17 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         }
     }
 
-    // Update WALLET_STATE with new mint
+    // Atomically check-and-insert to prevent race condition
     {
         let mut state = WALLET_STATE.write();
         if let Some(ref mut wallet_state) = *state {
+            // Re-check under write lock to prevent concurrent additions
+            let normalized_existing: Vec<String> = wallet_state.mints.iter()
+                .map(|m| normalize_mint_url(m))
+                .collect();
+            if normalized_existing.contains(&mint_url) {
+                return Err("Mint already exists in wallet".to_string());
+            }
             wallet_state.mints.push(mint_url.clone());
         } else {
             return Err("Wallet not initialized".to_string());
@@ -532,6 +543,8 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
     // Update wallet event on relays
     let wallet_state = WALLET_STATE.read().clone()
         .ok_or("Wallet state not available")?;
+    let privkey = wallet_state.privkey.as_ref()
+        .ok_or("Wallet private key not available")?;
 
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
@@ -546,7 +559,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         .ok_or("Client not initialized")?.clone();
 
     // Build wallet event content array following NIP-60 format
-    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", &wallet_state.privkey]];
+    let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
     for mint in wallet_state.mints.iter() {
         content_array.push(vec!["mint", mint.as_str()]);
     }
@@ -703,18 +716,20 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     }
 
     // Update local state - remove all tokens for this mint
+    // Use mint_matches for normalized comparison (handles URL variants)
     {
         let store = WALLET_TOKENS.read();
         let mut data = store.data();
         let mut tokens_write = data.write();
-        tokens_write.retain(|t| t.mint != mint_url);
+        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
     }
 
     // Remove mint from wallet state
+    // Use mint_matches for normalized comparison
     {
         let mut state_write = WALLET_STATE.write();
         if let Some(ref mut state) = *state_write {
-            state.mints.retain(|m| m != mint_url);
+            state.mints.retain(|m| !mint_matches(m, mint_url));
         }
     }
 
@@ -722,6 +737,13 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     {
         let wallet_state = WALLET_STATE.read().clone();
         if let Some(ref state) = wallet_state {
+            // Ensure privkey exists before publishing
+            let Some(ref privkey) = state.privkey else {
+                log::warn!("Cannot update wallet event: no private key available");
+                // Continue with local state changes - wallet event update is non-critical
+                return Ok((token_count, total_amount));
+            };
+
             let signer = crate::stores::signer::get_signer()
                 .ok_or("No signer available")?
                 .as_nostr_signer();
@@ -735,7 +757,7 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
                 .ok_or("Client not initialized")?.clone();
 
             // Build wallet event content array following NIP-60 format
-            let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", &state.privkey]];
+            let mut content_array: Vec<Vec<&str>> = vec![vec!["privkey", privkey]];
             for mint in state.mints.iter() {
                 content_array.push(vec!["mint", mint.as_str()]);
             }
@@ -836,18 +858,36 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     log::info!("Consolidating {} proofs worth {} sats", proofs_before, total_amount);
 
-    // Create wallet and swap proofs
+    // Create wallet for swaps
     let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
 
-    let new_proofs = wallet.swap(
-        Some(Amount::from(total_amount)),
-        SplitTarget::default(),  // PowerOfTwo split
-        all_proofs,
-        None,   // No spending conditions
-        false,  // Don't add fees to amount
-    ).await
-        .map_err(|e| format!("Swap failed: {}", e))?
-        .ok_or_else(|| "Swap returned no proofs".to_string())?;
+    // Batch proofs to avoid exceeding mint limits (CDK pattern)
+    let mut new_proofs: Vec<cdk::nuts::Proof> = Vec::new();
+    for (batch_idx, proof_batch) in all_proofs.chunks(BATCH_PROOF_SIZE).enumerate() {
+        let batch_amount: u64 = proof_batch.iter()
+            .map(|p| u64::from(p.amount))
+            .fold(0u64, |acc, amt| acc.saturating_add(amt));
+
+        log::debug!("Swapping batch {} with {} proofs ({} sats)",
+            batch_idx + 1, proof_batch.len(), batch_amount);
+
+        let batch_result = wallet.swap(
+            Some(Amount::from(batch_amount)),
+            SplitTarget::default(),  // PowerOfTwo split
+            proof_batch.to_vec(),
+            None,   // No spending conditions
+            false,  // Don't add fees to amount
+        ).await
+            .map_err(|e| format!("Swap failed on batch {}: {}", batch_idx + 1, e))?;
+
+        if let Some(proofs) = batch_result {
+            new_proofs.extend(proofs);
+        }
+    }
+
+    if new_proofs.is_empty() {
+        return Err("Swap returned no proofs".to_string());
+    }
 
     let proofs_after = new_proofs.len();
     log::info!("Consolidated to {} proofs", proofs_after);

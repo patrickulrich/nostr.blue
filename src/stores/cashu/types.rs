@@ -326,7 +326,8 @@ pub struct ExtendedTokenEvent {
 /// Wallet state containing configuration
 #[derive(Clone, Debug, PartialEq)]
 pub struct WalletState {
-    pub privkey: String,
+    /// Wallet private key (None when no wallet exists)
+    pub privkey: Option<String>,
     pub mints: Vec<String>,
     pub initialized: bool,
 }
@@ -375,6 +376,8 @@ pub struct HistoryItem {
 pub enum WalletStatus {
     Uninitialized,
     Loading,
+    /// Wallet initialized, background recovery/sync in progress
+    Recovering,
     Ready,
     Error(String),
 }
@@ -382,6 +385,15 @@ pub enum WalletStatus {
 impl WalletStatus {
     pub fn is_ready(&self) -> bool {
         matches!(self, WalletStatus::Ready)
+    }
+
+    pub fn is_recovering(&self) -> bool {
+        matches!(self, WalletStatus::Recovering)
+    }
+
+    /// Returns true if wallet is usable (Ready or Recovering)
+    pub fn is_usable(&self) -> bool {
+        matches!(self, WalletStatus::Ready | WalletStatus::Recovering)
     }
 }
 
@@ -599,6 +611,7 @@ pub struct RevertResult {
 #[derive(Clone, Debug, Default)]
 pub struct SyncResult {
     pub spent_found: usize,
+    pub pending_found: usize,
     pub proofs_cleaned: usize,
     pub sats_cleaned: u64,
 }
