@@ -24,7 +24,7 @@ nostr-relay-pool = { version = "0.44" }
 nwc = { version = "0.44" }
 
 # Cashu ecash protocol
-cdk = { version = "0.13.4", default-features = false, features = ["wallet"] }
+cdk = { version = "0.13.4", default-features = false, features = ["wallet", "auth"] }
 cdk-common = { version = "0.13.4", default-features = false, features = ["wallet", "auth"] }
 
 # Image processing for Blossom uploads

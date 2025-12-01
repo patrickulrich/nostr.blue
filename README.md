@@ -83,7 +83,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 
 ### Bitcoin & Ecash
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
-  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling
+  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling (with `auth` feature for NUT-21/22 protected mints)
   - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
   - Custom IndexedDB implementation of `WalletDatabase` trait for browser persistence
   - Atomic keyset counter management prevents "Blinded Message already signed" errors
@@ -417,6 +417,15 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 - Inter-mint transfers via Lightning
 - Protected mint authentication (NUT-21/22)
 - Proof recovery via signature restore (NUT-09)
+
+## 🔒 Security
+
+The Cashu wallet implementation includes several security measures:
+
+- **Reserved Proof Protection**: Cleanup operations check for active transactions before removing Reserved proofs, preventing accidental fund loss during concurrent operations
+- **URL Normalization**: Mint URLs are consistently normalized to prevent mismatches when filtering proofs
+- **Keyset ID Validation**: Keyset IDs are validated against CDK V1/V2 format requirements (16 or 66 hex characters with proper version prefix) before URL interpolation, preventing path traversal
+- **NUT Capability Detection**: Comprehensive detection of mint capabilities including NUT-19 (cached responses) and NUT-21/22 (authentication)
 
 ## 🔧 Configuration
 

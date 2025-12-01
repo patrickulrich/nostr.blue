@@ -579,8 +579,28 @@ pub async fn cached_fetch_keysets(mint_url: &str) -> Result<serde_json::Value, S
     serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {}", e))
 }
 
+/// Validate keyset ID format (CDK V1 or V2)
+///
+/// V1: 16 chars (00 version + 14 hex chars = 7 bytes)
+/// V2: 66 chars (01 version + 64 hex chars = 32 bytes)
+#[inline]
+fn is_valid_keyset_id(id: &str) -> bool {
+    let valid_length = id.len() == 16 || id.len() == 66;
+    let valid_hex = id.chars().all(|c| c.is_ascii_hexdigit());
+    let valid_version = id.starts_with("00") || id.starts_with("01");
+    valid_length && valid_hex && valid_version
+}
+
 /// Fetch keys for a keyset with caching
 pub async fn cached_fetch_keys(mint_url: &str, keyset_id: &str) -> Result<serde_json::Value, String> {
+    // Validate keyset_id format to prevent path traversal
+    if !is_valid_keyset_id(keyset_id) {
+        return Err(format!(
+            "Invalid keyset_id format '{}': expected V1 (16 hex chars starting with 00) or V2 (66 hex chars starting with 01)",
+            keyset_id
+        ));
+    }
+
     let normalized = normalize_mint_url(mint_url);
     let url = format!("{}/v1/keys/{}", normalized, keyset_id);
     let body = cached_fetch(&url, ttls::KEYS).await?;

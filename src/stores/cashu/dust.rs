@@ -15,7 +15,7 @@ use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{ProofData, WalletTokensStoreStoreExt};
-use super::utils::mint_matches;
+use super::utils::{mint_matches, normalize_mint_url};
 
 // =============================================================================
 // Dust Thresholds
@@ -51,13 +51,14 @@ pub struct DustStats {
 
 /// Find dust proofs for a mint
 pub fn find_dust_proofs(mint_url: &str, threshold: u64) -> Vec<ProofData> {
+    let normalized = normalize_mint_url(mint_url);
     let store = WALLET_TOKENS();
     let data = store.data();
     let tokens = data.read();
 
     tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, mint_url))
+        .filter(|t| mint_matches(&t.mint, &normalized))
         .flat_map(|t| t.proofs.iter())
         .filter(|p| p.amount <= threshold)
         .cloned()
@@ -142,10 +143,12 @@ pub async fn consolidate_dust(
 ) -> Result<DustConsolidationResult, String> {
     use cdk::amount::SplitTarget;
 
-    let _lock = try_acquire_mint_lock(mint_url)
-        .ok_or_else(|| format!("Another operation in progress for {}", mint_url))?;
+    let normalized = normalize_mint_url(mint_url);
 
-    let dust_proofs = find_dust_proofs(mint_url, threshold);
+    let _lock = try_acquire_mint_lock(&normalized)
+        .ok_or_else(|| format!("Another operation in progress for {}", normalized))?;
+
+    let dust_proofs = find_dust_proofs(&normalized, threshold);
 
     if dust_proofs.is_empty() {
         return Ok(DustConsolidationResult::default());
@@ -161,7 +164,7 @@ pub async fn consolidate_dust(
         "Consolidating {} dust proofs ({} sats) for {}",
         count,
         input_value,
-        mint_url
+        normalized
     );
 
     // Check if consolidation is worthwhile
@@ -189,7 +192,7 @@ pub async fn consolidate_dust(
     }
 
     // Get wallet and execute swap
-    let wallet = get_or_create_wallet(mint_url).await?;
+    let wallet = get_or_create_wallet(&normalized).await?;
 
     let output_proofs = wallet
         .swap(

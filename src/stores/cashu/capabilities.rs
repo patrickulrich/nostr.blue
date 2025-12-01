@@ -13,14 +13,15 @@ use super::internal::get_or_create_wallet;
 // =============================================================================
 
 /// All known NUT numbers for capability checking
+///
+/// Note: NUT-06 (Optional amounts) and NUT-13 (Deterministic secrets) are not included
+/// as they are client-side implementation details, not advertised mint capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Nut {
     /// NUT-04: Minting (Lightning receive)
     Minting = 4,
     /// NUT-05: Melting (Lightning send)
     Melting = 5,
-    /// NUT-06: Optional amounts in requests
-    OptionalAmount = 6,
     /// NUT-07: Proof state check
     ProofState = 7,
     /// NUT-08: Swap operations
@@ -33,8 +34,6 @@ pub enum Nut {
     P2pk = 11,
     /// NUT-12: DLEQ proofs
     Dleq = 12,
-    /// NUT-13: Deterministic secrets
-    DeterministicSecrets = 13,
     /// NUT-14: HTLC
     Htlc = 14,
     /// NUT-15: Multi-path payments
@@ -118,11 +117,6 @@ impl MintCapabilities {
     /// Check if restore is available
     pub fn supports_restore(&self) -> bool {
         self.supports_nut(Nut::Restore)
-    }
-
-    /// Check if optional amounts are supported
-    pub fn supports_optional_amount(&self) -> bool {
-        self.supports_nut(Nut::OptionalAmount)
     }
 
     /// Check if mint can perform basic operations
@@ -288,9 +282,31 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
         caps.supported_nuts.push(17);
     }
 
+    // NUT-19: Cached responses
+    // Check if cached_endpoints is non-empty or ttl is set
+    if !mint_info.nuts.nut19.cached_endpoints.is_empty() || mint_info.nuts.nut19.ttl.is_some() {
+        caps.supported_nuts.push(19);
+    }
+
     // NUT-20: Quote signatures
     if mint_info.nuts.nut20.supported {
         caps.supported_nuts.push(20);
+    }
+
+    // NUT-21: Clear auth
+    if mint_info.nuts.nut21.is_some() {
+        caps.supported_nuts.push(21);
+        caps.auth_required = true;
+        caps.auth_type = Some("clear".to_string());
+    }
+
+    // NUT-22: Blind auth
+    if mint_info.nuts.nut22.is_some() {
+        caps.supported_nuts.push(22);
+        caps.auth_required = true;
+        if caps.auth_type.is_none() {
+            caps.auth_type = Some("blind".to_string());
+        }
     }
 
     // Sort for consistent display

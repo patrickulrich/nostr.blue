@@ -404,14 +404,40 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         .await
         .map_err(|e| format!("Failed to check proof states: {}", e))?;
 
-    // Find unavailable proofs (spent, reserved, or pending)
+    // Find unavailable proofs (spent, pending, or orphaned reserves)
     let mut unavailable_secrets = std::collections::HashSet::new();
     let mut unavailable_amount = 0u64;
 
-    for (state, proof) in states.iter().zip(cdk_proofs.iter()) {
-        if matches!(state.state, State::Spent | State::Reserved | State::Pending) {
-            unavailable_secrets.insert(proof.secret.to_string());
-            unavailable_amount += u64::from(proof.amount);
+    for ((state, proof), local_proof) in states
+        .iter()
+        .zip(cdk_proofs.iter())
+        .zip(all_mint_proofs.iter())
+    {
+        match state.state {
+            State::Spent | State::Pending => {
+                // Always remove spent and pending proofs
+                unavailable_secrets.insert(proof.secret.to_string());
+                unavailable_amount += u64::from(proof.amount);
+            }
+            State::Reserved => {
+                // Only remove Reserved proofs if they have no active transaction
+                // (orphaned reserves). Proofs with transaction_id are part of
+                // active operations and should not be deleted.
+                if local_proof.transaction_id.is_none() {
+                    log::debug!(
+                        "Removing orphaned reserved proof (no transaction_id): {}...",
+                        &proof.secret.to_string()[..8.min(proof.secret.to_string().len())]
+                    );
+                    unavailable_secrets.insert(proof.secret.to_string());
+                    unavailable_amount += u64::from(proof.amount);
+                } else {
+                    log::debug!(
+                        "Preserving reserved proof with active transaction: {}...",
+                        &proof.secret.to_string()[..8.min(proof.secret.to_string().len())]
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
