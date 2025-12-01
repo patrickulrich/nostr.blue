@@ -670,6 +670,13 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> 
 ///
 /// Uses nostr-sdk pattern: adaptive multiplier with jitter to prevent synchronized retries.
 pub async fn process_pending_events() -> Result<usize, String> {
+    // Early check for client initialization (pattern from Nostr SDK)
+    // Avoids per-event failures and retry count increments when client isn't ready
+    if nostr_client::NOSTR_CLIENT.read().as_ref().is_none() {
+        log::debug!("Nostr client not yet initialized, skipping pending events processing");
+        return Ok(0);
+    }
+
     const MAX_RETRIES: u32 = 5;
     const BASE_RETRY_DELAY_SECS: u64 = 10;
     const MAX_RETRY_DELAY_SECS: u64 = 60;

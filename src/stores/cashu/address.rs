@@ -41,10 +41,23 @@ pub struct PaymentAddress {
 impl PaymentAddress {
     /// Parse a payment address string
     pub fn parse(address: &str) -> Self {
-        let trimmed = address.trim().to_lowercase();
+        let trimmed = address.trim();
+
+        // Strip "lightning:" URI prefix if present (case-insensitive)
+        // Pattern inspired by Nostr SDK NIP47 URI parsing
+        let stripped = if trimmed.to_lowercase().starts_with("lightning:") {
+            &trimmed[10..] // "lightning:" is 10 characters
+        } else {
+            trimmed
+        };
+
+        let lowercased = stripped.to_lowercase();
 
         // Check for Lightning invoice
-        if trimmed.starts_with("lnbc") || trimmed.starts_with("lntb") || trimmed.starts_with("lnbcrt") {
+        if lowercased.starts_with("lnbc")
+            || lowercased.starts_with("lntb")
+            || lowercased.starts_with("lnbcrt")
+        {
             return Self {
                 original: address.to_string(),
                 address_type: AddressType::Invoice,
@@ -54,7 +67,7 @@ impl PaymentAddress {
         }
 
         // Check for LNURL
-        if trimmed.starts_with("lnurl") {
+        if lowercased.starts_with("lnurl") {
             return Self {
                 original: address.to_string(),
                 address_type: AddressType::Lnurl,
@@ -64,7 +77,7 @@ impl PaymentAddress {
         }
 
         // Check for user@domain format (Lightning Address / BIP353)
-        if let Some((user, domain)) = trimmed.split_once('@') {
+        if let Some((user, domain)) = lowercased.split_once('@') {
             if !user.is_empty() && !domain.is_empty() && domain.contains('.') {
                 return Self {
                     original: address.to_string(),

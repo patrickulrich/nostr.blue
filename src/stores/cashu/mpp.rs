@@ -393,7 +393,7 @@ pub async fn execute_mpp_melt(
                                 mint: mint_url.clone(),
                                 unit: "sat".to_string(),
                                 proofs: proof_data,
-                                created_at: chrono::Utc::now().timestamp() as u64,
+                                created_at: super::proofs::now_secs(),
                             });
                         }
                         Err(e) => {
