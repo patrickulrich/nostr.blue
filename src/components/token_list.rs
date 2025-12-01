@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, TokenData, MintInfoDisplay, WalletTokensStoreStoreExt};
+use crate::stores::cashu;
+use crate::stores::cashu::{TokenData, MintInfoDisplay, WalletTokensStoreStoreExt, normalize_mint_url};
 use crate::utils::format_sats_with_separator;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -98,7 +99,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                 }
                                 div {
                                     class: "text-xs font-mono text-muted-foreground",
-                                    "{&token.event_id[..12]}..."
+                                    "{truncate_string(&token.event_id, 12)}..."
                                 }
                             }
 
@@ -286,7 +287,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                             mint_info_loading.set(true);
                                             mint_info_error.set(None);
                                             spawn(async move {
-                                                match cashu_wallet::get_mint_info(&mint_url).await {
+                                                match cashu::get_mint_info(&mint_url).await {
                                                     Ok(info) => {
                                                         mint_info.set(Some(info));
                                                         mint_info_loading.set(false);
@@ -313,9 +314,9 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                             class: "flex-1",
                             button {
                                 class: if *is_cleaning.read() {
-                                    "w-full px-3 py-2 text-sm bg-yellow-500 text-white rounded-lg opacity-50 cursor-not-allowed"
+                                    "w-full px-3 py-2 text-sm bg-accent rounded-lg opacity-50 cursor-not-allowed"
                                 } else {
-                                    "w-full px-3 py-2 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition"
+                                    "w-full px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded-lg transition"
                                 },
                                 disabled: *is_cleaning.read(),
                                 onclick: {
@@ -325,7 +326,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                         is_cleaning.set(true);
                                         cleanup_message.set(None);
                                         spawn(async move {
-                                            match cashu_wallet::cleanup_spent_proofs(mint_url).await {
+                                            match cashu::cleanup_spent_proofs(mint_url).await {
                                                 Ok((count, amount)) if count > 0 => {
                                                     cleanup_message.set(Some(format!("Cleaned {} proofs ({} sats)", count, amount)));
                                                     is_cleaning.set(false);
@@ -384,7 +385,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
                                                     is_removing.set(true);
                                                     remove_error.set(None);
                                                     spawn(async move {
-                                                        match cashu_wallet::remove_mint(mint_url).await {
+                                                        match cashu::remove_mint(&mint_url).await {
                                                             Ok((count, amount)) => {
                                                                 log::info!("Removed mint: {} events, {} sats", count, amount);
                                                                 is_removing.set(false);
@@ -438,12 +439,12 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
 
 #[component]
 pub fn TokenList() -> Element {
-    let tokens = cashu_wallet::WALLET_TOKENS.read();
+    let tokens = cashu::WALLET_TOKENS.read();
     let mut expanded_mints = use_signal(|| std::collections::HashSet::<String>::new());
 
     // Check if there are any tokens OR any mints (mints without tokens should still be shown)
     let has_tokens = !tokens.data().read().is_empty();
-    let has_mints = !cashu_wallet::get_mints().is_empty();
+    let has_mints = !cashu::get_mints().is_empty();
 
     if !has_tokens && !has_mints {
         return rsx! {
@@ -467,23 +468,26 @@ pub fn TokenList() -> Element {
 
     // Memoize the grouping and sorting to avoid recomputation on every render
     let grouped_mints = use_memo(move || {
-        let tokens = cashu_wallet::WALLET_TOKENS.read();
+        let tokens = cashu::WALLET_TOKENS.read();
         let data = tokens.data();
         let tokens_data = data.read();
 
-        // Group tokens by mint
+        // Group tokens by normalized mint URL to prevent duplicates
+        // e.g., "mint.coinos.io" and "mint.coinos.io/" should be treated as the same mint
         let mut tokens_by_mint: HashMap<String, Vec<TokenData>> = HashMap::new();
         for token in tokens_data.iter() {
-            tokens_by_mint.entry(token.mint.clone())
+            let normalized_url = normalize_mint_url(&token.mint);
+            tokens_by_mint.entry(normalized_url)
                 .or_insert_with(Vec::new)
                 .push(token.clone());
         }
 
         // Also include mints from WALLET_STATE that may have no tokens
         // This ensures users can manage (remove) mints even when they have no balance
-        let wallet_mints = cashu_wallet::get_mints();
+        let wallet_mints = cashu::get_mints();
         for mint_url in wallet_mints {
-            tokens_by_mint.entry(mint_url).or_insert_with(Vec::new);
+            let normalized_url = normalize_mint_url(&mint_url);
+            tokens_by_mint.entry(normalized_url).or_insert_with(Vec::new);
         }
 
         // Sort mints by total balance (descending) and wrap in Rc
@@ -533,11 +537,31 @@ pub fn TokenList() -> Element {
     }
 }
 
+/// Safely truncate a string to a maximum number of characters
+fn truncate_string(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
+        s
+    } else {
+        // Find a valid char boundary
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
+    }
+}
+
 /// Shorten mint URL for display
 fn shorten_mint_url(url: &str) -> String {
+    if url.is_empty() {
+        return "Unknown mint".to_string();
+    }
     let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    if url.is_empty() {
+        return "Unknown mint".to_string();
+    }
     if url.len() > 40 {
-        format!("{}...", &url[..37])
+        format!("{}...", truncate_string(url, 37))
     } else {
         url.to_string()
     }

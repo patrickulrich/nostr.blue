@@ -1243,7 +1243,7 @@ pub fn Profile(pubkey: String) -> Element {
 
                         // P2PK Cashu pubkey (only for own profile when wallet is initialized)
                         if is_own_profile {
-                            if let Ok(p2pk_pubkey) = crate::stores::cashu_wallet::get_wallet_pubkey() {
+                            if let Ok(p2pk_pubkey) = crate::stores::cashu::get_wallet_pubkey() {
                                 {
                                     let pubkey_for_copy = p2pk_pubkey.clone();
                                     rsx! {

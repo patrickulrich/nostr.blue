@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu;
 use crate::utils::{shorten_url, format::truncate_pubkey};
 
 #[component]
@@ -8,7 +8,7 @@ pub fn CashuSendModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut amount = use_signal(|| String::new());
-    let mints = cashu_wallet::get_mints();
+    let mints = cashu::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut is_sending = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -16,10 +16,18 @@ pub fn CashuSendModal(
     // P2PK (send to npub) support
     let mut p2pk_enabled = use_signal(|| false);
     let mut recipient_pubkey = use_signal(|| String::new());
+    // Fee estimation
+    let mut estimated_fee = use_signal(|| Option::<u64>::None);
+    let mut is_estimating_fee = use_signal(|| false);
+    // Request ID to prevent race conditions in async fee estimation
+    let mut fee_request_id = use_signal(|| 0u32);
+    // Token claim tracking (NUT-17)
+    // None = no token yet, Some(false) = pending, Some(true) = claimed
+    let mut token_claimed = use_signal(|| Option::<bool>::None);
 
     // Keep selected_mint in sync with available mints
     use_effect(move || {
-        let current_mints = cashu_wallet::get_mints();
+        let current_mints = cashu::get_mints();
         let current_selection = selected_mint.read().clone();
 
         // If no mint is selected, set it to the first available (only if one exists)
@@ -37,6 +45,51 @@ pub fn CashuSendModal(
                 selected_mint.set(String::new());
             }
         }
+    });
+
+    // Estimate fee when amount or mint changes
+    use_effect(move || {
+        let amount_str = amount.read().clone();
+        let mint = selected_mint.read().clone();
+
+        // Parse amount
+        let amount_sats = match amount_str.parse::<u64>() {
+            Ok(a) if a > 0 => a,
+            _ => {
+                estimated_fee.set(None);
+                return;
+            }
+        };
+
+        if mint.is_empty() {
+            estimated_fee.set(None);
+            return;
+        }
+
+        // Increment request ID and capture current value to prevent race conditions
+        let current_id = fee_request_id.read().wrapping_add(1);
+        fee_request_id.set(current_id);
+        is_estimating_fee.set(true);
+
+        spawn(async move {
+            match cashu::estimate_send_fee(mint, amount_sats).await {
+                Ok(fee) => {
+                    // Only update if this is still the latest request
+                    if *fee_request_id.read() == current_id {
+                        estimated_fee.set(Some(fee));
+                        is_estimating_fee.set(false);
+                    }
+                }
+                Err(e) => {
+                    // Only update if this is still the latest request
+                    if *fee_request_id.read() == current_id {
+                        log::debug!("Fee estimation failed: {}", e);
+                        estimated_fee.set(None);
+                        is_estimating_fee.set(false);
+                    }
+                }
+            }
+        });
     });
 
     let on_send = move |_| {
@@ -82,21 +135,32 @@ pub fn CashuSendModal(
         token_result.set(None);
 
         spawn(async move {
+            // Clone mint for use in watching after send
+            let mint_for_watch = mint.clone();
+
             let result = if is_p2pk {
                 // Send with P2PK lock (only recipient can redeem)
-                cashu_wallet::send_tokens_p2pk(mint, amount_sats, recipient).await
+                cashu::send_tokens_p2pk(mint, amount_sats, recipient).await
             } else {
                 // Regular send (anyone with token can redeem)
-                cashu_wallet::send_tokens(mint, amount_sats).await
+                cashu::send_tokens(mint, amount_sats).await
             };
 
             match result {
                 Ok(token_string) => {
-                    token_result.set(Some(token_string));
+                    token_result.set(Some(token_string.clone()));
+                    token_claimed.set(Some(false)); // Initially pending
                     is_sending.set(false);
                     // Clear inputs
                     amount.set(String::new());
                     recipient_pubkey.set(String::new());
+
+                    // Start watching for token claims via NUT-17
+                    if let Ok(y_values) = cashu::extract_y_values_from_token(&token_string) {
+                        cashu::watch_sent_token_claims(mint_for_watch, y_values, move || {
+                            token_claimed.set(Some(true));
+                        });
+                    }
                 }
                 Err(e) => {
                     error_message.set(Some(format!("Failed to send: {}", e)));
@@ -263,9 +327,29 @@ pub fn CashuSendModal(
                                         "✅"
                                     }
                                     div {
-                                        p {
-                                            class: "text-sm font-semibold text-green-800 dark:text-green-200",
-                                            "Token created successfully!"
+                                        class: "flex-1",
+                                        div {
+                                            class: "flex items-center justify-between",
+                                            p {
+                                                class: "text-sm font-semibold text-green-800 dark:text-green-200",
+                                                "Token created successfully!"
+                                            }
+                                            // Claim status badge
+                                            match *token_claimed.read() {
+                                                Some(true) => rsx! {
+                                                    span {
+                                                        class: "px-2 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full",
+                                                        "Claimed"
+                                                    }
+                                                },
+                                                Some(false) => rsx! {
+                                                    span {
+                                                        class: "px-2 py-0.5 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full animate-pulse",
+                                                        "Pending"
+                                                    }
+                                                },
+                                                None => rsx! {},
+                                            }
                                         }
                                     }
                                 }
@@ -333,6 +417,34 @@ pub fn CashuSendModal(
                                 class: "flex justify-between",
                                 span { class: "text-muted-foreground", "Amount:" }
                                 span { class: "font-mono", "{amount.read()} sats" }
+                            }
+                            // Fee display
+                            div {
+                                class: "flex justify-between",
+                                span { class: "text-muted-foreground", "Mint fee:" }
+                                if *is_estimating_fee.read() {
+                                    span { class: "text-muted-foreground italic", "calculating..." }
+                                } else if let Some(fee) = *estimated_fee.read() {
+                                    if fee > 0 {
+                                        span { class: "font-mono text-amber-500", "{fee} sats" }
+                                    } else {
+                                        span { class: "font-mono text-green-500", "0 sats (free)" }
+                                    }
+                                } else {
+                                    span { class: "text-muted-foreground", "—" }
+                                }
+                            }
+                            // Total with fee
+                            if let Some(fee) = *estimated_fee.read() {
+                                if fee > 0 {
+                                    if let Ok(amt) = amount.read().parse::<u64>() {
+                                        div {
+                                            class: "flex justify-between pt-1 border-t border-border/50",
+                                            span { class: "text-muted-foreground font-semibold", "Total:" }
+                                            span { class: "font-mono font-semibold", "{amt + fee} sats" }
+                                        }
+                                    }
+                                }
                             }
                             div {
                                 class: "flex justify-between",

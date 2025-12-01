@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, ReceiveTokensOptions};
+use crate::stores::cashu;
+use crate::stores::cashu::ReceiveTokensOptions;
 
 #[component]
 pub fn CashuReceiveModal(
@@ -26,9 +27,10 @@ pub fn CashuReceiveModal(
         spawn(async move {
             let options = ReceiveTokensOptions {
                 verify_dleq: should_verify_dleq,
+                preimages: vec![],  // No HTLC preimages for normal receive
             };
 
-            match cashu_wallet::receive_tokens_with_options(token, options).await {
+            match cashu::receive_tokens_with_options(token, options).await {
                 Ok(amount) => {
                     let msg = if should_verify_dleq {
                         format!("Successfully received {} sats (DLEQ verified)", amount)

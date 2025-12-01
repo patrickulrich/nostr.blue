@@ -25,7 +25,7 @@ nwc = { version = "0.44" }
 
 # Cashu ecash protocol
 cdk = { version = "0.13.4", default-features = false, features = ["wallet"] }
-cdk-common = { version = "0.13.4", default-features = false, features = ["wallet"] }
+cdk-common = { version = "0.13.4", default-features = false, features = ["wallet", "auth"] }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
