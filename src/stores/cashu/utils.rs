@@ -49,7 +49,7 @@ pub fn chrono_now_secs() -> u64 {
 }
 
 // =============================================================================
-// Batched Proof Validation (Minibits pattern)
+// Batched Proof Validation
 // =============================================================================
 
 /// Result of validating proofs with a mint
@@ -65,7 +65,7 @@ pub struct ProofValidationResult {
     pub spent_sats: u64,
 }
 
-/// Validate proofs with mint using batch pagination (Minibits pattern)
+/// Validate proofs with mint using batch pagination
 ///
 /// Chunks proofs into batches of MAX_SYNC_INPUT_SIZE to avoid mint API limits
 /// and timeouts with large wallets. Returns only the proofs that are still valid.

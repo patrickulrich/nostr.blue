@@ -330,7 +330,7 @@ pub struct WalletState {
     pub initialized: bool,
 }
 
-/// Sync state for incremental Nostr event fetching (Chorus pattern)
+/// Sync state for incremental Nostr event fetching
 /// Tracks last sync timestamps to avoid fetching all events every time
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SyncState {
@@ -407,7 +407,7 @@ pub struct WalletBalances {
 // Transaction Types
 // =============================================================================
 
-/// Transaction lifecycle status (following minibits pattern)
+/// Transaction lifecycle status
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TransactionStatus {
     /// Transaction created but not yet prepared
@@ -447,7 +447,7 @@ pub enum TransactionType {
     Transfer,
 }
 
-/// Transaction data entry for state accumulation (Minibits pattern)
+/// Transaction data entry for state accumulation
 /// Each transaction maintains a full history of state changes
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransactionDataEntry {
@@ -819,10 +819,13 @@ pub struct PendingNostrEvent {
     pub event_type: PendingEventType,
     pub created_at: u64,
     pub retry_count: u32,
+    /// Timestamp of last retry attempt (for proper backoff calculation)
+    #[serde(default)]
+    pub last_retry_at: Option<u64>,
 }
 
 // =============================================================================
-// Counter Backup Types (Minibits pattern)
+// Counter Backup Types
 // =============================================================================
 
 /// Counter backup for mint removal/re-addition

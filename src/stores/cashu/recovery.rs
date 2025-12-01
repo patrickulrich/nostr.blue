@@ -3,7 +3,7 @@
 //! Functions for syncing proofs with mints, cleaning up spent proofs,
 //! recovering from failures, and handling pending operations.
 //!
-//! Implements patterns from Minibits and Harbor for robust recovery.
+//! Implements patterns for robust recovery.
 
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
@@ -66,7 +66,7 @@ pub async fn cleanup_spent_proofs(mint_url: String) -> Result<(usize, u64), Stri
 }
 
 // =============================================================================
-// NUT-07 State Sync with Batch Pagination (Minibits pattern)
+// NUT-07 State Sync with Batch Pagination
 // =============================================================================
 
 /// Sync state with a specific mint using NUT-07
@@ -360,12 +360,12 @@ pub async fn sync_state_with_all_mints() -> CashuResult<SyncResult> {
 }
 
 // =============================================================================
-// Pending Operation Recovery (Harbor pattern)
+// Pending Operation Recovery
 // =============================================================================
 
 /// Recover pending operations on startup
 ///
-/// Implements Harbor's pattern of recovering all pending operations when the
+/// Recovers all pending operations when the
 /// app starts. This ensures no payments get stuck due to app crashes or
 /// network issues.
 ///
@@ -469,7 +469,7 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
 }
 
 // =============================================================================
-// Quote Recovery (Minibits pattern)
+// Quote Recovery
 // =============================================================================
 
 /// Recover a mint quote (incomplete topup)
@@ -662,7 +662,7 @@ async fn recover_unrecorded_proofs(mint_url: &str) -> CashuResult<RecoveryResult
 }
 
 // =============================================================================
-// Quote Expiry Checking (Harbor pattern)
+// Quote Expiry Checking
 // =============================================================================
 
 /// Check if a quote has expired

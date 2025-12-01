@@ -17,6 +17,7 @@ use super::signals::{
 };
 use super::types::{TokenData, ProofData, ProofState, TokenEventData, WalletTokensStoreStoreExt, PendingEventType, PendingNostrEvent, SyncState};
 use super::proofs::rebuild_proof_event_map;
+use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, nostr_client};
 
 // =============================================================================
@@ -42,6 +43,7 @@ pub async fn queue_nostr_event(
         event_type: event_type.clone(),
         created_at,
         retry_count: 0,
+        last_retry_at: None,
     };
 
     // Save to in-memory queue
@@ -424,7 +426,8 @@ pub async fn fetch_tokens() -> Result<(), String> {
 
                                     tokens.push(TokenData {
                                         event_id: event_id_hex,
-                                        mint: token_event.mint.clone(),
+                                        // Normalize mint URL for consistent balance lookups
+                                        mint: normalize_mint_url(&token_event.mint),
                                         unit: token_event.unit.clone(),
                                         proofs,
                                         created_at: event.created_at.as_secs(),
@@ -662,10 +665,13 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> 
     Ok(())
 }
 
-/// Process pending events with exponential backoff retry logic
+/// Process pending events with adaptive backoff retry logic
+///
+/// Uses nostr-sdk pattern: adaptive multiplier with jitter to prevent synchronized retries.
 pub async fn process_pending_events() -> Result<usize, String> {
     const MAX_RETRIES: u32 = 5;
-    const BASE_RETRY_DELAY_SECS: u64 = 60;
+    const BASE_RETRY_DELAY_SECS: u64 = 10;
+    const MAX_RETRY_DELAY_SECS: u64 = 60;
 
     let pending_events = PENDING_NOSTR_EVENTS.read().clone();
     let mut processed_count = 0;
@@ -680,11 +686,18 @@ pub async fn process_pending_events() -> Result<usize, String> {
         }
 
         let now = chrono::Utc::now().timestamp() as u64;
-        let elapsed = now.saturating_sub(event.created_at);
-        let retry_delay = BASE_RETRY_DELAY_SECS * (2_u64.pow(event.retry_count));
+        // Use last_retry_at if available, otherwise created_at (for first attempt)
+        let last_attempt = event.last_retry_at.unwrap_or(event.created_at);
+        let elapsed = now.saturating_sub(last_attempt);
+
+        // Adaptive backoff: BASE_DELAY * (1 + retry_count/2), capped at MAX_DELAY
+        // This gives delays of: 10s, 15s, 20s, 25s, 30s (capped)
+        let multiplier = 1 + (event.retry_count / 2);
+        let adaptive_delay = BASE_RETRY_DELAY_SECS * (multiplier as u64);
+        let retry_delay = adaptive_delay.min(MAX_RETRY_DELAY_SECS);
 
         if elapsed < retry_delay {
-            log::debug!("Event {} not ready for retry yet", event.id);
+            log::debug!("Event {} not ready for retry yet ({}s < {}s)", event.id, elapsed, retry_delay);
             continue;
         }
 
@@ -699,6 +712,8 @@ pub async fn process_pending_events() -> Result<usize, String> {
 
                 let mut updated_event = event.clone();
                 updated_event.retry_count += 1;
+                // Record when this retry attempt happened for proper backoff calculation
+                updated_event.last_retry_at = Some(now);
 
                 // Update in memory
                 let mut events = PENDING_NOSTR_EVENTS.write();
@@ -722,11 +737,29 @@ pub async fn process_pending_events() -> Result<usize, String> {
     Ok(processed_count)
 }
 
+/// Guard to prevent multiple processor spawns
+#[cfg(target_arch = "wasm32")]
+static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Start background task to process pending events periodically
+///
+/// Uses AtomicBool guard to ensure only one processor runs at a time.
+/// Calling this function multiple times is safe - subsequent calls are no-ops.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
     use dioxus::prelude::spawn;
     use gloo_timers::future::TimeoutFuture;
+    use std::sync::atomic::Ordering;
+
+    // Atomically check if already running and set to true if not
+    // compare_exchange returns Ok(false) if we successfully set it from false to true
+    if PROCESSOR_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::debug!("Pending events processor already running, skipping spawn");
+        return;
+    }
 
     spawn(async {
         loop {

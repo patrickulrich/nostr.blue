@@ -1,7 +1,7 @@
 //! Mint management
 //!
 //! Functions for adding, removing, and managing mints.
-//! Includes counter backup/restore for mint re-addition (Minibits pattern).
+//! Includes counter backup/restore for mint re-addition.
 
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
@@ -249,12 +249,12 @@ pub async fn get_mint_info(mint_url: &str) -> Result<MintInfoDisplay, String> {
 }
 
 // =============================================================================
-// Counter Backup/Restore (Minibits pattern)
+// Counter Backup/Restore
 // =============================================================================
 
 /// Save keyset counters before removing a mint
 ///
-/// Implements Minibits pattern: when a mint is removed, its counters are backed up
+/// When a mint is removed, its counters are backed up
 /// so they can be restored if the same mint is re-added. This prevents proof reuse.
 pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
     use crate::stores::cashu_cdk_bridge;
@@ -454,7 +454,7 @@ pub fn get_counter_backup(mint_url: &str) -> Option<CounterBackup> {
 /// 2. Verifies NUT support
 /// 3. Updates wallet state and publishes to Nostr
 /// 4. Restores counters if we previously had this mint
-/// 5. Runs background proof restoration (Harbor pattern)
+/// 5. Runs background proof restoration
 pub async fn add_mint(mint_url: &str) -> Result<(), String> {
     use nostr_sdk::signer::NostrSigner;
     use url::Url;
@@ -586,7 +586,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         // Non-fatal - mint is still added
     }
 
-    // Run background proof restoration (Harbor pattern)
+    // Run background proof restoration
     let mint_url_owned = mint_url.clone();
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
@@ -599,7 +599,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
 
 /// Restore proofs from a mint using CDK's restore function
 ///
-/// This implements the Harbor pattern of automatic restoration when adding a mint.
+/// Implements automatic restoration when adding a mint.
 /// It checks the mint for any proofs we might have derived but not recorded locally.
 pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
     use crate::stores::cashu_cdk_bridge;

@@ -8,6 +8,7 @@ use nostr_sdk::{EventId, Kind, PublicKey};
 use super::events::queue_event_for_retry;
 use super::types::PendingEventType;
 use super::internal::{create_ephemeral_wallet, get_or_create_wallet};
+use super::utils::normalize_mint_url;
 use super::mint_mgmt::get_mint_balance;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_BALANCE, WALLET_TOKENS};
@@ -28,6 +29,10 @@ pub async fn transfer_between_mints(
 ) -> Result<TransferResult, String> {
     use cdk::Amount;
     use nostr_sdk::signer::NostrSigner;
+
+    // Normalize mint URLs to ensure consistent comparison and storage
+    let source_mint = normalize_mint_url(&source_mint);
+    let target_mint = normalize_mint_url(&target_mint);
 
     log::info!(
         "Starting cross-mint transfer: {} sats from {} to {}",
@@ -498,6 +503,10 @@ pub async fn estimate_transfer_fees(
     amount: u64,
 ) -> Result<(u64, u64), String> {
     use cdk::Amount;
+
+    // Normalize mint URLs to ensure consistent comparison
+    let source_mint = normalize_mint_url(&source_mint);
+    let target_mint = normalize_mint_url(&target_mint);
 
     log::info!("Estimating transfer fees: {} sats from {} to {}",
         amount, source_mint, target_mint);

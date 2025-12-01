@@ -99,13 +99,15 @@ pub async fn fetch_history() -> Result<(), String> {
                                 let mut destroyed_tokens = Vec::new();
 
                                 for pair in pairs {
-                                    if pair.is_empty() {
-                                        continue;
-                                    }
-                                    match pair[0].as_str() {
+                                    // Use safe indexing with .get() for defensive parsing
+                                    let key = match pair.get(0) {
+                                        Some(k) => k.as_str(),
+                                        None => continue,
+                                    };
+                                    match key {
                                         "direction" => {
-                                            if pair.len() > 1 {
-                                                direction = if pair[1] == "in" {
+                                            if let Some(val) = pair.get(1) {
+                                                direction = if val == "in" {
                                                     TransactionDirection::In
                                                 } else {
                                                     TransactionDirection::Out
@@ -113,8 +115,8 @@ pub async fn fetch_history() -> Result<(), String> {
                                             }
                                         }
                                         "amount" => {
-                                            if pair.len() > 1 {
-                                                match pair[1].parse::<u64>() {
+                                            if let Some(val) = pair.get(1) {
+                                                match val.parse::<u64>() {
                                                     Ok(parsed_amount) => {
                                                         amount = Some(parsed_amount);
                                                     }
@@ -122,7 +124,7 @@ pub async fn fetch_history() -> Result<(), String> {
                                                         log::error!(
                                                             "Failed to parse amount in history event {}: '{}' - {}",
                                                             event.id.to_hex(),
-                                                            pair[1],
+                                                            val,
                                                             e
                                                         );
                                                     }
@@ -131,10 +133,10 @@ pub async fn fetch_history() -> Result<(), String> {
                                         }
                                         "e" => {
                                             // Event reference: ["e", "event_id", "", "marker"]
-                                            if pair.len() > 3 {
-                                                match pair[3].as_str() {
-                                                    "created" => created_tokens.push(pair[1].clone()),
-                                                    "destroyed" => destroyed_tokens.push(pair[1].clone()),
+                                            if let (Some(event_id), Some(marker)) = (pair.get(1), pair.get(3)) {
+                                                match marker.as_str() {
+                                                    "created" => created_tokens.push(event_id.clone()),
+                                                    "destroyed" => destroyed_tokens.push(event_id.clone()),
                                                     _ => {}
                                                 }
                                             }

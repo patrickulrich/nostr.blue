@@ -4,19 +4,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
-
-/// Slugify a string for use as a d-tag
-fn slugify(input: &str) -> String {
-    input
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
+use crate::utils::slugify;
 
 #[component]
 pub fn MusicPlaylistNew() -> Element {

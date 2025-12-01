@@ -533,14 +533,12 @@ async fn generate_nostr_zap_invoice(
     // Get profile to find lightning address
     let profile = profile.ok_or_else(|| "Artist profile not loaded yet".to_string())?;
 
-    let lud16 = profile.lud16.as_deref();
-
-    if lud16.is_none() {
-        return Err("This artist hasn't set up a Lightning address".to_string());
-    }
+    // Simplify with ok_or_else instead of as_deref + is_none check
+    let lud16 = profile.lud16.as_deref()
+        .ok_or_else(|| "This artist hasn't set up a Lightning address".to_string())?;
 
     // Prepare zap - validates amount and gets LNURL pay info
-    let (pay_info, amount_msats) = lnurl::prepare_zap(lud16, None, amount_sats).await
+    let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lud16), None, amount_sats).await
         .map_err(|e| format!("Failed to prepare zap: {}", e))?;
 
     log::info!("LNURL pay info received for nostr zap. Callback: {}", pay_info.callback);

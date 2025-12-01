@@ -368,11 +368,11 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     Ok(wt) => Some(MusicTrack::from(wt)),
                     Err(e) => {
                         log::warn!("Failed to fetch Wavlake track {}: {}", track_id, e);
-                        // Create a minimal track from cached data for display
-                        Some(create_fallback_track(&vote_data, TrackSource::Wavlake {
+                        // Fallback returns None - no playable media_url available
+                        create_fallback_track(&vote_data, TrackSource::Wavlake {
                             artist_id: String::new(),
                             album_id: String::new(),
-                        }))
+                        })
                     }
                 }
             }
@@ -391,20 +391,22 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                             Some(MusicTrack::from(nostr_track))
                         }
                         Ok(None) => {
-                            log::warn!("Nostr track not found, using fallback: {}", coordinate);
-                            Some(create_fallback_track(&vote_data, TrackSource::Nostr {
+                            log::warn!("Nostr track not found: {}", coordinate);
+                            // Fallback returns None - no playable media_url available
+                            create_fallback_track(&vote_data, TrackSource::Nostr {
                                 coordinate: coordinate.clone(),
                                 pubkey,
                                 d_tag,
-                            }))
+                            })
                         }
                         Err(e) => {
-                            log::warn!("Failed to fetch Nostr track {}: {}, using fallback", coordinate, e);
-                            Some(create_fallback_track(&vote_data, TrackSource::Nostr {
+                            log::warn!("Failed to fetch Nostr track {}: {}", coordinate, e);
+                            // Fallback returns None - no playable media_url available
+                            create_fallback_track(&vote_data, TrackSource::Nostr {
                                 coordinate: coordinate.clone(),
                                 pubkey,
                                 d_tag,
-                            }))
+                            })
                         }
                     }
                 } else {
@@ -425,26 +427,12 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
 }
 
 /// Create a fallback MusicTrack from cached vote data
-fn create_fallback_track(vote_data: &VoteData, source: TrackSource) -> MusicTrack {
-    let id = match &vote_data.track_ref {
-        TrackRef::Wavlake(id) => id.clone(),
-        TrackRef::Nostr(coord) => coord.clone(),
-    };
-
-    MusicTrack {
-        id,
-        title: vote_data.title.clone(),
-        artist: vote_data.artist.clone(),
-        album: None,
-        media_url: String::new(), // Will need to be resolved for playback
-        album_art_url: vote_data.image.clone(),
-        artist_art_url: vote_data.image.clone(),
-        duration: None,
-        artist_id: None,
-        album_id: None,
-        artist_npub: None,
-        source,
-        msat_total: None,
-        created_at: None,
-    }
+///
+/// Returns None because fallback tracks don't have a playable media_url.
+/// This prevents the Play button from rendering for tracks that can't be played.
+fn create_fallback_track(_vote_data: &VoteData, _source: TrackSource) -> Option<MusicTrack> {
+    // Fallback tracks have no media_url, so they aren't playable.
+    // Return None so the Play button won't render for these entries.
+    // The track info is still displayed from vote_data in the LeaderboardEntry.
+    None
 }

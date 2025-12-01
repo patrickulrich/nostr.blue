@@ -74,7 +74,7 @@ pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
 // Sync State Signals
 // =============================================================================
 
-/// Sync state for incremental Nostr event fetching (Chorus pattern)
+/// Sync state for incremental Nostr event fetching
 /// Tracks last sync timestamps to avoid fetching all events every time
 pub static SYNC_STATE: GlobalSignal<Option<SyncState>> = Signal::global(|| None);
 
@@ -123,7 +123,7 @@ pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<HashMap<String, NostrPaymentWa
     Signal::global(|| HashMap::new());
 
 // =============================================================================
-// Counter Backup Signal (Minibits pattern)
+// Counter Backup Signal
 // =============================================================================
 
 /// Counter backups for mint removal/re-addition
@@ -143,7 +143,7 @@ pub static TRANSACTION_ID_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
 // =============================================================================
-// Batch Pagination Constants (Minibits pattern)
+// Batch Pagination Constants
 // =============================================================================
 
 /// Maximum number of proofs to sync at once (NUT-07 state check)

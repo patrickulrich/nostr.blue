@@ -15,6 +15,7 @@ use super::internal::init_multi_mint_wallet;
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
 use super::signals::{TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
 use super::types::{WalletState, WalletStatus};
+use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 
 // NIP-60 Wallet event structure
@@ -165,7 +166,8 @@ pub async fn init_wallet() -> Result<(), String> {
 
                         *WALLET_STATE.write() = Some(WalletState {
                             privkey: Some(wallet_data.privkey.clone()),
-                            mints: wallet_data.mints.iter().map(|u| u.to_string()).collect(),
+                            // Normalize mint URLs on load to ensure consistent lookups
+                            mints: wallet_data.mints.iter().map(|u| normalize_mint_url(&u.to_string())).collect(),
                             initialized: true,
                         });
 

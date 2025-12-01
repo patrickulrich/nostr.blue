@@ -22,7 +22,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
     // Modal state
     let mut show_zap_modal = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
-    let has_signer = *HAS_SIGNER.read();
+    // Use memo for reactive has_signer that updates on login/logout
+    let has_signer = use_memo(move || *HAS_SIGNER.read());
 
     // Get author metadata from profile store (use host from p tag if available)
     let author_metadata = use_memo(move || {
@@ -379,8 +380,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                 // Zap button
                                                 button {
                                                     class: "p-2 rounded-full hover:bg-accent transition-colors text-yellow-500 hover:text-yellow-400",
-                                                    title: if has_signer { "Send Zap" } else { "Login to Zap" },
-                                                    disabled: !has_signer,
+                                                    title: if has_signer() { "Send Zap" } else { "Login to Zap" },
+                                                    disabled: !has_signer(),
                                                     onclick: move |_| show_zap_modal.set(true),
                                                     ZapIcon { class: "w-5 h-5".to_string() }
                                                 }

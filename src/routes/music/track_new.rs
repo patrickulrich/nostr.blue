@@ -4,19 +4,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
-
-/// Slugify a string for use as a d-tag
-fn slugify(input: &str) -> String {
-    input
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
+use crate::utils::slugify;
 
 #[component]
 pub fn MusicTrackNew() -> Element {
@@ -61,7 +49,9 @@ pub fn MusicTrackNew() -> Element {
 
     let mut do_add_genre = move || {
         let genre = genre_input.read().trim().to_string();
-        if !genre.is_empty() && !genres.read().contains(&genre) {
+        // Case-insensitive duplicate check while preserving original casing
+        let normalized = genre.to_lowercase();
+        if !normalized.is_empty() && !genres.read().iter().any(|g| g.to_lowercase() == normalized) {
             genres.write().push(genre);
             genre_input.set(String::new());
         }

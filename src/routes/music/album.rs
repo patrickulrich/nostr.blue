@@ -36,6 +36,13 @@ pub fn MusicAlbum(album_id: String) -> Element {
         });
     });
 
+    // Memoize track conversion to avoid reallocation on every render
+    let tracks = use_memo(move || {
+        album_state()
+            .map(|a| a.tracks.iter().map(|t| t.clone().into()).collect::<Vec<MusicTrack>>())
+            .unwrap_or_default()
+    });
+
     let play_track = move |track: MusicTrack, playlist: Vec<MusicTrack>, index: usize| {
         music_player::play_track(track, Some(playlist), Some(index));
     };
@@ -88,7 +95,8 @@ pub fn MusicAlbum(album_id: String) -> Element {
             // Album content
             if let Some(album) = album_state() {
                 {
-                    let tracks: Vec<MusicTrack> = album.tracks.iter().map(|t| t.clone().into()).collect();
+                    // Use memoized tracks to avoid reallocation on every render
+                    let tracks = tracks();
                     rsx! {
                         div { class: "space-y-6",
                             // Album Header

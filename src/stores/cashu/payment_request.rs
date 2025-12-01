@@ -35,7 +35,7 @@ use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, NostrPaymentWaitInfo,
     PaymentRequestProgress, ProofData, TokenData, WalletTokensStoreStoreExt,
 };
-use super::utils::mint_matches;
+use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, nostr_client};
 
 /// Create a payment request (NUT-18)
@@ -307,6 +307,11 @@ pub async fn pay_payment_request(
                 .find(|t| t._type == TransportType::HttpPost)
         });
 
+    // CDK pattern: Mark proofs as pending BEFORE network transport
+    // This ensures we can recover if transport fails
+    let token_proof_secrets: Vec<String> = proofs.iter().map(|p| p.secret.to_string()).collect();
+    super::proofs::register_proofs_pending_at_mint(&token_proof_secrets);
+
     if let Some(transport) = transport {
         match transport._type {
             TransportType::Nostr => {
@@ -350,6 +355,10 @@ pub async fn pay_payment_request(
                 );
 
                 if result.success.is_empty() {
+                    // Transport failed - sync with mint to check proof states
+                    log::warn!("Nostr transport failed, syncing proof states with mint");
+                    let _ = super::recovery::sync_proofs_with_mints().await;
+                    super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
                     return Err("Failed to deliver payment to any relay".to_string());
                 }
             }
@@ -368,6 +377,10 @@ pub async fn pay_payment_request(
                     .map_err(|e| format!("HTTP request failed: {}", e))?;
 
                 if !response.status().is_success() {
+                    // Transport failed - sync with mint to check proof states
+                    log::warn!("HTTP transport failed, syncing proof states with mint");
+                    let _ = super::recovery::sync_proofs_with_mints().await;
+                    super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
                     let status = response.status();
                     let body = response.text().await.unwrap_or_default();
                     return Err(format!(
@@ -380,8 +393,13 @@ pub async fn pay_payment_request(
             }
         }
     } else {
+        // No transport - revert proofs to spendable
+        super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
         return Err("No transport available in payment request. Cannot deliver payment.".to_string());
     }
+
+    // Transport succeeded - mark proofs as spent
+    super::proofs::move_proofs_to_spent(&token_proof_secrets);
 
     // Convert CDK proofs to local ProofData for state tracking
     let _token_proofs: Vec<ProofData> = proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -663,6 +681,9 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
 async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Result<u64, String> {
     use nostr_sdk::signer::NostrSigner;
 
+    // Normalize mint URL for consistent storage
+    let mint_url = normalize_mint_url(mint_url);
+
     log::info!("Receiving {} proofs from {}", proofs.len(), mint_url);
 
     // Convert to CDK proofs
@@ -679,11 +700,11 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .ok_or("Amount overflow")?;
 
     // Acquire lock
-    let _lock = try_acquire_mint_lock(mint_url)
+    let _lock = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
 
     // Create wallet and receive
-    let wallet = create_ephemeral_wallet(mint_url, cdk_proofs.clone()).await?;
+    let wallet = create_ephemeral_wallet(&mint_url, cdk_proofs.clone()).await?;
 
     // Swap proofs to ensure they're ours (contacts mint)
     // Use swap with the proofs to get fresh ones
@@ -698,13 +719,9 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;
 
-    // Get final proofs
-    let final_proofs = if let Some(swap_result) = swapped {
-        swap_result
-    } else {
-        // Swap returned None, meaning proofs were already valid
-        cdk_proofs
-    };
+    // Get final proofs - swap(None, ...) returning None means proofs were rejected by mint
+    let final_proofs = swapped
+        .ok_or("Swap validation failed - proofs rejected by mint")?;
 
     // Publish to Nostr
     let signer = crate::stores::signer::get_signer()

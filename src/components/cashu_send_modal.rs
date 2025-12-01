@@ -441,7 +441,12 @@ pub fn CashuSendModal(
                                         div {
                                             class: "flex justify-between pt-1 border-t border-border/50",
                                             span { class: "text-muted-foreground font-semibold", "Total:" }
-                                            span { class: "font-mono font-semibold", "{amt + fee} sats" }
+                                            // Use checked_add to prevent overflow
+                                            if let Some(total) = amt.checked_add(fee) {
+                                                span { class: "font-mono font-semibold", "{total} sats" }
+                                            } else {
+                                                span { class: "font-mono font-semibold text-destructive", "Amount too large" }
+                                            }
                                         }
                                     }
                                 }

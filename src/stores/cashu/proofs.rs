@@ -193,7 +193,7 @@ pub fn get_all_proofs_for_mint(mint_url: &str) -> Vec<ProofData> {
 }
 
 // =============================================================================
-// Pending-at-Mint Tracking (Dual Pending State - Minibits pattern)
+// Pending-at-Mint Tracking (Dual Pending State)
 // =============================================================================
 
 /// Register proofs as pending at the mint level (called when mint reports PENDING state)

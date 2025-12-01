@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.6.4-blue)
+![Version](https://img.shields.io/badge/version-0.6.5-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 

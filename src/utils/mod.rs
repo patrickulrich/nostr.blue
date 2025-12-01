@@ -34,3 +34,19 @@ pub fn generate_option_id() -> String {
         .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
         .collect()
 }
+
+/// Slugify a string for use as a d-tag or URL-safe identifier
+///
+/// Converts to lowercase, replaces non-alphanumeric characters with hyphens,
+/// and removes duplicate/leading/trailing hyphens.
+pub fn slugify(input: &str) -> String {
+    input
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}

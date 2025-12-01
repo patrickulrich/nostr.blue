@@ -30,14 +30,26 @@ use crate::stores::{auth_store, cashu_cdk_bridge};
 // =============================================================================
 
 /// Get or create the shared IndexedDB localstore
+///
+/// Uses double-checked locking to prevent race conditions where multiple
+/// concurrent calls could create duplicate IndexedDB instances.
 pub(crate) async fn get_shared_localstore(
 ) -> Result<Arc<crate::stores::indexeddb_database::IndexedDbDatabase>, String> {
-    // Check if we already have a cached localstore
+    // Fast path: check if we already have a cached localstore
     if let Some(store) = SHARED_LOCALSTORE.read().clone() {
         return Ok(store);
     }
 
-    // Create new localstore
+    // Slow path: acquire write lock and double-check before creating
+    // This prevents TOCTOU race where multiple tasks pass the read check
+    let mut store_guard = SHARED_LOCALSTORE.write();
+
+    // Double-check: another task may have created it while we waited for the lock
+    if let Some(store) = store_guard.clone() {
+        return Ok(store);
+    }
+
+    // Create new localstore (we hold the write lock, so only one task does this)
     let localstore = Arc::new(
         crate::stores::indexeddb_database::IndexedDbDatabase::new()
             .await
@@ -45,7 +57,7 @@ pub(crate) async fn get_shared_localstore(
     );
 
     // Cache it
-    *SHARED_LOCALSTORE.write() = Some(localstore.clone());
+    *store_guard = Some(localstore.clone());
     log::info!("Created shared IndexedDB localstore");
 
     Ok(localstore)
@@ -793,8 +805,9 @@ async fn sync_proofs_with_mint_after_failure(
                 super::proofs::revert_proofs_to_spendable(&[proof.secret.to_string()]);
             }
             State::Reserved => {
-                // Reserved at mint - treat as pending
+                // Reserved at mint - treat as pending and register
                 pending_count += 1;
+                super::proofs::register_proofs_pending_at_mint(&[proof.secret.to_string()]);
             }
             _ => {}
         }

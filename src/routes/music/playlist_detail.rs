@@ -14,9 +14,13 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
-    // Parse naddr and fetch playlist
+    // Store naddr in a signal to track changes and re-run effect
+    let naddr_signal = use_signal(|| naddr.clone());
+
+    // Parse naddr and fetch playlist - re-runs when naddr_signal changes
     use_effect(move || {
-        let naddr_clone = naddr.clone();
+        // Read the signal inside effect to create reactive dependency
+        let naddr_clone = naddr_signal.read().clone();
         loading.set(true);
         error_msg.set(None);
 
@@ -51,7 +55,9 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                                 tracks.set(music_tracks);
                             }
                             Err(e) => {
+                                // Surface error to UI instead of just logging
                                 log::error!("Failed to resolve playlist tracks: {}", e);
+                                error_msg.set(Some(format!("Failed to load tracks: {}", e)));
                             }
                         }
 
