@@ -87,7 +87,7 @@ pub fn select_strategy_for_operation(
     match operation {
         OperationType::Mint => {
             // For minting, prefer balanced to maintain flexibility
-            if current_proof_count > 50 {
+            if current_proof_count > CONSOLIDATION_THRESHOLD {
                 // Wallet has many proofs, prefer consolidation
                 DenominationStrategy::Large
             } else {

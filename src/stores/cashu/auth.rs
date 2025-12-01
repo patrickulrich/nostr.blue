@@ -46,7 +46,9 @@ pub fn get_mint_auth_state(mint_url: &str) -> Option<MintAuthState> {
 }
 
 /// Set auth state for a mint (in cache)
-pub fn set_mint_auth_state(mint_url: &str, state: MintAuthState) {
+pub fn set_mint_auth_state(mint_url: &str, mut state: MintAuthState) {
+    // Ensure protected_map is built before caching
+    state.build_protected_map();
     MINT_AUTH_STATES.write().insert(mint_url.to_string(), state);
 }
 
@@ -69,7 +71,7 @@ pub fn clear_mint_auth_state(mint_url: &str) {
 // =============================================================================
 
 /// Auth state for a single mint
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct MintAuthState {
     /// Clear auth settings (NUT-21) if supported
     pub clear_auth: Option<ClearAuthSettings>,
@@ -81,6 +83,19 @@ pub struct MintAuthState {
     pub refresh_token: Option<String>,
     /// Cached protected endpoints map (endpoint -> auth type required)
     pub protected_map: HashMap<ProtectedEndpoint, AuthRequired>,
+}
+
+// Manual Debug implementation to redact sensitive tokens
+impl std::fmt::Debug for MintAuthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MintAuthState")
+            .field("clear_auth", &self.clear_auth)
+            .field("blind_auth", &self.blind_auth)
+            .field("clear_token", &self.clear_token.as_ref().map(|_| "<redacted>"))
+            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<redacted>"))
+            .field("protected_map", &self.protected_map)
+            .finish()
+    }
 }
 
 impl MintAuthState {

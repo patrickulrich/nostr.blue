@@ -71,7 +71,8 @@ pub async fn check_terms_accepted() -> Result<bool, String> {
         }
         Err(e) => {
             log::warn!("Failed to check terms acceptance: {}", e);
-            *TERMS_ACCEPTED.write() = Some(false);
+            // Don't cache negative result on transient error - leave as None
+            // so UI can retry on next initialization
             Err(format!("Failed to check terms: {}", e))
         }
     }

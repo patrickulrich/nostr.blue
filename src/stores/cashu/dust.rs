@@ -266,9 +266,9 @@ pub fn get_total_dust_stats() -> DustStats {
     let mut total = DustStats::default();
 
     for stats in all_stats.values() {
-        total.count += stats.count;
-        total.total_value += stats.total_value;
-        total.estimated_fee += stats.estimated_fee;
+        total.count = total.count.saturating_add(stats.count);
+        total.total_value = total.total_value.saturating_add(stats.total_value);
+        total.estimated_fee = total.estimated_fee.saturating_add(stats.estimated_fee);
     }
 
     if total.count > 0 {

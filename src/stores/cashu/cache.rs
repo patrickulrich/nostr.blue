@@ -489,12 +489,30 @@ pub mod ttls {
 }
 
 /// Parse Cache-Control header to extract max-age
+///
+/// Returns None if:
+/// - Header is missing
+/// - Cache-forbidden directives present (no-cache, no-store, private)
+/// - max-age not found or invalid
 pub fn parse_cache_control(header: Option<&str>) -> Option<u64> {
     header.and_then(|h| {
-        for part in h.split(',') {
+        let lower = h.to_lowercase();
+
+        // Check for cache-forbidden directives (RFC 7234)
+        if lower.contains("no-cache") || lower.contains("no-store") || lower.contains("private") {
+            return None;
+        }
+
+        // Parse max-age (case-insensitive, handle quotes/whitespace)
+        for part in lower.split(',') {
             let part = part.trim();
-            if part.starts_with("max-age=") {
-                return part[8..].parse().ok();
+            if let Some(rest) = part.strip_prefix("max-age") {
+                // Handle "max-age=123", "max-age = 123", "max-age=\"123\""
+                let rest = rest.trim_start_matches(|c| c == '=' || c == ' ' || c == '"');
+                let rest = rest.trim_end_matches('"');
+                if let Ok(val) = rest.parse::<u64>() {
+                    return Some(val);
+                }
             }
         }
         None

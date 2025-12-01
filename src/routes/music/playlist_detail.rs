@@ -36,6 +36,9 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
             match nostr_music::fetch_playlists(Some(pubkey), 50).await {
                 Ok(playlists) => {
                     if let Some(pl) = playlists.into_iter().find(|p| p.d_tag == d_tag) {
+                        // Set playlist metadata FIRST - ensures playlist displays even if tracks fail
+                        playlist.set(Some(pl.clone()));
+
                         // Fetch creator profile
                         if let Ok(profile) = profiles::fetch_profile(pl.pubkey.clone()).await {
                             creator_name.set(profile.get_display_name());
@@ -51,13 +54,12 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                                 tracks.set(music_tracks);
                             }
                             Err(e) => {
-                                // Surface error to UI instead of just logging
-                                log::error!("Failed to resolve playlist tracks: {}", e);
-                                error_msg.set(Some(format!("Failed to load tracks: {}", e)));
+                                // Set empty tracks and surface as warning (non-fatal)
+                                log::warn!("Failed to resolve playlist tracks: {}", e);
+                                tracks.set(Vec::new());
+                                error_msg.set(Some(format!("Could not load tracks: {}", e)));
                             }
                         }
-
-                        playlist.set(Some(pl));
                     } else {
                         error_msg.set(Some("Playlist not found".to_string()));
                     }

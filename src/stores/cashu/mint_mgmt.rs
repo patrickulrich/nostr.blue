@@ -130,17 +130,22 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
 
 /// Extract keyset ID from a proof's id field
 fn extract_keyset_id_from_proof(proof: &ProofData) -> Option<String> {
-    // The proof's `id` field in our storage is formatted as "{secret}_{amount}"
-    // The actual keyset ID should come from parsing the proof's C value
-    // For now, we rely on the CDK proofs which have the proper keyset ID
+    // CDK keyset ID formats (from ~/cdk/crates/cashu/src/nuts/nut02.rs):
+    // - V1: 14 hex characters (7 bytes) - STRLEN_V1 = 14
+    // - V2: 64 hex characters (32 bytes) - STRLEN_V2 = 64
+    //
+    // Event-sourced proofs use "{secret}_{amount}" format which is not a keyset ID.
+    // We filter these out by checking for '_' character.
 
-    // Try to parse as a keyset ID directly (if stored that way)
-    if !proof.id.is_empty() && proof.id.len() <= 16 && !proof.id.contains('_') {
-        return Some(proof.id.clone());
+    let len = proof.id.len();
+    if (len == 14 || len == 64) && !proof.id.contains('_') {
+        // Validate it's valid hex
+        if proof.id.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(proof.id.clone());
+        }
     }
 
-    // Keyset ID not available in our proof storage format
-    // This is a limitation - we should ideally store keyset_id separately
+    // Keyset ID not available or invalid format
     None
 }
 
@@ -572,10 +577,20 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWallet, encrypted);
 
-    // Publish
+    // Publish - rollback local state on failure (nostr SDK pattern: transactional safety)
     match client.send_event_builder(builder).await {
         Ok(_) => log::info!("Published updated wallet event with new mint"),
-        Err(e) => log::warn!("Failed to publish wallet event: {}", e),
+        Err(e) => {
+            log::error!("Failed to publish wallet event: {}", e);
+            // Rollback: remove the mint we just added to local state
+            {
+                let mut state = WALLET_STATE.write();
+                if let Some(ref mut wallet_state) = *state {
+                    wallet_state.mints.retain(|m| normalize_mint_url(m) != mint_url);
+                }
+            }
+            return Err(format!("Failed to publish wallet event: {}", e));
+        }
     }
 
     log::info!("Successfully added mint: {}", mint_url);
@@ -684,7 +699,24 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
 
     log::info!("Found {} token events worth {} sats to remove", token_count, total_amount);
 
-    // Only create deletion event if there are tokens to delete
+    // Update local state FIRST - nostr SDK pattern: local before publish for consistency
+    // Use mint_matches for normalized comparison (handles URL variants)
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data = store.data();
+        let mut tokens_write = data.write();
+        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
+    }
+
+    // Remove mint from wallet state
+    {
+        let mut state_write = WALLET_STATE.write();
+        if let Some(ref mut state) = *state_write {
+            state.mints.retain(|m| !mint_matches(m, mint_url));
+        }
+    }
+
+    // Then publish deletion event to relays
     if !event_ids_to_delete.is_empty() {
         // Create kind-5 deletion event for all token events
         let mut tags = Vec::new();
@@ -713,24 +745,6 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
             .map_err(|e| format!("Failed to publish deletion event: {}", e))?;
 
         log::info!("Published deletion event for {} token events", event_ids_to_delete.len());
-    }
-
-    // Update local state - remove all tokens for this mint
-    // Use mint_matches for normalized comparison (handles URL variants)
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
-        tokens_write.retain(|t| !mint_matches(&t.mint, mint_url));
-    }
-
-    // Remove mint from wallet state
-    // Use mint_matches for normalized comparison
-    {
-        let mut state_write = WALLET_STATE.write();
-        if let Some(ref mut state) = *state_write {
-            state.mints.retain(|m| !mint_matches(m, mint_url));
-        }
     }
 
     // Update wallet event on relays to persist the mint removal
@@ -891,6 +905,38 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let proofs_after = new_proofs.len();
     log::info!("Consolidated to {} proofs", proofs_after);
+
+    // Persist new proofs to CDK database BEFORE publishing (CDK saga pattern)
+    // This ensures proofs survive if publish fails - can be recovered on next startup
+    {
+        use cdk_common::database::WalletDatabase;
+
+        let localstore = SHARED_LOCALSTORE.read()
+            .as_ref()
+            .ok_or("Localstore not initialized")?
+            .clone();
+
+        let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
+            .map_err(|e| format!("Invalid mint URL: {}", e))?;
+
+        // Create ProofInfo entries for each proof
+        let proof_infos: Vec<cdk::types::ProofInfo> = new_proofs.iter()
+            .filter_map(|p| {
+                cdk::types::ProofInfo::new(
+                    p.clone(),
+                    mint_url_parsed.clone(),
+                    cdk::nuts::State::Unspent,
+                    cdk::nuts::CurrencyUnit::Sat,
+                ).ok()
+            })
+            .collect();
+
+        if !proof_infos.is_empty() {
+            localstore.update_proofs(proof_infos, vec![]).await
+                .map_err(|e| format!("Failed to persist proofs to CDK database: {}", e))?;
+            log::debug!("Persisted {} proofs to CDK database before publish", proofs_after);
+        }
+    }
 
     // Prepare event data
     let signer = crate::stores::signer::get_signer()

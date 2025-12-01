@@ -211,8 +211,9 @@ pub fn MusicSearch(q: String) -> Element {
     let track_count = unified_tracks().len();
     let artist_count = artist_results.read().len() + nostr_artist_results.read().len();
     let album_count = album_results.read().len();
-    let both_loading = *loading.read() && *nostr_loading.read();
-    let artists_loading = *loading.read() && *nostr_artist_loading.read();
+    // Use OR so skeletons show while ANY source is still loading (when no tracks yet)
+    let either_loading = *loading.read() || *nostr_loading.read();
+    let artists_loading = *loading.read() || *nostr_artist_loading.read();
 
     rsx! {
         div {
@@ -301,11 +302,12 @@ pub fn MusicSearch(q: String) -> Element {
                     MusicSearchTab::Tracks => rsx! {
                         div {
                             class: "space-y-1",
-                            if both_loading {
+                            // Show skeletons while any source is loading AND we have no tracks yet
+                            if either_loading && unified_tracks().is_empty() {
                                 for _ in 0..8 {
                                     UnifiedTrackCardSkeleton {}
                                 }
-                            } else if unified_tracks().is_empty() {
+                            } else if !either_loading && unified_tracks().is_empty() {
                                 div {
                                     class: "text-center py-12 text-muted-foreground",
                                     p { "No tracks found" }

@@ -224,31 +224,13 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
 // Error Detection Helpers
 // =============================================================================
 
-/// Check if an error message indicates tokens are already spent
-pub(crate) fn is_token_spent_error_string(error_msg: &str) -> bool {
-    let msg = error_msg.to_lowercase();
-    msg.contains("already spent")
-        || msg.contains("already redeemed")
-        || msg.contains("token pending")
-}
-
-/// Check if an error message indicates insufficient funds
-pub(crate) fn is_insufficient_funds_error_string(error_msg: &str) -> bool {
-    error_msg.to_lowercase().contains("insufficient")
-}
-
-/// Check if a CDK error indicates tokens are already spent
-/// Re-export from errors module for convenience - the canonical implementation
-/// handles both TokenAlreadySpent and TokenPending cases
-pub(crate) use super::errors::is_token_already_spent_error;
-
-/// Check if a CDK error indicates insufficient funds
-pub(crate) fn is_insufficient_funds_error(error: &cdk::Error) -> bool {
-    match error {
-        cdk::Error::InsufficientFunds => true,
-        _ => is_insufficient_funds_error_string(&error.to_string()),
-    }
-}
+// Re-export error detection helpers from errors module to avoid duplication.
+// The canonical implementations live in errors.rs.
+pub(crate) use super::errors::{
+    is_token_already_spent_error,
+    is_token_spent_error_string,
+    is_insufficient_funds_error_string,
+};
 
 // =============================================================================
 // Database Cleanup Helpers

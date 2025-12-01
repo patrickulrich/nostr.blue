@@ -378,15 +378,14 @@ impl CashuWalletError {
             return Self::TokenPending;
         }
         if lower.contains("insufficient") {
-            return Self::InsufficientFunds {
-                available: 0,
-                required: 0,
-            };
+            // Preserve original error text - typed InsufficientFunds requires parsed values
+            // which aren't available from string. Using Internal preserves diagnostic context.
+            return Self::Internal(msg);
         }
         if lower.contains("expired") {
-            return Self::QuoteExpired {
-                quote_id: String::new(),
-            };
+            // Preserve original error text - typed QuoteExpired requires parsed quote_id
+            // which isn't available from string. Using Internal preserves diagnostic context.
+            return Self::Internal(msg);
         }
         if lower.contains("not initialized") {
             return Self::WalletNotInitialized;

@@ -276,6 +276,18 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
         caps.supported_nuts.push(14);
     }
 
+    // NUT-15: Multi-path payments (MPP)
+    // CDK pattern: check if methods list is non-empty
+    if !mint_info.nuts.nut15.methods.is_empty() {
+        caps.supported_nuts.push(15);
+    }
+
+    // NUT-17: WebSocket subscriptions
+    // CDK pattern: check if supported methods list is non-empty
+    if !mint_info.nuts.nut17.supported.is_empty() {
+        caps.supported_nuts.push(17);
+    }
+
     // NUT-20: Quote signatures
     if mint_info.nuts.nut20.supported {
         caps.supported_nuts.push(20);
