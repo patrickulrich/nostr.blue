@@ -171,6 +171,12 @@ pub async fn batch_amount(mint_url: &str, total_amount: u64) -> Vec<u64> {
 
     let max_amount = limits.max_mint_amount.unwrap_or(u64::MAX);
 
+    // Guard against misconfigured mint with zero limit
+    if max_amount == 0 {
+        log::warn!("Mint {} has zero max_mint_amount, using full amount", mint_url);
+        return vec![total_amount];
+    }
+
     if total_amount <= max_amount {
         return vec![total_amount];
     }

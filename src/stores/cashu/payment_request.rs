@@ -357,6 +357,8 @@ pub async fn pay_payment_request(
                 // Send via HTTP POST
                 log::info!("Sending payment via HTTP transport to {}", transport.target);
 
+                // Note: WASM reqwest doesn't support Client::builder().timeout()
+                // Browser fetch API handles timeouts via default network settings
                 let http_client = reqwest::Client::new();
                 let response = http_client
                     .post(&transport.target)

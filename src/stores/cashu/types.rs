@@ -162,8 +162,6 @@ pub struct SendOptions {
     pub p2pk_pubkey: Option<String>,
     /// Optional memo for the token
     pub memo: Option<String>,
-    /// Maximum number of proofs to include
-    pub max_proofs: Option<usize>,
 }
 
 impl SendOptions {

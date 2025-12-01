@@ -910,8 +910,33 @@ pub fn watch_melt_quote<F>(
                 }
             }
             Err(e) => {
-                log::warn!("WebSocket subscription failed for melt quote {}: {}", quote_id, e);
-                // Melt quotes typically complete quickly, so less aggressive polling
+                log::warn!("WebSocket subscription failed for melt quote {}: {}, using polling", quote_id, e);
+                // Fall back to HTTP polling - shorter duration since melts complete quickly
+                for _ in 0..6 {  // Poll for up to 1 minute (10s intervals)
+                    gloo_timers::future::TimeoutFuture::new(10_000).await;
+
+                    match poll_quote_status(&mint_url, &quote_id, false).await {
+                        Ok(status) => {
+                            match status {
+                                QuoteStatus::Paid => {
+                                    log::info!("Melt quote {} paid! (via polling)", quote_id);
+                                    on_completed(quote_id.clone(), true);
+                                    return;
+                                }
+                                QuoteStatus::Expired => {
+                                    log::info!("Melt quote {} expired (via polling)", quote_id);
+                                    on_completed(quote_id.clone(), false);
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to poll melt quote {}: {}", quote_id, e);
+                        }
+                    }
+                }
+                log::warn!("Polling timeout for melt quote {} without resolution", quote_id);
             }
         }
     });

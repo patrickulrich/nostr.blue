@@ -298,7 +298,7 @@ pub fn get_auth_cache_stats() -> AuthCacheStats {
     }
 
     AuthCacheStats {
-        total_tokens: cache.total_count(),
+        total_tokens: tokens_per_mint.values().sum(),
         mints_with_tokens: tokens_per_mint.values().filter(|&c| *c > 0).count(),
         tokens_per_mint,
     }
