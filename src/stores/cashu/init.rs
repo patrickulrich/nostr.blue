@@ -11,7 +11,7 @@ use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, SecretKey, Tag, Ur
 
 use super::events::{fetch_tokens, start_pending_events_processor};
 use super::history::fetch_history;
-use super::internal::init_multi_mint_wallet;
+use super::internal::{init_multi_mint_wallet, inject_nip60_proofs_to_cdk};
 use super::recovery::{recover_pending_operations, sync_state_with_all_mints};
 use super::signals::{TERMS_ACCEPTED, TERMS_D_TAG, WALLET_STATE, WALLET_STATUS};
 use super::types::{WalletState, WalletStatus};
@@ -177,9 +177,15 @@ pub async fn init_wallet() -> Result<(), String> {
                             // Continue without MultiMintWallet - fallback to legacy mode
                         }
 
-                        // Fetch tokens and history
+                        // Fetch tokens and history from NIP-60
                         if let Err(e) = fetch_tokens().await {
                             log::error!("Failed to fetch tokens: {}", e);
+                        }
+
+                        // Inject NIP-60 proofs into CDK database
+                        // This bridges NIP-60 (Nostr source of truth) with CDK (local operations)
+                        if let Err(e) = inject_nip60_proofs_to_cdk().await {
+                            log::warn!("Failed to inject NIP-60 proofs to CDK: {}", e);
                         }
 
                         if let Err(e) = fetch_history().await {
@@ -187,6 +193,7 @@ pub async fn init_wallet() -> Result<(), String> {
                         }
 
                         // Sync MultiMintWallet state to Dioxus signals
+                        // Now that CDK has the proofs, this will correctly populate UI state
                         if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
                             log::warn!("Failed to sync MultiMintWallet state: {}", e);
                         }

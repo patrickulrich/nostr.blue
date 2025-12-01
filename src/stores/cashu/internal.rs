@@ -705,6 +705,91 @@ pub(crate) async fn init_multi_mint_wallet(mints: &[nostr_sdk::Url]) -> Result<(
     Ok(())
 }
 
+/// Inject NIP-60 proofs into CDK's database
+///
+/// This function bridges the gap between NIP-60 (proofs stored in Nostr events)
+/// and CDK (proofs stored in IndexedDB). After loading proofs from NIP-60 via
+/// `fetch_tokens()`, we need to inject them into CDK's database so that
+/// `sync_wallet_state()` and other CDK operations can find them.
+///
+/// Architecture Note:
+/// - NIP-60 is the source of truth for cross-device wallet sync
+/// - CDK is used for local operations (mint, melt, swap, NUT-07 checks)
+/// - This injection bridges these two systems
+pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
+    use cdk::mint_url::MintUrl as CdkMintUrl;
+    use cdk::types::ProofInfo;
+
+    let localstore = get_shared_localstore().await?;
+
+    // Read all tokens from NIP-60 signal
+    let tokens = WALLET_TOKENS.read().data().read().clone();
+
+    if tokens.is_empty() {
+        log::debug!("No NIP-60 proofs to inject into CDK");
+        return Ok(());
+    }
+
+    let mut total_proofs = 0;
+    let mut failed_mints = Vec::new();
+
+    // Process each mint's tokens
+    for token in &tokens {
+        let mint_url: CdkMintUrl = match token.mint.parse() {
+            Ok(url) => url,
+            Err(e) => {
+                log::warn!("Invalid mint URL '{}': {}", token.mint, e);
+                failed_mints.push(token.mint.clone());
+                continue;
+            }
+        };
+
+        let proof_infos: Vec<ProofInfo> = token
+            .proofs
+            .iter()
+            .filter_map(|p| {
+                match proof_data_to_cdk_proof(p) {
+                    Ok(cdk_proof) => {
+                        ProofInfo::new(
+                            cdk_proof,
+                            mint_url.clone(),
+                            State::Unspent,
+                            CurrencyUnit::Sat,
+                        )
+                        .ok()
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to convert proof: {}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        if !proof_infos.is_empty() {
+            total_proofs += proof_infos.len();
+            if let Err(e) = localstore.update_proofs(proof_infos, vec![]).await {
+                log::warn!("Failed to inject proofs for {}: {}", token.mint, e);
+                failed_mints.push(token.mint.clone());
+            }
+        }
+    }
+
+    if total_proofs > 0 {
+        log::info!("Injected {} NIP-60 proofs into CDK database", total_proofs);
+    }
+
+    if !failed_mints.is_empty() {
+        log::warn!(
+            "Failed to inject proofs for {} mints: {:?}",
+            failed_mints.len(),
+            failed_mints
+        );
+    }
+
+    Ok(())
+}
+
 // =============================================================================
 // Atomic Recovery Wrapper (CDK pattern: try_proof_operation_or_reclaim)
 // =============================================================================

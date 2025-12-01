@@ -24,6 +24,7 @@ use super::types::*;
 use super::events::fetch_tokens;
 use super::history::fetch_history;
 use super::init::is_wallet_initialized;
+use super::internal::inject_nip60_proofs_to_cdk;
 use super::mint_mgmt::get_mints;
 use super::signals::try_acquire_mint_lock;
 
@@ -35,7 +36,15 @@ pub async fn refresh_wallet() -> Result<(), String> {
 
     log::info!("Refreshing wallet data");
 
+    // Fetch tokens from NIP-60
     fetch_tokens().await?;
+
+    // Inject NIP-60 proofs into CDK database
+    // This ensures CDK operations have access to the refreshed proofs
+    if let Err(e) = inject_nip60_proofs_to_cdk().await {
+        log::warn!("Failed to inject refreshed proofs to CDK: {}", e);
+    }
+
     fetch_history().await?;
 
     Ok(())
@@ -775,6 +784,11 @@ pub async fn recover_from_seed() -> Result<RecoverySummary, String> {
         if let Err(e) = fetch_tokens().await {
             log::warn!("Failed to refresh tokens after recovery: {}", e);
         }
+
+        // Inject any NIP-60 proofs into CDK database
+        if let Err(e) = inject_nip60_proofs_to_cdk().await {
+            log::warn!("Failed to inject proofs to CDK after recovery: {}", e);
+        }
     }
 
     let message = if errors.is_empty() {
@@ -899,6 +913,11 @@ pub async fn consolidate_proofs() -> Result<ConsolidationSummary, String> {
     if consolidated_sats > 0 {
         if let Err(e) = fetch_tokens().await {
             log::warn!("Failed to refresh tokens after consolidation: {}", e);
+        }
+
+        // Inject any NIP-60 proofs into CDK database
+        if let Err(e) = inject_nip60_proofs_to_cdk().await {
+            log::warn!("Failed to inject proofs to CDK after consolidation: {}", e);
         }
     }
 
