@@ -52,9 +52,9 @@ pub struct TrackedProofState {
 // Stuck Proof Detection
 // =============================================================================
 
-/// Detect proofs that are stuck in transient states
-pub fn detect_stuck_proofs(_timeout_secs: u64) -> Vec<TrackedProofState> {
-    let _now = now_secs();
+/// Detect proofs that are stuck in transient states for longer than timeout_secs
+pub fn detect_stuck_proofs(timeout_secs: u64) -> Vec<TrackedProofState> {
+    let now = now_secs();
     let mut stuck_proofs = Vec::new();
 
     let store = WALLET_TOKENS();
@@ -65,15 +65,23 @@ pub fn detect_stuck_proofs(_timeout_secs: u64) -> Vec<TrackedProofState> {
         for proof in &token.proofs {
             // Only check proofs in transient states
             if proof.state.is_pending() {
-                // For now, we can't track when state was set without additional metadata
-                // This is a simplified version that detects based on current state only
-                stuck_proofs.push(TrackedProofState {
-                    secret: proof.secret.clone(),
-                    state: proof.state,
-                    state_set_at: 0, // Would need separate tracking
-                    transaction_id: proof.transaction_id,
-                    mint_url: token.mint.clone(),
-                });
+                // Check if proof has been in this state longer than timeout
+                let is_stuck = match proof.state_set_at {
+                    Some(set_at) => now.saturating_sub(set_at) > timeout_secs,
+                    // If no timestamp recorded, treat as not timed out yet
+                    // (new proofs before this fix won't have timestamp)
+                    None => false,
+                };
+
+                if is_stuck {
+                    stuck_proofs.push(TrackedProofState {
+                        secret: proof.secret.clone(),
+                        state: proof.state,
+                        state_set_at: proof.state_set_at.unwrap_or(0),
+                        transaction_id: proof.transaction_id,
+                        mint_url: token.mint.clone(),
+                    });
+                }
             }
         }
     }

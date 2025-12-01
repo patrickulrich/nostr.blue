@@ -14,6 +14,27 @@ use super::types::*;
 use super::utils::mint_matches;
 
 // =============================================================================
+// Cross-Platform Time Helper
+// =============================================================================
+
+/// Cross-platform timestamp helper (aligned with nostr SDK pattern)
+/// Returns current time in seconds since Unix epoch
+pub fn now_secs() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+}
+
+// =============================================================================
 // Proof-to-Event Mapping
 // =============================================================================
 
@@ -73,12 +94,14 @@ pub fn move_proofs_to_reserved(proof_secrets: &[String], tx_id: u64) {
     let store = WALLET_TOKENS.read();
     let mut data = store.data();
     let mut tokens = data.write();
+    let now = now_secs();
 
     for token in tokens.iter_mut() {
         for proof in &mut token.proofs {
             if proof_secrets.contains(&proof.secret) {
                 proof.state = ProofState::Reserved;
                 proof.transaction_id = Some(tx_id);
+                proof.state_set_at = Some(now);
             }
         }
     }
@@ -101,6 +124,7 @@ pub fn move_proofs_to_spent(proof_secrets: &[String]) {
             if proof_secrets.contains(&proof.secret) {
                 proof.state = ProofState::Spent;
                 proof.transaction_id = None;
+                proof.state_set_at = None; // Clear timestamp for terminal state
             }
         }
     }
@@ -122,6 +146,7 @@ pub fn revert_proofs_to_spendable(proof_secrets: &[String]) {
             if proof_secrets.contains(&proof.secret) {
                 proof.state = ProofState::Unspent;
                 proof.transaction_id = None;
+                proof.state_set_at = None; // Clear timestamp when reverting
             }
         }
     }
@@ -201,7 +226,7 @@ pub fn get_all_proofs_for_mint(mint_url: &str) -> Vec<ProofData> {
 ///
 /// CDK best practice: Store timestamp for TTL-based cleanup
 pub fn register_proofs_pending_at_mint(proof_secrets: &[String]) {
-    let now = js_sys::Date::now() as u64 / 1000; // seconds since epoch
+    let now = now_secs();
     let mut pending = PENDING_BY_MINT_SECRETS.write();
     for secret in proof_secrets {
         pending.insert(secret.clone(), now);
@@ -248,17 +273,13 @@ pub fn clear_pending_at_mint() {
 pub fn cleanup_old_pending_at_mint() {
     const MAX_PENDING_AGE_SECS: u64 = 600; // 10 minutes
 
-    let now = js_sys::Date::now() as u64 / 1000;
+    let now = now_secs();
     let before_count = PENDING_BY_MINT_SECRETS.read().len();
 
-    PENDING_BY_MINT_SECRETS.write().retain(|secret, timestamp| {
+    PENDING_BY_MINT_SECRETS.write().retain(|_secret, timestamp| {
         let age = now.saturating_sub(*timestamp);
         if age > MAX_PENDING_AGE_SECS {
-            log::debug!(
-                "Cleaning up stale pending proof {} (age={}s)",
-                &secret[..8.min(secret.len())],
-                age
-            );
+            log::debug!("Cleaning up stale pending proof (age={}s)", age);
             false
         } else {
             true
@@ -448,6 +469,7 @@ pub fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
         dleq,
         state: ProofState::Unspent,
         transaction_id: None,
+        state_set_at: None,
     }
 }
 

@@ -257,8 +257,9 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<ProofData>, String> {
     Ok(proofs)
 }
 
-/// Estimate fee for a swap operation
-pub async fn estimate_swap_fee(mint_url: &str, proof_count: usize) -> Result<u64, String> {
+/// Estimate fee for a swap operation based on proof count
+/// Note: For full swap fee estimation with FeeEstimate struct, use fees::estimate_swap_fee
+pub async fn estimate_swap_proof_fee(mint_url: &str, proof_count: usize) -> Result<u64, String> {
     // Get keyset fee from cache or fetch
     let wallet = get_or_create_wallet(mint_url).await?;
 

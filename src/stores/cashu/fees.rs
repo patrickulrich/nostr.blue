@@ -56,7 +56,7 @@ impl FeeEstimate {
         Self {
             base_fee,
             witness_fee,
-            total_fee: base_fee + witness_fee,
+            total_fee: base_fee.saturating_add(witness_fee),
             proof_count,
             fee_ppk,
         }

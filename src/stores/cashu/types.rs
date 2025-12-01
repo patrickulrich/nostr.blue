@@ -257,6 +257,9 @@ pub struct ProofData {
     /// Transaction ID this proof is associated with (for Reserved/PendingSpent states)
     #[serde(skip)]
     pub transaction_id: Option<u64>,
+    /// Timestamp (seconds since epoch) when state was last set (for timeout detection)
+    #[serde(skip)]
+    pub state_set_at: Option<u64>,
 }
 
 /// Extended Cashu proof with P2PK support (superset of nostr_sdk::nips::nip60::CashuProof)

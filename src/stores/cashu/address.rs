@@ -239,7 +239,9 @@ pub async fn get_invoice_for_address(
 
     let lnurl_pay = resolve_lightning_address(&parsed).await?;
 
-    let amount_msats = amount_sats * 1000;
+    let amount_msats = amount_sats
+        .checked_mul(1000)
+        .ok_or("Amount overflow when converting to millisatoshis")?;
     request_invoice(&lnurl_pay, amount_msats, comment).await
 }
 

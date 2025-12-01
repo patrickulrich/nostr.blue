@@ -89,6 +89,11 @@ pub fn LiveStreamShareModal(
     let event_id = event.id;
 
     let handle_share_to_nostr = move |_| {
+        // Early guard to prevent concurrent submissions on rapid clicks
+        if *is_publishing.read() {
+            return;
+        }
+
         let text = nostr_text.read().trim().to_string();
         if text.is_empty() {
             return;
@@ -132,6 +137,11 @@ pub fn LiveStreamShareModal(
     let handle_send_dm = {
         let stream_url = stream_url.clone();
         move |_| {
+            // Early guard to prevent concurrent submissions on rapid clicks
+            if *is_publishing.read() {
+                return;
+            }
+
             let manual_recipient = dm_recipient.read().trim().to_string();
 
             if manual_recipient.is_empty() {

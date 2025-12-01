@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 use nostr_sdk::PublicKey;
+use std::cell::Cell;
+use std::rc::Rc;
 use crate::stores::cashu;
 use crate::utils::{shorten_url, format::truncate_pubkey};
 
@@ -24,6 +27,15 @@ pub fn CashuSendModal(
     // Token claim tracking (NUT-17)
     // None = no token yet, Some(false) = pending, Some(true) = claimed
     let mut token_claimed = use_signal(|| Option::<bool>::None);
+
+    // Mounted flag to prevent signal updates after modal closes
+    // The watch_sent_token_claims task checks this before updating signals
+    let is_mounted = use_hook(|| Rc::new(Cell::new(true)));
+    // Set mounted to false when component unmounts
+    let is_mounted_cleanup = is_mounted.clone();
+    use_drop(move || {
+        is_mounted_cleanup.set(false);
+    });
 
     // Keep selected_mint in sync with available mints
     use_effect(move || {
@@ -92,16 +104,19 @@ pub fn CashuSendModal(
         });
     });
 
-    let on_send = move |_| {
-        // Early guard: prevent concurrent send operations
-        if *is_sending.read() {
-            return;
-        }
+    let on_send = {
+        let is_mounted = is_mounted.clone();
+        move |_| {
+            // Early guard: prevent concurrent send operations
+            if *is_sending.read() {
+                return;
+            }
 
-        let amount_str = amount.read().clone();
-        let mint = selected_mint.read().clone();
-        let is_p2pk = *p2pk_enabled.read();
-        let recipient = recipient_pubkey.read().clone();
+            let amount_str = amount.read().clone();
+            let mint = selected_mint.read().clone();
+            let is_p2pk = *p2pk_enabled.read();
+            let recipient = recipient_pubkey.read().clone();
+            let is_mounted_for_watch = is_mounted.clone();
 
         // Validate amount
         let amount_sats = match amount_str.parse::<u64>() {
@@ -156,9 +171,13 @@ pub fn CashuSendModal(
                     recipient_pubkey.set(String::new());
 
                     // Start watching for token claims via NUT-17
+                    // Check is_mounted before updating signal to prevent panic on dropped signal
                     if let Ok(y_values) = cashu::extract_y_values_from_token(&token_string) {
                         cashu::watch_sent_token_claims(mint_for_watch, y_values, move || {
-                            token_claimed.set(Some(true));
+                            // Only update signal if component is still mounted
+                            if is_mounted_for_watch.get() {
+                                token_claimed.set(Some(true));
+                            }
                         });
                     }
                 }
@@ -168,7 +187,7 @@ pub fn CashuSendModal(
                 }
             }
         });
-    };
+    }};
 
     rsx! {
         // Modal overlay

@@ -406,6 +406,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                                         dleq: p.dleq.clone(),
                                         state: ProofState::Unspent,
                                         transaction_id: None,
+                                        state_set_at: None,
                                     })
                                     .collect();
 

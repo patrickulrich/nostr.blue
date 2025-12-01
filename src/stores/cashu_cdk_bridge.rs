@@ -211,6 +211,7 @@ pub async fn sync_wallet_state() -> Result<(), String> {
             }),
             state: ProofState::Unspent,
             transaction_id: None,
+            state_set_at: None,
         }).collect();
 
         tokens.push(TokenData {

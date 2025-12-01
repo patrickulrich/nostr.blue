@@ -481,7 +481,7 @@ pub async fn execute_mpp_melt(
 
         if let Err(e) = create_history_event_with_type(
             "out",
-            total_paid + total_fee,
+            total_paid.saturating_add(total_fee), // Saturating to prevent overflow
             new_event_ids,
             valid_destroyed,
             Some("mpp_lightning_melt"),
