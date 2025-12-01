@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client, cashu_wallet};
+use crate::stores::{auth_store, nostr_client, cashu};
 
 #[component]
 pub fn CashuWallet() -> Element {
     let auth = auth_store::AUTH_STATE.read();
-    let wallet_status = cashu_wallet::WALLET_STATUS.read();
-    let wallet_state = cashu_wallet::WALLET_STATE.read();
-    let terms_status = cashu_wallet::TERMS_ACCEPTED.read();
+    let wallet_status = cashu::WALLET_STATUS.read();
+    let wallet_state = cashu::WALLET_STATE.read();
+    let terms_status = cashu::TERMS_ACCEPTED.read();
     let mut show_setup_wizard = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
@@ -36,18 +36,18 @@ pub fn CashuWallet() -> Element {
         }
 
         // Check terms status first
-        let terms = *cashu_wallet::TERMS_ACCEPTED.read();
+        let terms = *cashu::TERMS_ACCEPTED.read();
 
         if terms.is_none() {
             // Mark init as started to prevent duplicate spawns
             init_started.set(true);
             // Terms not yet checked - check them first
             spawn(async move {
-                match cashu_wallet::check_terms_accepted().await {
+                match cashu::check_terms_accepted().await {
                     Ok(accepted) => {
                         if accepted {
                             // Terms accepted, proceed with wallet init
-                            if let Err(e) = cashu_wallet::init_wallet().await {
+                            if let Err(e) = cashu::init_wallet().await {
                                 log::error!("Failed to initialize wallet: {}", e);
                             }
                         }
@@ -61,11 +61,11 @@ pub fn CashuWallet() -> Element {
 
         // Terms already checked - if accepted, init wallet
         if terms == Some(true) {
-            if matches!(*cashu_wallet::WALLET_STATUS.read(), cashu_wallet::WalletStatus::Uninitialized) {
+            if matches!(*cashu::WALLET_STATUS.read(), cashu::WalletStatus::Uninitialized) {
                 // Mark init as started to prevent duplicate spawns
                 init_started.set(true);
                 spawn(async move {
-                    if let Err(e) = cashu_wallet::init_wallet().await {
+                    if let Err(e) = cashu::init_wallet().await {
                         log::error!("Failed to initialize wallet: {}", e);
                     }
                 });
@@ -96,12 +96,12 @@ pub fn CashuWallet() -> Element {
                     }
 
                     // Refresh button (only show when wallet is ready)
-                    if matches!(*wallet_status, cashu_wallet::WalletStatus::Ready) && !should_show_wizard {
+                    if matches!(*wallet_status, cashu::WalletStatus::Ready) && !should_show_wizard {
                         button {
                             class: "px-3 py-1 text-sm bg-accent hover:bg-accent/80 rounded-lg transition",
                             onclick: move |_| {
                                 spawn(async move {
-                                    if let Err(e) = cashu_wallet::refresh_wallet().await {
+                                    if let Err(e) = cashu::refresh_wallet().await {
                                         log::error!("Failed to refresh wallet: {}", e);
                                     }
                                 });
@@ -135,13 +135,13 @@ pub fn CashuWallet() -> Element {
                     on_accept: move |_| {
                         // Terms accepted, trigger wallet init
                         spawn(async move {
-                            if let Err(e) = cashu_wallet::init_wallet().await {
+                            if let Err(e) = cashu::init_wallet().await {
                                 log::error!("Failed to initialize wallet: {}", e);
                             }
                         });
                     }
                 }
-            } else if !client_initialized || terms_status.is_none() || matches!(*wallet_status, cashu_wallet::WalletStatus::Loading) {
+            } else if !client_initialized || terms_status.is_none() || matches!(*wallet_status, cashu::WalletStatus::Loading) {
                 // Client initializing or wallet loading - show bouncing N logo animation
 
                 div {
@@ -196,7 +196,7 @@ pub fn CashuWallet() -> Element {
                         }
                     }
                 }
-            } else if let cashu_wallet::WalletStatus::Error(error_msg) = &*wallet_status {
+            } else if let cashu::WalletStatus::Error(error_msg) = &*wallet_status {
                 // Error state
                 div {
                     class: "text-center py-12 px-4",
@@ -236,7 +236,7 @@ pub fn CashuWallet() -> Element {
                         class: "mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
                         onclick: move |_| {
                             spawn(async move {
-                                if let Err(e) = cashu_wallet::init_wallet().await {
+                                if let Err(e) = cashu::init_wallet().await {
                                     log::error!("Failed to retry wallet init: {}", e);
                                 }
                             });
@@ -251,7 +251,7 @@ pub fn CashuWallet() -> Element {
                         show_setup_wizard.set(false);
                         // Refresh wallet after setup
                         spawn(async move {
-                            if let Err(e) = cashu_wallet::init_wallet().await {
+                            if let Err(e) = cashu::init_wallet().await {
                                 log::error!("Failed to reload wallet after setup: {}", e);
                             }
                         });
@@ -356,7 +356,7 @@ pub fn CashuWallet() -> Element {
                     on_mint_added: move |_| {
                         // Refresh wallet to pick up the new mint
                         spawn(async move {
-                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                            if let Err(e) = cashu::refresh_wallet().await {
                                 log::error!("Failed to refresh after adding mint: {}", e);
                             }
                         });
@@ -371,7 +371,7 @@ pub fn CashuWallet() -> Element {
                     on_mint_selected: move |_| {
                         // Refresh wallet to pick up the new mint
                         spawn(async move {
-                            if let Err(e) = cashu_wallet::refresh_wallet().await {
+                            if let Err(e) = cashu::refresh_wallet().await {
                                 log::error!("Failed to refresh after adding mint: {}", e);
                             }
                         });

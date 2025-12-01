@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, DiscoveredMint};
+use crate::stores::cashu;
+use crate::stores::cashu::DiscoveredMint;
 use crate::utils::format::truncate_pubkey;
 
 #[component]
@@ -16,7 +17,7 @@ pub fn CashuMintDiscoveryModal(
     // Fetch mints on mount
     use_effect(move || {
         spawn(async move {
-            match cashu_wallet::discover_mints().await {
+            match cashu::discover_mints().await {
                 Ok(mints) => {
                     discovered_mints.set(mints);
                     is_loading.set(false);
@@ -34,7 +35,7 @@ pub fn CashuMintDiscoveryModal(
         error_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::add_mint(url.clone()).await {
+            match cashu::add_mint(&url).await {
                 Ok(_) => {
                     is_adding.set(false);
                     on_mint_selected.call(url);
@@ -49,7 +50,7 @@ pub fn CashuMintDiscoveryModal(
     };
 
     // Get existing mints to filter out already added ones (memoized to avoid cloning on every render)
-    let existing_mints = use_memo(move || cashu_wallet::get_mints());
+    let existing_mints = use_memo(move || cashu::get_mints());
 
     // Precompute display names for discovered mints to avoid URL parsing on every render
     let mints_with_display = use_memo(move || {

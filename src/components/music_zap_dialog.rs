@@ -1,8 +1,14 @@
 use dioxus::prelude::*;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
+use crate::stores::nostr_music::TrackSource;
+use crate::stores::profiles;
+use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
+use crate::services::lnurl;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
+use nostr_sdk::{PublicKey, RelayUrl};
+use nostr_sdk::nips::nip01::Coordinate;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LnurlPayParams {
@@ -36,7 +42,7 @@ struct InvoiceResponse {
 }
 
 #[component]
-pub fn WavlakeZapDialog() -> Element {
+pub fn MusicZapDialog() -> Element {
     let state = MUSIC_PLAYER.read();
     let show_dialog = state.show_zap_dialog;
     let track = state.zap_track.clone();
@@ -51,6 +57,7 @@ pub fn WavlakeZapDialog() -> Element {
     }
 
     let track = track.unwrap();
+    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. });
 
     let mut amount = use_signal(|| 100u64);
     let mut comment = use_signal(|| String::new());
@@ -58,22 +65,56 @@ pub fn WavlakeZapDialog() -> Element {
     let mut is_generating = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut qr_code_url = use_signal(|| None::<String>);
+    let mut artist_profile = use_signal(|| None::<profiles::Profile>);
 
     let preset_amounts = vec![21, 100, 500, 1000, 2100];
 
-    // Generate invoice
+    // Fetch artist profile for nostr tracks
+    let track_source_for_effect = track.source.clone();
+    use_effect(move || {
+        if let TrackSource::Nostr { ref pubkey, .. } = track_source_for_effect {
+            let pubkey = pubkey.clone();
+            spawn(async move {
+                if let Ok(profile) = profiles::fetch_profile(pubkey).await {
+                    artist_profile.set(Some(profile));
+                }
+            });
+        }
+    });
+
+    // Generate invoice (handles both Wavlake and Nostr tracks)
     let track_id = track.id.clone();
+    let track_source = track.source.clone();
     let generate_invoice = move |e: Event<MouseData>| {
         e.stop_propagation();
         let track_id = track_id.clone();
+        let track_source = track_source.clone();
         let amount_value = *amount.read();
         let comment_value = comment.read().clone();
+        let profile = artist_profile.read().clone();
 
         is_generating.set(true);
         error_msg.set(None);
 
         spawn(async move {
-            match generate_invoice_flow(&track_id, amount_value, &comment_value).await {
+            let result = match track_source {
+                TrackSource::Wavlake { .. } => {
+                    // Use Wavlake LNURL flow
+                    generate_wavlake_lnurl_invoice(&track_id, amount_value, &comment_value).await
+                }
+                TrackSource::Nostr { ref pubkey, ref coordinate, .. } => {
+                    // Use NIP-57 zap flow
+                    generate_nostr_zap_invoice(
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    ).await
+                }
+            };
+
+            match result {
                 Ok((inv, qr)) => {
                     log::info!("Invoice generated successfully");
                     invoice.set(Some(inv));
@@ -149,8 +190,20 @@ pub fn WavlakeZapDialog() -> Element {
                         class: "flex items-center justify-between mb-4",
                         div {
                             h3 {
-                                class: "text-lg font-semibold",
+                                class: "text-lg font-semibold flex items-center gap-2",
                                 "Zap Artist"
+                                // Source badge
+                                if is_nostr_track {
+                                    span {
+                                        class: "text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400",
+                                        "Nostr"
+                                    }
+                                } else {
+                                    span {
+                                        class: "text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400",
+                                        "Wavlake"
+                                    }
+                                }
                             }
                             p {
                                 class: "text-sm text-muted-foreground",
@@ -336,8 +389,8 @@ pub fn WavlakeZapDialog() -> Element {
     }
 }
 
-/// 5-step LNURL-pay flow
-async fn generate_invoice_flow(track_id: &str, amount_sats: u64, comment: &str) -> Result<(String, String), String> {
+/// Generate invoice for Wavlake tracks using LNURL-pay flow
+async fn generate_wavlake_lnurl_invoice(track_id: &str, amount_sats: u64, comment: &str) -> Result<(String, String), String> {
     let track_id = track_id.trim();
     log::info!("Starting invoice flow for track: {}, amount: {} sats", track_id, amount_sats);
 
@@ -465,4 +518,100 @@ fn generate_qr_code(invoice: &str) -> Result<String, String> {
     // Convert SVG to data URL
     let encoded = base64::engine::general_purpose::STANDARD.encode(svg_string.as_bytes());
     Ok(format!("data:image/svg+xml;base64,{}", encoded))
+}
+
+/// Generate invoice for Nostr tracks using NIP-57 zap flow
+async fn generate_nostr_zap_invoice(
+    artist_pubkey: &str,
+    track_coordinate: Option<&String>,
+    profile: Option<&profiles::Profile>,
+    amount_sats: u64,
+    comment: &str,
+) -> Result<(String, String), String> {
+    log::info!("Starting NIP-57 zap flow for artist: {}, amount: {} sats", artist_pubkey, amount_sats);
+
+    // Get profile to find lightning address
+    let profile = profile.ok_or_else(|| "Artist profile not loaded yet".to_string())?;
+
+    // Simplify with ok_or_else instead of as_deref + is_none check
+    let lud16 = profile.lud16.as_deref()
+        .ok_or_else(|| "This artist hasn't set up a Lightning address".to_string())?;
+
+    // Prepare zap - validates amount and gets LNURL pay info
+    let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lud16), None, amount_sats).await
+        .map_err(|e| format!("Failed to prepare zap: {}", e))?;
+
+    log::info!("LNURL pay info received for nostr zap. Callback: {}", pay_info.callback);
+
+    // Parse recipient pubkey
+    let recipient_pubkey = PublicKey::parse(artist_pubkey)
+        .map_err(|e| format!("Invalid artist pubkey: {}", e))?;
+
+    // Get relays from client, falling back to defaults
+    let relays: Vec<RelayUrl> = {
+        if let Some(client) = nostr_client::get_client() {
+            let client_relays = client.relays().await;
+            let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
+            if urls.is_empty() {
+                // Fallback to defaults
+                vec![
+                    RelayUrl::parse("wss://relay.damus.io").ok(),
+                    RelayUrl::parse("wss://nos.lol").ok(),
+                    RelayUrl::parse("wss://relay.nostr.band").ok(),
+                ].into_iter().flatten().collect()
+            } else {
+                // Limit to reasonable number for zap request
+                urls.truncate(5);
+                urls
+            }
+        } else {
+            // No client, use defaults
+            vec![
+                RelayUrl::parse("wss://relay.damus.io").ok(),
+                RelayUrl::parse("wss://nos.lol").ok(),
+                RelayUrl::parse("wss://relay.nostr.band").ok(),
+            ].into_iter().flatten().collect()
+        }
+    };
+
+    // Create zap request event
+    let message = if comment.is_empty() { None } else { Some(comment.to_string()) };
+
+    // Parse the track coordinate for 'a' tag (NIP-57 for addressable events)
+    let event_coordinate = track_coordinate.and_then(|coord| {
+        Coordinate::parse(coord).ok()
+    });
+
+    let builder = lnurl::create_zap_request_unsigned(
+        recipient_pubkey,
+        relays,
+        amount_msats,
+        message,
+        None, // No event_id for addressable events
+        event_coordinate, // 'a' tag for Kind 36787 tracks
+    );
+
+    // Sign the zap request
+    let client = nostr_client::get_client()
+        .ok_or_else(|| "Nostr client not available".to_string())?;
+
+    let zap_request = client.sign_event_builder(builder).await
+        .map_err(|e| format!("Failed to sign zap request: {}", e))?;
+
+    log::info!("Zap request event created: {}", zap_request.id.to_hex());
+
+    // Request invoice from LNURL callback
+    let invoice_response = lnurl::request_zap_invoice(
+        &pay_info.callback,
+        amount_msats,
+        &zap_request,
+        None,
+    ).await
+        .map_err(|e| format!("Failed to get zap invoice: {}", e))?;
+
+    // Generate QR code
+    let qr_code_url = generate_qr_code(&invoice_response.pr)
+        .map_err(|e| format!("Failed to generate QR code: {}", e))?;
+
+    Ok((invoice_response.pr, qr_code_url))
 }

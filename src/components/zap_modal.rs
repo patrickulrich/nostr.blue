@@ -167,6 +167,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 amount_msats,
                 msg_opt,
                 event_id,
+                None, // No event coordinate for generic zaps
             );
 
             // Sign the zap request based on signer type

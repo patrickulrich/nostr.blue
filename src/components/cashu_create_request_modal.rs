@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, PaymentRequestProgress};
+use crate::stores::cashu;
+use crate::stores::cashu::PaymentRequestProgress;
 
 #[component]
 pub fn CashuCreateRequestModal(
@@ -15,8 +16,8 @@ pub fn CashuCreateRequestModal(
     let mut copied = use_signal(|| false);
     let mut copy_error = use_signal(|| Option::<String>::None);
 
-    let progress = cashu_wallet::PAYMENT_REQUEST_PROGRESS.read();
-    let balance = *cashu_wallet::WALLET_BALANCE.read();
+    let progress = cashu::PAYMENT_REQUEST_PROGRESS.read();
+    let balance = *cashu::WALLET_BALANCE.read();
 
     // Handle creating a new request
     let handle_create = move |_| {
@@ -52,7 +53,7 @@ pub fn CashuCreateRequestModal(
         is_creating.set(true);
 
         spawn(async move {
-            match cashu_wallet::create_payment_request(amount, desc, use_nostr).await {
+            match cashu::create_payment_request(amount, desc, use_nostr).await {
                 Ok((request, nostr_info)) => {
                     request_string.set(Some(request.clone()));
 
@@ -63,7 +64,7 @@ pub fn CashuCreateRequestModal(
                         // Start waiting in background
                         let request_id = info.request_id.clone();
                         spawn(async move {
-                            match cashu_wallet::wait_for_nostr_payment(request_id.clone(), 300).await {
+                            match cashu::wait_for_nostr_payment(request_id.clone(), 300).await {
                                 Ok(amount) => {
                                     log::info!("Received payment of {} sats", amount);
                                 }
@@ -129,7 +130,7 @@ pub fn CashuCreateRequestModal(
     let handle_close = move |_| {
         // Cancel any pending request
         if let Some(req_id) = current_request_id.read().as_ref() {
-            cashu_wallet::cancel_payment_request(req_id);
+            cashu::cancel_payment_request(req_id);
         }
         on_close.call(());
     };
@@ -260,7 +261,7 @@ pub fn CashuCreateRequestModal(
                             onclick: move |_| {
                                 // Cancel current request
                                 if let Some(req_id) = current_request_id.read().as_ref() {
-                                    cashu_wallet::cancel_payment_request(req_id);
+                                    cashu::cancel_payment_request(req_id);
                                 }
                                 request_string.set(None);
                                 current_request_id.set(None);
