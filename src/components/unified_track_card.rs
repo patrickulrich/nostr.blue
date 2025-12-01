@@ -46,9 +46,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let mut artist_name = use_signal(|| track.artist.clone());
 
     // Fetch artist name from profile for nostr tracks
-    use_effect(move || {
-        if let Some(pubkey) = artist_pubkey.clone() {
-            if artist_is_empty {
+    // Use use_reactive to only run when dependencies change, not on every render
+    use_effect(use_reactive((&artist_pubkey, &artist_is_empty), move |(pubkey_opt, is_empty)| {
+        if let Some(pubkey) = pubkey_opt.clone() {
+            if is_empty {
                 // Look up profile for artist name
                 spawn(async move {
                     if let Ok(profile) = profiles::fetch_profile(pubkey).await {
@@ -57,7 +58,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                 });
             }
         }
-    });
+    }));
 
     let playlist = props.playlist.clone();
     let handle_play = {

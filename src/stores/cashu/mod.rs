@@ -255,4 +255,4 @@ pub(crate) mod internal;
 
 // Utility functions
 mod utils;
-pub use utils::normalize_mint_url;
+pub use utils::{normalize_mint_url, mint_matches};

@@ -244,11 +244,10 @@ fn NostrArtistSection(pubkey: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
-    let pubkey_signal = use_signal(|| pubkey.clone());
-
-    // Fetch artist profile and tracks (re-runs when client becomes available)
-    use_effect(move || {
-        let pk = pubkey_signal.read().clone();
+    // Fetch artist profile and tracks - reacts to pubkey prop changes
+    // Use use_reactive! to track pubkey prop directly instead of separate signal
+    use_effect(use_reactive!(|pubkey| {
+        let pk = pubkey.clone();
 
         // Read the NOSTR_CLIENT signal to create a reactive dependency
         // This will re-run the effect when the client becomes available
@@ -286,7 +285,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Get display info from profile
     let artist_name = profile.read().as_ref()

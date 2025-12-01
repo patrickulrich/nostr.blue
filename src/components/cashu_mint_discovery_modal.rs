@@ -142,7 +142,10 @@ pub fn CashuMintDiscoveryModal(
                             for (mint, display_name) in mints_with_display.read().iter() {
                                 {
                                     let url = mint.url.clone();
-                                    let is_already_added = existing_mints.read().contains(&url);
+                                    let normalized_url = cashu::normalize_mint_url(&url);
+                                    let is_already_added = existing_mints.read()
+                                        .iter()
+                                        .any(|m| cashu::mint_matches(m, &normalized_url));
                                     let is_selected = selected_mint.read().as_ref() == Some(&url);
                                     let is_mainnet = mint.network.as_ref().map(|n| n == "mainnet").unwrap_or(true);
 

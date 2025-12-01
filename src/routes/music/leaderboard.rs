@@ -4,7 +4,7 @@ use crate::stores::{nostr_client, music_player};
 use crate::stores::music_player::{MusicTrack, KIND_MUSIC_VOTE};
 use crate::stores::nostr_music::TrackSource;
 use crate::services::wavlake::WavlakeAPI;
-use nostr_sdk::{Filter, Kind, TagKind, Timestamp, SingleLetterTag, Alphabet};
+use nostr_sdk::{Filter, Kind, TagKind, Timestamp, Alphabet};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -261,14 +261,23 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
 
     log::info!("Fetched {} vote events", events.len());
 
-    // Aggregate votes by track reference
-    // Key: track reference string, Value: VoteData
-    let mut vote_map: HashMap<String, VoteData> = HashMap::new();
+    // STEP 1: Keep only the latest vote event per voter
+    // This ensures each user's vote counts only once (their most recent choice)
+    #[derive(Clone)]
+    struct ParsedVote {
+        track_ref: TrackRef,
+        title: String,
+        artist: String,
+        image: Option<String>,
+        created_at: Timestamp,
+    }
+
+    let mut latest_per_voter: HashMap<String, ParsedVote> = HashMap::new();
 
     for event in events {
-        // Extract cached metadata
+        // Extract cached metadata using correct TagKind variants
         let title = event.tags
-            .find(TagKind::custom("title"))
+            .find(TagKind::Title)
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
@@ -280,12 +289,12 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             .unwrap_or_else(|| "Unknown".to_string());
 
         let image = event.tags
-            .find(TagKind::custom("image"))
+            .find(TagKind::Image)
             .and_then(|t| t.content())
             .map(|s| s.to_string());
 
         let source_kind = event.tags
-            .find(TagKind::custom("k"))
+            .find(TagKind::k())
             .and_then(|t| t.content())
             .map(|s| s.to_string());
 
@@ -299,7 +308,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 .or_else(|| {
                     // Try to extract from r tag URL
                     event.tags
-                        .find(TagKind::custom("r"))
+                        .find(TagKind::single_letter(Alphabet::R, false))
                         .and_then(|t| t.content())
                         .and_then(|url| url.split('/').last())
                         .map(|s| s.to_string())
@@ -312,7 +321,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         } else {
             // Nostr track - look for 'a' tag (coordinate)
             let coordinate = event.tags
-                .find(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)))
+                .find(TagKind::a())
                 .and_then(|t| t.content())
                 .map(|s| s.to_string());
 
@@ -322,28 +331,44 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             }
         };
 
-        let track_key = match &track_ref {
+        let voter_pubkey = event.pubkey.to_hex();
+        let parsed = ParsedVote {
+            track_ref,
+            title,
+            artist,
+            image,
+            created_at: event.created_at,
+        };
+
+        // Keep only the latest vote per voter
+        latest_per_voter.entry(voter_pubkey)
+            .and_modify(|existing| {
+                if parsed.created_at > existing.created_at {
+                    *existing = parsed.clone();
+                }
+            })
+            .or_insert(parsed);
+    }
+
+    // STEP 2: Aggregate the latest votes by track
+    let mut vote_map: HashMap<String, VoteData> = HashMap::new();
+
+    for (voter_pubkey, vote) in latest_per_voter {
+        let track_key = match &vote.track_ref {
             TrackRef::Nostr(coord) => coord.clone(),
             TrackRef::Wavlake(id) => format!("wavlake:{}", id),
         };
 
-        let voter_pubkey = event.pubkey.to_hex();
-
         vote_map.entry(track_key)
             .and_modify(|data| {
-                // Each pubkey only counts once (addressable events mean latest vote wins per user)
-                // But we still dedupe in case of relay inconsistencies
-                // HashSet provides O(1) contains check
-                if !data.voters.contains(&voter_pubkey) {
-                    data.votes += 1;
-                    data.voters.insert(voter_pubkey.clone());
-                }
+                data.votes += 1;
+                data.voters.insert(voter_pubkey.clone());
             })
             .or_insert(VoteData {
-                track_ref,
-                title,
-                artist,
-                image,
+                track_ref: vote.track_ref,
+                title: vote.title,
+                artist: vote.artist,
+                image: vote.image,
                 votes: 1,
                 voters: HashSet::from([voter_pubkey]),
             });

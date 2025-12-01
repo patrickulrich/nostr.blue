@@ -66,9 +66,8 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     });
 
     // Get author metadata from profile store (uses LRU cache + database, much faster)
-    let author_metadata = use_memo(move || {
-        profiles::get_profile(&author_pubkey_for_fetch)
-    });
+    // Use signal instead of memo so we can update it after background fetch
+    let mut author_metadata = use_signal(move || profiles::get_profile(&author_pubkey_for_fetch));
 
     // Fetch author profile in background if not cached
     use_effect(use_reactive((&author_pubkey, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
@@ -76,7 +75,10 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
             return;
         }
         spawn(async move {
-            let _ = profiles::fetch_profile(pk).await;
+            if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                // Update signal with freshly fetched profile to trigger re-render
+                author_metadata.set(profiles::get_profile(&pk));
+            }
         });
     }));
 

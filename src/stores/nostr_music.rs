@@ -713,6 +713,37 @@ pub async fn fetch_playlists(
     Ok(playlists)
 }
 
+/// Fetch a single playlist by author pubkey and d-tag (more efficient than fetching all and filtering)
+pub async fn fetch_playlist_by_coordinate(
+    author: &str,
+    d_tag: &str,
+) -> Result<Option<NostrPlaylist>, String> {
+    let public_key = PublicKey::from_hex(author)
+        .or_else(|_| PublicKey::from_bech32(author))
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let filter = Filter::new()
+        .kind(Kind::from(KIND_PLAYLIST))
+        .author(public_key)
+        .identifier(d_tag)
+        .limit(1);
+
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
+        .await
+        .map_err(|e| format!("Failed to fetch playlist: {}", e))?;
+
+    if let Some(event) = events.into_iter().next() {
+        let playlist = parse_playlist_event(&event)?;
+
+        // Cache it
+        NOSTR_PLAYLIST_CACHE.write().put(playlist.coordinate.clone(), playlist.clone());
+
+        Ok(Some(playlist))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Resolve playlist tracks from track references
 pub async fn resolve_playlist_tracks(
     playlist: &NostrPlaylist,
