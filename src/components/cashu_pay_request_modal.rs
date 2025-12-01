@@ -1,13 +1,30 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, PaymentRequestData};
+use cdk::nuts::{PaymentRequest, TransportType};
+use crate::stores::cashu::{self, WALLET_BALANCE};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 enum PayState {
     Input,
-    Parsed { request: PaymentRequestData },
+    Parsed { request: PaymentRequest },
     Paying,
     Success { amount: u64 },
     Error { message: String },
+}
+
+impl PartialEq for PayState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PayState::Input, PayState::Input) => true,
+            (PayState::Parsed { request: a }, PayState::Parsed { request: b }) => {
+                // Compare by string representation for simplicity
+                a.to_string() == b.to_string()
+            }
+            (PayState::Paying, PayState::Paying) => true,
+            (PayState::Success { amount: a }, PayState::Success { amount: b }) => a == b,
+            (PayState::Error { message: a }, PayState::Error { message: b }) => a == b,
+            _ => false,
+        }
+    }
 }
 
 #[component]
@@ -19,7 +36,7 @@ pub fn CashuPayRequestModal(
     let mut pay_state = use_signal(|| PayState::Input);
 
     // Use memo for reactive balance updates while modal is open
-    let balance = use_memo(move || *cashu_wallet::WALLET_BALANCE.read());
+    let balance = use_memo(move || *WALLET_BALANCE.read());
 
     // Handle paste from clipboard
     let handle_paste = move |_| {
@@ -45,7 +62,7 @@ pub fn CashuPayRequestModal(
             return;
         }
 
-        match cashu_wallet::parse_payment_request(&input) {
+        match cashu::parse_payment_request(&input) {
             Ok(request) => {
                 pay_state.set(PayState::Parsed { request });
             }
@@ -80,7 +97,7 @@ pub fn CashuPayRequestModal(
         pay_state.set(PayState::Paying);
 
         spawn(async move {
-            match cashu_wallet::pay_payment_request(request_str, custom_amt).await {
+            match cashu::pay_payment_request(request_str, custom_amt).await {
                 Ok(amount) => {
                     pay_state.set(PayState::Success { amount });
                 }
@@ -175,12 +192,16 @@ pub fn CashuPayRequestModal(
 
                     PayState::Parsed { request } => {
                         let amount_specified = request.amount.is_some();
-                        let request_amount = request.amount.unwrap_or(0);
+                        let request_amount = request.amount.map(u64::from).unwrap_or(0);
                         let has_description = request.description.is_some();
                         let description = request.description.clone().unwrap_or_default();
                         let mint_count = request.mints.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let request_mints = request.mints.clone().unwrap_or_default();
-                        let has_nostr = request.transports.iter().any(|t| t.transport_type == "nostr");
+                        let request_mints: Vec<String> = request.mints.clone()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|m| m.to_string())
+                            .collect();
+                        let has_nostr = request.transports.iter().any(|t| t._type == TransportType::Nostr);
 
                         rsx! {
                             div {

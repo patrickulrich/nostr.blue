@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, TransferProgress, TRANSFER_PROGRESS};
+use crate::stores::cashu::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
 
 /// Select a valid mint from the list, optionally excluding one mint
@@ -27,13 +27,13 @@ pub fn CashuTransferModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut amount = use_signal(|| String::new());
-    let mints = cashu_wallet::get_mints();
+    let mints = cashu::get_mints();
     let mut source_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut target_mint = use_signal(|| mints.get(1).cloned().unwrap_or_else(|| mints.first().cloned().unwrap_or_default()));
     let mut is_transferring = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut fee_estimate = use_signal(|| Option::<u64>::None);
-    let mut transfer_result = use_signal(|| Option::<cashu_wallet::TransferResult>::None);
+    let mut transfer_result = use_signal(|| Option::<cashu::TransferResult>::None);
     let mut is_estimating = use_signal(|| false);
 
     // Read transfer progress for UI updates
@@ -41,7 +41,7 @@ pub fn CashuTransferModal(
 
     // Keep mints in sync
     use_effect(move || {
-        let current_mints = cashu_wallet::get_mints();
+        let current_mints = cashu::get_mints();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
 
@@ -59,7 +59,7 @@ pub fn CashuTransferModal(
     });
 
     // Get source balance for display
-    let source_balance = cashu_wallet::get_mint_balance(&source_mint.read());
+    let source_balance = cashu::get_mint_balance(&source_mint.read());
 
     // Estimate fees when amount or mints change
     let on_estimate_fees = move |_| {
@@ -88,7 +88,7 @@ pub fn CashuTransferModal(
         error_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::estimate_transfer_fees(source, target, amount_sats).await {
+            match cashu::estimate_transfer_fees(source, target, amount_sats).await {
                 Ok((fee, _)) => {
                     fee_estimate.set(Some(fee));
                     is_estimating.set(false);
@@ -135,7 +135,7 @@ pub fn CashuTransferModal(
         }
 
         // Check balance (including estimated fee)
-        let balance = cashu_wallet::get_mint_balance(&source);
+        let balance = cashu::get_mint_balance(&source);
         let fee = fee_estimate.read().unwrap_or(0);
         let required = amount_sats.saturating_add(fee);
         if balance < required {
@@ -151,7 +151,7 @@ pub fn CashuTransferModal(
         transfer_result.set(None);
 
         spawn(async move {
-            match cashu_wallet::transfer_between_mints(source, target, amount_sats).await {
+            match cashu::transfer_between_mints(source, target, amount_sats).await {
                 Ok(result) => {
                     transfer_result.set(Some(result));
                     is_transferring.set(false);
@@ -227,7 +227,7 @@ pub fn CashuTransferModal(
                                 for mint_url in mints.iter() {
                                     option {
                                         value: mint_url.clone(),
-                                        "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                        "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                     }
                                 }
                             }
@@ -277,7 +277,7 @@ pub fn CashuTransferModal(
                                     if mint_url != &*source_mint.read() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                            "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                         }
                                     }
                                 }

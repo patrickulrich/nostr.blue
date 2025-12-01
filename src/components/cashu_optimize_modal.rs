@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, ConsolidationResult};
+use crate::stores::cashu;
+use crate::stores::cashu::ConsolidationResult;
 use crate::utils::shorten_url;
 
 #[component]
@@ -11,11 +12,11 @@ pub fn CashuOptimizeModal(
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut is_complete = use_signal(|| false);
 
-    let mints = cashu_wallet::get_mints();
+    let mints = cashu::get_mints();
 
     // Get proof counts per mint
     let mint_proof_counts: Vec<(String, usize)> = mints.iter()
-        .map(|m| (m.clone(), cashu_wallet::get_mint_proof_count(m)))
+        .map(|m| (m.clone(), cashu::get_mint_proof_count(m)))
         .collect();
 
     let total_proofs: usize = mint_proof_counts.iter().map(|(_, c)| *c).sum();
@@ -30,7 +31,7 @@ pub fn CashuOptimizeModal(
         results.set(Vec::new());
 
         spawn(async move {
-            match cashu_wallet::consolidate_all_mints().await {
+            match cashu::consolidate_all_mints().await {
                 Ok(consolidation_results) => {
                     results.set(consolidation_results);
                     is_complete.set(true);

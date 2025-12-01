@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, MintInfoDisplay};
+use crate::stores::cashu;
+use crate::stores::cashu::MintInfoDisplay;
 
 #[component]
 pub fn CashuAddMintModal(
@@ -32,7 +33,7 @@ pub fn CashuAddMintModal(
         mint_info.set(None);
 
         spawn(async move {
-            match cashu_wallet::get_mint_info(&url).await {
+            match cashu::get_mint_info(&url).await {
                 Ok(info) => {
                     mint_info.set(Some(info));
                     is_checking.set(false);
@@ -52,7 +53,7 @@ pub fn CashuAddMintModal(
         error_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::add_mint(url.clone()).await {
+            match cashu::add_mint(&url).await {
                 Ok(_) => {
                     is_confirmed.set(true);
                     is_adding.set(false);

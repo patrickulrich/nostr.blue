@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::format_sats_with_separator;
 
@@ -14,10 +14,10 @@ pub fn WalletBalanceCard(
     on_create_request: EventHandler<()>,
     on_pay_request: EventHandler<()>,
 ) -> Element {
-    let balance = cashu_wallet::WALLET_BALANCE.read();
+    let balance = cashu::WALLET_BALANCE.read();
     let balances = WALLET_BALANCES.read();
-    let proof_count = cashu_wallet::get_total_proof_count();
-    let mint_count = cashu_wallet::get_mints().len();
+    let proof_count = cashu::get_total_proof_count();
+    let mint_count = cashu::get_mints().len();
 
     // Format balance with thousands separator
     let formatted_balance = format_sats_with_separator(*balance);

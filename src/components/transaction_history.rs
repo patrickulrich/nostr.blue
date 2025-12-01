@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self as cashu_wallet, WalletHistoryStoreStoreExt};
+use crate::stores::cashu::{WALLET_HISTORY, WalletHistoryStoreStoreExt};
 use crate::utils::format_sats_with_separator;
 use nostr_sdk::nips::nip60::TransactionDirection;
 
 #[component]
 pub fn TransactionHistory() -> Element {
-    let history = cashu_wallet::WALLET_HISTORY.read();
+    let history = WALLET_HISTORY.read();
 
     if history.data().read().is_empty() {
         return rsx! {

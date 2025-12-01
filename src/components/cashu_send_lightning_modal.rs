@@ -1,8 +1,13 @@
 use dioxus::prelude::*;
 use futures::future::join_all;
 use crate::stores::{
-    cashu_wallet::{self, MeltProgress},
-    cashu_cdk_bridge::{self, MppQuoteInfo},
+    cashu::{
+        get_mints, create_melt_quote, melt_tokens,
+        MeltProgress, MeltQuoteInfo, MELT_PROGRESS, WALLET_BALANCE,
+        // MPP types and functions
+        MppQuoteInfo, get_balances_per_mint, mint_supports_mpp,
+        calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt,
+    },
     cashu_ws,
 };
 use crate::utils::shorten_url;
@@ -21,13 +26,15 @@ pub fn CashuSendLightningModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut invoice = use_signal(|| String::new());
-    let mints = cashu_wallet::get_mints();
+    let mints = get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut is_creating_quote = use_signal(|| false);
     let mut is_paying = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
-    let mut quote_info = use_signal(|| Option::<cashu_wallet::MeltQuoteInfo>::None);
+    let mut quote_info = use_signal(|| Option::<MeltQuoteInfo>::None);
     let mut payment_result = use_signal(|| Option::<(bool, Option<String>, u64)>::None);
+    // Real-time melt status from NUT-17 WebSocket
+    let mut melt_status = use_signal(|| Option::<String>::None);
 
     // MPP state
     let mut payment_mode = use_signal(|| PaymentMode::Single);
@@ -37,12 +44,12 @@ pub fn CashuSendLightningModal(
     let mut mpp_mint_balances = use_signal(|| Vec::<(String, u64)>::new()); // Only MPP-supporting mints
 
     // Read melt progress for UI updates
-    let melt_progress = cashu_wallet::MELT_PROGRESS.read();
+    let melt_progress = MELT_PROGRESS.read();
 
     // Load mint balances on mount and check MPP support
     use_effect(move || {
         spawn(async move {
-            if let Ok(balances) = cashu_cdk_bridge::get_balances_per_mint().await {
+            if let Ok(balances) = get_balances_per_mint().await {
                 let all_balances: Vec<_> = balances.iter().map(|b| (b.mint_url.clone(), b.balance)).collect();
                 mint_balances.set(all_balances.clone());
 
@@ -52,7 +59,7 @@ pub fn CashuSendLightningModal(
                         let url = mint_url.clone();
                         let bal = *balance;
                         async move {
-                            if cashu_cdk_bridge::mint_supports_mpp(&url).await {
+                            if mint_supports_mpp(&url).await {
                                 Some((url, bal))
                             } else {
                                 None
@@ -70,7 +77,7 @@ pub fn CashuSendLightningModal(
 
     // Keep selected_mint in sync with available mints
     use_effect(move || {
-        let current_mints = cashu_wallet::get_mints();
+        let current_mints = get_mints();
         let current_selection = selected_mint.read().clone();
 
         if current_selection.is_empty() {
@@ -123,7 +130,7 @@ pub fn CashuSendLightningModal(
                 }
 
                 spawn(async move {
-                    match cashu_wallet::create_melt_quote(mint, invoice_str).await {
+                    match create_melt_quote(mint, invoice_str).await {
                         Ok(q) => {
                             quote_info.set(Some(q));
                             mpp_quote.set(None);
@@ -145,7 +152,7 @@ pub fn CashuSendLightningModal(
                 }
 
                 spawn(async move {
-                    match cashu_cdk_bridge::create_mpp_melt_quotes(invoice_str, allocations).await {
+                    match create_mpp_melt_quotes(invoice_str, allocations).await {
                         Ok(q) => {
                             mpp_quote.set(Some(q));
                             quote_info.set(None);
@@ -178,29 +185,45 @@ pub fn CashuSendLightningModal(
                     is_paying.set(true);
                     error_message.set(None);
 
-                    // WebSocket subscription for status
+                    // WebSocket subscription for real-time status updates (NUT-17)
                     let mint_for_ws = mint.clone();
                     let quote_id_for_ws = quote_id.clone();
+                    melt_status.set(Some("Connecting...".to_string()));
                     spawn(async move {
                         if let Ok(mut rx) = cashu_ws::subscribe_to_quote(
                             mint_for_ws,
                             quote_id_for_ws,
                             cashu_ws::SubscriptionKind::Bolt11MeltQuote,
                         ).await {
+                            melt_status.set(Some("Processing payment...".to_string()));
                             while let Some(status) = rx.recv().await {
-                                if matches!(status, cashu_ws::QuoteStatus::Paid) {
-                                    break;
+                                match status {
+                                    cashu_ws::QuoteStatus::Pending => {
+                                        melt_status.set(Some("Payment pending...".to_string()));
+                                    }
+                                    cashu_ws::QuoteStatus::Paid => {
+                                        melt_status.set(Some("Payment confirmed!".to_string()));
+                                        break;
+                                    }
+                                    cashu_ws::QuoteStatus::Expired => {
+                                        melt_status.set(Some("Quote expired".to_string()));
+                                        break;
+                                    }
+                                    _ => {}
                                 }
                             }
+                        } else {
+                            melt_status.set(Some("Processing...".to_string()));
                         }
                     });
 
                     spawn(async move {
-                        match cashu_wallet::melt_tokens(mint, quote_id).await {
+                        match melt_tokens(mint, quote_id).await {
                             Ok((paid, preimage, fee)) => {
                                 payment_result.set(Some((paid, preimage, fee)));
                                 is_paying.set(false);
-                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                                melt_status.set(None);
+                                *MELT_PROGRESS.write() = None;
 
                                 if paid {
                                     spawn(async move {
@@ -212,7 +235,8 @@ pub fn CashuSendLightningModal(
                             Err(e) => {
                                 error_message.set(Some(format!("Payment failed: {}", e)));
                                 is_paying.set(false);
-                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                                melt_status.set(None);
+                                *MELT_PROGRESS.write() = None;
                             }
                         }
                     });
@@ -224,9 +248,10 @@ pub fn CashuSendLightningModal(
 
                     is_paying.set(true);
                     error_message.set(None);
+                    melt_status.set(Some("Processing MPP payment...".to_string()));
 
                     spawn(async move {
-                        match cashu_cdk_bridge::execute_mpp_melt(contributions).await {
+                        match execute_mpp_melt(contributions).await {
                             Ok(result) => {
                                 payment_result.set(Some((
                                     result.paid,
@@ -234,7 +259,8 @@ pub fn CashuSendLightningModal(
                                     result.total_fee_paid,
                                 )));
                                 is_paying.set(false);
-                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                                melt_status.set(None);
+                                *MELT_PROGRESS.write() = None;
 
                                 if result.paid {
                                     spawn(async move {
@@ -246,7 +272,8 @@ pub fn CashuSendLightningModal(
                             Err(e) => {
                                 error_message.set(Some(format!("MPP payment failed: {}", e)));
                                 is_paying.set(false);
-                                *cashu_wallet::MELT_PROGRESS.write() = None;
+                                melt_status.set(None);
+                                *MELT_PROGRESS.write() = None;
                             }
                         }
                     });
@@ -261,7 +288,7 @@ pub fn CashuSendLightningModal(
         let mpp_mints: Vec<String> = mpp_mint_balances.read().iter().map(|(url, _)| url.clone()).collect();
         spawn(async move {
             let include_mints = if mpp_mints.is_empty() { None } else { Some(mpp_mints) };
-            match cashu_cdk_bridge::calculate_mpp_split(amount, include_mints).await {
+            match calculate_mpp_split(amount, include_mints).await {
                 Ok(allocations) => {
                     mpp_allocations.set(allocations);
                 }
@@ -446,7 +473,12 @@ pub fn CashuSendLightningModal(
                             }
                             div {
                                 class: "flex items-center justify-center text-sm text-blue-700 dark:text-blue-300 mt-4",
-                                "Processing..."
+                                // Show NUT-17 WebSocket status if available
+                                if let Some(status) = melt_status.read().as_ref() {
+                                    span { class: "animate-pulse", "{status}" }
+                                } else {
+                                    span { "Processing..." }
+                                }
                             }
                         }
                     }
@@ -557,7 +589,7 @@ pub fn CashuSendLightningModal(
                         div {
                             class: "text-sm text-muted-foreground",
                             "Total available: ",
-                            span { class: "font-mono font-semibold", "{*cashu_wallet::WALLET_BALANCE.read()} sats" }
+                            span { class: "font-mono font-semibold", "{*WALLET_BALANCE.read()} sats" }
                         }
                     }
                 }

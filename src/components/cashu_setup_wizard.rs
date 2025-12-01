@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu;
 
 const DEFAULT_MINT_URL: &str = "https://mint.minibits.cash/Bitcoin";
 
@@ -58,7 +58,7 @@ pub fn CashuSetupWizard(
                             creating.set(true);
                             error_msg.set(None); // Clear any previous error before starting
                             spawn(async move {
-                                match cashu_wallet::create_wallet(vec![DEFAULT_MINT_URL.to_string()]).await {
+                                match cashu::create_wallet(vec![DEFAULT_MINT_URL.to_string()]).await {
                                     Ok(_) => {
                                         log::info!("Wallet created successfully");
                                         error_msg.set(None); // Clear error on success
