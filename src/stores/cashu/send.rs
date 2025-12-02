@@ -218,12 +218,12 @@ pub async fn send_tokens_p2pk(
         ));
     }
 
-    // Execute send with P2PK conditions
-    let (token_string, keep_proofs) = execute_send_with_retry(
+    // Execute P2PK send using swap directly (bypasses CDK's buggy proof selection)
+    let (token_string, keep_proofs) = execute_p2pk_send_via_swap(
         &mint_url,
         amount,
         all_proofs,
-        Some(spending_conditions),
+        spending_conditions,
     )
     .await?;
 
@@ -452,6 +452,155 @@ async fn execute_send_with_retry(
                 Ok((token.to_string(), keep_proofs))
             } else {
                 Err(format!("Failed to send: {}", e))
+            }
+        }
+    }
+}
+
+/// Execute P2PK send using wallet.swap() directly
+///
+/// This bypasses CDK's prepare_send() which has a bug in proof selection for P2PK.
+/// By using swap() directly with our own proof selection, we avoid the issue where
+/// CDK only looks for bearer proofs when creating P2PK tokens.
+async fn execute_p2pk_send_via_swap(
+    mint_url: &str,
+    amount: u64,
+    all_proofs: Vec<cdk::nuts::Proof>,
+    spending_conditions: cdk::nuts::SpendingConditions,
+) -> Result<(String, Vec<cdk::nuts::Proof>), String> {
+    use cdk::amount::SplitTarget;
+    use cdk::nuts::{CurrencyUnit, Token};
+    use cdk::Amount;
+
+    // Try sending with current proofs
+    let result = async {
+        let wallet = create_ephemeral_wallet(mint_url, all_proofs.clone()).await?;
+
+        // Calculate fee for our proofs
+        let fee = wallet
+            .get_proofs_fee(&all_proofs)
+            .await
+            .map_err(|e| format!("Failed to calculate fee: {}", e))?;
+        let fee_u64 = u64::from(fee);
+        log::info!("P2PK send fee: {} sats", fee_u64);
+
+        // Use swap directly with our proofs and P2PK conditions
+        // This returns the P2PK-locked proofs for the recipient
+        let send_proofs = wallet
+            .swap(
+                Some(Amount::from(amount)),
+                SplitTarget::default(),
+                all_proofs.clone(),
+                Some(spending_conditions.clone()),
+                true, // include_fees
+            )
+            .await
+            .map_err(|e| format!("Swap failed: {}", e))?
+            .ok_or("Swap returned no proofs")?;
+
+        // Get change proofs from wallet (stored during swap)
+        let keep_proofs = wallet
+            .get_unspent_proofs()
+            .await
+            .map_err(|e| format!("Failed to get change proofs: {}", e))?;
+
+        // Create token from P2PK-locked proofs
+        let mint_url_parsed: cdk::mint_url::MintUrl = mint_url
+            .parse()
+            .map_err(|e| format!("Invalid mint URL: {}", e))?;
+
+        let token = Token::new(mint_url_parsed, send_proofs, None, CurrencyUnit::Sat);
+
+        // Validate change amount
+        let initial_total: u64 = all_proofs
+            .iter()
+            .map(|p| u64::from(p.amount))
+            .fold(0u64, |acc, amt| acc.saturating_add(amt));
+        let actual_change: u64 = keep_proofs
+            .iter()
+            .map(|p| u64::from(p.amount))
+            .fold(0u64, |acc, amt| acc.saturating_add(amt));
+        let expected_change = initial_total.saturating_sub(amount).saturating_sub(fee_u64);
+
+        if actual_change != expected_change {
+            log::warn!(
+                "P2PK change amount mismatch: expected {} sats, got {} sats (initial: {}, sent: {}, fee: {})",
+                expected_change, actual_change, initial_total, amount, fee_u64
+            );
+        }
+
+        Ok::<(Token, Vec<cdk::nuts::Proof>), String>((token, keep_proofs))
+    }
+    .await;
+
+    match result {
+        Ok((token, proofs)) => Ok((token.to_string(), proofs)),
+        Err(e) => {
+            // Auto-retry if proofs are already spent
+            if is_token_spent_error_string(&e) || is_insufficient_funds_error_string(&e) {
+                log::warn!("P2PK send failed ({}), cleaning up and retrying...", e);
+
+                // Cleanup spent proofs
+                let (cleaned_count, cleaned_amount) =
+                    cleanup_spent_proofs_internal(mint_url).await?;
+
+                log::info!(
+                    "Cleaned up {} spent proofs worth {} sats, retrying P2PK send",
+                    cleaned_count,
+                    cleaned_amount
+                );
+
+                // Get fresh proofs after cleanup
+                let fresh_proofs = get_proofs_for_mint(mint_url)?;
+
+                // Check we still have enough after cleanup
+                let fresh_total: u64 = fresh_proofs
+                    .iter()
+                    .map(|p| u64::from(p.amount))
+                    .try_fold(0u64, |acc, amt| acc.checked_add(amt))
+                    .ok_or("Balance overflow")?;
+                if fresh_total < amount {
+                    return Err(format!(
+                        "Insufficient funds after cleanup. Available: {} sats, Required: {} sats",
+                        fresh_total, amount
+                    ));
+                }
+
+                // Retry with fresh proofs
+                let wallet = create_ephemeral_wallet(mint_url, fresh_proofs.clone()).await?;
+
+                let send_proofs = wallet
+                    .swap(
+                        Some(Amount::from(amount)),
+                        SplitTarget::default(),
+                        fresh_proofs.clone(),
+                        Some(spending_conditions),
+                        true,
+                    )
+                    .await
+                    .map_err(|e| format!("Retry swap failed: {}", e))?
+                    .ok_or("Retry swap returned no proofs")?;
+
+                let keep_proofs = wallet
+                    .get_unspent_proofs()
+                    .await
+                    .map_err(|e| format!("Failed to get change proofs after retry: {}", e))?;
+
+                let mint_url_parsed: cdk::mint_url::MintUrl = mint_url
+                    .parse()
+                    .map_err(|e| format!("Invalid mint URL: {}", e))?;
+
+                let token = Token::new(
+                    mint_url_parsed,
+                    send_proofs,
+                    None,
+                    cdk::nuts::CurrencyUnit::Sat,
+                );
+
+                log::info!("P2PK send succeeded after cleanup and retry");
+                Ok((token.to_string(), keep_proofs))
+            } else {
+                Err(format!("Failed to send P2PK: {}", e))
             }
         }
     }
