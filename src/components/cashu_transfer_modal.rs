@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet::{self, TransferProgress, TRANSFER_PROGRESS};
+use crate::stores::cashu::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
 
 /// Select a valid mint from the list, optionally excluding one mint
@@ -27,24 +27,41 @@ pub fn CashuTransferModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut amount = use_signal(|| String::new());
-    let mints = cashu_wallet::get_mints();
-    let mut source_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
-    let mut target_mint = use_signal(|| mints.get(1).cloned().unwrap_or_else(|| mints.first().cloned().unwrap_or_default()));
+    // Use memo for reactive mint list that updates when WALLET_STATE changes
+    let mints = use_memo(move || cashu::get_mints());
+    let mut source_mint = use_signal(|| String::new());
+    let mut target_mint = use_signal(|| String::new());
     let mut is_transferring = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut fee_estimate = use_signal(|| Option::<u64>::None);
-    let mut transfer_result = use_signal(|| Option::<cashu_wallet::TransferResult>::None);
+    let mut transfer_result = use_signal(|| Option::<cashu::TransferResult>::None);
     let mut is_estimating = use_signal(|| false);
 
     // Read transfer progress for UI updates
     let progress = TRANSFER_PROGRESS.read().clone();
 
-    // Keep mints in sync
+    // Keep mints in sync - initialize and update when mint list changes
     use_effect(move || {
-        let current_mints = cashu_wallet::get_mints();
+        let current_mints = mints();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
 
+        // Initialize source mint if empty or invalid
+        if source.is_empty() || !current_mints.contains(&source) {
+            if let Some(first) = current_mints.first() {
+                source_mint.set(first.clone());
+            }
+        }
+
+        // Initialize target mint if empty or invalid (prefer different from source)
+        if target.is_empty() || !current_mints.contains(&target) {
+            let current_source = source_mint.read().clone();
+            if let Some(new_target) = current_mints.iter().find(|m| **m != current_source).or(current_mints.first()) {
+                target_mint.set(new_target.clone());
+            }
+        }
+
+        // Handle mint selection if current selections are still valid but could be better
         if let Some(new_source) = select_valid_mint(&source, &current_mints, None) {
             if new_source != source {
                 source_mint.set(new_source.clone());
@@ -59,7 +76,7 @@ pub fn CashuTransferModal(
     });
 
     // Get source balance for display
-    let source_balance = cashu_wallet::get_mint_balance(&source_mint.read());
+    let source_balance = cashu::get_mint_balance(&source_mint.read().clone());
 
     // Estimate fees when amount or mints change
     let on_estimate_fees = move |_| {
@@ -88,7 +105,7 @@ pub fn CashuTransferModal(
         error_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::estimate_transfer_fees(source, target, amount_sats).await {
+            match cashu::estimate_transfer_fees(source, target, amount_sats).await {
                 Ok((fee, _)) => {
                     fee_estimate.set(Some(fee));
                     is_estimating.set(false);
@@ -135,7 +152,7 @@ pub fn CashuTransferModal(
         }
 
         // Check balance (including estimated fee)
-        let balance = cashu_wallet::get_mint_balance(&source);
+        let balance = cashu::get_mint_balance(&source);
         let fee = fee_estimate.read().unwrap_or(0);
         let required = amount_sats.saturating_add(fee);
         if balance < required {
@@ -151,7 +168,7 @@ pub fn CashuTransferModal(
         transfer_result.set(None);
 
         spawn(async move {
-            match cashu_wallet::transfer_between_mints(source, target, amount_sats).await {
+            match cashu::transfer_between_mints(source, target, amount_sats).await {
                 Ok(result) => {
                     transfer_result.set(Some(result));
                     is_transferring.set(false);
@@ -211,7 +228,7 @@ pub fn CashuTransferModal(
                     class: "p-6 space-y-4",
 
                     // Source mint selection
-                    if mints.len() >= 2 {
+                    if mints().len() >= 2 {
                         div {
                             label {
                                 class: "block text-sm font-semibold mb-2",
@@ -224,10 +241,10 @@ pub fn CashuTransferModal(
                                     source_mint.set(evt.value());
                                     fee_estimate.set(None);
                                 },
-                                for mint_url in mints.iter() {
+                                for mint_url in mints().iter() {
                                     option {
                                         value: mint_url.clone(),
-                                        "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                        "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                     }
                                 }
                             }
@@ -273,11 +290,11 @@ pub fn CashuTransferModal(
                                     target_mint.set(evt.value());
                                     fee_estimate.set(None);
                                 },
-                                for mint_url in mints.iter() {
-                                    if mint_url != &*source_mint.read() {
+                                for mint_url in mints().iter() {
+                                    if *mint_url != *source_mint.read() {
                                         option {
                                             value: mint_url.clone(),
-                                            "{shorten_url(mint_url, 30)} ({cashu_wallet::get_mint_balance(mint_url)} sats)"
+                                            "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                         }
                                     }
                                 }
@@ -295,7 +312,7 @@ pub fn CashuTransferModal(
                     }
 
                     // Amount input
-                    if mints.len() >= 2 {
+                    if mints().len() >= 2 {
                         div {
                             label {
                                 class: "block text-sm font-semibold mb-2",
@@ -415,7 +432,7 @@ pub fn CashuTransferModal(
                 }
 
                 // Footer
-                if mints.len() >= 2 {
+                if mints().len() >= 2 {
                     div {
                         class: "px-6 py-4 border-t border-border flex gap-3",
                         button {

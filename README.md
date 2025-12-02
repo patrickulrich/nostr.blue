@@ -2,7 +2,7 @@
 
 A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
 
-![Version](https://img.shields.io/badge/version-0.6.4-blue)
+![Version](https://img.shields.io/badge/version-0.6.5-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.90+-orange)
 
@@ -83,7 +83,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 
 ### Bitcoin & Ecash
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
-  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling
+  - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling (with `auth` feature for NUT-21/22 protected mints)
   - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
   - Custom IndexedDB implementation of `WalletDatabase` trait for browser persistence
   - Atomic keyset counter management prevents "Blinded Message already signed" errors
@@ -389,15 +389,19 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 | [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md) | Mint information | ✅ |
 | [NUT-07](https://github.com/cashubtc/nuts/blob/main/07.md) | Token state check (spent proof cleanup) | ✅ |
 | [NUT-08](https://github.com/cashubtc/nuts/blob/main/08.md) | Lightning fee return (overpaid fees) | ✅ |
-| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore | ❌ |
+| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore (proof recovery) | ✅ |
 | [NUT-10](https://github.com/cashubtc/nuts/blob/main/10.md) | Spending conditions | ✅ |
 | [NUT-11](https://github.com/cashubtc/nuts/blob/main/11.md) | Pay-to-Public-Key (P2PK) | ✅ |
-| [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) | DLEQ proofs (optional verification) | ✅ |
+| [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) | DLEQ proofs | ✅ |
 | [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
-| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | Hashed Timelock Contracts (HTLC) | ❌ |
+| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | Hashed Timelock Contracts (HTLC) | ✅ |
 | [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments (MPP) | ✅ |
 | [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
 | [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
+| [NUT-19](https://github.com/cashubtc/nuts/blob/main/19.md) | Cached responses | ✅ |
+| [NUT-20](https://github.com/cashubtc/nuts/blob/main/20.md) | Signature on mint quote | ✅ |
+| [NUT-21](https://github.com/cashubtc/nuts/blob/main/21.md) | Clear authentication (protected mints) | ✅ |
+| [NUT-22](https://github.com/cashubtc/nuts/blob/main/22.md) | Blind authentication | ✅ |
 
 **Wallet Features:**
 - Multi-mint support via CDK's `MultiMintWallet`
@@ -407,9 +411,21 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 - Atomic keyset counter management in IndexedDB
 - WebSocket quote status with HTTP polling fallback
 - P2PK token locking to npub recipients
+- HTLC spending conditions
 - Optional DLEQ verification on receive
 - Proof optimization (consolidate many small proofs)
 - Inter-mint transfers via Lightning
+- Protected mint authentication (NUT-21/22)
+- Proof recovery via signature restore (NUT-09)
+
+## 🔒 Security
+
+The Cashu wallet implementation includes several security measures:
+
+- **Reserved Proof Protection**: Cleanup operations check for active transactions before removing Reserved proofs, preventing accidental fund loss during concurrent operations
+- **URL Normalization**: Mint URLs are consistently normalized to prevent mismatches when filtering proofs
+- **Keyset ID Validation**: Keyset IDs are validated against CDK V1/V2 format requirements (16 or 66 hex characters with proper version prefix) before URL interpolation, preventing path traversal
+- **NUT Capability Detection**: Comprehensive detection of mint capabilities including NUT-19 (cached responses) and NUT-21/22 (authentication)
 
 ## 🔧 Configuration
 

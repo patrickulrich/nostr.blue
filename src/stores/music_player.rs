@@ -4,10 +4,15 @@ use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::{auth_store, nostr_client};
-use nostr_sdk::{EventBuilder, Timestamp};
+use crate::stores::nostr_music::{TrackSource, NostrTrack, KIND_MUSIC_TRACK};
+use nostr_sdk::{EventBuilder, Timestamp, Kind, Tag, TagKind};
+use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 
-/// Music track for the player (simplified from WavlakeTrack)
+/// Kind number for Music Vote events (addressable, one per user)
+pub const KIND_MUSIC_VOTE: u16 = 33169;
+
+/// Music track for the player (unified for Wavlake and Nostr sources)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MusicTrack {
     pub id: String,
@@ -21,12 +26,22 @@ pub struct MusicTrack {
     pub artist_id: Option<String>,
     pub album_id: Option<String>,
     pub artist_npub: Option<String>,
+    /// Track source for routing zaps and links
+    #[serde(default)]
+    pub source: TrackSource,
+    /// Total millisats earned (for unified hotness ranking)
+    pub msat_total: Option<u64>,
+    /// Created timestamp (for chronological sorting)
+    pub created_at: Option<u64>,
 }
 
 impl From<WavlakeTrack> for MusicTrack {
     fn from(track: WavlakeTrack) -> Self {
+        // Parse msatTotal from string to u64
+        let msat_total = track.msat_total.parse::<u64>().ok();
+
         Self {
-            id: track.id,
+            id: track.id.clone(),
             title: track.title,
             artist: track.artist,
             album: Some(track.album_title),
@@ -34,9 +49,40 @@ impl From<WavlakeTrack> for MusicTrack {
             album_art_url: Some(track.album_art_url),
             artist_art_url: Some(track.artist_art_url),
             duration: Some(track.duration),
-            artist_id: Some(track.artist_id),
-            album_id: Some(track.album_id),
+            artist_id: Some(track.artist_id.clone()),
+            album_id: Some(track.album_id.clone()),
             artist_npub: track.artist_npub,
+            source: TrackSource::Wavlake {
+                artist_id: track.artist_id,
+                album_id: track.album_id,
+            },
+            msat_total,
+            created_at: None, // Wavlake tracks don't have created_at in rankings
+        }
+    }
+}
+
+impl From<NostrTrack> for MusicTrack {
+    fn from(track: NostrTrack) -> Self {
+        Self {
+            id: track.event_id.clone(),
+            title: track.title,
+            artist: String::new(), // Will be filled in by profile lookup
+            album: None,
+            media_url: track.url,
+            album_art_url: track.image.clone(),
+            artist_art_url: track.image,
+            duration: track.duration,
+            artist_id: None,
+            album_id: None,
+            artist_npub: Some(track.pubkey.clone()),
+            source: TrackSource::Nostr {
+                coordinate: track.coordinate,
+                pubkey: track.pubkey,
+                d_tag: track.d_tag,
+            },
+            msat_total: None, // Will be filled in by zap totals fetch
+            created_at: Some(track.created_at),
         }
     }
 }
@@ -120,14 +166,26 @@ async fn publish_music_status(track: &MusicTrack) {
     // Format content: "Track Title - Artist Name"
     let content = format!("{} - {}", track.title, track.artist);
 
-    // Build track URL reference
-    let track_url = format!("https://nostr.blue/music/track/{}", track.id);
+    // Build track URL reference based on source
+    let track_reference = match &track.source {
+        TrackSource::Wavlake { .. } => {
+            // Link to Wavlake track on our site
+            format!("https://nostr.blue/music/track/{}", track.id)
+        }
+        TrackSource::Nostr { pubkey, d_tag, .. } => {
+            // Create naddr bech32 for nostr tracks (NIP-19)
+            // Format: nostr:naddr1... where naddr encodes kind:pubkey:d-tag
+            // For simplicity, we'll use the coordinate format which can be parsed
+            format!("https://nostr.blue/music/playlist/{}:{}:{}",
+                crate::stores::nostr_music::KIND_MUSIC_TRACK, pubkey, d_tag)
+        }
+    };
 
     // Create LiveStatus with expiration based on track duration
     let mut status = LiveStatus {
         status_type: StatusType::Music,
         expiration: None,
-        reference: Some(track_url),
+        reference: Some(track_reference),
     };
 
     // Set expiration if track has duration
@@ -398,46 +456,74 @@ pub fn hide_zap_dialog() {
     state.zap_track = None;
 }
 
-/// Vote for a track using NIP-51 Kind 30003 (Bookmark Sets)
-pub async fn vote_for_track(track_id: &str, title: &str, artist: &str) {
+/// Vote for a track using Kind 33169 (Music Vote - addressable, one per user)
+/// Supports both Wavlake and Nostr tracks via TrackSource
+pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
     // Check if user is authenticated
     if !auth_store::is_authenticated() {
-        log::error!("User must be logged in to vote");
-        // TODO: Show toast notification
-        return;
+        return Err("You must be logged in to vote".to_string());
     }
 
-    let client = match nostr_client::get_client() {
-        Some(c) => c,
-        None => {
-            log::error!("Nostr client not initialized");
-            return;
-        }
-    };
+    let client = nostr_client::get_client()
+        .ok_or("Nostr client not initialized")?;
 
-    let track_url = format!("https://wavlake.com/track/{}", track_id);
-
-    // Create Kind 30003 event with proper tags
-    let tags = vec![
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("d".into()), vec!["peachy-song-vote".to_string()]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("title".into()), vec!["Weekly Song Vote".to_string()]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("description".into()), vec!["My vote for the best song of the week".to_string()]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("r".into()), vec![track_url]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_title".into()), vec![title.to_string()]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_artist".into()), vec![artist.to_string()]),
-        nostr_sdk::Tag::custom(nostr_sdk::TagKind::Custom("track_id".into()), vec![track_id.to_string()]),
+    // Build tags based on track source
+    let mut tags = vec![
+        // Fixed d-tag ensures one vote per user (replaces previous vote)
+        Tag::identifier("music-vote"),
+        // Cached metadata for leaderboard display
+        Tag::custom(TagKind::custom("title"), vec![track.title.clone()]),
+        Tag::custom(TagKind::custom("artist"), vec![track.artist.clone()]),
     ];
 
-    let builder = EventBuilder::new(nostr_sdk::Kind::Custom(30003), "").tags(tags);
+    // Add image if available
+    if let Some(ref image) = track.album_art_url {
+        tags.push(Tag::custom(TagKind::custom("image"), vec![image.clone()]));
+    }
+
+    // Add track reference based on source
+    match &track.source {
+        TrackSource::Nostr { coordinate, pubkey, d_tag } => {
+            // Parse pubkey for Coordinate
+            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+                .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+            // Create coordinate for the track (Kind 36787)
+            let coord = Coordinate::new(Kind::from(KIND_MUSIC_TRACK), pk)
+                .identifier(d_tag);
+
+            tags.push(Tag::coordinate(coord, None));
+            tags.push(Tag::custom(TagKind::custom("k"), vec![KIND_MUSIC_TRACK.to_string()]));
+
+            log::debug!("Voting for Nostr track: {}", coordinate);
+        }
+        TrackSource::Wavlake { .. } => {
+            // Use r-tag with Wavlake URL
+            let track_url = format!("https://wavlake.com/track/{}", track.id);
+            tags.push(Tag::custom(TagKind::custom("r"), vec![track_url]));
+            tags.push(Tag::custom(TagKind::custom("k"), vec!["wavlake".to_string()]));
+            // Also store the track ID for easier aggregation
+            tags.push(Tag::custom(TagKind::custom("track_id"), vec![track.id.clone()]));
+
+            log::debug!("Voting for Wavlake track: {}", track.id);
+        }
+    }
+
+    let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
 
     match client.send_event_builder(builder).await {
-        Ok(event_id) => {
-            log::info!("Vote submitted for track: {} by {} (event: {})", title, artist, event_id.to_hex());
-            // TODO: Show success toast
+        Ok(output) => {
+            log::info!(
+                "Vote submitted for '{}' by {} (event: {})",
+                track.title,
+                track.artist,
+                output.id().to_hex()
+            );
+            Ok(())
         }
         Err(e) => {
             log::error!("Failed to publish vote: {}", e);
-            // TODO: Show error toast
+            Err(format!("Failed to publish vote: {}", e))
         }
     }
 }

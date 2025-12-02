@@ -32,6 +32,9 @@
 //! Subject to browser storage quota (typically ~50MB, varies by browser).
 //! Use `navigator.storage.estimate()` to check available space.
 
+// Allow dead_code for keyset counter methods not yet wired to UI
+#![allow(dead_code)]
+
 use cdk_common::database::{self, WalletDatabase};
 use cdk_common::common::ProofInfo;
 use cdk_common::wallet::{MintQuote, MeltQuote, Transaction, TransactionDirection, TransactionId};
@@ -52,7 +55,7 @@ use web_sys::IdbTransactionMode;
 
 // Database constants
 const DB_NAME: &str = "cashu_wallet_db";
-const DB_VERSION: u32 = 1;
+const DB_VERSION: u32 = 2;
 
 // Object store names
 const STORE_MINTS: &str = "mints";
@@ -65,6 +68,7 @@ const STORE_PROOFS: &str = "proofs";
 const STORE_TRANSACTIONS: &str = "transactions";
 const STORE_KEYSET_COUNTERS: &str = "keyset_counters";
 const STORE_PENDING_EVENTS: &str = "pending_events";
+const STORE_SYNC_STATE: &str = "sync_state";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[derive(Clone, Debug)]
@@ -128,6 +132,10 @@ impl IndexedDbDatabase {
             }
             if !db.object_store_names().any(|n| n == STORE_PENDING_EVENTS) {
                 db.create_object_store(STORE_PENDING_EVENTS)?;
+            }
+            // V2: Add sync state store for incremental Nostr sync
+            if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
+                db.create_object_store(STORE_SYNC_STATE)?;
             }
 
             Ok(())
@@ -324,7 +332,7 @@ impl IndexedDbDatabase {
     #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn add_pending_event(
         &self,
-        event: &crate::stores::cashu_wallet::PendingNostrEvent,
+        event: &crate::stores::cashu::types::PendingNostrEvent,
     ) -> Result<(), database::Error> {
         let key = event.id.clone();
         self.put_value(STORE_PENDING_EVENTS, &key, event).await
@@ -335,7 +343,7 @@ impl IndexedDbDatabase {
     pub async fn get_pending_event(
         &self,
         event_id: &str,
-    ) -> Result<Option<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
+    ) -> Result<Option<crate::stores::cashu::types::PendingNostrEvent>, database::Error> {
         self.get_value(STORE_PENDING_EVENTS, event_id).await
     }
 
@@ -343,7 +351,7 @@ impl IndexedDbDatabase {
     #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn get_all_pending_events(
         &self,
-    ) -> Result<Vec<crate::stores::cashu_wallet::PendingNostrEvent>, database::Error> {
+    ) -> Result<Vec<crate::stores::cashu::types::PendingNostrEvent>, database::Error> {
         self.get_all_values(STORE_PENDING_EVENTS).await
     }
 
@@ -357,10 +365,36 @@ impl IndexedDbDatabase {
     #[allow(dead_code)] // Will be used by pending events retry logic
     pub async fn update_pending_event(
         &self,
-        event: &crate::stores::cashu_wallet::PendingNostrEvent,
+        event: &crate::stores::cashu::types::PendingNostrEvent,
     ) -> Result<(), database::Error> {
         let key = event.id.clone();
         self.put_value(STORE_PENDING_EVENTS, &key, event).await
+    }
+
+    // =========================================================================
+    // Sync State (Incremental Nostr Sync)
+    // =========================================================================
+
+    /// Save sync state for incremental Nostr event fetching
+    pub async fn save_sync_state(
+        &self,
+        state: &crate::stores::cashu::types::SyncState,
+    ) -> Result<(), database::Error> {
+        // Use a fixed key since there's only one sync state per wallet
+        self.put_value(STORE_SYNC_STATE, "current", state).await
+    }
+
+    /// Load sync state for incremental Nostr event fetching
+    pub async fn load_sync_state(
+        &self,
+    ) -> Result<Option<crate::stores::cashu::types::SyncState>, database::Error> {
+        self.get_value(STORE_SYNC_STATE, "current").await
+    }
+
+    /// Clear sync state (forces full resync on next fetch)
+    #[allow(dead_code)]
+    pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
+        self.delete_value(STORE_SYNC_STATE, "current").await
     }
 }
 
@@ -1026,5 +1060,140 @@ impl WalletDatabase for IndexedDbDatabase {
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err> {
         let key = transaction_id.to_string();
         self.delete_value(STORE_TRANSACTIONS, &key).await
+    }
+}
+
+// =============================================================================
+// NUT-13 Counter Extensions (beyond WalletDatabase trait)
+// =============================================================================
+
+impl IndexedDbDatabase {
+    /// Get current counter value for a keyset (NUT-13)
+    ///
+    /// Returns 0 if no counter exists for this keyset.
+    pub async fn get_keyset_counter(&self, keyset_id: &Id) -> Result<u32, database::Error> {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readonly)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_KEYSET_COUNTERS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        let key = JsValue::from_str(&keyset_id.to_string());
+
+        let value_opt = store
+            .get(&key)
+            .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?;
+
+        let counter = if let Some(value) = value_opt {
+            value.as_f64().map(|f| f as u32).unwrap_or(0)
+        } else {
+            0
+        };
+
+        Ok(counter)
+    }
+
+    /// Set counter value for a keyset (NUT-13 restore operations)
+    ///
+    /// Used when restoring from backup or after NUT-09 recovery.
+    pub async fn set_keyset_counter(&self, keyset_id: &Id, value: u32) -> Result<(), database::Error> {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_KEYSET_COUNTERS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        let key = JsValue::from_str(&keyset_id.to_string());
+        let js_value = JsValue::from_f64(value as f64);
+
+        store
+            .put_key_val(&key, &js_value)
+            .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+
+        log::info!("Counter for keyset {} set to {}", keyset_id, value);
+
+        Ok(())
+    }
+
+    /// Get all keyset counters (for backup)
+    ///
+    /// Returns a map of keyset_id -> counter value.
+    pub async fn get_all_keyset_counters(&self) -> Result<HashMap<String, u32>, database::Error> {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readonly)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_KEYSET_COUNTERS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        let keys = store
+            .get_all_keys()
+            .map_err(|e| Self::make_error(format!("Get all keys error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get all keys await error: {:?}", e)))?;
+
+        let values = store
+            .get_all()
+            .map_err(|e| Self::make_error(format!("Get all error: {:?}", e)))?
+            .await
+            .map_err(|e| Self::make_error(format!("Get all await error: {:?}", e)))?;
+
+        let mut counters = HashMap::new();
+
+        for (key_js, value_js) in keys.into_iter().zip(values.into_iter()) {
+            if let Some(key_str) = key_js.as_string() {
+                let counter = value_js.as_f64().map(|f| f as u32).unwrap_or(0);
+                counters.insert(key_str, counter);
+            }
+        }
+
+        log::debug!("Loaded {} keyset counters", counters.len());
+
+        Ok(counters)
+    }
+
+    /// Restore keyset counters from backup
+    ///
+    /// Used when restoring wallet from seed.
+    pub async fn restore_keyset_counters(&self, counters: &HashMap<String, u32>) -> Result<(), database::Error> {
+        let tx = self
+            .db
+            .transaction_on_one_with_mode(STORE_KEYSET_COUNTERS, IdbTransactionMode::Readwrite)
+            .map_err(|e| Self::make_error(format!("Transaction error: {:?}", e)))?;
+
+        let store = tx
+            .object_store(STORE_KEYSET_COUNTERS)
+            .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
+
+        for (keyset_id, counter) in counters {
+            let key = JsValue::from_str(keyset_id);
+            let js_value = JsValue::from_f64(*counter as f64);
+
+            store
+                .put_key_val(&key, &js_value)
+                .map_err(|e| Self::make_error(format!("Put error: {:?}", e)))?;
+        }
+
+        tx.await
+            .into_result()
+            .map_err(|e| Self::make_error(format!("Transaction commit error: {:?}", e)))?;
+
+        log::info!("Restored {} keyset counters", counters.len());
+
+        Ok(())
     }
 }

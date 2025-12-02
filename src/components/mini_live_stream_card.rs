@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, JsonUtil};
+use nostr_sdk::{Event as NostrEvent, Kind};
+use nostr_sdk::prelude::{Coordinate, ToBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client;
-use crate::components::{StreamStatus, parse_nip53_live_event};
-use std::time::Duration;
+use crate::stores::nostr_client::CLIENT_INITIALIZED;
+use crate::stores::profiles;
+use crate::components::{StreamStatus, parse_nip53_live_event, extract_live_event_host};
 
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
@@ -12,24 +13,35 @@ pub struct LiveStreamMeta {
     pub image: Option<String>,
     pub status: StreamStatus,
     pub current_participants: Option<u64>,
-    /// The host pubkey from p tag with Host marker
+    /// The host pubkey from p tag with Host marker (case-insensitive)
     pub host_pubkey: Option<String>,
+    /// Whether the host has a valid proof signature per NIP-53
+    pub host_verified: bool,
 }
 
 /// Parse NIP-53 Kind 30311 live streaming event into MiniLiveStreamCard's meta format
 fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let live_event = parse_nip53_live_event(event)?;
 
-    // Extract host pubkey
-    let host_pubkey = live_event.host.as_ref().map(|h| h.public_key.to_string());
+    // Extract host with case-insensitive fallback and proof verification
+    let host = extract_live_event_host(event, &live_event);
+    let host_pubkey = host.as_ref().map(|h| h.public_key.clone());
+    let host_verified = host.as_ref().map(|h| h.is_verified).unwrap_or(false);
+
+    // Get raw status and apply stale check
+    let raw_status = live_event.status.as_ref()
+        .map(StreamStatus::from)
+        .unwrap_or(StreamStatus::Planned);
+    let effective_status = StreamStatus::effective_status(raw_status, event.created_at);
 
     Some(LiveStreamMeta {
         d_tag: live_event.id,
         title: live_event.title,
         image: live_event.image.map(|(url, _dims)| url.to_string()),
-        status: live_event.status.as_ref().map(StreamStatus::from).unwrap_or(StreamStatus::Planned),
+        status: effective_status,
         current_participants: live_event.current_participants,
         host_pubkey,
+        host_verified,
     })
 }
 
@@ -40,31 +52,32 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         None => return rsx! { div { class: "hidden" } }
     };
 
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
     // Use host pubkey from p tag if available, otherwise fall back to event publisher
     let author_pubkey = stream_meta.host_pubkey.clone()
         .unwrap_or_else(|| event.pubkey.to_string());
+    let author_pubkey_for_fetch = author_pubkey.clone();
+    let host_verified = stream_meta.host_verified;
 
-    // Create naddr for the livestream (still uses event publisher for fetching)
-    let naddr = format!("30311:{}:{}", event.pubkey, stream_meta.d_tag);
+    // Create bech32 naddr for the livestream
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
+        .identifier(&stream_meta.d_tag);
+    let naddr = coord.to_bech32().unwrap_or_else(|_| {
+        format!("30311:{}:{}", event.pubkey, stream_meta.d_tag)
+    });
 
-    // Fetch author metadata
-    use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
+    // Get author metadata from profile store (uses LRU cache + database, much faster)
+    // Use signal instead of memo so we can update it after background fetch
+    let mut author_metadata = use_signal(move || profiles::get_profile(&author_pubkey_for_fetch));
+
+    // Fetch author profile in background if not cached
+    use_effect(use_reactive((&author_pubkey, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
+        if !client_initialized {
+            return;
+        }
         spawn(async move {
-            if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
-                let filter = Filter::new()
-                    .author(pubkey)
-                    .kind(Kind::Metadata)
-                    .limit(1);
-
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                    if let Some(event) = events.into_iter().next() {
-                        if let Ok(metadata) = nostr_sdk::Metadata::from_json(&event.content) {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
+            if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                // Update signal with freshly fetched profile to trigger re-render
+                author_metadata.set(profiles::get_profile(&pk));
             }
         });
     }));
@@ -187,8 +200,26 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
                     }
 
                     p {
-                        class: "text-sm text-muted-foreground mb-1",
+                        class: "text-sm text-muted-foreground mb-1 flex items-center gap-1",
                         "{display_name}"
+                        // Show verified badge if host proof is valid
+                        if host_verified {
+                            span {
+                                class: "text-green-500",
+                                title: "Verified host",
+                                svg {
+                                    class: "w-3 h-3",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "currentColor",
+                                    view_box: "0 0 20 20",
+                                    path {
+                                        fill_rule: "evenodd",
+                                        d: "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+                                        clip_rule: "evenodd"
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     p {

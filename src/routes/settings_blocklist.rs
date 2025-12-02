@@ -145,8 +145,8 @@ pub fn SettingsBlocklist() -> Element {
 
                                 div {
                                     class: "flex-1 min-w-0",
-                                    a {
-                                        href: "/profile/{pubkey}",
+                                    Link {
+                                        to: Route::Profile { pubkey: pubkey.clone() },
                                         class: "hover:text-foreground hover:underline truncate block",
                                         // Display name or fallback to truncated hex
                                         div {

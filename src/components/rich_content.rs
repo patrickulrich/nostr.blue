@@ -1026,19 +1026,7 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
         let track_clone = track.clone();
 
         let handle_play = move |_: MouseEvent| {
-            let music_track = MusicTrack {
-                id: track_clone.id.clone(),
-                title: track_clone.title.clone(),
-                artist: track_clone.artist.clone(),
-                album: Some(track_clone.album_title.clone()),
-                media_url: track_clone.media_url.clone(),
-                album_art_url: Some(track_clone.album_art_url.clone()),
-                artist_art_url: Some(track_clone.artist_art_url.clone()),
-                duration: Some(track_clone.duration),
-                artist_id: Some(track_clone.artist_id.clone()),
-                album_id: Some(track_clone.album_id.clone()),
-                artist_npub: track_clone.artist_npub.clone(),
-            };
+            let music_track: MusicTrack = track_clone.clone().into();
             music_player::play_track(music_track, None, None);
         };
 
@@ -1076,19 +1064,19 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
                         }
                         div {
                             class: "text-xs text-muted-foreground truncate",
-                            a {
-                                href: "/music/artist/{track.artist_id}",
+                            Link {
+                                to: Route::MusicArtist { artist_id: track.artist_id.clone() },
                                 class: "hover:text-foreground hover:underline",
-                                onclick: move |e| e.stop_propagation(),
+                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
                                 "{track.artist}"
                             }
                         }
                         div {
                             class: "text-xs text-muted-foreground/80 truncate mt-1",
-                            a {
-                                href: "/music/album/{track.album_id}",
+                            Link {
+                                to: Route::MusicAlbum { album_id: track.album_id.clone() },
                                 class: "hover:text-foreground hover:underline",
-                                onclick: move |e| e.stop_propagation(),
+                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
                                 "{track.album_title}"
                             }
                         }
@@ -1159,19 +1147,7 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
         },
         // Success state - render album card with track list
         Some(Ok(album)) => {
-        let tracks: Vec<MusicTrack> = album.tracks.iter().map(|track| MusicTrack {
-            id: track.id.clone(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: Some(track.album_title.clone()),
-            media_url: track.media_url.clone(),
-            album_art_url: Some(track.album_art_url.clone()),
-            artist_art_url: Some(track.artist_art_url.clone()),
-            duration: Some(track.duration),
-            artist_id: Some(track.artist_id.clone()),
-            album_id: Some(track.album_id.clone()),
-            artist_npub: track.artist_npub.clone(),
-        }).collect();
+        let tracks: Vec<MusicTrack> = album.tracks.iter().map(|track| track.clone().into()).collect();
 
         rsx! {
             div {
@@ -1461,19 +1437,7 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
         },
         // Success state - render playlist card with track list
         Some(Ok(playlist)) => {
-        let tracks: Vec<MusicTrack> = playlist.tracks.iter().map(|track| MusicTrack {
-            id: track.id.clone(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: Some(track.album_title.clone()),
-            media_url: track.media_url.clone(),
-            album_art_url: Some(track.album_art_url.clone()),
-            artist_art_url: Some(track.artist_art_url.clone()),
-            duration: Some(track.duration),
-            artist_id: Some(track.artist_id.clone()),
-            album_id: Some(track.album_id.clone()),
-            artist_npub: track.artist_npub.clone(),
-        }).collect();
+        let tracks: Vec<MusicTrack> = playlist.tracks.iter().map(|track| track.clone().into()).collect();
 
         rsx! {
             div {
@@ -1606,6 +1570,7 @@ fn YouTubeRenderer(video_id: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden bg-black aspect-video max-w-full",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1671,6 +1636,7 @@ fn SpotifyRenderer(content_type: String, content_id: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1728,6 +1694,7 @@ fn SoundCloudRenderer(url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1791,6 +1758,7 @@ fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",
@@ -1850,6 +1818,7 @@ fn MixCloudRenderer(username: String, mix_name: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{embed_url}",
@@ -1924,6 +1893,7 @@ fn RumbleRenderer(embed_url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden bg-black aspect-video max-w-full",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",
@@ -1981,6 +1951,7 @@ fn TidalRenderer(embed_url: String) -> Element {
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
             if *is_visible.read() {
                 iframe {
                     src: "{final_embed_url}",

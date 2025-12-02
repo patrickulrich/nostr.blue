@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::cashu_wallet;
+use crate::stores::cashu;
 
 /// Modal for accepting Cashu wallet terms and disclaimer
 /// This modal is non-dismissible - users must accept to proceed
@@ -18,7 +18,7 @@ pub fn CashuTermsModal(on_accept: EventHandler<()>) -> Element {
         error_message.set(None);
 
         spawn(async move {
-            match cashu_wallet::accept_terms().await {
+            match cashu::accept_terms().await {
                 Ok(()) => {
                     on_accept.call(());
                 }

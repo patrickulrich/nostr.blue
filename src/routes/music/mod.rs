@@ -4,6 +4,9 @@ pub mod leaderboard;
 pub mod artist;
 pub mod album;
 pub mod music_search;
+pub mod track_new;
+pub mod playlist_new;
+pub mod playlist_detail;
 
 pub use music_home::MusicHome;
 pub use radio::MusicRadio;
@@ -11,3 +14,6 @@ pub use leaderboard::MusicLeaderboard;
 pub use artist::MusicArtist;
 pub use album::MusicAlbum;
 pub use music_search::MusicSearch;
+pub use track_new::MusicTrackNew;
+pub use playlist_new::MusicPlaylistNew;
+pub use playlist_detail::MusicPlaylistDetail;

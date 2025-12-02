@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
@@ -99,20 +100,20 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                 }
                 div {
                     class: "text-xs text-muted-foreground truncate",
-                    a {
-                        href: "/music/artist/{track.artist_id}",
+                    Link {
+                        to: Route::MusicArtist { artist_id: track.artist_id.clone() },
                         class: "hover:text-foreground hover:underline",
-                        onclick: move |e| e.stop_propagation(),
+                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
                         "{track.artist}"
                     }
                 }
                 if props.show_album {
                     div {
                         class: "text-xs text-muted-foreground truncate",
-                        a {
-                            href: "/music/album/{track.album_id}",
+                        Link {
+                            to: Route::MusicAlbum { album_id: track.album_id.clone() },
                             class: "hover:text-foreground hover:underline",
-                            onclick: move |e| e.stop_propagation(),
+                            onclick: move |e: Event<MouseData>| e.stop_propagation(),
                             "{track.album_title}"
                         }
                     }
@@ -134,16 +135,14 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
                     class: "p-2 hover:bg-muted rounded-full transition",
                     title: "Vote for this track",
                     onclick: {
-                        let track_id = track.id.clone();
-                        let track_title = track.title.clone();
-                        let track_artist = track.artist.clone();
+                        let vote_track: MusicTrack = track.clone().into();
                         move |e: Event<MouseData>| {
                             e.stop_propagation();
-                            let id = track_id.clone();
-                            let title = track_title.clone();
-                            let artist = track_artist.clone();
+                            let t = vote_track.clone();
                             spawn(async move {
-                                music_player::vote_for_track(&id, &title, &artist).await;
+                                if let Err(e) = music_player::vote_for_music(&t).await {
+                                    log::error!("Vote failed: {}", e);
+                                }
                             });
                         }
                     },
