@@ -79,7 +79,9 @@ pub fn CashuSendModal(
         }
 
         // Increment request ID and capture current value to prevent race conditions
-        let current_id = fee_request_id.read().wrapping_add(1);
+        // Use peek() instead of read() to avoid subscribing to fee_request_id,
+        // which would cause an infinite loop when we immediately set() it
+        let current_id = fee_request_id.peek().wrapping_add(1);
         fee_request_id.set(current_id);
         is_estimating_fee.set(true);
 
