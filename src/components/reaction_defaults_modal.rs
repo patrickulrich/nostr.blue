@@ -242,8 +242,10 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                                         local_reactions.with_mut(|list| {
                                             if from_idx != index && from_idx < list.len() && index < list.len() {
                                                 let item = list.remove(from_idx);
-                                                let to = if index > from_idx { index } else { index };
-                                                let insert_idx = to.min(list.len());
+                                                // After remove, indices shift down. If dragging from before
+                                                // the target, the target index is now one less.
+                                                let insert_idx = if from_idx < index { index - 1 } else { index };
+                                                let insert_idx = insert_idx.min(list.len());
                                                 list.insert(insert_idx, item);
                                             }
                                         });

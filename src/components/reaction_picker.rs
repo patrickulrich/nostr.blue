@@ -165,6 +165,8 @@ pub struct InlineReactionPickerProps {
 #[component]
 pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
     let preferred_reactions = PREFERRED_REACTIONS.read();
+    // Track failed image URLs for fallback display
+    let mut failed_images: Signal<HashSet<String>> = use_signal(HashSet::new);
 
     rsx! {
         div {
@@ -194,6 +196,8 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
                         PreferredReaction::Custom { shortcode, url } => {
                             let title_text = format!(":{shortcode}:");
                             let url_str = url.clone();
+                            let url_for_error = url.clone();
+                            let has_error = failed_images.read().contains(url);
                             rsx! {
                                 button {
                                     key: "inline-custom-{idx}",
@@ -202,14 +206,17 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
                                     onclick: move |_| {
                                         props.on_reaction.call(reaction_for_click.to_reaction_emoji());
                                     },
-                                    if url_str.is_empty() {
+                                    if url_str.is_empty() || has_error {
                                         span { class: "text-xs text-gray-500", "{title_text}" }
                                     } else {
                                         img {
                                             src: "{url_str}",
                                             alt: "{title_text}",
                                             class: "w-5 h-5 object-contain",
-                                            loading: "lazy"
+                                            loading: "lazy",
+                                            onerror: move |_| {
+                                                failed_images.write().insert(url_for_error.clone());
+                                            }
                                         }
                                     }
                                 }

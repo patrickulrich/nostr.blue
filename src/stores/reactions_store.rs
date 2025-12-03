@@ -115,6 +115,7 @@ pub async fn load_preferred_reactions() {
         None => {
             log::warn!("Client not initialized");
             *REACTIONS_LOADING.write() = false;
+            *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
             return;
         }
     };
@@ -129,6 +130,7 @@ pub async fn load_preferred_reactions() {
                 Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
                     *REACTIONS_LOADING.write() = false;
+                    *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
                     return;
                 }
             }
@@ -136,6 +138,7 @@ pub async fn load_preferred_reactions() {
         None => {
             log::warn!("No pubkey available");
             *REACTIONS_LOADING.write() = false;
+            *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
             return;
         }
     };
@@ -160,8 +163,13 @@ pub async fn load_preferred_reactions() {
                 match serde_json::from_str::<ReactionsData>(&event.content) {
                     Ok(data) => {
                         if !data.reactions.is_empty() {
-                            log::info!("Loaded {} preferred reactions from Nostr", data.reactions.len());
-                            *PREFERRED_REACTIONS.write() = data.reactions;
+                            // Truncate to MAX_REACTIONS to handle malformed/malicious events
+                            let reactions: Vec<PreferredReaction> = data.reactions
+                                .into_iter()
+                                .take(MAX_REACTIONS)
+                                .collect();
+                            log::info!("Loaded {} preferred reactions from Nostr", reactions.len());
+                            *PREFERRED_REACTIONS.write() = reactions;
                         }
                     }
                     Err(e) => {
@@ -190,11 +198,19 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
         return Err("Not authenticated".to_string());
     }
 
+    // Validate reaction count
+    if reactions.len() > MAX_REACTIONS {
+        return Err(format!("Too many reactions (max {})", MAX_REACTIONS));
+    }
+
     // Get client
     let client = nostr_client::NOSTR_CLIENT.read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
+
+    // Ensure relays are ready before publishing
+    nostr_client::ensure_relays_ready(&client).await;
 
     // Create data structure
     let data = ReactionsData {
