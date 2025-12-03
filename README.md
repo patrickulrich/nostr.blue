@@ -1,67 +1,37 @@
 # nostr.blue
 
-A decentralized social network client built on the Nostr protocol using **Rust + Dioxus + rust-nostr**.
+A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
 ![Version](https://img.shields.io/badge/version-0.6.6-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/rust-1.90+-orange)
+![Rust](https://img.shields.io/badge/rust-1.77+-orange)
+![CDK](https://img.shields.io/badge/CDK-0.13.4-purple)
 
 ## 🌟 Overview
 
-nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAssembly. It provides a comprehensive social networking experience on the decentralized Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, and Data Vending Machines.
+nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAssembly. It provides a comprehensive social networking experience on the Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, and Data Vending Machines.
 
-## ✨ Features
+## ⚡ Nostr Features
 
-### Core Social Features
-- ✅ **Home Feed** - Real-time feed from people you follow with infinite scroll, dual feed types (Following / Following + Replies), and integrated repost display
-- ✅ **Profiles** - View and edit user profiles with follow/unfollow
-- ✅ **Post Composer** - Create text notes with rich content support
-- ✅ **Interactions** - Reactions, reposts with attribution display, and threaded replies
-- ✅ **Search** - Comprehensive NIP-50 search with profile autocomplete and tabbed content search (posts, articles, photos, videos) with contact prioritization
-- ✅ **Notifications** - Track mentions, replies, and interactions
-- ✅ **Explore** - Discover trending content and new users
-- ✅ **Polls (NIP-88)** - Create and vote on single-choice and multiple-choice polls with real-time results, countdown timers, and hashtag support
+- **Real-time Social Feeds** - Smart relay routing using the outbox model (NIP-65) for reliable content discovery
+- **Encrypted Messaging** - Full DM support with NIP-04 (legacy), NIP-17 (private), and NIP-44 (versioned encryption)
+- **Lightning Zaps** - Send and receive Bitcoin micropayments (NIP-57) with NWC integration (NIP-47)
+- **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0)
+- **Long-form Content** - Articles (NIP-23), Photos (NIP-68), Videos (NIP-71)
+- **Social Organization** - Communities (NIP-72), Lists (NIP-51), Data Vending Machines (NIP-90)
+- **Secure Authentication** - Browser extension (NIP-07) and remote signer (NIP-46) with Amber/nsecBunker
+- **Cross-device Sync** - Settings synchronized across devices via Nostr (NIP-78)
 
-### Advanced Features
-- ✅ **Outbox Model (NIP-65)** - Smart relay routing using author's preferred write relays for improved content discovery
-- ✅ **Communities (NIP-72)** - Moderated topic-based communities
-- ✅ **Lists (NIP-51)** - Create and manage custom lists and bookmarks
-- ✅ **Lightning Zaps (NIP-57)** - Send and receive Bitcoin micropayments
-- ✅ **Nostr Wallet Connect (NIP-47)** - Remote Lightning wallet integration with IndexedDB persistence, configurable payment preferences (NWC-first, WebLN-first, manual-only, always-ask), automatic payment routing with smart fallbacks, and balance display
-- ✅ **Direct Messages (NIP-04/NIP-17/NIP-44)** - Encrypted private messaging with full NIP-17 compliance
-- ✅ **Long-form Articles (NIP-23)** - Rich markdown articles with metadata and threaded comments
-- ✅ **Photos Feed (NIP-68)** - Dedicated feed for image content with metadata
-- ✅ **Videos (NIP-71)** - Video event support with playback controls and comments
-- ✅ **Livestreaming (NIP-53)** - Live video streaming with HLS support, chat integration, status indicators (live/upcoming/ended), viewer counts, and dual-feed layout (Following + Global)
-- ✅ **Voice Messages (NIP-A0)** - Short audio messages up to 60 seconds with waveform visualization and threaded replies
-- ✅ **Web Bookmarks (NIP-B0)** - Pocket-inspired bookmark manager with auto-metadata fetching, tag filtering, favorites, and search
-- ✅ **Comments (NIP-22)** - Structured threaded comments on articles and videos
-- ✅ **Music Player (NIP-38)** - Wavlake integration with live listening status broadcast
-- ✅ **Data Vending Machines (NIP-90)** - AI-powered content services
-- ✅ **Cashu Wallet (NIP-60)** - Bitcoin ecash wallet with Lightning deposits/withdrawals, multi-mint support, WebSocket subscriptions (NUT-17), payment requests (NUT-18), P2PK locking (NUT-11), persistent IndexedDB storage, and automatic cleanup of spent proofs
-- ✅ **Settings Sync (NIP-78)** - Cloud-synced app preferences via Nostr
+## 💰 Cashu Features
 
-### User Experience
-- ✅ **Light/Dark Theme** - System preference detection with manual override
-- ✅ **Responsive Design** - Mobile-first design with desktop optimization
-- ✅ **Infinite Scroll** - Smooth pagination across all feeds
-- ✅ **Rich Content** - Embedded images, videos, and link previews with proper parsing
-- ✅ **Collapsible Notes** - Long notes collapse with "Show More" button for cleaner feeds
-- ✅ **NIP-19 Support** - Full support for npub, note, nprofile, nevent identifiers
-- ✅ **Browser Extension** - NIP-07 signing with Alby, nos2x, etc.
-- ✅ **Remote Signer (NIP-46)** - Secure signing with Amber, nsecBunker via bunker:// URIs
-- ✅ **Enhanced Login UI** - Educational sign-in experience with security best practices
-- ✅ **Real-Time Updates** - Live feed and notification updates
-- ✅ **Offline Support** - Browse cached content without internet
-- ✅ **Instant Loading** - Sub-100ms load times with IndexedDB cache
-- ✅ **Blossom Media Storage (NIP-B7)** - Decentralized image uploads with quality control and multi-server support
-- ✅ **Enhanced Emoji Picker** - 1500+ emojis across all categories with NIP-51 custom emoji support
-- ✅ **GIF Search (NIP-50)** - Search and insert GIFs directly from the post composer using relay search
-- ✅ **Username Autocomplete** - @ mention autocomplete in all composers with relay search
-- ✅ **Video Sharing Modal** - Share videos via link, Nostr post, or encrypted DM
-- ✅ **Followers Count** - Real-time follower statistics using nostr.band API
-- ✅ **Interactive Notifications** - Clickable avatars and usernames in notification feed
-- ✅ **Social Media Embeds** - Twitter/X and Twitch embeds with click-to-load for performance
+- **Multi-mint Ecash Wallet** - Bitcoin ecash with NIP-60 integration for encrypted token storage
+- **Lightning Integration** - Deposits (NUT-04) and withdrawals (NUT-05) via Lightning Network
+- **P2PK Token Locking** - Send ecash locked to npub recipients (NUT-11)
+- **Real-time Updates** - WebSocket subscriptions for instant quote status (NUT-17)
+- **Protected Mints** - Full authentication support for private mints (NUT-21/22)
+- **Deterministic Recovery** - Seed derived from Nostr keys survives app reinstall
+- **Mint Discovery** - Find trusted mints via community recommendations (NIP-87)
+- **Security Features** - Reserved proof protection, URL normalization, keyset ID validation
 
 ## 🛠 Technology Stack
 
@@ -69,7 +39,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **[Dioxus 0.7.1](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
 - **dioxus-stores** - Advanced state management library for reactive global state
 - **WebAssembly** - Compiled to WASM for near-native browser performance
-- **[Trunk](https://trunkrs.dev/)** - WASM web application bundler
+- **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server and WASM bundler
 
 ### Nostr Protocol
 - **[rust-nostr SDK](https://rust-nostr.org/)** - Comprehensive Nostr implementation
@@ -81,7 +51,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
   - `nwc` - NIP-47 Nostr Wallet Connect for remote Lightning wallet integration
 
-### Bitcoin & Ecash
+### Cashu Protocol
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
   - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling (with `auth` feature for NUT-21/22 protected mints)
   - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
@@ -101,30 +71,10 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **gloo-storage** - LocalStorage API wrapper
 - **tokio** - Async runtime for parallel operations
 
-## 📊 Performance Metrics
-
-### Architecture Improvements
-
-- **Database-First Pattern**: Check IndexedDB → Background relay sync
-- **Parallel Fetching**: `tokio::join!()` for simultaneous queries
-- **Smart Caching**: 5-minute TTL for profiles, persistent event storage
-- **Outbox Model (NIP-65)**: Fetches content from author's preferred write relays for reliable content discovery
-- **Cashu Wallet Persistence**:
-  - IndexedDB storage for quotes, proofs, keyset counters, and mint cache
-  - Atomic keyset counter increments prevent duplicate blinded messages
-  - Multi-step mint/melt operations survive page refresh
-  - 9 object stores for complete wallet state management
-- **Relay Optimization**:
-  - Max latency: 2 seconds (auto-skip slow relays)
-  - Subscription verification (ban mismatched events)
-  - Adaptive retry intervals based on success rate
-  - Automatic relay hints in nevent/nprofile identifiers
-- **Real-Time Subscriptions**: Live updates via `limit=0, since=now` filters
-
 ## 📦 Project Structure
 
 ```
-nostrbluerust/
+nostr.blue/
 ├── src/
 │   ├── components/          # Reusable UI components
 │   │   ├── note.rs         # Note/event display
@@ -264,9 +214,9 @@ nostrbluerust/
 
 ### Prerequisites
 
-- **Rust 1.90+** (install via [rustup](https://rustup.rs/))
+- **Rust 1.77+** (install via [rustup](https://rustup.rs/))
 - **Node.js 18+** and **npm** (for TailwindCSS)
-- **Trunk** (WASM bundler)
+- **Dioxus CLI** (development server and bundler)
 - **wasm32-unknown-unknown** target
 
 ### Installation
@@ -282,8 +232,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Add WASM target
 rustup target add wasm32-unknown-unknown
 
-# Install Trunk
-cargo install trunk wasm-bindgen-cli
+# Install Dioxus CLI
+cargo install dioxus-cli
 
 # Install Node dependencies
 npm install
@@ -299,7 +249,7 @@ npm run tailwind:build
 npm run tailwind:watch
 
 # Terminal 2: Run development server
-trunk serve
+dx serve
 
 # Visit http://localhost:8080
 ```
@@ -316,7 +266,7 @@ The development server includes:
 npm run tailwind:build
 
 # Build optimized WASM bundle
-trunk build --release
+dx build --release
 
 # Output files in dist/
 ```
@@ -331,48 +281,107 @@ Production builds are optimized with:
 
 ### Nostr
 
-This client implements the following Nostr Improvement Proposals (NIPs):
-
 | NIP | Description | Status |
 |-----|-------------|--------|
-| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic protocol (events, signatures, filters) | ✅ |
-| [NIP-02](https://github.com/nostr-protocol/nips/blob/master/02.md) | Contact/follow lists | ✅ |
-| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted direct messages (legacy) | ✅ |
+| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic protocol | ✅ |
+| [NIP-02](https://github.com/nostr-protocol/nips/blob/master/02.md) | Follow List | ✅ |
+| [NIP-03](https://github.com/nostr-protocol/nips/blob/master/03.md) | OpenTimestamps Attestations | ❌ |
+| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted DM (legacy) | ✅ |
+| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS Identifiers | ✅ |
+| [NIP-06](https://github.com/nostr-protocol/nips/blob/master/06.md) | Key derivation from mnemonic | ❌ |
 | [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md) | Browser extension signing | ✅ |
-| [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Reply conventions and threading | ✅ |
-| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private direct messages | ✅ |
+| [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) | Event Deletion | ✅ |
+| [NIP-10](https://github.com/nostr-protocol/nips/blob/master/10.md) | Text Notes and Threads | ✅ |
+| [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) | Relay Information Document | ❌ |
+| [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) | Proof of Work | ❌ |
+| [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md) | Subject tag | ❌ |
+| [NIP-15](https://github.com/nostr-protocol/nips/blob/master/15.md) | Nostr Marketplace | ❌ |
+| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private Direct Messages | ✅ |
 | [NIP-18](https://github.com/nostr-protocol/nips/blob/master/18.md) | Reposts | ✅ |
-| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | bech32 identifiers (npub, note, naddr, etc.) | ✅ |
-| [NIP-22](https://github.com/nostr-protocol/nips/blob/master/22.md) | Comments on articles, videos, and other events | ✅ |
-| [NIP-23](https://github.com/nostr-protocol/nips/blob/master/23.md) | Long-form articles | ✅ |
+| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | bech32 identifiers | ✅ |
+| [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md) | nostr: URI scheme | ✅ |
+| [NIP-22](https://github.com/nostr-protocol/nips/blob/master/22.md) | Comments | ✅ |
+| [NIP-23](https://github.com/nostr-protocol/nips/blob/master/23.md) | Long-form Content | ✅ |
+| [NIP-24](https://github.com/nostr-protocol/nips/blob/master/24.md) | Extra metadata fields | ❌ |
 | [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md) | Reactions | ✅ |
-| [NIP-30](https://github.com/nostr-protocol/nips/blob/master/30.md) | Custom emoji | ✅ |
-| [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User status (music listening, etc.) | ✅ |
-| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted direct messages (versioned) | ✅ |
-| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Nostr Connect (remote signer protocol) | ✅ |
-| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (remote Lightning wallet) | ✅ |
-| [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search capability (profiles, posts, articles, photos, videos, GIFs) | ✅ |
-| [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists (people, bookmarks, music votes, emoji sets) | ✅ |
-| [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live activities (livestreaming) | ✅ |
-| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning zaps | ✅ |
-| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift wrap (sealed sender) | ✅ |
-| [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu wallet (ecash) | ✅ |
-| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay list metadata | ✅ |
-| [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) | Picture events with imeta tags | ✅ |
-| [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video events | ✅ |
-| [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated communities | ✅ |
-| [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | Application-specific data | ✅ |
-| [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Cashu mint discovery | ✅ |
-| [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls (single/multiple choice with results) | ✅ |
+| [NIP-27](https://github.com/nostr-protocol/nips/blob/master/27.md) | Text Note References | ✅ |
+| [NIP-28](https://github.com/nostr-protocol/nips/blob/master/28.md) | Public Chat | ❌ |
+| [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) | Relay-based Groups | ❌ |
+| [NIP-30](https://github.com/nostr-protocol/nips/blob/master/30.md) | Custom Emoji | ✅ |
+| [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) | Unknown Events | ❌ |
+| [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md) | Labeling | ❌ |
+| [NIP-34](https://github.com/nostr-protocol/nips/blob/master/34.md) | Git stuff | ❌ |
+| [NIP-35](https://github.com/nostr-protocol/nips/blob/master/35.md) | Torrents | ❌ |
+| [NIP-36](https://github.com/nostr-protocol/nips/blob/master/36.md) | Sensitive Content | ❌ |
+| [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ❌ |
+| [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User Statuses | ✅ |
+| [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ❌ |
+| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp | ❌ |
+| [NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) | Client Auth to Relays | ❌ |
+| [NIP-43](https://github.com/nostr-protocol/nips/blob/master/43.md) | Relay Access Metadata | ❌ |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted Payloads | ✅ |
+| [NIP-45](https://github.com/nostr-protocol/nips/blob/master/45.md) | Counting results | ❌ |
+| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Remote Signing | ✅ |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Wallet Connect | ✅ |
+| [NIP-48](https://github.com/nostr-protocol/nips/blob/master/48.md) | Proxy Tags | ❌ |
+| [NIP-49](https://github.com/nostr-protocol/nips/blob/master/49.md) | Private Key Encryption | ❌ |
+| [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search Capability | ✅ |
+| [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists | ✅ |
+| [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md) | Calendar Events | ❌ |
+| [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live Activities | ✅ |
+| [NIP-54](https://github.com/nostr-protocol/nips/blob/master/54.md) | Wiki | ❌ |
+| [NIP-56](https://github.com/nostr-protocol/nips/blob/master/56.md) | Reporting | ❌ |
+| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps | ✅ |
+| [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ❌ |
+| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
+| [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu Wallet | ✅ |
+| [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ❌ |
+| [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ❌ |
+| [NIP-64](https://github.com/nostr-protocol/nips/blob/master/64.md) | Chess (PGN) | ❌ |
+| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata | ✅ |
+| [NIP-66](https://github.com/nostr-protocol/nips/blob/master/66.md) | Relay Discovery | ❌ |
+| [NIP-68](https://github.com/nostr-protocol/nips/blob/master/68.md) | Picture-first feeds | ✅ |
+| [NIP-69](https://github.com/nostr-protocol/nips/blob/master/69.md) | P2P Order events | ❌ |
+| [NIP-70](https://github.com/nostr-protocol/nips/blob/master/70.md) | Protected Events | ❌ |
+| [NIP-71](https://github.com/nostr-protocol/nips/blob/master/71.md) | Video Events | ✅ |
+| [NIP-72](https://github.com/nostr-protocol/nips/blob/master/72.md) | Moderated Communities | ✅ |
+| [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) | External Content IDs | ❌ |
+| [NIP-75](https://github.com/nostr-protocol/nips/blob/master/75.md) | Zap Goals | ❌ |
+| [NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy Syncing | ❌ |
+| [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | App-specific data | ✅ |
+| [NIP-7D](https://github.com/nostr-protocol/nips/blob/master/7D.md) | Threads | ❌ |
+| [NIP-84](https://github.com/nostr-protocol/nips/blob/master/84.md) | Highlights | ❌ |
+| [NIP-86](https://github.com/nostr-protocol/nips/blob/master/86.md) | Relay Management API | ❌ |
+| [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Mint Discoverability | ✅ |
+| [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls | ✅ |
+| [NIP-89](https://github.com/nostr-protocol/nips/blob/master/89.md) | App Handlers | ❌ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
-| [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice messages | ✅ |
-| [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web bookmarks | ✅ |
+| [NIP-92](https://github.com/nostr-protocol/nips/blob/master/92.md) | Media Attachments | ✅ |
+| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata | ❌ |
+| [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | HTTP Auth | ❌ |
+| [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md) | Classified Listings | ❌ |
+| [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice Messages | ✅ |
+| [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web Bookmarks | ✅ |
+| [NIP-B7](https://github.com/nostr-protocol/nips/blob/master/B7.md) | Blossom | ✅ |
+| [NIP-BE](https://github.com/nostr-protocol/nips/blob/master/BE.md) | BLE Communications | ❌ |
+| [NIP-C0](https://github.com/nostr-protocol/nips/blob/master/C0.md) | Code Snippets | ❌ |
+| [NIP-C7](https://github.com/nostr-protocol/nips/blob/master/C7.md) | Chats | ❌ |
+| [NIP-EE](https://github.com/nostr-protocol/nips/blob/master/EE.md) | E2EE MLS Protocol | ❌ |
 
 ### Blossom
 
 | BUD | Description | Status |
 |-----|-------------|--------|
-| [BUD-01](https://github.com/hzrd149/blossom) | Core Blossom protocol for decentralized blob storage | ✅ |
+| [BUD-01](https://github.com/hzrd149/blossom/blob/master/buds/01.md) | Server requirements | ✅ |
+| [BUD-02](https://github.com/hzrd149/blossom/blob/master/buds/02.md) | Blob upload/management | ✅ |
+| [BUD-03](https://github.com/hzrd149/blossom/blob/master/buds/03.md) | User Server List | ✅ |
+| [BUD-04](https://github.com/hzrd149/blossom/blob/master/buds/04.md) | Mirroring blobs | ❌ |
+| [BUD-05](https://github.com/hzrd149/blossom/blob/master/buds/05.md) | Media optimization | ❌ |
+| [BUD-06](https://github.com/hzrd149/blossom/blob/master/buds/06.md) | Upload requirements | ❌ |
+| [BUD-07](https://github.com/hzrd149/blossom/blob/master/buds/07.md) | Payment required | ❌ |
+| [BUD-08](https://github.com/hzrd149/blossom/blob/master/buds/08.md) | File Metadata Tags | ❌ |
+| [BUD-09](https://github.com/hzrd149/blossom/blob/master/buds/09.md) | Blob Report | ❌ |
+| [BUD-10](https://github.com/hzrd149/blossom/blob/master/buds/10.md) | Blossom URI Schema | ❌ |
 
 ### Cashu
 
@@ -380,84 +389,32 @@ The wallet is built on [CDK (Cashu Development Kit)](https://github.com/cashubtc
 
 | NUT | Description | Status |
 |-----|-------------|--------|
-| [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) | Notation, terminology, and encoding | ✅ |
-| [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md) | Mint public key exchange | ✅ |
-| [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md) | Keysets and keyset IDs | ✅ |
-| [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md) | Swapping tokens (proof consolidation) | ✅ |
-| [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md) | Minting tokens (Lightning deposits) | ✅ |
-| [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md) | Melting tokens (Lightning withdrawals) | ✅ |
-| [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md) | Mint information | ✅ |
-| [NUT-07](https://github.com/cashubtc/nuts/blob/main/07.md) | Token state check (spent proof cleanup) | ✅ |
-| [NUT-08](https://github.com/cashubtc/nuts/blob/main/08.md) | Lightning fee return (overpaid fees) | ✅ |
-| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore (proof recovery) | ✅ |
+| [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) | Notation and Encoding | ✅ |
+| [NUT-01](https://github.com/cashubtc/nuts/blob/main/01.md) | Mint public keys | ✅ |
+| [NUT-02](https://github.com/cashubtc/nuts/blob/main/02.md) | Keysets and fees | ✅ |
+| [NUT-03](https://github.com/cashubtc/nuts/blob/main/03.md) | Swapping tokens | ✅ |
+| [NUT-04](https://github.com/cashubtc/nuts/blob/main/04.md) | Minting tokens | ✅ |
+| [NUT-05](https://github.com/cashubtc/nuts/blob/main/05.md) | Melting tokens | ✅ |
+| [NUT-06](https://github.com/cashubtc/nuts/blob/main/06.md) | Mint info | ✅ |
+| [NUT-07](https://github.com/cashubtc/nuts/blob/main/07.md) | Token state check | ✅ |
+| [NUT-08](https://github.com/cashubtc/nuts/blob/main/08.md) | Overpaid fees | ✅ |
+| [NUT-09](https://github.com/cashubtc/nuts/blob/main/09.md) | Signature restore | ✅ |
 | [NUT-10](https://github.com/cashubtc/nuts/blob/main/10.md) | Spending conditions | ✅ |
-| [NUT-11](https://github.com/cashubtc/nuts/blob/main/11.md) | Pay-to-Public-Key (P2PK) | ✅ |
+| [NUT-11](https://github.com/cashubtc/nuts/blob/main/11.md) | P2PK | ✅ |
 | [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) | DLEQ proofs | ✅ |
 | [NUT-13](https://github.com/cashubtc/nuts/blob/main/13.md) | Deterministic secrets | ✅ |
-| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | Hashed Timelock Contracts (HTLC) | ✅ |
-| [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments (MPP) | ✅ |
+| [NUT-14](https://github.com/cashubtc/nuts/blob/main/14.md) | HTLCs | ✅ |
+| [NUT-15](https://github.com/cashubtc/nuts/blob/main/15.md) | Multi-path payments | ✅ |
+| [NUT-16](https://github.com/cashubtc/nuts/blob/main/16.md) | Animated QR codes | ❌ |
 | [NUT-17](https://github.com/cashubtc/nuts/blob/main/17.md) | WebSocket subscriptions | ✅ |
 | [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) | Payment requests | ✅ |
 | [NUT-19](https://github.com/cashubtc/nuts/blob/main/19.md) | Cached responses | ✅ |
 | [NUT-20](https://github.com/cashubtc/nuts/blob/main/20.md) | Signature on mint quote | ✅ |
-| [NUT-21](https://github.com/cashubtc/nuts/blob/main/21.md) | Clear authentication (protected mints) | ✅ |
+| [NUT-21](https://github.com/cashubtc/nuts/blob/main/21.md) | Clear authentication | ✅ |
 | [NUT-22](https://github.com/cashubtc/nuts/blob/main/22.md) | Blind authentication | ✅ |
-
-**Wallet Features:**
-- Multi-mint support via CDK's `MultiMintWallet`
-- NIP-60 integration (encrypted token storage on Nostr relays)
-- NIP-87 mint discovery (find mints recommended by the community)
-- Deterministic seed derivation from Nostr keys (survives app reinstall)
-- Atomic keyset counter management in IndexedDB
-- WebSocket quote status with HTTP polling fallback
-- P2PK token locking to npub recipients
-- HTLC spending conditions
-- Optional DLEQ verification on receive
-- Proof optimization (consolidate many small proofs)
-- Inter-mint transfers via Lightning
-- Protected mint authentication (NUT-21/22)
-- Proof recovery via signature restore (NUT-09)
-
-## 🔒 Security
-
-The Cashu wallet implementation includes several security measures:
-
-- **Reserved Proof Protection**: Cleanup operations check for active transactions before removing Reserved proofs, preventing accidental fund loss during concurrent operations
-- **URL Normalization**: Mint URLs are consistently normalized to prevent mismatches when filtering proofs
-- **Keyset ID Validation**: Keyset IDs are validated against CDK V1/V2 format requirements (16 or 66 hex characters with proper version prefix) before URL interpolation, preventing path traversal
-- **NUT Capability Detection**: Comprehensive detection of mint capabilities including NUT-19 (cached responses) and NUT-21/22 (authentication)
-
-## 🔧 Configuration
-
-### Default Relays
-
-The client connects to a default set of popular Nostr relays. Users can customize their relay list in Settings.
-
-### Environment Variables
-
-No environment variables are required. All configuration is managed through the UI and stored locally or synced via NIP-78.
-
-### Theme Configuration
-
-Themes are configured in `tailwind.config.js` with CSS variables for easy customization. The theme system supports:
-- Light mode
-- Dark mode
-- System preference detection
-- Persistent user preference (LocalStorage + NIP-78 sync)
-
-## 🎯 Roadmap
-
-### In Planning
-- 🔄 **Negentropy Sync** - 10-100x bandwidth reduction
-- 🔄 **Database Cleanup** - Auto-delete old events
-- 🔄 **Relay Statistics UI** - Monitor relay performance
-- 🔄 **Background Sync Tasks** - Auto-update every 5 minutes
-- 🔄 **Advanced Filters** - Custom feed filtering and muting
-- 🔄 **Web of Trust** - Configurable WoT scoring
-- 🔄 **Virtual Scrolling** - Handle feeds with 10,000+ events
-- 🔄 **PWA Support** - Install to home screen, push notifications
-- 🔄 **Multi-account** - Switch between multiple Nostr identities
-- 🔄 **Backup/Restore** - Account data export/import
+| [NUT-23](https://github.com/cashubtc/nuts/blob/main/23.md) | Payment Method: BOLT11 | ❌ |
+| [NUT-24](https://github.com/cashubtc/nuts/blob/main/24.md) | HTTP 402 Payment Required | ❌ |
+| [NUT-25](https://github.com/cashubtc/nuts/blob/main/25.md) | Payment Method: BOLT12 | ❌ |
 
 ## 🤝 Contributing
 
@@ -489,6 +446,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 - **[rust-nostr](https://rust-nostr.org/)** - Comprehensive Nostr SDK by [@yukibtc](https://github.com/yukibtc)
   - Special thanks for the IndexedDB implementation that enabled 0.2.0's performance gains
+- **[CDK (Cashu Development Kit)](https://github.com/cashubtc/cdk)** - Production-grade Cashu ecash wallet implementation
 - **[Dioxus](https://dioxuslabs.com/)** - Modern Rust web framework with excellent reactive state management
 - **[Nostr Protocol](https://nostr.com)** - Decentralized communication protocol
 - **The Nostr Community** - For building the decentralized social web
@@ -503,8 +461,8 @@ MIT License - See [LICENSE](LICENSE) file for details
 ## 📞 Support
 
 - Open an [issue](https://github.com/patrickulrich/nostr.blue/issues) for bug reports
-- Find the developer on Nostr: `npub1...` (if you have a public key to share)
+- Find the developer on Nostr: `npub1patrlck0muvqevgytp4etpen0xsvrlw0hscp4qxgy40n852lqwwsz79h9a`
 
 ---
 
-**Built with ⚡ Rust + Dioxus + rust-nostr**
+**Built with ⚡ Rust + Dioxus + rust-nostr + CDK**
