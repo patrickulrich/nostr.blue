@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata, nwc_store};
+use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay_metadata, nwc_store, reactions_store};
 use crate::stores::nostr_client::RelayPoolStoreStoreExt;
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
-use crate::components::NwcSetupModal;
+use crate::components::{NwcSetupModal, ReactionDefaultsModal};
 use crate::routes::Route;
 use nostr_sdk::ToBech32;
 use gloo_storage::Storage;
@@ -52,6 +52,9 @@ pub fn Settings() -> Element {
     let mut show_nwc_modal = use_signal(|| false);
     let nwc_status = nwc_store::NWC_STATUS.read().clone();
     let nwc_balance = nwc_store::NWC_BALANCE.read().clone();
+
+    // Reactions modal state
+    let mut show_reactions_modal = use_signal(|| false);
 
     // Load settings from Nostr on mount
     use_effect(move || {
@@ -402,6 +405,75 @@ pub fn Settings() -> Element {
                         },
                         onclick: move |_| theme_store::set_theme(theme_store::Theme::System),
                         "💻 System"
+                    }
+                }
+            }
+
+            // Default Reactions section
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h3 {
+                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "😊 Default Reactions"
+                    }
+                    span {
+                        class: "text-xs text-gray-500 dark:text-gray-400",
+                        "NIP-78"
+                    }
+                }
+                p {
+                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    if auth.is_authenticated {
+                        "Customize your preferred reaction emojis. The first emoji is used when you click the heart button."
+                    } else {
+                        "Login to customize and sync your reaction preferences across devices."
+                    }
+                }
+
+                // Show current reactions preview
+                div {
+                    class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg mb-4",
+                    for reaction in reactions_store::PREFERRED_REACTIONS.read().iter().take(10) {
+                        match reaction {
+                            reactions_store::PreferredReaction::Standard { emoji } => rsx! {
+                                span { class: "text-2xl", "{emoji}" }
+                            },
+                            reactions_store::PreferredReaction::Custom { shortcode, url } => rsx! {
+                                if url.is_empty() {
+                                    span { class: "text-sm text-gray-500", ":{shortcode}:" }
+                                } else {
+                                    img {
+                                        class: "w-7 h-7 object-contain",
+                                        src: "{url}",
+                                        alt: ":{shortcode}:",
+                                        loading: "lazy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                button {
+                    class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
+                    disabled: !auth.is_authenticated,
+                    onclick: move |_| show_reactions_modal.set(true),
+                    "✏️ Edit Defaults"
+                }
+
+                // Sync status
+                if auth.is_authenticated {
+                    div {
+                        class: "mt-3 text-xs text-gray-500 dark:text-gray-400",
+                        if *reactions_store::REACTIONS_LOADING.read() {
+                            "⏳ Loading..."
+                        } else if *reactions_store::REACTIONS_LOADED.read() {
+                            "✓ Synced via NIP-78"
+                        } else {
+                            ""
+                        }
                     }
                 }
             }
@@ -1222,6 +1294,13 @@ pub fn Settings() -> Element {
         if *show_nwc_modal.read() {
             NwcSetupModal {
                 on_close: move |_| show_nwc_modal.set(false)
+            }
+        }
+
+        // Reactions Defaults Modal
+        if *show_reactions_modal.read() {
+            ReactionDefaultsModal {
+                on_close: move |_| show_reactions_modal.set(false)
             }
         }
     }

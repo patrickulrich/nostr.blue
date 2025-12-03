@@ -22,4 +22,5 @@ pub mod cashu_cdk_bridge;
 pub mod cashu;  // NIP-60 Cashu wallet
 pub mod nwc_store;
 pub mod indexeddb_database;
+pub mod reactions_store;  // NIP-78 preferred reactions
 

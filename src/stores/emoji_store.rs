@@ -36,6 +36,45 @@ pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> = Signal::globa
 pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| Store::new(EmojiSetsStore::default()));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
 
+// Recent emojis (persisted to localStorage)
+const RECENT_EMOJIS_KEY: &str = "nostr_blue_recent_emojis";
+const MAX_RECENT: usize = 14;
+const DEFAULT_RECENT: &[&str] = &["❤️", "👍", "😂", "🔥", "😮", "😢", "🎉"];
+
+pub static RECENT_EMOJIS: GlobalSignal<Vec<String>> = Signal::global(|| {
+    load_recent_emojis().unwrap_or_else(|| DEFAULT_RECENT.iter().map(|s| s.to_string()).collect())
+});
+
+/// Load recent emojis from localStorage
+pub fn load_recent_emojis() -> Option<Vec<String>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use web_sys::window;
+        let storage = window()?.local_storage().ok()??;
+        let value = storage.get_item(RECENT_EMOJIS_KEY).ok()??;
+        serde_json::from_str(&value).ok()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    { None }
+}
+
+/// Save an emoji to recents (moves to front if already exists)
+pub fn save_recent_emoji(emoji: String) {
+    let mut recent = RECENT_EMOJIS.write();
+    recent.retain(|e| e != &emoji);  // Remove if exists
+    recent.insert(0, emoji);         // Add to front
+    recent.truncate(MAX_RECENT);     // Keep max
+
+    // Persist to localStorage
+    #[cfg(target_arch = "wasm32")]
+    {
+        use web_sys::window;
+        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
+            let _ = storage.set_item(RECENT_EMOJIS_KEY, &serde_json::to_string(&*recent).unwrap_or_default());
+        }
+    }
+}
+
 /// Fetch user's custom emojis (kind 10030) and emoji sets (kind 30030)
 pub async fn fetch_custom_emojis(pubkey: String) {
     log::info!("Fetching custom emojis for pubkey: {}", pubkey);

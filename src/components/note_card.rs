@@ -1,12 +1,13 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_reaction, publish_repost};
+use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost};
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
-use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu};
-use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::format_sats_compact;
 use std::time::Duration;
 
@@ -32,8 +33,6 @@ pub fn NoteCard(
     let event_id_counts = event_id.clone();
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
@@ -49,11 +48,18 @@ pub fn NoteCard(
     let mut is_author_blocked = use_signal(|| false);
     let mut show_hidden_anyway = use_signal(|| false);
 
-    // State for counts
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        precomputed_counts.as_ref().map(|c| c.likes),
+        None, // Will fetch is_liked state
+    );
 
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
@@ -62,6 +68,7 @@ pub fn NoteCard(
     let mut reposter_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // Initialize counts from precomputed data if available (batch optimization)
+    // Note: likes are handled by use_reaction hook
     use_effect(use_reactive(&precomputed_counts, move |counts_opt| {
         if let Some(counts) = counts_opt {
             // CRITICAL FIX: Don't overwrite non-zero counts with zeros from batch fetch
@@ -69,18 +76,16 @@ pub fn NoteCard(
             // Only update if new counts are non-zero OR if current counts are still at initial zero state
             let current_has_data = {
                 let reply = *reply_count.peek();
-                let like = *like_count.peek();
                 let repost = *repost_count.peek();
                 let zap = *zap_amount_sats.peek();
-                reply > 0 || like > 0 || repost > 0 || zap > 0
+                reply > 0 || repost > 0 || zap > 0
             };
 
-            let new_has_data = counts.replies > 0 || counts.likes > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
+            let new_has_data = counts.replies > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
 
             // Only update if: new data exists, OR no current data exists
             if new_has_data || !current_has_data {
                 reply_count.set(counts.replies.min(500));
-                like_count.set(counts.likes.min(500));
                 repost_count.set(counts.reposts.min(500));
                 zap_amount_sats.set(counts.zap_amount_sats);
             }
@@ -89,11 +94,12 @@ pub fn NoteCard(
 
     // Fetch counts individually if not precomputed (fallback for single-note views)
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
+    // Note: Reactions/likes are handled by use_reaction hook
     use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
         spawn(async move {
             // Only consider precomputed if it actually has data (not just zeros from batch init)
             let has_precomputed = counts_opt.as_ref().map_or(false, |c|
-                c.replies > 0 || c.likes > 0 || c.reposts > 0 || c.zap_amount_sats > 0
+                c.replies > 0 || c.reposts > 0 || c.zap_amount_sats > 0
             );
             let client = match get_client() {
                 Some(c) => c,
@@ -105,43 +111,32 @@ pub fn NoteCard(
                 Err(_) => return,
             };
 
-            // Create a combined filter for all interaction kinds (replies, likes, reposts, zaps)
+            // Create a combined filter for interaction kinds (replies, reposts, zaps)
+            // Note: Reactions are handled by use_reaction hook
             let combined_filter = Filter::new()
                 .kinds(vec![
                     Kind::TextNote,      // kind 1 - replies
-                    Kind::Reaction,      // kind 7 - likes
                     Kind::Repost,        // kind 6 - reposts
                     Kind::from(9735),    // kind 9735 - zaps
                 ])
                 .event(event_id_parsed)
-                .limit(2000); // Increased limit to accommodate all event types
+                .limit(2000);
 
-            // Single fetch for all interaction types
+            // Single fetch for interaction types (excluding reactions - handled by hook)
             if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
                 // Get current user's pubkey to check if they've already reacted
                 let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
 
                 // Partition events by kind
                 let mut replies = 0;
-                let mut likes = 0;
                 let mut reposts = 0;
                 let mut total_sats = 0u64;
-                let mut user_has_liked = false;
                 let mut user_has_reposted = false;
                 let mut user_has_zapped = false;
 
                 for event in events {
                     match event.kind {
                         Kind::TextNote => replies += 1,
-                        Kind::Reaction => {
-                            likes += 1;
-                            // Check if this reaction is from the current user
-                            if let Some(ref user_pk) = current_user_pubkey {
-                                if event.pubkey.to_string() == *user_pk {
-                                    user_has_liked = true;
-                                }
-                            }
-                        },
                         Kind::Repost => {
                             reposts += 1;
                             // Check if this repost is from the current user
@@ -225,15 +220,14 @@ pub fn NoteCard(
                 }
 
                 // Update counts only if we don't have precomputed data
+                // Note: likes are handled by use_reaction hook
                 if !has_precomputed {
                     reply_count.set(replies.min(500));
-                    like_count.set(likes.min(500));
                     repost_count.set(reposts.min(500));
                     zap_amount_sats.set(total_sats);
                 }
 
-                // Always update user interaction flags
-                is_liked.set(user_has_liked);
+                // Always update user interaction flags (except is_liked - handled by hook)
                 is_reposted.set(user_has_reposted);
                 is_zapped.set(user_has_zapped);
             }
@@ -456,12 +450,6 @@ pub fn NoteCard(
     });
 
     // Compute dynamic class strings
-    let like_button_class = if *is_liked.read() {
-        "flex items-center text-red-500 transition"
-    } else {
-        "flex items-center text-muted-foreground hover:text-red-500 transition"
-    };
-
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 transition"
     } else {
@@ -686,57 +674,10 @@ pub fn NoteCard(
                             }
                         }
 
-                        // Like button
-                        button {
-                            class: "{like_button_class} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded",
-                            disabled: !has_signer || *is_liking.read() || *is_liked.read(),
-                            onclick: move |e: MouseEvent| {
-                                e.stop_propagation();
-
-                                if !has_signer || *is_liking.read() || *is_liked.read() {
-                                    return;
-                                }
-
-                                let event_id_clone = event_id_like.clone();
-                                let author_pubkey_clone = author_pubkey_like.clone();
-
-                                is_liking.set(true);
-
-                                // Like - publish reaction
-                                spawn(async move {
-                                    match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                        Ok(reaction_id) => {
-                                            log::info!("Liked event, reaction ID: {}", reaction_id);
-                                            is_liked.set(true);
-                                            // Increment like count locally
-                                            let current_count = *like_count.read();
-                                            like_count.set(current_count.saturating_add(1));
-                                            is_liking.set(false);
-                                        }
-                                        Err(e) => {
-                                            log::error!("Failed to like event: {}", e);
-                                            is_liking.set(false);
-                                        }
-                                    }
-                                });
-                            },
-                            HeartIcon {
-                                class: "h-4 w-4".to_string(),
-                                filled: *is_liked.read()
-                            }
-                            span {
-                                class: "text-xs",
-                                {
-                                    let count = *like_count.read();
-                                    if count > 500 {
-                                        "500+".to_string()
-                                    } else if count > 0 {
-                                        count.to_string()
-                                    } else {
-                                        "".to_string()
-                                    }
-                                }
-                            }
+                        // Like button with reaction picker
+                        ReactionButton {
+                            reaction: reaction.clone(),
+                            has_signer: has_signer,
                         }
 
                         // Zap button (only show if author has lightning address)

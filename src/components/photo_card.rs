@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_reaction, publish_note, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note, get_client, HAS_SIGNER};
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{HeartIcon, MessageCircleIcon, BookmarkIcon, ZapIcon};
-use crate::components::ZapModal;
+use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
+use crate::components::{ZapModal, ReactionButton};
 use crate::utils::format_sats_compact;
 use std::time::Duration;
 
@@ -97,20 +98,25 @@ pub fn PhotoCard(event: Event) -> Element {
     let images_carousel = images.clone();
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     // Read bookmark state reactively - will update when store changes
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        None, // No precomputed count for photos
+        None, // Will fetch is_liked state
+    );
+
     // State for current image (carousel)
     let mut current_image_index = use_signal(|| 0usize);
 
-    // State for counts
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
     // State for author profile
@@ -179,37 +185,7 @@ pub fn PhotoCard(event: Event) -> Element {
 
             reply_count.set(unique_replies.len());
 
-            // Fetch like count (kind 7 reactions)
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                // Get current user's pubkey to check if they've already liked
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
-                            }
-                        }
-                    }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
-                }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
-            }
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch zap receipts (kind 9735) and calculate total
             let zap_filter = Filter::new()
@@ -444,44 +420,12 @@ pub fn PhotoCard(event: Event) -> Element {
             div {
                 class: "flex items-center gap-4 px-3 py-2",
 
-                // Like button
-                button {
-                    class: if *is_liked.read() {
-                        "flex items-center gap-1 text-red-500"
-                    } else {
-                        "flex items-center gap-1 hover:text-red-500 transition"
-                    },
-                    disabled: !has_signer || *is_liking.read() || *is_liked.read(),
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        if !has_signer || *is_liking.read() || *is_liked.read() {
-                            return;
-                        }
-
-                        let event_id_clone = event_id_like.clone();
-                        let author_pubkey_clone = author_pubkey_like.clone();
-
-                        is_liking.set(true);
-
-                        spawn(async move {
-                            match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                Ok(_) => {
-                                    is_liked.set(true);
-                                    let current_count = *like_count.read();
-                                    like_count.set(current_count + 1);
-                                    is_liking.set(false);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to like: {}", e);
-                                    is_liking.set(false);
-                                }
-                            }
-                        });
-                    },
-                    HeartIcon {
-                        class: "w-6 h-6".to_string(),
-                        filled: *is_liked.read()
-                    }
+                // Like button with reaction picker
+                ReactionButton {
+                    reaction: reaction.clone(),
+                    has_signer: has_signer,
+                    icon_class: "w-6 h-6".to_string(),
+                    count_class: "text-sm".to_string(),
                 }
 
                 // Comment button - navigate to photo detail
@@ -593,11 +537,11 @@ pub fn PhotoCard(event: Event) -> Element {
             // Like count
             div {
                 class: "px-3 pb-2",
-                if *like_count.read() > 0 {
+                if *reaction.like_count.read() > 0 {
                     span {
                         class: "font-semibold text-sm",
                         {
-                            let count = *like_count.read();
+                            let count = *reaction.like_count.read();
                             if count == 1 {
                                 format!("{} like", count)
                             } else {

@@ -1,0 +1,157 @@
+//! Reaction button component with emoji picker
+//! Encapsulates the like button, reaction picker, and click-outside-to-close behavior
+
+use dioxus::prelude::*;
+use crate::hooks::{UseReaction, ReactionState, ReactionEmoji, format_count};
+use crate::components::InlineReactionPicker;
+use crate::components::ReactionDefaultsModal;
+use crate::components::icons::HeartIcon;
+use crate::stores::reactions_store::get_default_reaction;
+
+#[derive(Props, Clone, PartialEq)]
+pub struct ReactionButtonProps {
+    /// The reaction hook instance from use_reaction()
+    pub reaction: UseReaction,
+    /// Whether a signer is available
+    pub has_signer: bool,
+    /// Icon size class (e.g., "h-4 w-4", "w-5 h-5", "w-6 h-6")
+    #[props(default = "h-4 w-4".to_string())]
+    pub icon_class: String,
+    /// Additional button classes
+    #[props(default = String::new())]
+    pub button_class: String,
+    /// Text size class for count
+    #[props(default = "text-xs".to_string())]
+    pub count_class: String,
+}
+
+#[component]
+pub fn ReactionButton(props: ReactionButtonProps) -> Element {
+    let mut show_picker = use_signal(|| false);
+    let mut show_defaults_modal = use_signal(|| false);
+
+    let is_liked = *props.reaction.is_liked.read();
+    let like_count = *props.reaction.like_count.read();
+    let is_pending = matches!(*props.reaction.state.read(), ReactionState::Pending);
+    let user_reaction = props.reaction.user_reaction.read().clone();
+
+    let base_class = if is_liked {
+        "flex items-center text-red-500"
+    } else {
+        "flex items-center text-muted-foreground hover:text-red-500"
+    };
+
+    let button_class = if props.button_class.is_empty() {
+        format!("{} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded transition", base_class)
+    } else {
+        format!("{} {}", base_class, props.button_class)
+    };
+
+    // Determine what to display based on user's reaction
+    let icon_class = props.icon_class.clone();
+
+    rsx! {
+        div {
+            class: "relative",
+
+            // Like button - click for quick like, right-click for reaction picker
+            button {
+                class: "{button_class}",
+                disabled: !props.has_signer || is_pending,
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    if props.has_signer {
+                        // Use user's default reaction instead of simple toggle
+                        if is_liked {
+                            // Already liked - unlike it
+                            props.reaction.react_with.call(ReactionEmoji::Unlike);
+                        } else if let Some(default) = get_default_reaction() {
+                            // Use user's preferred default reaction
+                            props.reaction.react_with.call(default.to_reaction_emoji());
+                        } else {
+                            // Fallback to standard like
+                            props.reaction.toggle_like.call(());
+                        }
+                    }
+                },
+                // Right-click to show reaction picker
+                oncontextmenu: move |e: MouseEvent| {
+                    e.prevent_default();
+                    e.stop_propagation();
+                    if props.has_signer {
+                        let current = *show_picker.peek();
+                        show_picker.set(!current);
+                    }
+                },
+                // Display emoji based on user's reaction
+                match &user_reaction {
+                    Some(ReactionEmoji::Custom { url, shortcode }) => {
+                        rsx! {
+                            img {
+                                class: "{icon_class} object-contain",
+                                src: "{url}",
+                                alt: ":{shortcode}:",
+                                loading: "lazy"
+                            }
+                        }
+                    }
+                    Some(ReactionEmoji::Standard(emoji)) => {
+                        rsx! {
+                            span {
+                                class: "{icon_class} flex items-center justify-center",
+                                "{emoji}"
+                            }
+                        }
+                    }
+                    // Like (+) or no reaction - show heart
+                    _ => {
+                        rsx! {
+                            HeartIcon {
+                                class: icon_class.clone(),
+                                filled: is_liked
+                            }
+                        }
+                    }
+                }
+                if like_count > 0 {
+                    span {
+                        class: "{props.count_class}",
+                        { format_count(like_count) }
+                    }
+                }
+            }
+
+            // Reaction picker dropdown with backdrop
+            if *show_picker.read() {
+                // Invisible backdrop to catch outside clicks
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_picker.set(false);
+                    },
+                }
+                div {
+                    class: "absolute bottom-full left-0 mb-2 z-50",
+                    InlineReactionPicker {
+                        on_reaction: move |emoji: ReactionEmoji| {
+                            props.reaction.react_with.call(emoji);
+                            show_picker.set(false);
+                        },
+                        on_settings: move |_| {
+                            show_picker.set(false);
+                            show_defaults_modal.set(true);
+                        }
+                    }
+                }
+            }
+
+            // Reaction defaults modal
+            if *show_defaults_modal.read() {
+                ReactionDefaultsModal {
+                    on_close: move |_| show_defaults_modal.set(false)
+                }
+            }
+        }
+    }
+}
