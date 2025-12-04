@@ -1510,6 +1510,31 @@ pub async fn publish_repost(
     Ok(repost_id)
 }
 
+/// Delete a repost event (Kind 6) using NIP-9 Event Deletion
+pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot delete events.".to_string());
+    }
+
+    log::info!("Deleting repost: {}", repost_event_id);
+
+    let event_id = nostr::EventId::from_hex(&repost_event_id)
+        .map_err(|e| format!("Invalid event ID: {}", e))?;
+
+    // Create deletion event (kind 5) using NIP-9
+    use nostr::nips::nip09::EventDeletionRequest;
+    let request = EventDeletionRequest::new().id(event_id);
+    let builder = nostr::EventBuilder::delete(request);
+
+    client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish deletion: {}", e))?;
+
+    log::info!("Repost deleted successfully");
+    Ok(())
+}
+
 /// Fetch articles (kind 30023 - NIP-23 long-form content)
 /// Returns events sorted by created_at descending (newest first)
 pub async fn fetch_articles(

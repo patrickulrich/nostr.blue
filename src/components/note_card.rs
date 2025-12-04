@@ -2,12 +2,12 @@ use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
 use nostr_sdk::nips::nip19::Nip19Event;
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost};
+use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost, delete_repost};
 use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
-use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton};
+use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::format_sats_compact;
 use std::time::Duration;
@@ -36,6 +36,8 @@ pub fn NoteCard(
     // State for interactions
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
+    let mut user_repost_id = use_signal(|| None::<String>);
+    let mut show_undo_repost_confirm = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
@@ -136,6 +138,7 @@ pub fn NoteCard(
                 let mut reposts = 0;
                 let mut total_sats = 0u64;
                 let mut user_has_reposted = false;
+                let mut user_repost_event_id: Option<String> = None;
                 let mut user_has_zapped = false;
 
                 for event in events {
@@ -147,6 +150,7 @@ pub fn NoteCard(
                             if let Some(ref user_pk) = current_user_pubkey {
                                 if event.pubkey.to_string() == *user_pk {
                                     user_has_reposted = true;
+                                    user_repost_event_id = Some(event.id.to_hex());
                                 }
                             }
                         },
@@ -233,6 +237,7 @@ pub fn NoteCard(
 
                 // Always update user interaction flags (except is_liked - handled by hook)
                 is_reposted.set(user_has_reposted);
+                user_repost_id.set(user_repost_event_id);
                 is_zapped.set(user_has_zapped);
             }
         });
@@ -676,39 +681,46 @@ pub fn NoteCard(
                                     class: "absolute bottom-full left-0 mb-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50",
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
 
-                                    // Repost option
+                                    // Repost/Undo Repost option
                                     button {
                                         class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
                                         onclick: move |e: MouseEvent| {
                                             e.stop_propagation();
                                             show_repost_menu.set(false);
 
-                                            let event_id_clone = event_id_repost.clone();
-                                            let author_pubkey_clone = author_pubkey_repost.clone();
+                                            if *is_reposted.read() {
+                                                // Show confirmation modal for undo
+                                                show_undo_repost_confirm.set(true);
+                                            } else {
+                                                // Create new repost
+                                                let event_id_clone = event_id_repost.clone();
+                                                let author_pubkey_clone = author_pubkey_repost.clone();
 
-                                            is_reposting.set(true);
+                                                is_reposting.set(true);
 
-                                            spawn(async move {
-                                                match publish_repost(event_id_clone, author_pubkey_clone, None).await {
-                                                    Ok(repost_id) => {
-                                                        log::info!("Reposted event, repost ID: {}", repost_id);
-                                                        is_reposted.set(true);
-                                                        let current_count = *repost_count.peek();
-                                                        repost_count.set(current_count + 1);
-                                                        is_reposting.set(false);
+                                                spawn(async move {
+                                                    match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                                        Ok(repost_id) => {
+                                                            log::info!("Reposted event, repost ID: {}", repost_id);
+                                                            is_reposted.set(true);
+                                                            user_repost_id.set(Some(repost_id));
+                                                            let current_count = *repost_count.peek();
+                                                            repost_count.set(current_count + 1);
+                                                            is_reposting.set(false);
+                                                        }
+                                                        Err(e) => {
+                                                            log::error!("Failed to repost event: {}", e);
+                                                            is_reposting.set(false);
+                                                        }
                                                     }
-                                                    Err(e) => {
-                                                        log::error!("Failed to repost event: {}", e);
-                                                        is_reposting.set(false);
-                                                    }
-                                                }
-                                            });
+                                                });
+                                            }
                                         },
                                         Repeat2Icon {
                                             class: "h-4 w-4".to_string(),
                                             filled: false
                                         }
-                                        "Repost"
+                                        if *is_reposted.read() { "Undo Repost" } else { "Repost" }
                                     }
 
                                     // Quote option
@@ -874,6 +886,39 @@ pub fn NoteCard(
                 on_close: move |_| {
                     show_zap_modal.set(false);
                 }
+            }
+        }
+
+        // Undo repost confirmation modal
+        if *show_undo_repost_confirm.read() {
+            ConfirmModal {
+                title: "Delete Repost?".to_string(),
+                message: "Are you sure you want to remove this repost?".to_string(),
+                confirm_text: Some("Delete".to_string()),
+                cancel_text: Some("Cancel".to_string()),
+                on_cancel: move |_| show_undo_repost_confirm.set(false),
+                on_confirm: move |_| {
+                    show_undo_repost_confirm.set(false);
+                    if let Some(repost_id) = user_repost_id.read().clone() {
+                        is_reposting.set(true);
+                        spawn(async move {
+                            match delete_repost(repost_id).await {
+                                Ok(()) => {
+                                    log::info!("Repost deleted successfully");
+                                    is_reposted.set(false);
+                                    let current_count = *repost_count.peek();
+                                    repost_count.set(current_count.saturating_sub(1));
+                                    user_repost_id.set(None);
+                                    is_reposting.set(false);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to delete repost: {}", e);
+                                    is_reposting.set(false);
+                                }
+                            }
+                        });
+                    }
+                },
             }
         }
     }
