@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
 use crate::utils::ThreadNode;
-use crate::components::{RichContent, ReplyComposer, ZapModal};
+use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, publish_reaction, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::format_sats_compact;
 use nostr_sdk::{Metadata, Filter, Kind};
@@ -34,8 +35,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut author_metadata = use_signal(|| None::<Metadata>);
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
@@ -44,9 +43,15 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
 
-    // State for counts
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        None, // No precomputed counts for comments
+    );
+
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
@@ -92,37 +97,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 reply_count.set(replies.len());
             }
 
-            // Fetch like count
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                // Get current user's pubkey to check if they've already liked
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
-                            }
-                        }
-                    }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
-                }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
-            }
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch repost count
             let repost_filter = Filter::new()
@@ -191,12 +166,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     });
 
     // Button class helpers
-    let like_button_class = if *is_liked.read() {
-        "flex items-center text-red-500 hover:text-red-600 transition"
-    } else {
-        "flex items-center text-muted-foreground hover:text-red-500 transition"
-    };
-
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 hover:text-green-600 transition"
     } else {
@@ -394,64 +363,12 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 }
                             }
 
-                            // Like button
-                            button {
-                                class: "{like_button_class} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded",
-                                disabled: !has_signer || *is_liking.read(),
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    if !has_signer || *is_liking.read() {
-                                        return;
-                                    }
-
-                                    let currently_liked = *is_liked.read();
-                                    let event_id_clone = event_id_like.clone();
-                                    let author_pubkey_clone = author_pubkey_like.clone();
-
-                                    is_liking.set(true);
-
-                                    if currently_liked {
-                                        // Unlike
-                                        is_liked.set(false);
-                                        let current_count = *like_count.read();
-                                        like_count.set(current_count.saturating_sub(1));
-                                        is_liking.set(false);
-                                    } else {
-                                        // Like
-                                        spawn(async move {
-                                            match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                                Ok(reaction_id) => {
-                                                    log::info!("Liked event, reaction ID: {}", reaction_id);
-                                                    is_liked.set(true);
-                                                    let current_count = *like_count.read();
-                                                    like_count.set(current_count.saturating_add(1));
-                                                    is_liking.set(false);
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Failed to like event: {}", e);
-                                                    is_liking.set(false);
-                                                }
-                                            }
-                                        });
-                                    }
-                                },
-                                HeartIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: *is_liked.read()
-                                }
-                                span {
-                                    class: "text-xs",
-                                    {
-                                        let count = *like_count.read();
-                                        if count > 500 {
-                                            "500+".to_string()
-                                        } else if count > 0 {
-                                            count.to_string()
-                                        } else {
-                                            "".to_string()
-                                        }
-                                    }
-                                }
+                            // Like button with reaction picker
+                            ReactionButton {
+                                reaction: reaction.clone(),
+                                has_signer: has_signer,
+                                icon_class: "h-4 w-4".to_string(),
+                                count_class: "text-xs".to_string(),
                             }
 
                             // Zap button (only show if author has lightning address)

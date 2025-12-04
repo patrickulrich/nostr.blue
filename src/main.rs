@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store};
+use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store, reactions_store};
 
 // Modules
 mod components;
@@ -44,6 +44,9 @@ fn App() -> Element {
                     log::info!("Nostr client initialized");
                     // Restore signer from stored credentials
                     auth_store::restore_session_async().await;
+
+                    // Load user's preferred reactions from Nostr (NIP-78)
+                    reactions_store::load_preferred_reactions().await;
 
                     // Restore NWC connection from LocalStorage
                     nwc_store::restore_connection().await;

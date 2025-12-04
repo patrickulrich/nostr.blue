@@ -989,7 +989,7 @@ fn VideoInfo(
                             is_liking.set(true);
 
                             spawn(async move {
-                                match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string()).await {
+                                match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string(), None).await {
                                     Ok(_) => {
                                         is_liked.set(true);
                                         let current_count = *like_count.read();
@@ -1320,7 +1320,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                     is_liking.set(true);
 
                     spawn(async move {
-                        match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string()).await {
+                        match nostr_client::publish_reaction(event_id_clone, author_pk_clone, "+".to_string(), None).await {
                             Ok(_) => {
                                 is_liked.set(true);
                                 let current_count = *like_count.read();
