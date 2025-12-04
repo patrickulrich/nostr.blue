@@ -476,7 +476,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 let emoji_for_click = emoji_str.clone();
                                                 let emoji_for_error = emoji_str.clone();
                                                 // Check if it's a URL (custom emoji) or unicode emoji
-                                                let is_url = emoji_str.starts_with("http");
+                                                let is_url = emoji_str.starts_with("http://") || emoji_str.starts_with("https://");
                                                 let has_error = is_url && failed_images.read().contains(&emoji_str);
                                                 rsx! {
                                                     button {
@@ -609,6 +609,11 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             }
                                                         }
                                                     }
+                                                }
+                                            } else {
+                                                p {
+                                                    class: "col-span-5 text-center text-gray-500 text-sm py-4",
+                                                    "Emoji set not found"
                                                 }
                                             }
                                         }

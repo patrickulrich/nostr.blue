@@ -235,8 +235,11 @@ pub async fn fetch_interaction_counts_batch(
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
 
-    // Get current user's pubkey for tracking their reactions
-    let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+    // Parse current user's pubkey once for efficient comparison (avoids string allocation per event)
+    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+        .read()
+        .as_ref()
+        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
 
     // Count interactions
     for event in events {
@@ -251,10 +254,9 @@ pub async fn fetch_interaction_counts_batch(
         // Get or create counts entry (should already exist from initialization)
         let counts = freshly_fetched.entry(event_key).or_default();
 
-        // Check if this event is from the current user
-        let is_current_user = current_user_pubkey
-            .as_ref()
-            .map(|pk| event.pubkey.to_string() == *pk)
+        // Check if this event is from the current user (direct PublicKey comparison)
+        let is_current_user = current_user_pk
+            .map(|pk| event.pubkey == pk)
             .unwrap_or(false);
 
         // Increment appropriate counter

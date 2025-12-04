@@ -69,16 +69,11 @@ pub const MAX_REACTIONS: usize = 10;
 const DEFAULT_EMOJIS: &[&str] = &["❤️", "👍", "😂", "🔥", "😮", "😢", "🎉", "🤔", "👀", "🙏"];
 
 /// Create the default reactions list
-fn default_reactions() -> Vec<PreferredReaction> {
+pub fn default_reactions() -> Vec<PreferredReaction> {
     DEFAULT_EMOJIS
         .iter()
         .map(|e| PreferredReaction::Standard { emoji: e.to_string() })
         .collect()
-}
-
-/// Public version for resetting to defaults in the modal
-pub fn default_reactions_list() -> Vec<PreferredReaction> {
-    default_reactions()
 }
 
 /// Global state for preferred reactions
@@ -93,13 +88,16 @@ pub fn get_default_reaction() -> Option<PreferredReaction> {
 
 /// Load preferred reactions from Nostr relays (NIP-78)
 pub async fn load_preferred_reactions() {
-    // Avoid duplicate loads
-    if *REACTIONS_LOADING.read() {
-        return;
+    // Atomically check and set loading flag to avoid duplicate loads
+    {
+        let mut loading = REACTIONS_LOADING.write();
+        if *loading {
+            return;
+        }
+        *loading = true;
     }
 
     log::info!("Loading preferred reactions from Nostr (NIP-78)...");
-    *REACTIONS_LOADING.write() = true;
 
     // Check if authenticated
     if !auth_store::is_authenticated() {

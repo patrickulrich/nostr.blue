@@ -171,18 +171,26 @@ pub fn use_reaction(
                 .limit(500);
 
             if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                // Parse current user's pubkey once for efficient comparison
+                let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
 
                 let mut positive_count = 0usize;
                 let mut user_liked = false;
                 let mut user_unliked = false;
                 let mut user_emoji: Option<ReactionEmoji> = None;
 
-                for reaction in reactions.iter() {
+                // Sort reactions by created_at (ascending) to process chronologically
+                // This ensures the final state reflects the user's most recent action
+                let mut reactions_vec: Vec<_> = reactions.iter().collect();
+                reactions_vec.sort_by_key(|r| r.created_at);
+
+                for reaction in reactions_vec.iter() {
                     let content = reaction.content.trim();
-                    let is_from_user = current_user_pubkey
-                        .as_ref()
-                        .map(|pk| reaction.pubkey.to_string() == *pk)
+                    let is_from_user = current_user_pk
+                        .map(|pk| reaction.pubkey == pk)
                         .unwrap_or(false);
 
                     if content == "-" {
@@ -233,9 +241,8 @@ pub fn use_reaction(
                     }
                 }
 
-                // User's final state: liked if they have a + reaction and no subsequent - reaction
-                // For simplicity, if user has any + reaction, consider them as having liked
-                // (A more sophisticated implementation could track timestamps)
+                // User's final state: since we process chronologically, user_liked/user_unliked
+                // reflect the most recent action. Final state is liked only if no subsequent unlike.
                 let final_liked = user_liked && !user_unliked;
 
                 like_count.set(positive_count);

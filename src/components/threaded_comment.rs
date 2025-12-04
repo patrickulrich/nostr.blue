@@ -367,6 +367,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             ReactionButton {
                                 reaction: reaction.clone(),
                                 has_signer: has_signer,
+                                icon_class: "h-4 w-4".to_string(),
+                                count_class: "text-xs".to_string(),
                             }
 
                             // Zap button (only show if author has lightning address)

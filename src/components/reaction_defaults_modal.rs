@@ -123,6 +123,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                     PreferredReaction::Custom { shortcode, url }
                 } else {
                     // URL not found anywhere, skip it
+                    log::warn!("Custom emoji URL not found in user's emoji stores: {}", trimmed);
                     return;
                 }
             }
@@ -381,7 +382,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                     button {
                         class: "text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300",
                         onclick: move |_| {
-                            local_reactions.set(crate::stores::reactions_store::default_reactions_list());
+                            local_reactions.set(crate::stores::reactions_store::default_reactions());
                         },
                         disabled: *saving.read(),
                         "Reset to defaults"

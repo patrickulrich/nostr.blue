@@ -134,7 +134,6 @@ pub fn VideoCard(event: Event) -> Element {
 
     // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
     // State for author profile
@@ -165,25 +164,14 @@ pub fn VideoCard(event: Event) -> Element {
                 Err(_) => return,
             };
 
-            // Fetch reply and repost count
+            // Fetch reply count
             let interaction_filter = Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
+                .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
 
             if let Ok(events) = client.fetch_events(interaction_filter, Duration::from_secs(5)).await {
-                // Count replies (TextNote, Comment) and reposts separately
-                let mut replies = 0usize;
-                let mut reposts = 0usize;
-                for event in events.iter() {
-                    match event.kind {
-                        Kind::TextNote | Kind::Comment => replies += 1,
-                        Kind::Repost => reposts += 1,
-                        _ => {}
-                    }
-                }
-                reply_count.set(replies);
-                repost_count.set(reposts);
+                reply_count.set(events.len());
             }
 
             // Note: Reactions/likes are handled by use_reaction hook

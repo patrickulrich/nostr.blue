@@ -555,6 +555,8 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 ReactionButton {
                     reaction: reaction.clone(),
                     has_signer: has_signer,
+                    icon_class: "w-4 h-4".to_string(),
+                    count_class: "text-sm".to_string(),
                 }
 
                 // Zap button
