@@ -71,14 +71,18 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
 
-    // Fetch both and combine
+    // Fetch both in parallel and combine
     let mut all_replies = Vec::new();
 
-    if let Ok(lower_replies) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
+    let (lower_result, upper_result) = tokio::join!(
+        nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10))
+    );
+
+    if let Ok(lower_replies) = lower_result {
         all_replies.extend(lower_replies);
     }
-
-    if let Ok(upper_replies) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
+    if let Ok(upper_replies) = upper_result {
         all_replies.extend(upper_replies);
     }
 
