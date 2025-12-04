@@ -218,6 +218,20 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let search_lower = use_memo(move || search_query.read().to_lowercase());
     let is_searching = !search_lower.read().is_empty();
 
+    // Memoize search results to avoid re-filtering on every render
+    let search_results = use_memo(move || {
+        let query = search_lower.read();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        EMOJI_CATEGORIES.iter()
+            .flat_map(|(_, emojis)| emojis.iter())
+            .filter(|e| e.to_lowercase().contains(query.as_str()))
+            .take(50) // Limit results for performance
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+    });
+
     rsx! {
         div {
             class: "relative",
@@ -398,26 +412,22 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         if is_searching {
                             div {
                                 class: "grid grid-cols-7 gap-2",
-                                // Search through all standard emojis
-                                for (cat_idx, (_, emojis)) in EMOJI_CATEGORIES.iter().enumerate() {
-                                    for (emoji_idx, emoji) in emojis.iter().enumerate() {
-                                        if emoji.to_lowercase().contains(search_lower.read().as_str()) {
-                                            {
-                                                let emoji_str = emoji.to_string();
-                                                let emoji_for_click = emoji_str.clone();
-                                                rsx! {
-                                                    button {
-                                                        key: "search-{cat_idx}-{emoji_idx}",
-                                                        class: "text-2xl hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition",
-                                                        onclick: move |_| {
-                                                            save_recent_emoji(emoji_for_click.clone());
-                                                            props.on_emoji_selected.call(emoji_for_click.clone());
-                                                            show_picker.set(false);
-                                                            search_query.set(String::new());
-                                                        },
-                                                        "{emoji_str}"
-                                                    }
-                                                }
+                                // Render memoized standard emoji search results
+                                for (emoji_idx, emoji_str) in search_results.read().iter().enumerate() {
+                                    {
+                                        let emoji_for_click = emoji_str.clone();
+                                        let emoji_display = emoji_str.clone();
+                                        rsx! {
+                                            button {
+                                                key: "search-{emoji_idx}",
+                                                class: "text-2xl hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition",
+                                                onclick: move |_| {
+                                                    save_recent_emoji(emoji_for_click.clone());
+                                                    props.on_emoji_selected.call(emoji_for_click.clone());
+                                                    show_picker.set(false);
+                                                    search_query.set(String::new());
+                                                },
+                                                "{emoji_display}"
                                             }
                                         }
                                     }

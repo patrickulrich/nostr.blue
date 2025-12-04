@@ -29,6 +29,7 @@ pub struct ReactionButtonProps {
 pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut show_picker = use_signal(|| false);
     let mut show_defaults_modal = use_signal(|| false);
+    let mut custom_emoji_failed = use_signal(|| false);
 
     let is_liked = *props.reaction.is_liked.read();
     let like_count = *props.reaction.like_count.read();
@@ -58,6 +59,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
             button {
                 class: "{button_class}",
                 disabled: !props.has_signer || is_pending,
+                aria_label: if is_liked { "Remove reaction" } else { "Add reaction" },
                 onclick: move |e: MouseEvent| {
                     e.stop_propagation();
                     if props.has_signer {
@@ -86,12 +88,23 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                 // Display emoji based on user's reaction
                 match &user_reaction {
                     Some(ReactionEmoji::Custom { url, shortcode }) => {
+                        let shortcode_display = format!(":{}:", shortcode);
                         rsx! {
-                            img {
-                                class: "{icon_class} object-contain",
-                                src: "{url}",
-                                alt: ":{shortcode}:",
-                                loading: "lazy"
+                            if *custom_emoji_failed.read() {
+                                span {
+                                    class: "{icon_class} flex items-center justify-center text-xs text-gray-500",
+                                    "{shortcode_display}"
+                                }
+                            } else {
+                                img {
+                                    class: "{icon_class} object-contain",
+                                    src: "{url}",
+                                    alt: ":{shortcode}:",
+                                    loading: "lazy",
+                                    onerror: move |_| {
+                                        custom_emoji_failed.set(true);
+                                    }
+                                }
                             }
                         }
                     }
