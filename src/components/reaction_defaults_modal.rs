@@ -122,8 +122,9 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                 if let Some((shortcode, url)) = found_in_set {
                     PreferredReaction::Custom { shortcode, url }
                 } else {
-                    // URL not found anywhere, skip it
+                    // URL not found anywhere, show error to user
                     log::warn!("Custom emoji URL not found in user's emoji stores: {}", trimmed);
+                    error_msg.set(Some("Custom emoji not found in your emoji list. Try adding it first.".to_string()));
                     return;
                 }
             }

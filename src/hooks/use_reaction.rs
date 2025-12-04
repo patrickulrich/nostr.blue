@@ -206,6 +206,7 @@ pub fn use_reaction(
                         positive_count += 1;
                         if is_from_user {
                             user_liked = true;
+                            user_unliked = false; // Reset - new positive reaction overrides previous unlike
                             // Parse the user's reaction emoji
                             if content == "+" {
                                 user_emoji = Some(ReactionEmoji::Like);
