@@ -1528,7 +1528,7 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event_id);
     let builder = nostr::EventBuilder::delete(request)
-        .tag(nostr::Tag::custom(nostr::TagKind::k(), [nostr::Kind::Repost.as_u16().to_string()]));
+        .tag(nostr::Tag::custom(nostr::TagKind::k(), vec![nostr::Kind::Repost.as_u16().to_string()]));
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
