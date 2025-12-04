@@ -117,6 +117,7 @@ pub fn PhotoCard(event: Event) -> Element {
 
     // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
+    let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
     // State for author profile
@@ -153,9 +154,9 @@ pub fn PhotoCard(event: Event) -> Element {
             // NIP-22 comments use uppercase E tags for root, so we need to check both
             let event_id_hex = event_id_parsed.to_hex();
 
-            // Filter for lowercase 'e' tags (standard kind 1 replies)
+            // Filter for lowercase 'e' tags (replies and reposts)
             let reply_filter_lower = Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
                 .event(event_id_parsed)
                 .limit(500);
 
@@ -177,13 +178,25 @@ pub fn PhotoCard(event: Event) -> Element {
                 all_replies.extend(upper_replies.into_iter());
             }
 
-            // Deduplicate by event ID
+            // Deduplicate by event ID and count by kind
             let mut seen_ids = std::collections::HashSet::new();
-            let unique_replies: Vec<_> = all_replies.into_iter()
+            let unique_events: Vec<_> = all_replies.into_iter()
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
 
-            reply_count.set(unique_replies.len());
+            // Count replies (TextNote, Comment) and reposts separately
+            let mut replies = 0usize;
+            let mut reposts = 0usize;
+            for event in unique_events.iter() {
+                match event.kind {
+                    Kind::TextNote | Kind::Comment => replies += 1,
+                    Kind::Repost => reposts += 1,
+                    _ => {}
+                }
+            }
+
+            reply_count.set(replies);
+            repost_count.set(reposts);
 
             // Note: Reactions/likes are handled by use_reaction hook
 
