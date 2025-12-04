@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{NoteCard, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
-use crate::utils::repost::extract_reposted_event;
+use crate::utils::repost::expand_events_for_prefetch;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 
@@ -55,18 +55,7 @@ pub fn Explore() -> Element {
 
                     // Spawn non-blocking background prefetch for metadata
                     // Include original authors from reposts for better UX
-                    let authors_to_prefetch: Vec<Event> = feed_events.iter()
-                        .flat_map(|e| {
-                            if e.kind == Kind::Repost {
-                                match extract_reposted_event(e) {
-                                    Ok(original) => vec![e.clone(), original],
-                                    Err(_) => vec![e.clone()],
-                                }
-                            } else {
-                                vec![e.clone()]
-                            }
-                        })
-                        .collect();
+                    let authors_to_prefetch = expand_events_for_prefetch(&feed_events);
                     spawn(async move {
                         prefetch_author_metadata(&authors_to_prefetch).await;
                     });
@@ -113,18 +102,7 @@ pub fn Explore() -> Element {
 
                     // Spawn non-blocking background prefetch for missing metadata
                     // Include original authors from reposts for better UX
-                    let authors_to_prefetch: Vec<Event> = new_events.iter()
-                        .flat_map(|e| {
-                            if e.kind == Kind::Repost {
-                                match extract_reposted_event(e) {
-                                    Ok(original) => vec![e.clone(), original],
-                                    Err(_) => vec![e.clone()],
-                                }
-                            } else {
-                                vec![e.clone()]
-                            }
-                        })
-                        .collect();
+                    let authors_to_prefetch = expand_events_for_prefetch(&new_events);
                     spawn(async move {
                         prefetch_author_metadata(&authors_to_prefetch).await;
                     });

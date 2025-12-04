@@ -5,7 +5,7 @@ use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
-use crate::utils::repost::extract_reposted_event;
+use crate::utils::repost::expand_events_for_prefetch;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -255,18 +255,7 @@ pub fn Profile(pubkey: String) -> Element {
 
                     // Prefetch metadata for DB results
                     // Include original authors from reposts for better UX
-                    let db_events_for_metadata: Vec<NostrEvent> = db_outcome.events.iter()
-                        .flat_map(|e| {
-                            if e.kind == Kind::Repost {
-                                match extract_reposted_event(e) {
-                                    Ok(original) => vec![e.clone(), original],
-                                    Err(_) => vec![e.clone()],
-                                }
-                            } else {
-                                vec![e.clone()]
-                            }
-                        })
-                        .collect();
+                    let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
                     spawn(async move {
                         prefetch_author_metadata(&db_events_for_metadata).await;
                     });
@@ -327,18 +316,7 @@ pub fn Profile(pubkey: String) -> Element {
 
                             // Prefetch metadata for new events
                             // Include original authors from reposts for better UX
-                            let events_for_prefetch: Vec<NostrEvent> = new_events.iter()
-                                .flat_map(|e| {
-                                    if e.kind == Kind::Repost {
-                                        match extract_reposted_event(e) {
-                                            Ok(original) => vec![e.clone(), original],
-                                            Err(_) => vec![e.clone()],
-                                        }
-                                    } else {
-                                        vec![e.clone()]
-                                    }
-                                })
-                                .collect();
+                            let events_for_prefetch = expand_events_for_prefetch(&new_events);
                             spawn(async move {
                                 prefetch_author_metadata(&events_for_prefetch).await;
                             });
@@ -518,18 +496,7 @@ pub fn Profile(pubkey: String) -> Element {
 
                     // Spawn non-blocking background prefetch for missing metadata
                     // Include original authors from reposts for better UX
-                    let events_for_prefetch: Vec<NostrEvent> = outcome.events.iter()
-                        .flat_map(|e| {
-                            if e.kind == Kind::Repost {
-                                match extract_reposted_event(e) {
-                                    Ok(original) => vec![e.clone(), original],
-                                    Err(_) => vec![e.clone()],
-                                }
-                            } else {
-                                vec![e.clone()]
-                            }
-                        })
-                        .collect();
+                    let events_for_prefetch = expand_events_for_prefetch(&outcome.events);
                     spawn(async move {
                         prefetch_author_metadata(&events_for_prefetch).await;
                     });

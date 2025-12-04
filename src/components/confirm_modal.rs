@@ -22,6 +22,7 @@ pub fn ConfirmModal(
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "modal-title",
+                aria_describedby: "modal-message",
                 onclick: move |e| e.stop_propagation(),
 
                 // Title
@@ -34,6 +35,7 @@ pub fn ConfirmModal(
                 // Message
                 p {
                     class: "text-muted-foreground mb-6",
+                    id: "modal-message",
                     "{message}"
                 }
 
