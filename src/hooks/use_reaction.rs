@@ -346,6 +346,11 @@ pub fn use_reaction(
         // Determine if this is a positive reaction (not unlike)
         let is_positive = !matches!(emoji, ReactionEmoji::Unlike);
 
+        // Skip publishing unlike when user hasn't liked - no action needed
+        if !is_positive && !prev_liked {
+            return;
+        }
+
         // Optimistic update
         state.set(ReactionState::Pending);
         if is_positive && !prev_liked {

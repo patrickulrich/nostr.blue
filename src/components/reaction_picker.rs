@@ -63,6 +63,8 @@ pub fn ReactionPicker(props: ReactionPickerProps) -> Element {
                             PreferredReaction::Custom { shortcode, url } => {
                                 let title_text = format!(":{shortcode}:");
                                 let url_str = url.clone();
+                                let url_for_error = url.clone();
+                                let has_error = failed_images.read().contains(url);
                                 rsx! {
                                     button {
                                         key: "quick-custom-{idx}",
@@ -74,14 +76,17 @@ pub fn ReactionPicker(props: ReactionPickerProps) -> Element {
                                                 on_close.call(());
                                             }
                                         },
-                                        if url_str.is_empty() {
+                                        if url_str.is_empty() || has_error {
                                             span { class: "text-xs text-gray-500", "{title_text}" }
                                         } else {
                                             img {
                                                 src: "{url_str}",
                                                 alt: "{title_text}",
                                                 class: "w-6 h-6 object-contain",
-                                                loading: "lazy"
+                                                loading: "lazy",
+                                                onerror: move |_| {
+                                                    failed_images.write().insert(url_for_error.clone());
+                                                }
                                             }
                                         }
                                     }

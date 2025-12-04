@@ -401,7 +401,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 // Search through all standard emojis
                                 for (cat_idx, (_, emojis)) in EMOJI_CATEGORIES.iter().enumerate() {
                                     for (emoji_idx, emoji) in emojis.iter().enumerate() {
-                                        if emoji.to_lowercase().contains(&search_lower) || search_lower.len() <= 2 {
+                                        if emoji.to_lowercase().contains(&search_lower) {
                                             {
                                                 let emoji_str = emoji.to_string();
                                                 let emoji_for_click = emoji_str.clone();
