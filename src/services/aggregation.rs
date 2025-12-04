@@ -257,7 +257,7 @@ pub async fn fetch_interaction_counts_batch(
         let event_key = referenced_event_id.to_hex();
 
         // Get or create counts entry (should already exist from initialization)
-        let counts = freshly_fetched.entry(event_key).or_default();
+        let counts = freshly_fetched.entry(event_key.clone()).or_default();
 
         // Check if this event is from the current user (direct PublicKey comparison)
         let is_current_user = current_user_pk
