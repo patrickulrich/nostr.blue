@@ -615,10 +615,12 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::resul
 
 /// Publish a reaction (kind 7 event) to another event
 /// NIP-25: https://github.com/nostr-protocol/nips/blob/master/25.md
+/// NIP-30: Custom emoji support via emoji_tag parameter
 pub async fn publish_reaction(
     event_id: String,
     event_author: String,
     content: String,
+    emoji_tag: Option<(String, String)>, // (shortcode, url) for custom emoji reactions
 ) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -629,8 +631,9 @@ pub async fn publish_reaction(
     log::info!("Publishing reaction to event: {}", event_id);
 
     // Parse event ID and author pubkey
-    use nostr::{EventId, PublicKey};
+    use nostr::{EventId, PublicKey, Tag, Url};
     use nostr::nips::nip25::ReactionTarget;
+    use nostr::event::tag::TagStandard;
     use nostr_sdk::nips::nip01::Coordinate;
 
     let target_event_id = EventId::from_hex(&event_id)
@@ -668,7 +671,19 @@ pub async fn publish_reaction(
         relay_hint: None,
     };
 
-    let builder = nostr::EventBuilder::reaction(target, content);
+    let mut builder = nostr::EventBuilder::reaction(target, content);
+
+    // Add emoji tag for custom emojis (NIP-30)
+    if let Some((shortcode, url_str)) = emoji_tag {
+        if let Ok(parsed_url) = Url::parse(&url_str) {
+            builder = builder.tag(Tag::from_standardized_without_cell(
+                TagStandard::Emoji { shortcode, url: parsed_url }
+            ));
+            log::info!("Added custom emoji tag to reaction");
+        } else {
+            log::warn!("Failed to parse custom emoji URL: {}", url_str);
+        }
+    }
 
     // Publish using gossip - automatic relay routing
     let output = client.send_event_builder(builder).await

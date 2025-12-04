@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_reaction, publish_note, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note, publish_repost, get_client, HAS_SIGNER};
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{HeartIcon, MessageCircleIcon, BookmarkIcon, ZapIcon};
-use crate::components::ZapModal;
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
+use crate::components::{ZapModal, ReactionButton};
 use crate::utils::format_sats_compact;
 use std::time::Duration;
 
@@ -92,26 +93,37 @@ pub fn PhotoCard(event: Event) -> Element {
     let event_id_comment = event_id.clone();
     let event_id_comment_btn = event_id.clone();
     let event_id_link = event_id.clone();
+    let event_id_repost = event_id.clone();
+    let author_pubkey_repost = author_pubkey.clone();
 
     // Clone images for use in closures
     let images_carousel = images.clone();
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     // Read bookmark state reactively - will update when store changes
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        None, // No precomputed counts for photos
+    );
+
     // State for current image (carousel)
     let mut current_image_index = use_signal(|| 0usize);
 
-    // State for counts
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
+    let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    // State for repost button
+    let mut is_reposting = use_signal(|| false);
+    let mut is_reposted = use_signal(|| false);
 
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
@@ -147,9 +159,9 @@ pub fn PhotoCard(event: Event) -> Element {
             // NIP-22 comments use uppercase E tags for root, so we need to check both
             let event_id_hex = event_id_parsed.to_hex();
 
-            // Filter for lowercase 'e' tags (standard kind 1 replies)
+            // Filter for lowercase 'e' tags (replies and reposts)
             let reply_filter_lower = Filter::new()
-                .kinds(vec![Kind::TextNote, Kind::Comment])
+                .kinds(vec![Kind::TextNote, Kind::Comment, Kind::Repost])
                 .event(event_id_parsed)
                 .limit(500);
 
@@ -171,45 +183,40 @@ pub fn PhotoCard(event: Event) -> Element {
                 all_replies.extend(upper_replies.into_iter());
             }
 
-            // Deduplicate by event ID
+            // Deduplicate by event ID and count by kind
             let mut seen_ids = std::collections::HashSet::new();
-            let unique_replies: Vec<_> = all_replies.into_iter()
+            let unique_events: Vec<_> = all_replies.into_iter()
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
 
-            reply_count.set(unique_replies.len());
+            // Count replies (TextNote, Comment) and reposts separately
+            // Also check if current user has reposted
+            let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            let mut replies = 0usize;
+            let mut reposts = 0usize;
+            let mut user_has_reposted = false;
 
-            // Fetch like count (kind 7 reactions)
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                // Get current user's pubkey to check if they've already liked
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
+            for event in unique_events.iter() {
+                match event.kind {
+                    Kind::TextNote | Kind::Comment => replies += 1,
+                    Kind::Repost => {
+                        reposts += 1;
+                        // Check if this repost is from the current user
+                        if let Some(ref user_pk) = current_user_pubkey {
+                            if event.pubkey.to_string() == *user_pk {
+                                user_has_reposted = true;
                             }
                         }
                     }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
+                    _ => {}
                 }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
             }
+
+            reply_count.set(replies);
+            repost_count.set(reposts);
+            is_reposted.set(user_has_reposted);
+
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch zap receipts (kind 9735) and calculate total
             let zap_filter = Filter::new()
@@ -444,44 +451,12 @@ pub fn PhotoCard(event: Event) -> Element {
             div {
                 class: "flex items-center gap-4 px-3 py-2",
 
-                // Like button
-                button {
-                    class: if *is_liked.read() {
-                        "flex items-center gap-1 text-red-500"
-                    } else {
-                        "flex items-center gap-1 hover:text-red-500 transition"
-                    },
-                    disabled: !has_signer || *is_liking.read() || *is_liked.read(),
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        if !has_signer || *is_liking.read() || *is_liked.read() {
-                            return;
-                        }
-
-                        let event_id_clone = event_id_like.clone();
-                        let author_pubkey_clone = author_pubkey_like.clone();
-
-                        is_liking.set(true);
-
-                        spawn(async move {
-                            match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                Ok(_) => {
-                                    is_liked.set(true);
-                                    let current_count = *like_count.read();
-                                    like_count.set(current_count + 1);
-                                    is_liking.set(false);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to like: {}", e);
-                                    is_liking.set(false);
-                                }
-                            }
-                        });
-                    },
-                    HeartIcon {
-                        class: "w-6 h-6".to_string(),
-                        filled: *is_liked.read()
-                    }
+                // Like button with reaction picker
+                ReactionButton {
+                    reaction: reaction.clone(),
+                    has_signer: has_signer,
+                    icon_class: "w-6 h-6".to_string(),
+                    count_class: "text-sm".to_string(),
                 }
 
                 // Comment button - navigate to photo detail
@@ -502,6 +477,59 @@ pub fn PhotoCard(event: Event) -> Element {
                                     count.to_string()
                                 } else {
                                     "".to_string()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Repost button
+                button {
+                    class: if *is_reposted.read() {
+                        "flex items-center gap-1 text-green-500 transition"
+                    } else {
+                        "flex items-center gap-1 hover:text-green-500 transition"
+                    },
+                    disabled: !has_signer || *is_reposting.read(),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+
+                        if !has_signer || *is_reposting.read() {
+                            return;
+                        }
+
+                        let event_id_clone = event_id_repost.clone();
+                        let author_pubkey_clone = author_pubkey_repost.clone();
+
+                        is_reposting.set(true);
+
+                        spawn(async move {
+                            match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                Ok(repost_id) => {
+                                    log::info!("Reposted photo, repost ID: {}", repost_id);
+                                    is_reposted.set(true);
+                                    is_reposting.set(false);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to repost photo: {}", e);
+                                    is_reposting.set(false);
+                                }
+                            }
+                        });
+                    },
+                    Repeat2Icon {
+                        class: "w-6 h-6".to_string(),
+                        filled: false
+                    }
+                    if *repost_count.read() > 0 {
+                        span {
+                            class: "text-sm",
+                            {
+                                let count = *repost_count.read();
+                                if count > 500 {
+                                    "500+".to_string()
+                                } else {
+                                    count.to_string()
                                 }
                             }
                         }
@@ -593,11 +621,11 @@ pub fn PhotoCard(event: Event) -> Element {
             // Like count
             div {
                 class: "px-3 pb-2",
-                if *like_count.read() > 0 {
+                if *reaction.like_count.read() > 0 {
                     span {
                         class: "font-semibold text-sm",
                         {
-                            let count = *like_count.read();
+                            let count = *reaction.like_count.read();
                             if count == 1 {
                                 format!("{} like", count)
                             } else {
