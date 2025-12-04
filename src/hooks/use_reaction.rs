@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use crate::stores::nostr_client::{get_client, publish_reaction, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
-use crate::services::aggregation::invalidate_interaction_counts;
+use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 
 /// State of the reaction action
 #[derive(Clone, Debug, PartialEq)]
@@ -94,8 +94,7 @@ impl PartialEq for UseReaction {
 /// # Arguments
 /// * `event_id` - The hex ID of the event to react to
 /// * `event_author` - The hex pubkey of the event author
-/// * `precomputed_count` - Optional precomputed like count (from batch fetches)
-/// * `precomputed_is_liked` - Optional precomputed is_liked state
+/// * `precomputed_counts` - Optional precomputed InteractionCounts (from batch fetches)
 ///
 /// # Returns
 /// A `UseReaction` struct with signals and handlers for reaction state
@@ -105,8 +104,7 @@ impl PartialEq for UseReaction {
 /// let reaction = use_reaction(
 ///     event.id.to_hex(),
 ///     event.pubkey.to_string(),
-///     counts.as_ref().map(|c| c.likes),
-///     None,
+///     precomputed_counts.as_ref(),
 /// );
 ///
 /// button {
@@ -118,20 +116,35 @@ impl PartialEq for UseReaction {
 pub fn use_reaction(
     event_id: String,
     event_author: String,
-    precomputed_count: Option<usize>,
-    precomputed_is_liked: Option<bool>,
+    precomputed_counts: Option<&InteractionCounts>,
 ) -> UseReaction {
+    // Extract precomputed values from InteractionCounts
+    let precomputed_count = precomputed_counts.map(|c| c.likes);
+    let precomputed_is_liked = precomputed_counts.and_then(|c| c.user_liked);
+    let precomputed_user_reaction = precomputed_counts.and_then(|c| {
+        c.user_reaction.as_ref().map(|r| {
+            // Convert string to ReactionEmoji
+            if r == "+" {
+                ReactionEmoji::Like
+            } else if r == "-" {
+                ReactionEmoji::Unlike
+            } else {
+                ReactionEmoji::Standard(r.clone())
+            }
+        })
+    });
+
     // Signals for reaction state
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| None);
+    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction);
 
     // Clone for effect
     let event_id_fetch = event_id.clone();
 
     // Fetch initial state if not precomputed
-    // Only fetch if we don't have precomputed data with actual likes or is_liked state
+    // Only fetch if we don't have precomputed data with actual is_liked state
     let should_fetch = precomputed_is_liked.is_none();
 
     // Use use_reactive to properly track event_id dependency and re-run when it changes

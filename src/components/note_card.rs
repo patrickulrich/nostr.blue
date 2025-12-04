@@ -57,8 +57,7 @@ pub fn NoteCard(
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
-        precomputed_counts.as_ref().map(|c| c.likes),
-        None, // Will fetch is_liked state
+        precomputed_counts.as_ref(),
     );
 
     // State for author profile

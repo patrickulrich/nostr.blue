@@ -129,8 +129,7 @@ pub fn VideoCard(event: Event) -> Element {
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_for_like.clone(),
-        None, // No precomputed count for videos
-        None, // Will fetch is_liked state
+        None, // No precomputed counts for videos
     );
 
     // State for counts (likes handled by use_reaction hook)

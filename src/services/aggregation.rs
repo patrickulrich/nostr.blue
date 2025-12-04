@@ -16,9 +16,11 @@
 /// - Automatic eviction of stale/excess entries
 /// - Reduces redundant database queries for recently-viewed events
 
+use dioxus::prelude::ReadableExt;
 use lru::LruCache;
 use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagStandard};
 use crate::stores::nostr_client::get_client;
+use crate::stores::signer::SIGNER_INFO;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -32,6 +34,10 @@ pub struct InteractionCounts {
     pub reposts: usize,
     pub zaps: usize,
     pub zap_amount_sats: u64,
+    /// Whether the current user has liked this event (None if not checked)
+    pub user_liked: Option<bool>,
+    /// The current user's reaction emoji if they reacted (None if not checked or no reaction)
+    pub user_reaction: Option<String>,
 }
 
 /// Cache entry with TTL tracking
@@ -229,6 +235,9 @@ pub async fn fetch_interaction_counts_batch(
         freshly_fetched.insert(event_id.to_hex(), InteractionCounts::default());
     }
 
+    // Get current user's pubkey for tracking their reactions
+    let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+
     // Count interactions
     for event in events {
         // Get the event this interaction is referencing, only if it's one we requested
@@ -242,13 +251,33 @@ pub async fn fetch_interaction_counts_batch(
         // Get or create counts entry (should already exist from initialization)
         let counts = freshly_fetched.entry(event_key).or_default();
 
+        // Check if this event is from the current user
+        let is_current_user = current_user_pubkey
+            .as_ref()
+            .map(|pk| event.pubkey.to_string() == *pk)
+            .unwrap_or(false);
+
         // Increment appropriate counter
         match event.kind {
             Kind::TextNote => counts.replies += 1,
             Kind::Reaction => {
+                let content = event.content.trim();
                 // Per NIP-25, only count reactions with content != "-" as likes
-                if event.content.trim() != "-" {
+                if content != "-" {
                     counts.likes += 1;
+                }
+
+                // Track current user's reaction
+                if is_current_user {
+                    if content == "-" {
+                        // User unliked - they don't currently like this
+                        counts.user_liked = Some(false);
+                        counts.user_reaction = None;
+                    } else {
+                        // User reacted positively
+                        counts.user_liked = Some(true);
+                        counts.user_reaction = Some(content.to_string());
+                    }
                 }
             },
             Kind::Repost => counts.reposts += 1,

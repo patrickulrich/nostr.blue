@@ -38,8 +38,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     let reaction = use_reaction(
         event_id_str.clone(),
         author_pubkey.clone(),
-        None, // No precomputed count for voice messages
-        None, // Will fetch is_liked state
+        None, // No precomputed counts for voice messages
     );
 
     // Reaction counts and states (likes handled by use_reaction hook)

@@ -214,9 +214,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let emoji_sets = EMOJI_SETS.read();
     let recent_emojis = RECENT_EMOJIS.read();
 
-    // Filter standard emojis based on search
-    let search_lower = search_query.read().to_lowercase();
-    let is_searching = !search_lower.is_empty();
+    // Filter standard emojis based on search (memoized to avoid recomputing on every render)
+    let search_lower = use_memo(move || search_query.read().to_lowercase());
+    let is_searching = !search_lower.read().is_empty();
 
     rsx! {
         div {
@@ -401,7 +401,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 // Search through all standard emojis
                                 for (cat_idx, (_, emojis)) in EMOJI_CATEGORIES.iter().enumerate() {
                                     for (emoji_idx, emoji) in emojis.iter().enumerate() {
-                                        if emoji.to_lowercase().contains(&search_lower) {
+                                        if emoji.to_lowercase().contains(search_lower.read().as_str()) {
                                             {
                                                 let emoji_str = emoji.to_string();
                                                 let emoji_for_click = emoji_str.clone();
@@ -424,7 +424,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 }
                                 // Also search custom emojis by shortcode
                                 for (emoji_idx, custom_emoji) in custom_emojis.data().read().iter().enumerate() {
-                                    if custom_emoji.shortcode.to_lowercase().contains(&search_lower) {
+                                    if custom_emoji.shortcode.to_lowercase().contains(search_lower.read().as_str()) {
                                         {
                                             let shortcode = custom_emoji.shortcode.clone();
                                             let url = custom_emoji.image_url.clone();

@@ -47,8 +47,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
-        None, // No precomputed count for comments
-        None, // Will fetch is_liked state
+        None, // No precomputed counts for comments
     );
 
     // State for counts (likes handled by use_reaction hook)

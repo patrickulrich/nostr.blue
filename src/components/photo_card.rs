@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_note, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note, publish_repost, get_client, HAS_SIGNER};
 use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
 use crate::utils::format_sats_compact;
 use std::time::Duration;
@@ -93,6 +93,8 @@ pub fn PhotoCard(event: Event) -> Element {
     let event_id_comment = event_id.clone();
     let event_id_comment_btn = event_id.clone();
     let event_id_link = event_id.clone();
+    let event_id_repost = event_id.clone();
+    let author_pubkey_repost = author_pubkey.clone();
 
     // Clone images for use in closures
     let images_carousel = images.clone();
@@ -108,8 +110,7 @@ pub fn PhotoCard(event: Event) -> Element {
     let reaction = use_reaction(
         event_id_like.clone(),
         author_pubkey_like.clone(),
-        None, // No precomputed count for photos
-        None, // Will fetch is_liked state
+        None, // No precomputed counts for photos
     );
 
     // State for current image (carousel)
@@ -119,6 +120,10 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    // State for repost button
+    let mut is_reposting = use_signal(|| false);
+    let mut is_reposted = use_signal(|| false);
 
     // State for author profile
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
@@ -185,18 +190,31 @@ pub fn PhotoCard(event: Event) -> Element {
                 .collect();
 
             // Count replies (TextNote, Comment) and reposts separately
+            // Also check if current user has reposted
+            let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
             let mut replies = 0usize;
             let mut reposts = 0usize;
+            let mut user_has_reposted = false;
+
             for event in unique_events.iter() {
                 match event.kind {
                     Kind::TextNote | Kind::Comment => replies += 1,
-                    Kind::Repost => reposts += 1,
+                    Kind::Repost => {
+                        reposts += 1;
+                        // Check if this repost is from the current user
+                        if let Some(ref user_pk) = current_user_pubkey {
+                            if event.pubkey.to_string() == *user_pk {
+                                user_has_reposted = true;
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
 
             reply_count.set(replies);
             repost_count.set(reposts);
+            is_reposted.set(user_has_reposted);
 
             // Note: Reactions/likes are handled by use_reaction hook
 
@@ -459,6 +477,59 @@ pub fn PhotoCard(event: Event) -> Element {
                                     count.to_string()
                                 } else {
                                     "".to_string()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Repost button
+                button {
+                    class: if *is_reposted.read() {
+                        "flex items-center gap-1 text-green-500 transition"
+                    } else {
+                        "flex items-center gap-1 hover:text-green-500 transition"
+                    },
+                    disabled: !has_signer || *is_reposting.read(),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+
+                        if !has_signer || *is_reposting.read() {
+                            return;
+                        }
+
+                        let event_id_clone = event_id_repost.clone();
+                        let author_pubkey_clone = author_pubkey_repost.clone();
+
+                        is_reposting.set(true);
+
+                        spawn(async move {
+                            match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                Ok(repost_id) => {
+                                    log::info!("Reposted photo, repost ID: {}", repost_id);
+                                    is_reposted.set(true);
+                                    is_reposting.set(false);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to repost photo: {}", e);
+                                    is_reposting.set(false);
+                                }
+                            }
+                        });
+                    },
+                    Repeat2Icon {
+                        class: "w-6 h-6".to_string(),
+                        filled: false
+                    }
+                    if *repost_count.read() > 0 {
+                        span {
+                            class: "text-sm",
+                            {
+                                let count = *repost_count.read();
+                                if count > 500 {
+                                    "500+".to_string()
+                                } else {
+                                    count.to_string()
                                 }
                             }
                         }
