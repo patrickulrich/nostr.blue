@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{NoteCard, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
-use crate::utils::repost::expand_events_for_prefetch;
+use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 

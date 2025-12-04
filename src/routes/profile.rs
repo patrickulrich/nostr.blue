@@ -5,7 +5,7 @@ use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
-use crate::utils::repost::expand_events_for_prefetch;
+use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
