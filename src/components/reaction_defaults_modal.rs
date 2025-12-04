@@ -9,6 +9,15 @@ use crate::stores::emoji_store::{CUSTOM_EMOJIS, EMOJI_SETS, CustomEmojisStoreSto
 use crate::components::EmojiPicker;
 use crate::components::icons::SettingsIcon;
 
+/// Check if a reaction already exists in the list (by emoji content or shortcode)
+fn is_duplicate_reaction(reactions: &[PreferredReaction], new_reaction: &PreferredReaction) -> bool {
+    reactions.iter().any(|r| match (r, new_reaction) {
+        (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => a == b,
+        (PreferredReaction::Custom { shortcode: a, .. }, PreferredReaction::Custom { shortcode: b, .. }) => a == b,
+        _ => false,
+    })
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ReactionDefaultsModalProps {
     pub on_close: EventHandler<()>,
@@ -60,19 +69,11 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
         };
 
         // Check for duplicates
-        let reactions = local_reactions.read();
-        let is_duplicate = reactions.iter().any(|r| match (r, &reaction) {
-            (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => a == b,
-            (PreferredReaction::Custom { shortcode: a, .. }, PreferredReaction::Custom { shortcode: b, .. }) => a == b,
-            _ => false,
-        });
-
-        if is_duplicate {
+        if is_duplicate_reaction(&local_reactions.read(), &reaction) {
             error_msg.set(Some("This emoji is already in your list".to_string()));
             return;
         }
 
-        drop(reactions);
         local_reactions.write().push(reaction);
         new_emoji_input.set(String::new());
         error_msg.set(None);
@@ -134,15 +135,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
         };
 
         // Check for duplicates
-        let reactions = local_reactions.read();
-        let is_duplicate = reactions.iter().any(|r| match (r, &reaction) {
-            (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => a == b,
-            (PreferredReaction::Custom { shortcode: a, .. }, PreferredReaction::Custom { shortcode: b, .. }) => a == b,
-            _ => false,
-        });
-
-        if !is_duplicate {
-            drop(reactions);
+        if !is_duplicate_reaction(&local_reactions.read(), &reaction) {
             local_reactions.write().push(reaction);
             error_msg.set(None); // Clear any stale error
         }

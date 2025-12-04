@@ -214,14 +214,14 @@ pub fn use_reaction(
                             } else if content.starts_with(':') && content.ends_with(':') {
                                 // Custom emoji - look for emoji tag
                                 let shortcode = &content[1..content.len()-1];
-                                // Find emoji tag with matching shortcode
+                                // Find emoji tag with matching shortcode (use as_slice for zero-copy access)
                                 let emoji_url = reaction.tags.iter().find_map(|tag| {
-                                    let tag_vec = tag.clone().to_vec();
-                                    if tag_vec.len() >= 3
-                                        && tag_vec.first().map(|s| s.as_str()) == Some("emoji")
-                                        && tag_vec.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                    let tag_slice = tag.as_slice();
+                                    if tag_slice.len() >= 3
+                                        && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                        && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
                                     {
-                                        tag_vec.get(2).map(|s| s.to_string())
+                                        tag_slice.get(2).map(|s| s.to_string())
                                     } else {
                                         None
                                     }
