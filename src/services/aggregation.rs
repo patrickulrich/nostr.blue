@@ -241,6 +241,11 @@ pub async fn fetch_interaction_counts_batch(
         .as_ref()
         .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
 
+    // Track which events we've already processed a user reaction for.
+    // Since fetch_events() returns events sorted descending by created_at (newest first),
+    // we use "first seen wins" - the first reaction we see is the most recent one.
+    let mut user_reactions_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     // Count interactions
     for event in events {
         // Get the event this interaction is referencing, only if it's one we requested
@@ -269,8 +274,10 @@ pub async fn fetch_interaction_counts_batch(
                     counts.likes += 1;
                 }
 
-                // Track current user's reaction
-                if is_current_user {
+                // Track current user's reaction (first seen wins - newest reaction)
+                // Only process if we haven't already seen a reaction from this user for this event
+                if is_current_user && !user_reactions_seen.contains(&event_key) {
+                    user_reactions_seen.insert(event_key.clone());
                     if content == "-" {
                         // User unliked - they don't currently like this
                         counts.user_liked = Some(false);
