@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
+use nostr_sdk::nips::nip19::Nip19Event;
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost};
 use crate::hooks::use_reaction;
@@ -38,6 +39,7 @@ pub fn NoteCard(
     let mut is_zapped = use_signal(|| false);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
+    let mut show_repost_menu = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     // Read bookmark state reactively - will update when store changes
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
@@ -627,50 +629,106 @@ pub fn NoteCard(
                             }
                         }
 
-                        // Repost button
-                        button {
-                            class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
-                            disabled: !has_signer || *is_reposting.read(),
-                            onclick: move |e: MouseEvent| {
-                                e.stop_propagation();
+                        // Repost button with dropdown
+                        div {
+                            class: "relative",
 
-                                if !has_signer || *is_reposting.read() {
-                                    return;
+                            // Repost button (toggles dropdown)
+                            button {
+                                class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
+                                disabled: !has_signer || *is_reposting.read(),
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    if has_signer && !*is_reposting.read() {
+                                        show_repost_menu.toggle();
+                                    }
+                                },
+                                Repeat2Icon {
+                                    class: "h-4 w-4".to_string(),
+                                    filled: false
                                 }
-
-                                let event_id_clone = event_id_repost.clone();
-                                let author_pubkey_clone = author_pubkey_repost.clone();
-
-                                is_reposting.set(true);
-
-                                spawn(async move {
-                                    match publish_repost(event_id_clone, author_pubkey_clone, None).await {
-                                        Ok(repost_id) => {
-                                            log::info!("Reposted event, repost ID: {}", repost_id);
-                                            is_reposted.set(true);
-                                            is_reposting.set(false);
-                                        }
-                                        Err(e) => {
-                                            log::error!("Failed to repost event: {}", e);
-                                            is_reposting.set(false);
+                                span {
+                                    class: "text-xs",
+                                    {
+                                        let count = *repost_count.read();
+                                        if count > 500 {
+                                            "500+".to_string()
+                                        } else if count > 0 {
+                                            count.to_string()
+                                        } else {
+                                            "".to_string()
                                         }
                                     }
-                                });
-                            },
-                            Repeat2Icon {
-                                class: "h-4 w-4".to_string(),
-                                filled: false
+                                }
                             }
-                            span {
-                                class: "text-xs",
-                                {
-                                    let count = *repost_count.read();
-                                    if count > 500 {
-                                        "500+".to_string()
-                                    } else if count > 0 {
-                                        count.to_string()
-                                    } else {
-                                        "".to_string()
+
+                            // Dropdown menu
+                            if *show_repost_menu.read() {
+                                div {
+                                    class: "absolute bottom-full left-0 mb-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50",
+                                    onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                                    // Repost option
+                                    button {
+                                        class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
+                                        onclick: move |e: MouseEvent| {
+                                            e.stop_propagation();
+                                            show_repost_menu.set(false);
+
+                                            let event_id_clone = event_id_repost.clone();
+                                            let author_pubkey_clone = author_pubkey_repost.clone();
+
+                                            is_reposting.set(true);
+
+                                            spawn(async move {
+                                                match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                                    Ok(repost_id) => {
+                                                        log::info!("Reposted event, repost ID: {}", repost_id);
+                                                        is_reposted.set(true);
+                                                        is_reposting.set(false);
+                                                    }
+                                                    Err(e) => {
+                                                        log::error!("Failed to repost event: {}", e);
+                                                        is_reposting.set(false);
+                                                    }
+                                                }
+                                            });
+                                        },
+                                        Repeat2Icon {
+                                            class: "h-4 w-4".to_string(),
+                                            filled: false
+                                        }
+                                        "Repost"
+                                    }
+
+                                    // Quote option
+                                    button {
+                                        class: "w-full px-3 py-2 text-left hover:bg-accent text-sm flex items-center gap-2",
+                                        onclick: move |e: MouseEvent| {
+                                            e.stop_propagation();
+                                            show_repost_menu.set(false);
+
+                                            // Generate nevent1 for the quote
+                                            let nevent = Nip19Event::new(event.id)
+                                                .author(event.pubkey);
+                                            if let Ok(nevent_str) = nevent.to_bech32() {
+                                                nav.push(Route::NoteNew { quote: Some(nevent_str) });
+                                            }
+                                        },
+                                        svg {
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            class: "h-4 w-4",
+                                            fill: "none",
+                                            view_box: "0 0 24 24",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            path {
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                d: "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                                            }
+                                        }
+                                        "Quote"
                                     }
                                 }
                             }

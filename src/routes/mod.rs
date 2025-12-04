@@ -197,8 +197,8 @@ pub enum Route {
         #[route("/cashuwallet")]
         CashuWallet {},
 
-        #[route("/notes/new")]
-        NoteNew {},
+        #[route("/notes/new?:quote")]
+        NoteNew { quote: Option<String> },
 
         #[route("/articles/new")]
         ArticleNew {},
@@ -270,7 +270,7 @@ fn Layout() -> Element {
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
         current_route,
-        Route::NoteNew {}
+        Route::NoteNew { .. }
         | Route::ArticleNew {}
         | Route::PhotoNew {}
         | Route::VideoNewLandscape {}
@@ -593,7 +593,7 @@ fn Layout() -> Element {
                                     on_close: move |_| radial_menu_open.set(false),
                                     on_note_click: move |_| {
                                         radial_menu_open.set(false);
-                                        navigator.push(Route::NoteNew {});
+                                        navigator.push(Route::NoteNew { quote: None });
                                     },
                                     on_article_click: move |_| {
                                         radial_menu_open.set(false);

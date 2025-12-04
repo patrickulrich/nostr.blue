@@ -5,6 +5,7 @@ use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
+use crate::utils::repost::extract_reposted_event;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -994,10 +995,33 @@ pub fn Profile(pubkey: String) -> Element {
                                                 }
                                             }
                                         },
-                                        _ => rsx! {
-                                            NoteCard {
-                                                event: event.clone(),
-                                                collapsible: true
+                                        _ => {
+                                            // Handle reposts in Posts tab
+                                            if event.kind == Kind::Repost {
+                                                // Extract the original event from the repost content
+                                                match extract_reposted_event(event) {
+                                                    Ok(original_event) => {
+                                                        let repost_info = Some((event.pubkey, event.created_at));
+                                                        rsx! {
+                                                            NoteCard {
+                                                                event: original_event,
+                                                                repost_info: repost_info,
+                                                                collapsible: true
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(_) => {
+                                                        // Failed to extract original event, skip this repost
+                                                        rsx! {}
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! {
+                                                    NoteCard {
+                                                        event: event.clone(),
+                                                        collapsible: true
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1448,7 +1472,14 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 /// Build a filter for the given tab type
 fn build_tab_filter(public_key: PublicKey, tab: &ProfileTab, until: Option<u64>, limit: usize) -> Filter {
     let mut filter = match tab {
-        ProfileTab::Posts | ProfileTab::Replies => {
+        ProfileTab::Posts => {
+            // Include both text notes and reposts for the Posts tab
+            Filter::new()
+                .author(public_key)
+                .kinds(vec![Kind::TextNote, Kind::Repost])
+                .limit(limit)
+        }
+        ProfileTab::Replies => {
             Filter::new()
                 .author(public_key)
                 .kind(Kind::TextNote)
@@ -1498,16 +1529,23 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
     match tab {
         ProfileTab::Posts => {
             // Filter for posts only (no e-tags = not replies)
-            // Use SDK's event_ids() to check for e-tags
+            // Reposts (kind 6) are always included - they have e-tags but aren't replies
             events.into_iter()
-                .filter(|e| e.tags.event_ids().next().is_none())
+                .filter(|e| {
+                    // Always include reposts
+                    if e.kind == Kind::Repost {
+                        return true;
+                    }
+                    // For text notes, only include non-replies (no e-tags)
+                    e.tags.event_ids().next().is_none()
+                })
                 .collect()
         }
         ProfileTab::Replies => {
             // Filter for replies only (with e-tags)
-            // Use SDK's event_ids() to check for e-tags
+            // Exclude reposts - they're not replies
             events.into_iter()
-                .filter(|e| e.tags.event_ids().next().is_some())
+                .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
                 .collect()
         }
         _ => events, // No filtering needed for other tabs

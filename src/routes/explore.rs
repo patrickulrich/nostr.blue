@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{NoteCard, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
+use crate::utils::repost::extract_reposted_event;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 
@@ -187,6 +188,27 @@ pub fn Explore() -> Element {
                                 key: "{event.id}",
                                 event: event.clone()
                             }
+                        } else if event.kind == Kind::Repost {
+                            // Handle reposts - extract original event and show with repost info
+                            {
+                                match extract_reposted_event(event) {
+                                    Ok(original_event) => {
+                                        let repost_info = Some((event.pubkey, event.created_at));
+                                        rsx! {
+                                            NoteCard {
+                                                key: "{event.id}",
+                                                event: original_event,
+                                                repost_info: repost_info,
+                                                collapsible: true
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // Failed to extract original event, skip this repost
+                                        rsx! {}
+                                    }
+                                }
+                            }
                         } else {
                             NoteCard {
                                 event: event.clone(),
@@ -253,9 +275,9 @@ async fn load_global_feed_refresh() -> Result<Vec<Event>, String> {
 async fn load_global_feed_impl(until: Option<u64>, force_relay: bool) -> Result<Vec<Event>, String> {
     log::info!("Loading global feed (until: {:?}, force_relay: {})...", until, force_relay);
 
-    // Create filter for recent text notes (kind 1)
+    // Create filter for recent text notes (kind 1) and reposts (kind 6)
     let mut filter = Filter::new()
-        .kind(Kind::TextNote)
+        .kinds(vec![Kind::TextNote, Kind::Repost])
         .limit(50);
 
     // Add until timestamp if provided for pagination
