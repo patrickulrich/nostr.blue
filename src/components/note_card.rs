@@ -662,8 +662,16 @@ pub fn NoteCard(
                                 }
                             }
 
-                            // Dropdown menu
+                            // Dropdown menu with click-outside-to-close overlay
                             if *show_repost_menu.read() {
+                                // Invisible overlay to catch clicks outside the dropdown
+                                div {
+                                    class: "fixed inset-0 z-40",
+                                    onclick: move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        show_repost_menu.set(false);
+                                    },
+                                }
                                 div {
                                     class: "absolute bottom-full left-0 mb-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50",
                                     onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -685,6 +693,8 @@ pub fn NoteCard(
                                                     Ok(repost_id) => {
                                                         log::info!("Reposted event, repost ID: {}", repost_id);
                                                         is_reposted.set(true);
+                                                        let current_count = *repost_count.peek();
+                                                        repost_count.set(current_count + 1);
                                                         is_reposting.set(false);
                                                     }
                                                     Err(e) => {
@@ -711,8 +721,13 @@ pub fn NoteCard(
                                             // Generate nevent1 for the quote
                                             let nevent = Nip19Event::new(event.id)
                                                 .author(event.pubkey);
-                                            if let Ok(nevent_str) = nevent.to_bech32() {
-                                                nav.push(Route::NoteNew { quote: Some(nevent_str) });
+                                            match nevent.to_bech32() {
+                                                Ok(nevent_str) => {
+                                                    nav.push(Route::NoteNew { quote: Some(nevent_str) });
+                                                }
+                                                Err(e) => {
+                                                    log::warn!("Failed to encode nevent for quote: {}", e);
+                                                }
                                             }
                                         },
                                         svg {

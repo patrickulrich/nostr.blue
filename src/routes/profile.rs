@@ -254,7 +254,19 @@ pub fn Profile(pubkey: String) -> Element {
                     log::info!("Phase 1 complete: showing {} events from DB instantly", db_outcome.events.len());
 
                     // Prefetch metadata for DB results
-                    let db_events_for_metadata = db_outcome.events.clone();
+                    // Include original authors from reposts for better UX
+                    let db_events_for_metadata: Vec<NostrEvent> = db_outcome.events.iter()
+                        .flat_map(|e| {
+                            if e.kind == Kind::Repost {
+                                match extract_reposted_event(e) {
+                                    Ok(original) => vec![e.clone(), original],
+                                    Err(_) => vec![e.clone()],
+                                }
+                            } else {
+                                vec![e.clone()]
+                            }
+                        })
+                        .collect();
                     spawn(async move {
                         prefetch_author_metadata(&db_events_for_metadata).await;
                     });
@@ -314,8 +326,21 @@ pub fn Profile(pubkey: String) -> Element {
                             }
 
                             // Prefetch metadata for new events
+                            // Include original authors from reposts for better UX
+                            let events_for_prefetch: Vec<NostrEvent> = new_events.iter()
+                                .flat_map(|e| {
+                                    if e.kind == Kind::Repost {
+                                        match extract_reposted_event(e) {
+                                            Ok(original) => vec![e.clone(), original],
+                                            Err(_) => vec![e.clone()],
+                                        }
+                                    } else {
+                                        vec![e.clone()]
+                                    }
+                                })
+                                .collect();
                             spawn(async move {
-                                prefetch_author_metadata(&new_events).await;
+                                prefetch_author_metadata(&events_for_prefetch).await;
                             });
                         } else {
                             log::info!("Phase 2: no new events from relays (all already in DB, has_more: {})", has_more);
@@ -492,8 +517,21 @@ pub fn Profile(pubkey: String) -> Element {
                     current_tab_has_more.set(has_more_val);
 
                     // Spawn non-blocking background prefetch for missing metadata
+                    // Include original authors from reposts for better UX
+                    let events_for_prefetch: Vec<NostrEvent> = outcome.events.iter()
+                        .flat_map(|e| {
+                            if e.kind == Kind::Repost {
+                                match extract_reposted_event(e) {
+                                    Ok(original) => vec![e.clone(), original],
+                                    Err(_) => vec![e.clone()],
+                                }
+                            } else {
+                                vec![e.clone()]
+                            }
+                        })
+                        .collect();
                     spawn(async move {
-                        prefetch_author_metadata(&outcome.events).await;
+                        prefetch_author_metadata(&events_for_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -1010,8 +1048,8 @@ pub fn Profile(pubkey: String) -> Element {
                                                             }
                                                         }
                                                     }
-                                                    Err(_) => {
-                                                        // Failed to extract original event, skip this repost
+                                                    Err(e) => {
+                                                        log::warn!("Failed to extract reposted event {}: {}", event.id, e);
                                                         rsx! {}
                                                     }
                                                 }

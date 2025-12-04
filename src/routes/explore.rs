@@ -54,8 +54,21 @@ pub fn Explore() -> Element {
                     loading.set(false);
 
                     // Spawn non-blocking background prefetch for metadata
+                    // Include original authors from reposts for better UX
+                    let authors_to_prefetch: Vec<Event> = feed_events.iter()
+                        .flat_map(|e| {
+                            if e.kind == Kind::Repost {
+                                match extract_reposted_event(e) {
+                                    Ok(original) => vec![e.clone(), original],
+                                    Err(_) => vec![e.clone()],
+                                }
+                            } else {
+                                vec![e.clone()]
+                            }
+                        })
+                        .collect();
                     spawn(async move {
-                        prefetch_author_metadata(&feed_events).await;
+                        prefetch_author_metadata(&authors_to_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -99,8 +112,21 @@ pub fn Explore() -> Element {
                     loading.set(false);
 
                     // Spawn non-blocking background prefetch for missing metadata
+                    // Include original authors from reposts for better UX
+                    let authors_to_prefetch: Vec<Event> = new_events.iter()
+                        .flat_map(|e| {
+                            if e.kind == Kind::Repost {
+                                match extract_reposted_event(e) {
+                                    Ok(original) => vec![e.clone(), original],
+                                    Err(_) => vec![e.clone()],
+                                }
+                            } else {
+                                vec![e.clone()]
+                            }
+                        })
+                        .collect();
                     spawn(async move {
-                        prefetch_author_metadata(&new_events).await;
+                        prefetch_author_metadata(&authors_to_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -203,8 +229,8 @@ pub fn Explore() -> Element {
                                             }
                                         }
                                     }
-                                    Err(_) => {
-                                        // Failed to extract original event, skip this repost
+                                    Err(e) => {
+                                        log::warn!("Failed to extract reposted event {}: {}", event.id, e);
                                         rsx! {}
                                     }
                                 }
