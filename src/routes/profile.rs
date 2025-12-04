@@ -60,6 +60,19 @@ impl Default for TabData {
     }
 }
 
+/// Create default tab data map with all tabs initialized
+fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
+    let mut map = HashMap::new();
+    map.insert(ProfileTab::Posts, TabData::default());
+    map.insert(ProfileTab::Replies, TabData::default());
+    map.insert(ProfileTab::Articles, TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
+    map.insert(ProfileTab::Likes, TabData::default());
+    map
+}
+
 #[component]
 pub fn Profile(pubkey: String) -> Element {
     // State management
@@ -69,17 +82,7 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Tab and events state
     let mut active_tab = use_signal(|| ProfileTab::Posts);
-    let mut tab_data = use_signal(|| {
-        let mut map = HashMap::new();
-        map.insert(ProfileTab::Posts, TabData::default());
-        map.insert(ProfileTab::Replies, TabData::default());
-        map.insert(ProfileTab::Articles, TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
-        map.insert(ProfileTab::Likes, TabData::default());
-        map
-    });
+    let mut tab_data = use_signal(default_tab_data_map);
     let mut loading_events = use_signal(|| false);
     let mut current_tab_has_more = use_signal(|| true);
 
@@ -130,17 +133,7 @@ pub fn Profile(pubkey: String) -> Element {
         loading.set(true);
         error.set(None);
         active_tab.set(ProfileTab::Posts);
-        tab_data.set({
-            let mut map = HashMap::new();
-            map.insert(ProfileTab::Posts, TabData::default());
-            map.insert(ProfileTab::Replies, TabData::default());
-            map.insert(ProfileTab::Articles, TabData::default());
-            map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
-            map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
-            map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
-            map.insert(ProfileTab::Likes, TabData::default());
-            map
-        });
+        tab_data.set(default_tab_data_map());
         loading_events.set(false);
         current_tab_has_more.set(true);
         is_following.set(false);

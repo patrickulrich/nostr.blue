@@ -332,7 +332,11 @@ pub fn ShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Post about this video" } else { "Login required" }
+                                        if has_signer {
+                                            if is_article { "Post about this article" } else { "Post about this video" }
+                                        } else {
+                                            "Login required"
+                                        }
                                     }
                                 }
                             }

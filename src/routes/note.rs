@@ -20,32 +20,29 @@ async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, S
     events.into_iter().next().ok_or("Event not found".to_string())
 }
 
-async fn fetch_parent_notes(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
-    // First get the main note to extract parent IDs
-    let main_note = fetch_main_note(event_id).await?;
+/// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
+fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
+    // Use SDK's event_ids() for NIP-10 lowercase 'e' tags
+    let mut ids: Vec<EventId> = note.tags.event_ids().cloned().collect();
 
-    // Extract parent IDs from both lowercase 'e' (NIP-10) and uppercase 'E' (NIP-22) tags
-    let parent_ids: Vec<EventId> = main_note.tags.iter()
-        .filter_map(|tag| {
-            let is_lowercase_e = tag.kind() == nostr_sdk::TagKind::SingleLetter(
-                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-            );
-            let is_uppercase_e = tag.kind() == nostr_sdk::TagKind::SingleLetter(
-                nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E)
-            );
-            if is_lowercase_e || is_uppercase_e {
-                if let Some(content) = tag.content() {
-                    let parts: Vec<&str> = content.split('\t').collect();
-                    EventId::from_hex(parts[0]).ok()
-                } else {
-                    None
+    // Also extract NIP-22 uppercase 'E' tags (for Comment kind)
+    let upper_e = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+    for tag in note.tags.iter() {
+        if tag.kind() == nostr_sdk::TagKind::SingleLetter(upper_e) {
+            if let Some(content) = tag.content() {
+                if let Ok(id) = EventId::from_hex(content) {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
                 }
-            } else {
-                None
             }
-        })
-        .collect();
+        }
+    }
+    ids
+}
 
+/// Fetch parent events by their IDs
+async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<Vec<NostrEvent>, String> {
     if parent_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -137,22 +134,30 @@ pub fn Note(note_id: String) -> Element {
                 }
             };
 
-            // PARALLEL FETCHES - All three at once!
-            let (note_result, parents_result, replies_result) = tokio::join!(
-                fetch_main_note(event_id),
-                fetch_parent_notes(event_id),
-                fetch_replies(event_id)
-            );
+            // Fetch main note first (needed to extract parent IDs)
+            let note_result = fetch_main_note(event_id).await;
 
-            // Process main note
-            match note_result {
+            // Process main note and extract parent IDs
+            let parent_ids = match &note_result {
                 Ok(event) => {
-                    note_data.set(Some(event));
+                    note_data.set(Some(event.clone()));
+                    loading.set(false);
+                    extract_parent_ids(event)
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    error.set(Some(e.clone()));
+                    loading.set(false);
+                    loading_parents.set(false);
+                    loading_replies.set(false);
+                    return;
                 }
-            }
+            };
+
+            // Now fetch parents and replies in parallel (no duplicate main note fetch)
+            let (parents_result, replies_result) = tokio::join!(
+                fetch_parents_by_ids(parent_ids),
+                fetch_replies(event_id)
+            );
 
             // Process parents
             if let Ok(mut parents) = parents_result {
