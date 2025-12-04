@@ -917,6 +917,8 @@ pub fn NoteCard(
                                 }
                             }
                         });
+                    } else {
+                        log::warn!("Undo repost triggered but no repost ID available");
                     }
                 },
             }

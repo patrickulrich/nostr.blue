@@ -1524,9 +1524,11 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Create deletion event (kind 5) using NIP-9
+    // Include k-tag per NIP-9 recommendation for better relay interoperability
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event_id);
-    let builder = nostr::EventBuilder::delete(request);
+    let builder = nostr::EventBuilder::delete(request)
+        .tag(nostr::Tag::custom(nostr::TagKind::k(), [nostr::Kind::Repost.as_u16().to_string()]));
 
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;

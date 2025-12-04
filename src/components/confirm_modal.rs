@@ -19,11 +19,15 @@ pub fn ConfirmModal(
             // Modal content
             div {
                 class: "bg-card border border-border rounded-xl max-w-sm w-full p-6 shadow-xl",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "modal-title",
                 onclick: move |e| e.stop_propagation(),
 
                 // Title
                 h2 {
                     class: "text-lg font-bold mb-2",
+                    id: "modal-title",
                     "{title}"
                 }
 
