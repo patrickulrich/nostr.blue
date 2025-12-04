@@ -31,6 +31,12 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut show_defaults_modal = use_signal(|| false);
     let mut custom_emoji_failed = use_signal(|| false);
 
+    // Viewport-aware positioning signals
+    let button_id = use_signal(|| format!("reaction-btn-{}", uuid::Uuid::new_v4()));
+    let mut picker_top = use_signal(|| 0.0);
+    let mut picker_left = use_signal(|| 0.0);
+    let mut position_below = use_signal(|| false);
+
     let is_liked = *props.reaction.is_liked.read();
     let like_count = *props.reaction.like_count.read();
     let is_pending = matches!(*props.reaction.state.read(), ReactionState::Pending);
@@ -57,6 +63,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
 
             // Like button - click for quick like, right-click for reaction picker
             button {
+                id: "{button_id}",
                 class: "{button_class}",
                 disabled: !props.has_signer || is_pending,
                 aria_label: if is_liked { "Remove reaction" } else { "Add reaction" },
@@ -82,6 +89,36 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     e.stop_propagation();
                     if props.has_signer {
                         let current = *show_picker.peek();
+                        if !current {
+                            // Calculate viewport-aware position when opening
+                            #[cfg(target_family = "wasm")]
+                            {
+                                let btn_id = button_id.read().clone();
+                                if let Some(window) = web_sys::window() {
+                                    if let Some(document) = window.document() {
+                                        if let Some(element) = document.get_element_by_id(&btn_id) {
+                                            let rect = element.get_bounding_client_rect();
+                                            let viewport_height = window.inner_height()
+                                                .ok().and_then(|h| h.as_f64()).unwrap_or(800.0);
+                                            let picker_height = 50.0; // Approximate picker height
+
+                                            // Check if button is in top half of viewport
+                                            let button_center_y = rect.top() + (rect.height() / 2.0);
+                                            if button_center_y < (viewport_height / 2.0) {
+                                                // Position below button
+                                                picker_top.set(rect.bottom() + 8.0);
+                                                position_below.set(true);
+                                            } else {
+                                                // Position above button
+                                                picker_top.set(rect.top() - picker_height - 8.0);
+                                                position_below.set(false);
+                                            }
+                                            picker_left.set(rect.left());
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         show_picker.set(!current);
                     }
                 },
@@ -145,7 +182,8 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     },
                 }
                 div {
-                    class: "absolute bottom-full left-0 mb-2 z-50",
+                    class: "fixed z-50",
+                    style: format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read()),
                     InlineReactionPicker {
                         on_reaction: move |emoji: ReactionEmoji| {
                             props.reaction.react_with.call(emoji);

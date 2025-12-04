@@ -144,6 +144,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
         if !is_duplicate {
             drop(reactions);
             local_reactions.write().push(reaction);
+            error_msg.set(None); // Clear any stale error
         }
     };
 

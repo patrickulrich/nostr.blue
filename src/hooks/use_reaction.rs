@@ -15,6 +15,9 @@ use crate::stores::nostr_client::{get_client, publish_reaction, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 
+/// Maximum reactions to fetch per event
+const MAX_REACTIONS_FETCH: usize = 500;
+
 /// State of the reaction action
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReactionState {
@@ -143,13 +146,11 @@ pub fn use_reaction(
     // Clone for effect
     let event_id_fetch = event_id.clone();
 
-    // Fetch initial state if not precomputed
-    // Only fetch if we don't have precomputed data with actual is_liked state
-    let should_fetch = precomputed_is_liked.is_none();
-
     // Use use_reactive to properly track event_id dependency and re-run when it changes
+    // Note: Check precomputed_is_liked inside the closure to avoid stale capture
     use_effect(use_reactive(&event_id_fetch, move |event_id_for_fetch| {
-        if !should_fetch {
+        // Check directly inside closure - evaluates fresh each time
+        if precomputed_is_liked.is_some() {
             return;
         }
 
@@ -168,7 +169,7 @@ pub fn use_reaction(
             let filter = Filter::new()
                 .kind(Kind::Reaction)
                 .event(event_id_parsed)
-                .limit(500);
+                .limit(MAX_REACTIONS_FETCH);
 
             if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
                 // Parse current user's pubkey once for efficient comparison
@@ -446,8 +447,8 @@ pub fn use_reaction(
 
 /// Format a count for display (e.g., "500+" for large numbers)
 pub fn format_count(count: usize) -> String {
-    if count > 500 {
-        "500+".to_string()
+    if count > MAX_REACTIONS_FETCH {
+        format!("{}+", MAX_REACTIONS_FETCH)
     } else if count > 0 {
         count.to_string()
     } else {
