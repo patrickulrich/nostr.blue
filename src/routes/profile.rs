@@ -1741,7 +1741,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
     match tab {
         ProfileTab::Posts => {
-            // Fetch kind 1 events until we have 50 posts (without e-tags)
+            // Fetch kind 1 (text notes) and kind 6 (reposts) until we have 50 posts
             let mut all_posts = Vec::new();
             let mut current_until = until;
             let mut total_fetched = 0;
@@ -1750,7 +1750,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key.clone())
-                    .kind(Kind::TextNote)
+                    .kinds(vec![Kind::TextNote, Kind::Repost])
                     .limit(100); // Fetch more at once to reduce round trips
 
                 if let Some(until_ts) = current_until {
@@ -1772,9 +1772,9 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 // Get the oldest event timestamp BEFORE filtering
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
-                // Filter for posts only (no e-tags) using SDK's event_ids()
+                // Filter: keep all reposts, but for text notes only keep those without e-tags (not replies)
                 let posts: Vec<NostrEvent> = events.into_iter()
-                    .filter(|e| e.tags.event_ids().next().is_none())
+                    .filter(|e| e.kind == Kind::Repost || e.tags.event_ids().next().is_none())
                     .collect();
 
                 all_posts.extend(posts);
