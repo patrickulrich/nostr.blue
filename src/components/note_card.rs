@@ -95,10 +95,13 @@ pub fn NoteCard(
     // Fetch counts individually if not precomputed (fallback for single-note views)
     // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
     // Note: Reactions/likes are handled by use_reaction hook
-    use_effect(use_reactive((&event_id_counts, &precomputed_counts), move |(event_id_for_counts, counts_opt)| {
+    // Note: Only depend on event_id, NOT precomputed_counts - to avoid re-running when batch data arrives
+    let precomputed_for_fetch = precomputed_counts.clone();
+    use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
+        let precomputed = precomputed_for_fetch.clone();
         spawn(async move {
             // Only consider precomputed if it actually has data (not just zeros from batch init)
-            let has_precomputed = counts_opt.as_ref().map_or(false, |c|
+            let has_precomputed = precomputed.as_ref().map_or(false, |c|
                 c.replies > 0 || c.reposts > 0 || c.zap_amount_sats > 0
             );
             let client = match get_client() {
