@@ -232,16 +232,14 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
             }
 
             // Settings button (if callback provided)
-            if props.on_settings.is_some() {
+            if let Some(on_settings) = props.on_settings.as_ref().cloned() {
                 div {
                     class: "ml-1 pl-1 border-l border-gray-200 dark:border-gray-600",
                     button {
                         class: "p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
                         title: "Customize reactions",
                         onclick: move |_| {
-                            if let Some(ref on_settings) = props.on_settings {
-                                on_settings.call(());
-                            }
+                            on_settings.call(());
                         },
                         SettingsIcon { class: "w-4 h-4" }
                     }

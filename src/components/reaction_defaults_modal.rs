@@ -213,7 +213,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                     for (index, reaction) in local_reactions.read().iter().cloned().enumerate() {
                         // Each emoji item is both draggable AND a drop zone
                         div {
-                            key: "{index}-{reaction.display()}",
+                            key: "{reaction.display()}",
                             class: "relative group",
                             draggable: "true",
 
