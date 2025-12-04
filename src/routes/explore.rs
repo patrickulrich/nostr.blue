@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{NoteCard, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
+use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 
@@ -53,8 +54,10 @@ pub fn Explore() -> Element {
                     loading.set(false);
 
                     // Spawn non-blocking background prefetch for metadata
+                    // Include original authors from reposts for better UX
+                    let authors_to_prefetch = expand_events_for_prefetch(&feed_events);
                     spawn(async move {
-                        prefetch_author_metadata(&feed_events).await;
+                        prefetch_author_metadata(&authors_to_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -98,8 +101,10 @@ pub fn Explore() -> Element {
                     loading.set(false);
 
                     // Spawn non-blocking background prefetch for missing metadata
+                    // Include original authors from reposts for better UX
+                    let authors_to_prefetch = expand_events_for_prefetch(&new_events);
                     spawn(async move {
-                        prefetch_author_metadata(&new_events).await;
+                        prefetch_author_metadata(&authors_to_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -187,6 +192,27 @@ pub fn Explore() -> Element {
                                 key: "{event.id}",
                                 event: event.clone()
                             }
+                        } else if event.kind == Kind::Repost {
+                            // Handle reposts - extract original event and show with repost info
+                            {
+                                match extract_reposted_event(event) {
+                                    Ok(original_event) => {
+                                        let repost_info = Some((event.pubkey, event.created_at));
+                                        rsx! {
+                                            NoteCard {
+                                                key: "{event.id}",
+                                                event: original_event,
+                                                repost_info: repost_info,
+                                                collapsible: true
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to extract reposted event {}: {}", event.id, e);
+                                        rsx! {}
+                                    }
+                                }
+                            }
                         } else {
                             NoteCard {
                                 event: event.clone(),
@@ -253,9 +279,9 @@ async fn load_global_feed_refresh() -> Result<Vec<Event>, String> {
 async fn load_global_feed_impl(until: Option<u64>, force_relay: bool) -> Result<Vec<Event>, String> {
     log::info!("Loading global feed (until: {:?}, force_relay: {})...", until, force_relay);
 
-    // Create filter for recent text notes (kind 1)
+    // Create filter for recent text notes (kind 1) and reposts (kind 6)
     let mut filter = Filter::new()
-        .kind(Kind::TextNote)
+        .kinds(vec![Kind::TextNote, Kind::Repost])
         .limit(50);
 
     // Add until timestamp if provided for pagination

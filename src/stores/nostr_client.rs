@@ -509,6 +509,68 @@ pub async fn fetch_profile_events_from_relays(
     }
 }
 
+/// Extract quote tags from content containing nostr: URIs (NIP-18 compliance)
+/// Returns q tags for note1/nevent1/naddr1 references
+fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
+    use nostr::nips::nip19::Nip19;
+    use nostr::event::tag::TagStandard;
+    use nostr_sdk::nips::nip01::Coordinate;
+
+    let mut tags = Vec::new();
+
+    // Match nostr:note1..., nostr:nevent1..., nostr:naddr1...
+    let re = match regex::Regex::new(r"nostr:(note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)") {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("Failed to compile quote regex: {}", e);
+            return tags;
+        }
+    };
+
+    for cap in re.captures_iter(content) {
+        if let Some(bech32_match) = cap.get(1) {
+            let bech32 = bech32_match.as_str();
+            match Nip19::from_bech32(bech32) {
+                Ok(nip19) => {
+                    let tag = match nip19 {
+                        Nip19::EventId(id) => Some(nostr::Tag::from_standardized_without_cell(
+                            TagStandard::Quote {
+                                event_id: id,
+                                relay_url: None,
+                                public_key: None,
+                            }
+                        )),
+                        Nip19::Event(nevent) => Some(nostr::Tag::from_standardized_without_cell(
+                            TagStandard::Quote {
+                                event_id: nevent.event_id,
+                                relay_url: nevent.relays.first().cloned(),
+                                public_key: nevent.author,
+                            }
+                        )),
+                        Nip19::Coordinate(coord) => Some(nostr::Tag::from_standardized_without_cell(
+                            TagStandard::QuoteAddress {
+                                coordinate: Coordinate::new(coord.kind, coord.public_key)
+                                    .identifier(coord.identifier.clone()),
+                                relay_url: coord.relays.first().cloned(),
+                            }
+                        )),
+                        _ => None,
+                    };
+                    if let Some(t) = tag {
+                        tags.push(t);
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Failed to parse nostr URI '{}': {}", bech32, e);
+                }
+            }
+        }
+    }
+
+    log::debug!("Extracted {} quote tags from content", tags.len());
+    tags
+}
+
 /// Publish a text note (kind 1 event)
 pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -600,6 +662,10 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::resul
 
     // Combine mention tags with other tags
     mention_tags.extend(nostr_tags);
+
+    // Extract and add quote tags (NIP-18 compliance)
+    let quote_tags = extract_quote_tags(&content);
+    mention_tags.extend(quote_tags);
 
     // Build the event
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
@@ -1442,6 +1508,33 @@ pub async fn publish_repost(
     let repost_id = output.id().to_hex();
     log::info!("Repost published successfully: {}", repost_id);
     Ok(repost_id)
+}
+
+/// Delete a repost event (Kind 6) using NIP-9 Event Deletion
+pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot delete events.".to_string());
+    }
+
+    log::info!("Deleting repost: {}", repost_event_id);
+
+    let event_id = nostr::EventId::from_hex(&repost_event_id)
+        .map_err(|e| format!("Invalid event ID: {}", e))?;
+
+    // Create deletion event (kind 5) using NIP-9
+    // Include k-tag per NIP-9 recommendation for better relay interoperability
+    use nostr::nips::nip09::EventDeletionRequest;
+    let request = EventDeletionRequest::new().id(event_id);
+    let builder = nostr::EventBuilder::delete(request)
+        .tag(nostr::Tag::custom(nostr::TagKind::k(), vec![nostr::Kind::Repost.as_u16().to_string()]));
+
+    client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish deletion: {}", e))?;
+
+    log::info!("Repost deleted successfully");
+    Ok(())
 }
 
 /// Fetch articles (kind 30023 - NIP-23 long-form content)
