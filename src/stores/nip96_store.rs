@@ -271,6 +271,7 @@ async fn upload_with_fetch(
         .map_err(|e| format!("Failed to create Blob: {:?}", e))?;
 
     // Append file to FormData
+    // Note: nostr.build ignores the client-provided filename and generates its own
     form_data.append_with_blob_and_filename("file", &blob, "upload.gif")
         .map_err(|e| format!("Failed to append file: {:?}", e))?;
 

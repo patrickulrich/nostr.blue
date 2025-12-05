@@ -206,6 +206,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 // Auto-close after success
                                 spawn(async move {
                                     gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    // Revoke object URL to free memory before clearing
+                                    if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+                                        let _ = web_sys::Url::revoke_object_url(url);
+                                    }
                                     show.set(false);
                                     // Reset state
                                     selected_file.set(None);
