@@ -525,6 +525,14 @@ pub fn Home() -> Element {
             }
             // Note: pending_posts is already cleared by mem::take
         }
+
+        // Scroll to top of page
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(window) = web_sys::window() {
+                window.scroll_to_with_x_and_y(0.0, 0.0);
+            }
+        }
     };
 
     // Read auth state for rendering
