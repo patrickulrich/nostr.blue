@@ -19,7 +19,7 @@ pub mod profile_prefetch;
 pub mod repost;
 pub mod event;
 
-pub use thread_tree::{ThreadNode, build_thread_tree};
+pub use thread_tree::{ThreadNode, ThreadNodeSource, build_thread_tree, merge_pending_into_tree};
 pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};
 pub use data_state::DataState;
 pub use format::{format_sats_with_separator, format_sats_compact, truncate_pubkey, shorten_url};

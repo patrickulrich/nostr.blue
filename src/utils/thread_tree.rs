@@ -1,15 +1,59 @@
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, TagKind};
+use nostr_sdk::{Event, EventId, PublicKey, TagKind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 use instant::{Duration, Instant};
+
+use crate::stores::pending_comments::{CommentStatus, PendingComment};
+
+/// Source of a thread node - distinguishes confirmed vs pending comments
+#[derive(Debug, Clone, PartialEq)]
+pub enum ThreadNodeSource {
+    /// Confirmed event from relays
+    Confirmed,
+    /// Pending local comment awaiting confirmation
+    Pending {
+        local_id: String,
+        status: CommentStatus,
+        /// Author's public key (stored explicitly since display event may have dummy pubkey)
+        author_pubkey: PublicKey,
+    },
+}
+
+impl Default for ThreadNodeSource {
+    fn default() -> Self {
+        Self::Confirmed
+    }
+}
 
 /// Represents a node in a threaded conversation tree
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadNode {
     pub event: Event,
     pub children: Vec<ThreadNode>,
+    /// Source of this node (confirmed or pending)
+    pub source: ThreadNodeSource,
+}
+
+impl ThreadNode {
+    /// Create a confirmed thread node
+    pub fn confirmed(event: Event) -> Self {
+        Self {
+            event,
+            children: Vec::new(),
+            source: ThreadNodeSource::Confirmed,
+        }
+    }
+
+    /// Create a pending thread node
+    pub fn pending(event: Event, local_id: String, status: CommentStatus, author_pubkey: PublicKey) -> Self {
+        Self {
+            event,
+            children: Vec::new(),
+            source: ThreadNodeSource::Pending { local_id, status, author_pubkey },
+        }
+    }
 }
 
 /// Get the parent event ID from a reply event
@@ -207,10 +251,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     for reply in &replies {
         node_map.insert(
             reply.id,
-            ThreadNode {
-                event: reply.clone(),
-                children: Vec::new(),
-            },
+            ThreadNode::confirmed(reply.clone()),
         );
     }
 
@@ -260,10 +301,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     for reply in &replies {
         node_map.insert(
             reply.id,
-            ThreadNode {
-                event: reply.clone(),
-                children: Vec::new(),
-            },
+            ThreadNode::confirmed(reply.clone()),
         );
     }
 
@@ -358,4 +396,96 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
+}
+
+/// Merge pending comments into a confirmed thread tree
+///
+/// This function takes a tree of confirmed comments and a list of pending comments,
+/// and returns a new tree with pending comments inserted at appropriate positions.
+///
+/// Pending comments are:
+/// - Added as children of their parent comment (if replying to a comment)
+/// - Added to the root level (if replying to the root event)
+/// - Sorted by timestamp along with confirmed comments
+/// - Deduplicated (if a pending comment was already confirmed)
+pub fn merge_pending_into_tree(
+    mut confirmed_tree: Vec<ThreadNode>,
+    pending: Vec<PendingComment>,
+    _root_event_id: &EventId,
+) -> Vec<ThreadNode> {
+    if pending.is_empty() {
+        return confirmed_tree;
+    }
+
+    // Get set of confirmed event IDs to avoid duplicates
+    fn collect_event_ids(nodes: &[ThreadNode]) -> std::collections::HashSet<EventId> {
+        let mut ids = std::collections::HashSet::new();
+        for node in nodes {
+            ids.insert(node.event.id);
+            ids.extend(collect_event_ids(&node.children));
+        }
+        ids
+    }
+    let confirmed_ids = collect_event_ids(&confirmed_tree);
+
+    // Sort pending comments by timestamp to ensure parents are processed before children
+    // This prevents chains of pending comments from being flattened to root level
+    let mut pending = pending;
+    pending.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+    for pending_comment in pending {
+        // Skip if this pending comment was already confirmed (by event ID match)
+        // This can happen if relay returned the event faster than our timeout
+        if let CommentStatus::Confirmed(confirmed_id) = &pending_comment.status {
+            if confirmed_ids.contains(confirmed_id) {
+                continue;
+            }
+        }
+
+        // Create display event and thread node for pending comment
+        let display_event = pending_comment.to_display_event();
+        let pending_node = ThreadNode::pending(
+            display_event,
+            pending_comment.local_id.clone(),
+            pending_comment.status.clone(),
+            pending_comment.author_pubkey,
+        );
+
+        // Determine where to insert
+        if let Some(parent_id) = pending_comment.parent_comment_id {
+            // Replying to another comment - find and insert as child
+            // Returns Some(node) if not found (ownership returned), None if consumed
+            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
+                for existing in nodes.iter_mut() {
+                    if existing.event.id == *parent_id {
+                        existing.children.push(node);
+                        // Sort children by timestamp
+                        existing.children.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+                        return None; // Consumed
+                    }
+                }
+                // Try children - pass ownership through each subtree
+                for existing in nodes.iter_mut() {
+                    match insert_as_child(&mut existing.children, parent_id, node) {
+                        None => return None, // Found and consumed in subtree
+                        Some(returned) => node = returned, // Not found, continue with ownership
+                    }
+                }
+                Some(node) // Not found anywhere, return ownership
+            }
+
+            if let Some(orphan_node) = insert_as_child(&mut confirmed_tree, &parent_id, pending_node) {
+                // Parent not found (maybe also pending), add to root
+                confirmed_tree.push(orphan_node);
+            }
+        } else {
+            // Top-level comment - add to root
+            confirmed_tree.push(pending_node);
+        }
+    }
+
+    // Sort root level by timestamp
+    confirmed_tree.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+
+    confirmed_tree
 }

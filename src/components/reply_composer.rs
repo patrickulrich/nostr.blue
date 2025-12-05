@@ -1,10 +1,17 @@
 use dioxus::prelude::*;
+use std::time::Duration;
 use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
+use crate::stores::signer::SIGNER_INFO;
+use crate::stores::pending_comments::{
+    PendingComment, CommentStatus, add_pending_comment, update_pending_status,
+};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use nostr_sdk::Event as NostrEvent;
+use nostr_sdk::{Event as NostrEvent, Kind, Timestamp, PublicKey};
 use nostr_sdk::prelude::*;
+use wasm_bindgen_futures::spawn_local;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -19,6 +26,7 @@ pub fn ReplyComposer(
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(|| Vec::<String>::new());
     let mut show_poll_modal = use_signal(|| false);
+    let toast = consume_toast();
 
     // Calculate total length including media URLs
     let content_len = content.read().len();
@@ -157,23 +165,52 @@ pub fn ReplyComposer(
         show_poll_modal.set(false);
     };
 
-    let handle_publish = move |_| {
-        let mut content_value = content.read().clone();
+    let handle_publish = {
+        let toast_api = toast.clone();
+        move |_| {
+            let mut content_value = content.read().clone();
 
-        // Append media URLs to content
-        if !uploaded_media.read().is_empty() {
-            if !content_value.is_empty() {
-                content_value.push_str("\n\n");
+            // Append media URLs to content
+            if !uploaded_media.read().is_empty() {
+                if !content_value.is_empty() {
+                    content_value.push_str("\n\n");
+                }
+                for url in uploaded_media.read().iter() {
+                    content_value.push_str(&url);
+                    content_value.push('\n');
+                }
             }
-            for url in uploaded_media.read().iter() {
-                content_value.push_str(&url);
-                content_value.push('\n');
-            }
-        }
 
-        if content_value.is_empty() || is_over_limit {
-            return;
-        }
+            if content_value.is_empty() || is_over_limit {
+                return;
+            }
+
+            // Get current user's pubkey for optimistic display
+            let current_user_pubkey = match SIGNER_INFO.read().as_ref() {
+                Some(info) => match PublicKey::from_hex(&info.public_key) {
+                    Ok(pk) => pk,
+                    Err(_) => {
+                        log::error!("Invalid pubkey in signer info");
+                        toast_api.error(
+                            "Unable to reply".to_string(),
+                            ToastOptions::new()
+                                .description("Invalid signer configuration")
+                                .duration(Duration::from_secs(3))
+                        );
+                        return;
+                    }
+                },
+                None => {
+                    log::error!("No signer info available");
+                    toast_api.error(
+                        "Unable to reply".to_string(),
+                        ToastOptions::new()
+                            .description("Please sign in first")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+            };
 
         is_publishing.set(true);
 
@@ -182,32 +219,83 @@ pub fn ReplyComposer(
 
         // Clone the tags from reply_to before moving into async block
         let parent_tags = reply_to.tags.clone();
+        let reply_to_event = reply_to.clone();
 
-        spawn(async move {
+        // Generate unique local ID for tracking this pending comment
+        let local_id = uuid::Uuid::new_v4().to_string();
+
+        // Check if the event we're replying to has a root marker
+        // to determine if this is a top-level reply or nested reply
+        let parent_root = parent_tags.iter().find_map(|tag| {
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.len() >= 4
+                && tag_vec[0] == "e"
+                && tag_vec[3] == "root" {
+                Some(tag_vec[1].clone())
+            } else {
+                None
+            }
+        });
+
+        // Determine the root event ID for optimistic update and cache invalidation
+        let thread_root_id = if let Some(root_id) = &parent_root {
+            root_id.clone()
+        } else {
+            event_id.clone()
+        };
+
+        // For optimistic updates, we need to know the root event ID as EventId
+        let target_event_id = if let Ok(id) = EventId::from_hex(&thread_root_id) {
+            id
+        } else {
+            log::error!("Invalid thread root ID");
+            is_publishing.set(false);
+            return;
+        };
+
+        // Determine if this is a nested reply (replying to a reply vs replying to root)
+        let is_nested_reply = parent_root.is_some();
+
+        // Create pending comment for optimistic UI update
+        let pending = PendingComment {
+            local_id: local_id.clone(),
+            content: content_value.clone(),
+            target_event_id,
+            parent_comment_id: if is_nested_reply {
+                Some(reply_to_event.id)
+            } else {
+                None
+            },
+            kind: Kind::TextNote,
+            status: CommentStatus::Pending,
+            created_at: Timestamp::now(),
+            author_pubkey: current_user_pubkey,
+            target_event: reply_to_event.clone(),
+            parent_comment: if is_nested_reply {
+                Some(reply_to_event.clone())
+            } else {
+                None
+            },
+        };
+
+        // Add to pending store immediately (optimistic update)
+        add_pending_comment(pending);
+
+        // Clear form immediately for better UX
+        content.set(String::new());
+        uploaded_media.set(Vec::new());
+        is_publishing.set(false);
+        on_success.call(());
+
+        // Clone for async block
+        let local_id_clone = local_id.clone();
+        let content_for_publish = content_value.clone();
+        let thread_root_id_clone = thread_root_id.clone();
+
+        // Use spawn_local instead of spawn so the task survives component unmount
+        spawn_local(async move {
             // Build tags for reply following NIP-10 properly
             let mut tags = Vec::new();
-
-            // Check if the event we're replying to has a root marker
-            // to determine if this is a top-level reply or nested reply
-            let parent_root = parent_tags.iter().find_map(|tag| {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 4
-                    && tag_vec[0] == "e"
-                    && tag_vec[3] == "root" {
-                    Some(tag_vec[1].clone())
-                } else {
-                    None
-                }
-            });
-
-            // Determine the root event ID for cache invalidation
-            let thread_root_id = if let Some(root_id) = &parent_root {
-                // This is a nested reply - use the existing root
-                root_id.clone()
-            } else {
-                // This is a direct reply - the parent IS the root
-                event_id.clone()
-            };
 
             if let Some(root_id) = parent_root {
                 // This is a nested reply (replying to a reply)
@@ -237,27 +325,37 @@ pub fn ReplyComposer(
                 }
             }
 
-            match publish_note(content_value, tags).await {
-                Ok(event_id) => {
-                    log::info!("Reply published successfully: {}", event_id);
+            match publish_note(content_for_publish, tags).await {
+                Ok(published_event_id) => {
+                    log::info!("Reply published successfully: {}", published_event_id);
 
                     // Invalidate thread tree cache to ensure fresh data on next view
-                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
+                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
                         invalidate_thread_tree_cache(&root_event_id);
-                        log::debug!("Invalidated thread tree cache for root: {}", thread_root_id);
+                        log::debug!("Invalidated thread tree cache for root: {}", thread_root_id_clone);
                     }
 
-                    content.set(String::new());
-                    uploaded_media.set(Vec::new());
-                    is_publishing.set(false);
-                    on_success.call(());
+                    // Update pending comment status
+                    match EventId::from_hex(&published_event_id) {
+                        Ok(event_id_parsed) => {
+                            update_pending_status(&local_id_clone, CommentStatus::Confirmed(event_id_parsed));
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse published event ID '{}': {}", published_event_id, e);
+                            update_pending_status(&local_id_clone, CommentStatus::Failed("Event ID parse error".to_string()));
+                        }
+                    }
+                    // Note: We don't remove the pending comment here. It will remain visible
+                    // until the page is refreshed or navigated away. The merge function will
+                    // skip duplicates once the relay data is fetched on next load.
                 }
                 Err(e) => {
                     log::error!("Failed to publish reply: {}", e);
-                    is_publishing.set(false);
+                    update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
                 }
             }
         });
+        }
     };
 
     let handle_cancel = move |_| {

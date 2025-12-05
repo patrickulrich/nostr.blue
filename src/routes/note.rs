@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::routes::Route;
 use crate::components::{NoteCard, ThreadedComment, ClientInitializing, VoiceMessageCard};
-use crate::utils::{build_thread_tree, event::is_voice_message};
+use crate::utils::{build_thread_tree, merge_pending_into_tree, event::is_voice_message};
+use crate::stores::pending_comments::get_pending_comments;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
@@ -321,7 +322,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     // Only build thread tree after loading completes to avoid caching empty results
                     {
                         let reply_vec = replies.read().clone();
-                        let thread_tree = build_thread_tree(reply_vec, &event.id);
+                        let confirmed_tree = build_thread_tree(reply_vec, &event.id);
+                        // Merge pending comments for optimistic display
+                        let pending = get_pending_comments(&event.id);
+                        let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
                         rsx! {
                             if thread_tree.is_empty() {

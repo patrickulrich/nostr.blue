@@ -178,11 +178,25 @@ pub fn use_reaction(
     // Clone for effect
     let event_id_fetch = event_id.clone();
 
+    // Track whether we have precomputed data from batch fetch
+    // Note: We check if precomputed_counts exists, not just user_liked,
+    // because user_liked is None when user hasn't reacted (not the same as "unknown")
+    let has_batch_data = precomputed_counts.is_some();
+    let mut has_precomputed_data = use_signal(|| has_batch_data);
+
+    // Update the flag when precomputed data arrives (batch fetch completes after mount)
+    use_effect(use_reactive(&has_batch_data, move |has_data| {
+        if has_data {
+            has_precomputed_data.set(true);
+        }
+    }));
+
     // Use use_reactive to properly track event_id dependency and re-run when it changes
-    // Note: Check precomputed_is_liked inside the closure to avoid stale capture
+    // Skip individual fetch if batch data has already provided user's like status
     use_effect(use_reactive(&event_id_fetch, move |event_id_for_fetch| {
-        // Check directly inside closure - evaluates fresh each time
-        if precomputed_is_liked.is_some() {
+        // Check if batch data already provided user's like status
+        // This prevents unnecessary individual fetches when batch data is available
+        if *has_precomputed_data.peek() {
             return;
         }
 
@@ -285,9 +299,13 @@ pub fn use_reaction(
                     like_count.set(positive_count);
                 }
 
-                // Always update user state - individual fetch has accurate per-user data
-                is_liked.set(final_liked);
-                user_reaction.set(if final_liked { user_emoji } else { None });
+                // Only update user state if batch data hasn't already provided it
+                // This prevents individual fetch from overwriting authoritative batch data
+                // that may have arrived while this fetch was in progress
+                if !*has_precomputed_data.peek() {
+                    is_liked.set(final_liked);
+                    user_reaction.set(if final_liked { user_emoji } else { None });
+                }
             }
         });
     }));

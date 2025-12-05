@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 use dioxus::events::MediaData;
 use dioxus::web::WebEventExt;
 use wasm_bindgen::JsCast;
-use crate::utils::{ThreadNode, event::is_voice_message};
+use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
+use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, retry_pending_comment};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
@@ -24,6 +25,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
 
+    // Extract pending state and author pubkey from node source
+    // For pending comments, use the explicitly stored author_pubkey since the display event
+    // may have a dummy pubkey from the unsigned event construction
+    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node.source {
+        ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
+        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
+            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
+        }
+    };
+
     // Clone values needed for closures
     let event_id = event.id.to_string();
     let event_id_like = event_id.clone();
@@ -31,7 +42,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
-    let author_pubkey = event.pubkey;
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
     let author_pubkey_repost = author_pubkey_str.clone();
@@ -311,7 +321,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
             // Comment card - clickable to navigate to thread
             div {
-                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
+                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70"
+                } else {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer"
+                },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav.clone();
@@ -389,6 +403,56 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             span {
                                 class: "text-xs text-muted-foreground",
                                 "{format_relative_time_ex(event.created_at, true, true)}"
+                            }
+
+                            // Pending status badge
+                            if is_pending {
+                                match pending_status.as_ref() {
+                                    Some(CommentStatus::Pending) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
+                                            "Posting..."
+                                        }
+                                    },
+                                    Some(CommentStatus::Confirmed(_)) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+                                            "Posted!"
+                                        }
+                                    },
+                                    Some(CommentStatus::Failed(error)) => {
+                                        let local_id_retry = pending_local_id.clone().unwrap_or_default();
+                                        let local_id_dismiss = pending_local_id.clone().unwrap_or_default();
+                                        let error_msg = error.clone();
+                                        rsx! {
+                                            div {
+                                                class: "ml-2 flex items-center gap-2 flex-wrap",
+                                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                                span {
+                                                    class: "px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full",
+                                                    title: "{error_msg}",
+                                                    "Failed"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
+                                                    onclick: move |_| {
+                                                        // Actually retry publishing the comment
+                                                        retry_pending_comment(&local_id_retry);
+                                                    },
+                                                    "Retry"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground",
+                                                    onclick: move |_| {
+                                                        remove_pending_comment(&local_id_dismiss);
+                                                    },
+                                                    "Dismiss"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    None => rsx! {}
+                                }
                             }
                         }
 

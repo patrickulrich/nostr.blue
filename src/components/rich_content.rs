@@ -7,7 +7,7 @@ use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
-use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard};
+use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
 use crate::components::live_stream_card::LiveStreamCard;
 
 #[component]
@@ -28,7 +28,7 @@ pub fn RichContent(
                      ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
                      ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
                      ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
-                     ContentToken::EventMention(_))
+                     ContentToken::EventMention(_) | ContentToken::CashuToken(_))
         }).count();
 
         // Heuristic: >800 chars (roughly 16 lines at ~50 chars/line)
@@ -231,6 +231,11 @@ fn render_token(token: &ContentToken) -> Element {
         // Zap.stream - Nostr live streaming
         ContentToken::ZapStream(naddr) => rsx! {
             ZapStreamRenderer { naddr: naddr.clone() }
+        },
+
+        // Cashu ecash token
+        ContentToken::CashuToken(token) => rsx! {
+            CashuTokenCard { token: token.clone() }
         },
     }
 }
