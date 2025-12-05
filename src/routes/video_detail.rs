@@ -763,7 +763,7 @@ fn VideoInfo(
                     Kind::TextNote,
                     Kind::Comment,
                     Kind::Reaction,
-                    Kind::from(9735),
+                    Kind::ZapReceipt,
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
@@ -787,7 +787,7 @@ fn VideoInfo(
                                 }
                             }
                         },
-                        kind if kind == Kind::from(9735) => {
+                        Kind::ZapReceipt => {
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
                                 if tag_vec.first()?.as_str() == "description" {
@@ -1286,7 +1286,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                     Kind::TextNote,
                     Kind::Comment,
                     Kind::Reaction,
-                    Kind::from(9735),
+                    Kind::ZapReceipt,
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
@@ -1310,7 +1310,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                                 }
                             }
                         },
-                        kind if kind == Kind::from(9735) => {
+                        Kind::ZapReceipt => {
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
                                 if tag_vec.first()?.as_str() == "description" {

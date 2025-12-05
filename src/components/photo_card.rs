@@ -220,7 +220,7 @@ pub fn PhotoCard(event: Event) -> Element {
 
             // Fetch zap receipts (kind 9735) and calculate total
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 

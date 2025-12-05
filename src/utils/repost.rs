@@ -71,7 +71,7 @@ pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
     events
         .iter()
         .flat_map(|e| {
-            if e.kind == Kind::Repost {
+            if is_repost(e) {
                 match extract_reposted_event(e) {
                     Ok(original) => vec![e.clone(), original],
                     Err(_) => vec![e.clone()],

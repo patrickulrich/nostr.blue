@@ -6,8 +6,7 @@
 use dioxus::prelude::*;
 use std::str::FromStr;
 use std::time::Duration;
-use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::spawn_local;
+use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use cdk::nuts::CurrencyUnit;
 
@@ -45,15 +44,8 @@ fn extract_mint_hostname(url: &str) -> String {
         .to_string()
 }
 
-/// Copy text to clipboard using Web API
-async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
-    let navigator = window.navigator();
-    let clipboard = navigator.clipboard();
-    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text))
-        .await
-        .map(|_| ())
-}
+// Re-use shared clipboard utility
+use crate::utils::clipboard::copy_to_clipboard;
 
 /// Parsed token information
 struct ParsedTokenInfo {
@@ -123,8 +115,8 @@ pub fn CashuTokenCard(token: String) -> Element {
             let unit = unit_for_claim.clone();
             claim_state.set(ClaimState::Claiming);
 
-            // Use spawn_local so the task survives component unmount (consistent with comment publishing)
-            spawn_local(async move {
+            // Use spawn_forever so the task survives component unmount
+            spawn_forever(async move {
                 match crate::stores::cashu::receive_tokens(token).await {
                     Ok(amount) => {
                         log::info!("Successfully claimed {} {}", amount, unit);
@@ -161,7 +153,7 @@ pub fn CashuTokenCard(token: String) -> Element {
 
             let token = token.clone();
             let toast_api = toast_api.clone();
-            spawn_local(async move {
+            spawn_forever(async move {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {
                         copied.set(true);

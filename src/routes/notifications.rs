@@ -356,6 +356,7 @@ fn render_notification(notification: &NotificationType) -> Element {
         NotificationType::Mention(event) | NotificationType::Reply(event) => {
             rsx! {
                 div {
+                    key: "{event.id}",
                     class: "p-4 hover:bg-accent/50 transition",
                     div {
                         class: "flex items-center gap-2 mb-2 text-sm text-muted-foreground",
@@ -377,6 +378,7 @@ fn render_notification(notification: &NotificationType) -> Element {
         NotificationType::Reaction(event) => {
             rsx! {
                 ReactionNotification {
+                    key: "{event.id}",
                     event: event.clone()
                 }
             }
@@ -384,6 +386,7 @@ fn render_notification(notification: &NotificationType) -> Element {
         NotificationType::Repost(event) => {
             rsx! {
                 RepostNotification {
+                    key: "{event.id}",
                     event: event.clone()
                 }
             }
@@ -391,6 +394,7 @@ fn render_notification(notification: &NotificationType) -> Element {
         NotificationType::Zap(event) => {
             rsx! {
                 ZapNotification {
+                    key: "{event.id}",
                     event: event.clone()
                 }
             }

@@ -257,7 +257,7 @@ pub fn use_reaction(
                             // Parse the user's reaction emoji
                             if content == "+" {
                                 user_emoji = Some(ReactionEmoji::Like);
-                            } else if content.starts_with(':') && content.ends_with(':') {
+                            } else if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
                                 // Custom emoji - look for emoji tag
                                 let shortcode = &content[1..content.len()-1];
                                 // Find emoji tag with matching shortcode (use as_slice for zero-copy access)

@@ -200,6 +200,7 @@ pub fn Hashtag(tag: String) -> Element {
                     class: "divide-y divide-border",
                     for event in events.read().iter() {
                         NoteCard {
+                            key: "{event.id}",
                             event: event.clone(),
                             collapsible: true
                         }

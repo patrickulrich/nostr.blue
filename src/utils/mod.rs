@@ -18,6 +18,7 @@ pub mod url_metadata;
 pub mod profile_prefetch;
 pub mod repost;
 pub mod event;
+pub mod clipboard;
 
 pub use thread_tree::{ThreadNode, ThreadNodeSource, build_thread_tree, merge_pending_into_tree};
 pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};

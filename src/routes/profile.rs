@@ -963,21 +963,25 @@ pub fn Profile(pubkey: String) -> Element {
                                     match &tab {
                                         ProfileTab::Articles => rsx! {
                                             ArticleCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Photos) => rsx! {
                                             PhotoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Videos) => rsx! {
                                             VideoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Verts) => rsx! {
                                             VertsVideoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
@@ -986,21 +990,25 @@ pub fn Profile(pubkey: String) -> Element {
                                             match event.kind.as_u16() {
                                                 20 => rsx! {
                                                     PhotoCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 21 | 22 => rsx! {
                                                     VideoCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 30023 => rsx! {
                                                     ArticleCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 _ => rsx! {
                                                     NoteCard {
+                                                        key: "{event.id}",
                                                         event: event.clone(),
                                                         collapsible: true
                                                     }
@@ -1016,6 +1024,7 @@ pub fn Profile(pubkey: String) -> Element {
                                                         let repost_info = Some((event.pubkey, event.created_at));
                                                         rsx! {
                                                             NoteCard {
+                                                                key: "{event.id}",
                                                                 event: original_event,
                                                                 repost_info: repost_info,
                                                                 collapsible: true
@@ -1030,6 +1039,7 @@ pub fn Profile(pubkey: String) -> Element {
                                             } else {
                                                 rsx! {
                                                     NoteCard {
+                                                        key: "{event.id}",
                                                         event: event.clone(),
                                                         collapsible: true
                                                     }

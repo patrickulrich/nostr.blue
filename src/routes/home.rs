@@ -95,6 +95,10 @@ pub fn Home() -> Element {
             // Reset real-time subscription flag to allow fresh subscription
             realtime_started.set(false);
 
+            // Capture is_first_load BEFORE resetting the flag
+            // This allows negentropy sync for manual refreshes (same feed type)
+            let is_first_load = !*interactions_loaded.peek();
+
             // Reset interactions_loaded so new feed type gets full fetch (not sync)
             interactions_loaded.set(false);
 
@@ -122,7 +126,6 @@ pub fn Home() -> Element {
                                 // Batch fetch interaction counts for all events
                                 // Use negentropy sync for subsequent refreshes (incremental updates)
                                 let items_for_counts = feed_items.clone();
-                                let is_first_load = !*interactions_loaded.peek();
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -166,7 +169,6 @@ pub fn Home() -> Element {
                                 // Batch fetch interaction counts for all events
                                 // Use negentropy sync for subsequent refreshes (incremental updates)
                                 let items_for_counts = feed_items.clone();
-                                let is_first_load = !*interactions_loaded.peek();
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -827,6 +829,7 @@ pub fn Home() -> Element {
                                 } else {
                                     rsx! {
                                         NoteCard {
+                                            key: "{event.id}",
                                             event: event.clone(),
                                             repost_info: repost_info,
                                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),

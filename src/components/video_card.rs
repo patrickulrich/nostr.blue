@@ -164,21 +164,38 @@ pub fn VideoCard(event: Event) -> Element {
                 Err(_) => return,
             };
 
-            // Fetch reply count
+            // Fetch reply count - query both lowercase e and uppercase E tags for NIP-22 compatibility
             let interaction_filter = Filter::new()
                 .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
 
+            // NIP-22 uppercase E tag query for comments referencing root
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let nip22_filter = Filter::new()
+                .kind(Kind::Comment)
+                .custom_tag(upper_e_tag, event_id_for_counts.clone())
+                .limit(500);
+
+            // Fetch both filter types and deduplicate by event ID
+            let mut all_reply_ids = std::collections::HashSet::new();
             if let Ok(events) = client.fetch_events(interaction_filter, Duration::from_secs(5)).await {
-                reply_count.set(events.len());
+                for event in events.iter() {
+                    all_reply_ids.insert(event.id);
+                }
             }
+            if let Ok(events) = client.fetch_events(nip22_filter, Duration::from_secs(5)).await {
+                for event in events.iter() {
+                    all_reply_ids.insert(event.id);
+                }
+            }
+            reply_count.set(all_reply_ids.len());
 
             // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch zap amount
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 

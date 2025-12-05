@@ -259,6 +259,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                         class: "border-b-2 border-blue-500/20",
                         for parent in parent_events.read().iter() {
                             div {
+                                key: "{parent.id}",
                                 class: "relative",
                                 // Render VoiceMessageCard for voice messages, NoteCard otherwise
                                 if is_voice_message(parent) {

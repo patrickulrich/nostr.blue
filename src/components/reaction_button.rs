@@ -31,6 +31,12 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut show_defaults_modal = use_signal(|| false);
     let mut custom_emoji_failed = use_signal(|| false);
 
+    // Reset custom emoji failed state when reaction changes
+    let user_reaction_for_effect = props.reaction.user_reaction.clone();
+    use_effect(use_reactive(&*user_reaction_for_effect.read(), move |_| {
+        custom_emoji_failed.set(false);
+    }));
+
     // Viewport-aware positioning signals
     let button_id = use_signal(|| format!("reaction-btn-{}", uuid::Uuid::new_v4()));
     let mut picker_top = use_signal(|| 0.0);

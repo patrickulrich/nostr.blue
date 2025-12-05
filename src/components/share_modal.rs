@@ -6,7 +6,7 @@ use crate::components::icons::{
     ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
     FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon
 };
-use wasm_bindgen::JsValue;
+use crate::utils::clipboard::copy_to_clipboard;
 
 #[derive(Clone, Copy, PartialEq)]
 enum ShareMode {
@@ -510,13 +510,3 @@ pub fn ShareModal(
     }
 }
 
-// Web API clipboard function
-async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
-    let navigator = window.navigator();
-    let clipboard = navigator.clipboard();
-
-    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text))
-        .await
-        .map(|_| ())
-}

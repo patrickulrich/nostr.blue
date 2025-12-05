@@ -473,6 +473,11 @@ pub async fn publish_gif_event(
     // Publish to all connected relays (including gifbuddy)
     match client.send_event(&event).await {
         Ok(output) => {
+            // Check if any relays accepted the event
+            if output.success.is_empty() {
+                log::error!("GIF event was not accepted by any relay");
+                return Err("Failed to publish: no relays accepted the event".to_string());
+            }
             log::info!("Published GIF event to {} relays", output.success.len());
             if !output.failed.is_empty() {
                 log::warn!("Failed to publish to {} relays", output.failed.len());

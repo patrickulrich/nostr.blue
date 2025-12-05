@@ -345,7 +345,7 @@ pub async fn get_counts_with_count_fallback(
         try_count_from_relays(event_id, Kind::Reaction, timeout),
         try_count_from_relays(event_id, Kind::Repost, timeout),
         try_count_from_relays(event_id, Kind::TextNote, timeout),
-        try_count_from_relays(event_id, Kind::from(9735), timeout),
+        try_count_from_relays(event_id, Kind::ZapReceipt, timeout),
     );
 
     // Use COUNT results if available
@@ -377,7 +377,7 @@ pub async fn get_counts_with_count_fallback(
     // If any COUNT failed, fall back to batch fetch for complete data
     if needs_fallback {
         log::debug!("COUNT incomplete for {}, using full fetch", event_id.to_hex());
-        if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![event_id.clone()], timeout).await {
+        if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
                 return fetched.clone();
             }
@@ -455,7 +455,7 @@ pub async fn fetch_interaction_counts_batch(
             Kind::TextNote,   // kind 1 - replies
             Kind::Reaction,   // kind 7 - likes
             Kind::Repost,     // kind 6 - reposts
-            Kind::from(9735), // kind 9735 - zaps
+            Kind::ZapReceipt, // kind 9735 - zaps
         ])
         .events(uncached_ids.clone())
         .limit(capped_limit); // Capped to avoid relay limit issues
@@ -656,7 +656,7 @@ pub async fn sync_interaction_counts(
             Kind::TextNote,   // kind 1 - replies
             Kind::Reaction,   // kind 7 - likes
             Kind::Repost,     // kind 6 - reposts
-            Kind::from(9735), // kind 9735 - zaps
+            Kind::ZapReceipt, // kind 9735 - zaps
         ])
         .events(event_ids.clone());
 
@@ -933,7 +933,7 @@ pub async fn fetch_trending_interactions(
             Kind::TextNote,
             Kind::Reaction,
             Kind::Repost,
-            Kind::from(9735),
+            Kind::ZapReceipt,
         ])
         .since(since)
         .limit(limit);

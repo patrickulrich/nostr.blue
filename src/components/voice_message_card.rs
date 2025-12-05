@@ -152,7 +152,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
             // Fetch zap receipts (kind 9735)
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 

@@ -8,7 +8,7 @@ use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomple
 use crate::utils::{SignerValidationResult, get_current_user_pubkey};
 use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
 use nostr_sdk::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 const MAX_LENGTH: usize = 5000;
@@ -24,7 +24,6 @@ pub fn CommentComposer(
     on_success: EventHandler<()>,
 ) -> Element {
     let mut content = use_signal(|| String::new());
-    let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(|| Vec::<String>::new());
     let toast = consume_toast();
@@ -45,7 +44,7 @@ pub fn CommentComposer(
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
+    let can_publish = char_count > 0 && !is_over_limit && has_signer;
 
     let is_reply = parent_comment.is_some();
 
@@ -196,8 +195,6 @@ pub fn CommentComposer(
                 }
             };
 
-        is_publishing.set(true);
-
         let target_event = comment_on.clone();
         let parent = parent_comment.clone();
 
@@ -221,10 +218,9 @@ pub fn CommentComposer(
         // Add to pending store immediately (optimistic update)
         add_pending_comment(pending);
 
-        // Clear form immediately for better UX
+        // Clear form immediately for better UX (optimistic UI)
         content.set(String::new());
         uploaded_media.set(Vec::new());
-        is_publishing.set(false);
         on_success.call(());
 
         // Clone for async block
@@ -232,8 +228,8 @@ pub fn CommentComposer(
         let content_for_publish = content_value.clone();
         let toast_for_async = toast_api.clone();
 
-        // Use spawn_local instead of spawn so the task survives component unmount
-        spawn_local(async move {
+        // Use spawn_forever so the task survives component unmount
+        spawn_forever(async move {
             let client = match get_client() {
                 Some(c) => c,
                 None => {
@@ -430,7 +426,6 @@ pub fn CommentComposer(
                                     let current = *show_media_uploader.read();
                                     show_media_uploader.set(!current);
                                 },
-                                disabled: *is_publishing.read(),
                                 "📎 Media"
                             }
 
@@ -462,11 +457,7 @@ pub fn CommentComposer(
                             },
                             disabled: !can_publish,
                             onclick: handle_publish,
-                            if *is_publishing.read() {
-                                "Publishing..."
-                            } else {
-                                "Publish Comment"
-                            }
+                            "Publish Comment"
                         }
                     }
                 }

@@ -10,7 +10,7 @@ use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::{SignerValidationResult, get_current_user_pubkey};
 use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use nostr_sdk::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 const MAX_LENGTH: usize = 5000;
@@ -290,8 +290,8 @@ pub fn ReplyComposer(
         let content_for_publish = content_value.clone();
         let thread_root_id_clone = thread_root_id.clone();
 
-        // Use spawn_local instead of spawn so the task survives component unmount
-        spawn_local(async move {
+        // Use spawn_forever so the task survives component unmount
+        spawn_forever(async move {
             // Build tags for reply following NIP-10 properly
             let mut tags = Vec::new();
 

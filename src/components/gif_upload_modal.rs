@@ -36,6 +36,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
+    // Track upload ID for timer cancellation (prevents race condition)
+    let mut current_upload_id = use_signal(|| None::<uuid::Uuid>);
 
     // Derive progress reactively based on selected server
     // Using use_memo ensures proper re-renders when global signals change
@@ -203,9 +205,15 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     handler.call(gif_metadata);
                                 }
 
-                                // Auto-close after success
+                                // Auto-close after success (with race condition guard)
+                                let upload_id = uuid::Uuid::new_v4();
+                                current_upload_id.set(Some(upload_id));
                                 spawn(async move {
                                     gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    // Only close if this is still the current upload
+                                    if current_upload_id.peek().as_ref() != Some(&upload_id) {
+                                        return;
+                                    }
                                     // Revoke object URL to free memory before clearing
                                     if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
                                         let _ = web_sys::Url::revoke_object_url(url);
@@ -215,6 +223,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     selected_file.set(None);
                                     caption.set(String::new());
                                     success.set(false);
+                                    current_upload_id.set(None);
                                 });
                             }
                             Err(e) => {
@@ -226,6 +235,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     }
                     Err(e) => {
                         log::error!("Upload failed: {}", e);
+                        // Revoke object URL to free memory on failure
+                        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+                            let _ = web_sys::Url::revoke_object_url(url);
+                        }
                         error.set(Some(e));
                         uploading.set(false);
                     }

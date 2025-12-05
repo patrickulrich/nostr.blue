@@ -9,7 +9,7 @@ use nostr_sdk::prelude::{EventBuilder, CommentTarget, Tags};
 use nostr_sdk::secp256k1::schnorr::Signature;
 use std::collections::HashMap;
 use std::str::FromStr;
-use wasm_bindgen_futures::spawn_local;
+use dioxus_core::spawn_forever;
 
 use crate::stores::nostr_client::{get_client, publish_note};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -112,10 +112,10 @@ pub fn add_pending_comment(comment: PendingComment) {
     let mut store = PENDING_COMMENTS.write();
     let comments = store.entry(target_id).or_insert_with(Vec::new);
 
-    // Prevent duplicates: check if we already have a pending comment with same content
+    // Prevent duplicates: check if we already have a pending or failed comment with same content
     let already_exists = comments.iter().any(|c|
         c.content == comment.content &&
-        matches!(c.status, CommentStatus::Pending)
+        matches!(c.status, CommentStatus::Pending | CommentStatus::Failed(_))
     );
 
     if already_exists {
@@ -191,8 +191,8 @@ pub fn retry_pending_comment(local_id: &str) {
 
     log::info!("Retrying pending comment {}", local_id);
 
-    // Spawn async task to republish
-    spawn_local(async move {
+    // Spawn async task to republish (survives component unmount)
+    spawn_forever(async move {
         if kind == Kind::Comment {
             // NIP-22 Comment
             let client = match get_client() {

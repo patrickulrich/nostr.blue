@@ -116,7 +116,7 @@ pub fn NoteCard(
                 .kinds(vec![
                     Kind::TextNote,      // kind 1 - replies
                     Kind::Repost,        // kind 6 - reposts
-                    Kind::from(9735),    // kind 9735 - zaps
+                    Kind::ZapReceipt,    // kind 9735 - zaps
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
@@ -147,7 +147,7 @@ pub fn NoteCard(
                                 }
                             }
                         },
-                        kind if kind == Kind::from(9735) => {
+                        Kind::ZapReceipt => {
                             // Check if this zap is from the current user
                             // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
                             if let Some(ref user_pk) = current_user_pubkey {

@@ -74,6 +74,7 @@ pub mod nwc_setup_modal;
 pub mod report_modal;
 pub mod add_to_list_modal;
 pub mod dvm_selector_modal;
+pub mod gif_upload_modal;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -116,7 +117,6 @@ pub use reaction_picker::InlineReactionPicker;
 pub use reaction_button::ReactionButton;
 pub use reaction_defaults_modal::ReactionDefaultsModal;
 pub use gif_picker::GifPicker;
-pub mod gif_upload_modal;
 pub use mention_autocomplete::MentionAutocomplete;
 pub use share_modal::ShareModal;
 pub use radial_menu::RadialMenu;
