@@ -44,11 +44,9 @@ pub struct PendingComment {
     pub created_at: Timestamp,
     /// Author's public key
     pub author_pubkey: PublicKey,
-    /// Original target event (needed for retry - prefixed to silence warning until retry is implemented)
-    #[allow(dead_code)]
+    /// Original target event (used by retry_pending_comment)
     pub target_event: NostrEvent,
-    /// Original parent comment (needed for retry - prefixed to silence warning until retry is implemented)
-    #[allow(dead_code)]
+    /// Optional parent comment for nested replies (used by retry_pending_comment)
     pub parent_comment: Option<NostrEvent>,
 }
 
