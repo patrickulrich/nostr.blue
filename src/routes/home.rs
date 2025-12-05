@@ -4,7 +4,7 @@ use crate::routes::Route;
 use crate::components::{NoteCard, NoteComposer, ArticleCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use crate::utils::{DataState, FeedItem, extract_reposted_event};
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
+use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -39,6 +39,11 @@ pub fn Home() -> Element {
 
     // Interaction counts cache (event_id -> counts) for batch optimization
     let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+
+    // Track if this is the first interaction count load (for negentropy optimization)
+    // First load: full fetch (no local data to reconcile)
+    // Subsequent refreshes: use negentropy sync for incremental updates
+    let mut interactions_loaded = use_signal(|| false);
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(|| Vec::<FeedItem>::new());
@@ -109,12 +114,22 @@ pub fn Home() -> Element {
                                 // Display feed immediately (NoteCard shows fallback until metadata loads)
                                 feed_state.set(DataState::Loaded(feed_items.clone()));
 
-                                // Batch fetch interaction counts for all events (99% query reduction!)
+                                // Batch fetch interaction counts for all events
+                                // Use negentropy sync for subsequent refreshes (incremental updates)
                                 let items_for_counts = feed_items.clone();
+                                let is_first_load = !*interactions_loaded.peek();
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                    if let Ok(counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                                    let counts = if is_first_load {
+                                        // First load: full fetch (no local data to reconcile)
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        // Subsequent refresh: use negentropy for incremental sync
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
                                     }
                                 });
 
@@ -143,12 +158,22 @@ pub fn Home() -> Element {
                                 // Display feed immediately (NoteCard shows fallback until metadata loads)
                                 feed_state.set(DataState::Loaded(feed_items.clone()));
 
-                                // Batch fetch interaction counts for all events (99% query reduction!)
+                                // Batch fetch interaction counts for all events
+                                // Use negentropy sync for subsequent refreshes (incremental updates)
                                 let items_for_counts = feed_items.clone();
+                                let is_first_load = !*interactions_loaded.peek();
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                    if let Ok(counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                                    let counts = if is_first_load {
+                                        // First load: full fetch (no local data to reconcile)
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        // Subsequent refresh: use negentropy for incremental sync
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
                                     }
                                 });
 
