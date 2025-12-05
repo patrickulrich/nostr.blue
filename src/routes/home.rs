@@ -13,6 +13,7 @@ use std::collections::HashMap;
 enum FeedType {
     Following,          // Top level posts only
     FollowingWithReplies, // All posts including replies
+    Global,             // Global feed from all users
 }
 
 impl FeedType {
@@ -20,6 +21,7 @@ impl FeedType {
         match self {
             FeedType::Following => "Following",
             FeedType::FollowingWithReplies => "Following + Replies",
+            FeedType::Global => "Global",
         }
     }
 }
@@ -172,6 +174,46 @@ pub fn Home() -> Element {
                                         fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
                                     } else {
                                         // Subsequent refresh: use negentropy for incremental sync
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+
+                                // Spawn non-blocking background prefetch for metadata
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
+                            Err(e) => {
+                                feed_state.set(DataState::Error(e));
+                            }
+                        }
+                    }
+                    FeedType::Global => {
+                        match load_global_feed(None).await {
+                            Ok(feed_items) => {
+                                // Track oldest timestamp for pagination
+                                if let Some(last_item) = feed_items.last() {
+                                    oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                }
+
+                                // Always assume there's more content on initial load
+                                has_more.set(true);
+
+                                // Display feed immediately
+                                feed_state.set(DataState::Loaded(feed_items.clone()));
+
+                                // Batch fetch interaction counts for all events
+                                let items_for_counts = feed_items.clone();
+                                let is_first_load = !*interactions_loaded.peek();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
                                         sync_interaction_counts(event_ids, Duration::from_secs(5)).await
                                     };
                                     if let Ok(counts) = counts {
@@ -380,7 +422,7 @@ pub fn Home() -> Element {
                                                 // Only top-level posts (no e tags)
                                                 !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
                                             }
-                                            FeedType::FollowingWithReplies => {
+                                            FeedType::FollowingWithReplies | FeedType::Global => {
                                                 // All posts including replies
                                                 true
                                             }
@@ -469,6 +511,7 @@ pub fn Home() -> Element {
             let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
                 FeedType::Following => load_following_feed(until).await.map(|(items, _)| items),
                 FeedType::FollowingWithReplies => load_following_with_replies(until).await,
+                FeedType::Global => load_global_feed(until).await,
             };
 
             match fetch_result {
@@ -612,6 +655,31 @@ pub fn Home() -> Element {
                                             }
                                         }
                                         if *feed_type.read() == FeedType::FollowingWithReplies {
+                                            span { "✓" }
+                                        }
+                                    }
+
+                                    div {
+                                        class: "border-t border-border"
+                                    }
+
+                                    button {
+                                        class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                        onclick: move |_| {
+                                            feed_type.set(FeedType::Global);
+                                            show_dropdown.set(false);
+                                        },
+                                        div {
+                                            div {
+                                                class: "font-medium",
+                                                "Global"
+                                            }
+                                            div {
+                                                class: "text-xs text-muted-foreground",
+                                                "Posts from everyone"
+                                            }
+                                        }
+                                        if *feed_type.read() == FeedType::Global {
                                             span { "✓" }
                                         }
                                     }
