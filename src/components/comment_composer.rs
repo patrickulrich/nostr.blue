@@ -1,8 +1,13 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
+use crate::stores::signer::SIGNER_INFO;
+use crate::stores::pending_comments::{
+    PendingComment, CommentStatus, add_pending_comment, update_pending_status,
+};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
-use nostr_sdk::{Event as NostrEvent, EventBuilder};
+use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
 use nostr_sdk::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 const MAX_LENGTH: usize = 5000;
 
@@ -161,17 +166,63 @@ pub fn CommentComposer(
             return;
         }
 
+        // Get current user's pubkey for optimistic display
+        let author_pubkey = match SIGNER_INFO.read().as_ref() {
+            Some(info) => match PublicKey::from_hex(&info.public_key) {
+                Ok(pk) => pk,
+                Err(_) => {
+                    log::error!("Invalid pubkey in signer info");
+                    return;
+                }
+            },
+            None => {
+                log::error!("No signer info available");
+                return;
+            }
+        };
+
         is_publishing.set(true);
 
         let target_event = comment_on.clone();
         let parent = parent_comment.clone();
 
-        spawn(async move {
+        // Generate unique local ID for tracking this pending comment
+        let local_id = uuid::Uuid::new_v4().to_string();
+
+        // Create pending comment for optimistic UI update
+        let pending = PendingComment {
+            local_id: local_id.clone(),
+            content: content_value.clone(),
+            target_event_id: target_event.id,
+            parent_comment_id: parent.as_ref().map(|p| p.id),
+            kind: Kind::Comment,
+            status: CommentStatus::Pending,
+            created_at: Timestamp::now(),
+            author_pubkey,
+            target_event: target_event.clone(),
+            parent_comment: parent.clone(),
+        };
+
+        // Add to pending store immediately (optimistic update)
+        add_pending_comment(pending);
+
+        // Clear form immediately for better UX
+        content.set(String::new());
+        uploaded_media.set(Vec::new());
+        is_publishing.set(false);
+        on_success.call(());
+
+        // Clone for async block
+        let local_id_clone = local_id.clone();
+        let content_for_publish = content_value.clone();
+
+        // Use spawn_local instead of spawn so the task survives component unmount
+        spawn_local(async move {
             let client = match get_client() {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    is_publishing.set(false);
+                    update_pending_status(&local_id_clone, CommentStatus::Failed("Client not initialized".to_string()));
                     return;
                 }
             };
@@ -202,19 +253,19 @@ pub fn CommentComposer(
                 None,
                 None
             ));
-            let builder = EventBuilder::comment(content_value, comment_target, root_target);
+            let builder = EventBuilder::comment(content_for_publish, comment_target, root_target);
 
             match client.send_event_builder(builder).await {
-                Ok(event_id) => {
-                    log::info!("NIP-22 comment published: {}", event_id.to_hex());
-                    content.set(String::new());
-                    uploaded_media.set(Vec::new());
-                    is_publishing.set(false);
-                    on_success.call(());
+                Ok(send_output) => {
+                    log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
+                    update_pending_status(&local_id_clone, CommentStatus::Confirmed(*send_output.id()));
+                    // Note: We don't remove the pending comment here. It will remain visible
+                    // until the page is refreshed or navigated away. The merge function will
+                    // skip duplicates once the relay data is fetched on next load.
                 }
                 Err(e) => {
                     log::error!("Failed to publish comment: {}", e);
-                    is_publishing.set(false);
+                    update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
                 }
             }
         });

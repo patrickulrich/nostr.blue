@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::components::{PhotoCard, ThreadedComment, CommentComposer, ClientInitializing};
-use crate::utils::build_thread_tree;
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::stores::pending_comments::get_pending_comments;
 use nostr_sdk::{Event, Filter, Kind, EventId};
 use std::time::Duration;
 
@@ -197,7 +198,10 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                                 // Build thread tree and render
                                 {
                                     let comment_vec = comments.read().clone();
-                                    let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                    let confirmed_tree = build_thread_tree(comment_vec, &event.id);
+                                    // Merge pending comments for optimistic display
+                                    let pending = get_pending_comments(&event.id);
+                                    let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
                                     rsx! {
                                         div {

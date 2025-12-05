@@ -19,6 +19,10 @@ static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
 static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
 });
+// Cashu tokens are base64-encoded strings starting with cashuA (V3) or cashuB (V4)
+static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
+});
 
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +67,8 @@ pub enum ContentToken {
     Tidal(String),           // Embed URL
     // Zap.stream - Nostr live streaming
     ZapStream(String),       // naddr from zap.stream URL
+    // Cashu ecash tokens
+    CashuToken(String),      // cashuA.../cashuB... token string
 }
 
 /// Parse note content into structured tokens
@@ -153,6 +159,12 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     for mat in HASHTAG_PATTERN.find_iter(content) {
         let hashtag = mat.as_str()[1..].to_string(); // Remove the #
         matches.push((mat.start(), mat.end(), ContentToken::Hashtag(hashtag)));
+    }
+
+    // Find all cashu tokens (using precompiled static regex)
+    for mat in CASHU_PATTERN.find_iter(content) {
+        let token_str = mat.as_str().to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::CashuToken(token_str)));
     }
 
     // Sort matches by position

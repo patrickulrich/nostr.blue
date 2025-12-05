@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 use dioxus::events::MediaData;
 use dioxus::web::WebEventExt;
 use wasm_bindgen::JsCast;
-use crate::utils::{ThreadNode, event::is_voice_message};
+use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
+use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, update_pending_status};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
@@ -23,6 +24,14 @@ const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
 pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
+
+    // Extract pending state from node source
+    let (is_pending, pending_local_id, pending_status) = match &node.source {
+        ThreadNodeSource::Confirmed => (false, None, None),
+        ThreadNodeSource::Pending { local_id, status } => {
+            (true, Some(local_id.clone()), Some(status.clone()))
+        }
+    };
 
     // Clone values needed for closures
     let event_id = event.id.to_string();
@@ -311,7 +320,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
             // Comment card - clickable to navigate to thread
             div {
-                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
+                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70"
+                } else {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer"
+                },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav.clone();
@@ -389,6 +402,56 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             span {
                                 class: "text-xs text-muted-foreground",
                                 "{format_relative_time_ex(event.created_at, true, true)}"
+                            }
+
+                            // Pending status badge
+                            if is_pending {
+                                match pending_status.as_ref() {
+                                    Some(CommentStatus::Pending) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
+                                            "Posting..."
+                                        }
+                                    },
+                                    Some(CommentStatus::Confirmed(_)) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+                                            "Posted!"
+                                        }
+                                    },
+                                    Some(CommentStatus::Failed(error)) => {
+                                        let local_id_retry = pending_local_id.clone().unwrap_or_default();
+                                        let local_id_dismiss = pending_local_id.clone().unwrap_or_default();
+                                        let error_msg = error.clone();
+                                        rsx! {
+                                            div {
+                                                class: "ml-2 flex items-center gap-2 flex-wrap",
+                                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                                span {
+                                                    class: "px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full",
+                                                    title: "{error_msg}",
+                                                    "Failed"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
+                                                    onclick: move |_| {
+                                                        // Reset to pending and let user retry by refreshing
+                                                        update_pending_status(&local_id_retry, CommentStatus::Pending);
+                                                    },
+                                                    "Retry"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground",
+                                                    onclick: move |_| {
+                                                        remove_pending_comment(&local_id_dismiss);
+                                                    },
+                                                    "Dismiss"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    None => rsx! {}
+                                }
                             }
                         }
 

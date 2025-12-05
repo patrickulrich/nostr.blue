@@ -7,7 +7,8 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, calculate_read_time
 };
-use crate::utils::build_thread_tree;
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::stores::pending_comments::get_pending_comments;
 use std::time::Duration;
 
 #[component]
@@ -490,7 +491,10 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                         // Only build thread tree after loading completes to avoid caching empty results
                                         {
                                             let comment_vec = comments.read().clone();
-                                            let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                            let confirmed_tree = build_thread_tree(comment_vec, &event.id);
+                                            // Merge pending comments for optimistic display
+                                            let pending = get_pending_comments(&event.id);
+                                            let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
                                             rsx! {
                                                 if thread_tree.is_empty() {

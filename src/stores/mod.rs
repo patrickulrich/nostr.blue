@@ -25,4 +25,5 @@ pub mod indexeddb_database;
 pub mod reactions_store;  // NIP-78 preferred reactions
 pub mod dvm_store;  // NIP-90 Data Vending Machines
 pub mod nip96_store;  // NIP-96 HTTP File Storage
+pub mod pending_comments;  // Optimistic updates for comments
 
