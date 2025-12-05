@@ -131,6 +131,15 @@ pub fn use_reaction(
                 ReactionEmoji::Like
             } else if r == "-" {
                 ReactionEmoji::Unlike
+            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+                // NIP-30 custom emoji - check if we have the URL
+                let shortcode = r[1..r.len()-1].to_string();
+                if let Some(url) = c.user_reaction_url.as_ref() {
+                    ReactionEmoji::Custom { shortcode, url: url.clone() }
+                } else {
+                    // No URL available, fall back to showing shortcode as text
+                    ReactionEmoji::Standard(r.clone())
+                }
             } else {
                 ReactionEmoji::Standard(r.clone())
             }
@@ -141,16 +150,53 @@ pub fn use_reaction(
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction);
+    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction.clone());
+
+    // Watch for late-arriving precomputed data (batch fetch may complete after component mount)
+    // This handles the race condition where NoteCard renders before batch fetch completes
+    use_effect(use_reactive(
+        &(precomputed_count, precomputed_is_liked, precomputed_user_reaction.clone()),
+        move |(count_opt, liked_opt, reaction_opt)| {
+            // Update if precomputed has data that's >= current (batch may have more complete data)
+            if let Some(count) = count_opt {
+                let current = *like_count.peek();
+                // Update if batch has more OR if we're still at zero
+                if count > current || (count > 0 && current == 0) {
+                    like_count.set(count);
+                }
+            }
+            if let Some(liked) = liked_opt {
+                // User liked state from batch - always update to reflect accurate state
+                is_liked.set(liked);
+            }
+            if let Some(reaction) = reaction_opt {
+                user_reaction.set(Some(reaction.clone()));
+            }
+        }
+    ));
 
     // Clone for effect
     let event_id_fetch = event_id.clone();
 
+    // Track whether we have precomputed data from batch fetch
+    // Note: We check if precomputed_counts exists, not just user_liked,
+    // because user_liked is None when user hasn't reacted (not the same as "unknown")
+    let has_batch_data = precomputed_counts.is_some();
+    let mut has_precomputed_data = use_signal(|| has_batch_data);
+
+    // Update the flag when precomputed data arrives (batch fetch completes after mount)
+    use_effect(use_reactive(&has_batch_data, move |has_data| {
+        if has_data {
+            has_precomputed_data.set(true);
+        }
+    }));
+
     // Use use_reactive to properly track event_id dependency and re-run when it changes
-    // Note: Check precomputed_is_liked inside the closure to avoid stale capture
+    // Skip individual fetch if batch data has already provided user's like status
     use_effect(use_reactive(&event_id_fetch, move |event_id_for_fetch| {
-        // Check directly inside closure - evaluates fresh each time
-        if precomputed_is_liked.is_some() {
+        // Check if batch data already provided user's like status
+        // This prevents unnecessary individual fetches when batch data is available
+        if *has_precomputed_data.peek() {
             return;
         }
 
@@ -247,9 +293,19 @@ pub fn use_reaction(
                 // reflect the most recent action. Final state is liked only if no subsequent unlike.
                 let final_liked = user_liked && !user_unliked;
 
-                like_count.set(positive_count);
-                is_liked.set(final_liked);
-                user_reaction.set(if final_liked { user_emoji } else { None });
+                // Only update count if we found more than current (avoid overwriting batch data)
+                let current_count = *like_count.peek();
+                if positive_count > current_count {
+                    like_count.set(positive_count);
+                }
+
+                // Only update user state if batch data hasn't already provided it
+                // This prevents individual fetch from overwriting authoritative batch data
+                // that may have arrived while this fetch was in progress
+                if !*has_precomputed_data.peek() {
+                    is_liked.set(final_liked);
+                    user_reaction.set(if final_liked { user_emoji } else { None });
+                }
             }
         });
     }));

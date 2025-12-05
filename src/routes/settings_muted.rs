@@ -126,7 +126,7 @@ pub fn SettingsMuted() -> Element {
                                 div {
                                     class: "flex-1 min-w-0",
                                     Link {
-                                        to: Route::Note { note_id: event_id.clone() },
+                                        to: Route::Note { note_id: event_id.clone(), from_voice: None },
                                         class: "font-mono text-sm text-muted-foreground hover:text-foreground hover:underline truncate block",
                                         if event_id.len() > 40 {
                                             "{&event_id[..16]}...{&event_id[event_id.len()-16..]}"

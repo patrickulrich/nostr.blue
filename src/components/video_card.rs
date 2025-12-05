@@ -419,7 +419,7 @@ pub fn VideoCard(event: Event) -> Element {
 
                 // Reply/Comment
                 Link {
-                    to: Route::Note { note_id: event_id.clone() },
+                    to: Route::Note { note_id: event_id.clone(), from_voice: None },
                     class: "flex items-center gap-2 hover:text-blue-500 transition",
                     MessageCircleIcon { class: "w-5 h-5" }
                     if *reply_count.read() > 0 {

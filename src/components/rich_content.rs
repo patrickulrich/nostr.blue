@@ -7,7 +7,7 @@ use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
-use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard};
+use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
 use crate::components::live_stream_card::LiveStreamCard;
 
 #[component]
@@ -28,7 +28,7 @@ pub fn RichContent(
                      ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
                      ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
                      ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
-                     ContentToken::EventMention(_))
+                     ContentToken::EventMention(_) | ContentToken::CashuToken(_))
         }).count();
 
         // Heuristic: >800 chars (roughly 16 lines at ~50 chars/line)
@@ -231,6 +231,11 @@ fn render_token(token: &ContentToken) -> Element {
         // Zap.stream - Nostr live streaming
         ContentToken::ZapStream(naddr) => rsx! {
             ZapStreamRenderer { naddr: naddr.clone() }
+        },
+
+        // Cashu ecash token
+        ContentToken::CashuToken(token) => rsx! {
+            CashuTokenCard { token: token.clone() }
         },
     }
 }
@@ -477,7 +482,7 @@ fn EventMentionRenderer(mention: String) -> Element {
 
             rsx! {
                 Link {
-                    to: Route::Note { note_id: event_id.to_hex() },
+                    to: Route::Note { note_id: event_id.to_hex(), from_voice: None },
                     class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     "{short}"
@@ -523,7 +528,7 @@ fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: event_id.clone() },
+            to: Route::Note { note_id: event_id.clone(), from_voice: None },
             class: "block my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
             div {

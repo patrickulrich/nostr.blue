@@ -57,32 +57,57 @@ pub fn ShareModal(
         .next()
         .unwrap_or_default();
 
-    // Generate nostr.blue URL
-    let video_url = format!("https://nostr.blue/videos/{}", event.id.to_hex());
+    // Generate nostr.blue URL based on event kind
+    use nostr_sdk::{Kind, ToBech32};
 
-    // Generate NIP-19 nevent identifier with relay hints from author's write relays
-    let video_nip19 = use_signal(|| String::new());
+    let content_url = if event.kind.is_addressable() {
+        // For articles (Kind 30023) and other addressable events, use naddr
+        if let Some(coord) = event.coordinate() {
+            match coord.to_bech32() {
+                Ok(naddr) => format!("https://nostr.blue/articles/{}", naddr),
+                Err(_) => format!("https://nostr.blue/videos/{}", event.id.to_hex()),
+            }
+        } else {
+            format!("https://nostr.blue/videos/{}", event.id.to_hex())
+        }
+    } else {
+        format!("https://nostr.blue/videos/{}", event.id.to_hex())
+    };
 
-    // Generate nevent (with gossip, relay hints are not needed)
+    // Determine content type for modal title
+    let is_article = event.kind == Kind::LongFormTextNote;
+
+    // Generate NIP-19 identifier with relay hints from author's write relays
+    let content_nip19 = use_signal(|| String::new());
+
+    // Generate nevent/naddr (with gossip, relay hints are not needed)
     {
         let event_clone = event.clone();
-        let mut video_nip19_clone = video_nip19.clone();
+        let mut content_nip19_clone = content_nip19.clone();
         use_effect(move || {
+            let event_for_async = event_clone.clone();
             spawn(async move {
-                // With gossip, relay hints are not needed - just use simple note encoding
-                use nostr_sdk::ToBech32;
-                let nevent = event_clone.id.to_bech32().unwrap_or_else(|_| event_clone.id.to_hex());
+                // For addressable events use naddr, for regular events use nevent/note
+                let nip19_str = if event_for_async.kind.is_addressable() {
+                    if let Some(coord) = event_for_async.coordinate() {
+                        coord.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                    } else {
+                        event_for_async.id.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                    }
+                } else {
+                    event_for_async.id.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                };
 
-                // Set video_nip19 so the Nostr Event button remains enabled
-                video_nip19_clone.set(format!("nostr:{}", nevent));
+                // Set content_nip19 so the Nostr Event button remains enabled
+                content_nip19_clone.set(format!("nostr:{}", nip19_str));
             });
         });
     }
 
     let handle_copy_link = {
-        let video_url = video_url.clone();
+        let content_url_copy = content_url.clone();
         move |_| {
-            let url = video_url.clone();
+            let url = content_url_copy.clone();
             spawn(async move {
             match copy_to_clipboard(&url).await {
                 Ok(_) => {
@@ -102,7 +127,7 @@ pub fn ShareModal(
     };
 
     // Clone URLs for button handlers
-    let video_url_for_button1 = video_url.clone();
+    let content_url_for_button1 = content_url.clone();
     let video_mp4_url_for_button = video_mp4_url.clone();
 
     let handle_share_to_nostr = move |_| {
@@ -145,7 +170,8 @@ pub fn ShareModal(
     };
 
     let handle_send_dm = {
-        let video_url = video_url.clone();
+        let content_url_dm = content_url.clone();
+        let is_article_dm = is_article;
         move |_| {
             let manual_recipient = dm_recipient.read().trim().to_string();
 
@@ -155,7 +181,8 @@ pub fn ShareModal(
 
             is_publishing.set(true);
 
-            let video_url_clone = video_url.clone();
+            let content_url_clone = content_url_dm.clone();
+            let is_article_clone = is_article_dm;
 
             spawn(async move {
                 // Parse recipient as npub or hex
@@ -170,7 +197,8 @@ pub fn ShareModal(
                     return;
                 };
 
-                let message = format!("Check out this video on nostr.blue: {}", video_url_clone);
+                let content_type = if is_article_clone { "article" } else { "video" };
+                let message = format!("Check out this {} on nostr.blue: {}", content_type, content_url_clone);
 
                 // Send DM using NIP-17
                 match dms::send_dm(recipient_hex.clone(), message).await {
@@ -219,7 +247,7 @@ pub fn ShareModal(
                         h3 {
                             class: "text-lg font-semibold ml-2",
                             match *share_mode.read() {
-                                ShareMode::Main => "Share Video",
+                                ShareMode::Main => if is_article { "Share Article" } else { "Share Video" },
                                 ShareMode::Nostr => "Share to Nostr",
                                 ShareMode::Dm => "Send via DM",
                             }
@@ -238,12 +266,16 @@ pub fn ShareModal(
 
                     // Main menu mode
                     if *share_mode.read() == ShareMode::Main {
-                        // Video preview card
+                        // Content preview card
                         div {
                             class: "bg-accent rounded-lg p-4 flex items-center gap-3",
                             div {
                                 class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0",
-                                FileVideoIcon { class: "w-6 h-6 text-white" }
+                                if is_article {
+                                    HashIcon { class: "w-6 h-6 text-white" }
+                                } else {
+                                    FileVideoIcon { class: "w-6 h-6 text-white" }
+                                }
                             }
                             div {
                                 class: "flex-1 min-w-0",
@@ -253,7 +285,7 @@ pub fn ShareModal(
                                 }
                                 p {
                                     class: "text-sm text-muted-foreground",
-                                    "nostr.blue Video"
+                                    if is_article { "nostr.blue Article" } else { "nostr.blue Video" }
                                 }
                             }
                         }
@@ -302,7 +334,11 @@ pub fn ShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Post about this video" } else { "Login required" }
+                                        if has_signer {
+                                            if is_article { "Post about this article" } else { "Post about this video" }
+                                        } else {
+                                            "Login required"
+                                        }
                                     }
                                 }
                             }
@@ -363,30 +399,32 @@ pub fn ShareModal(
                                         if !current.is_empty() {
                                             current.push(' ');
                                         }
-                                        current.push_str(&video_url_for_button1);
+                                        current.push_str(&content_url_for_button1);
                                         nostr_text.set(current);
                                     },
                                     Link2Icon { class: "w-3 h-3" }
                                     "nostr.blue Link"
                                 }
-                                button {
-                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
-                                    onclick: move |_| {
-                                        let mut current = nostr_text.read().clone();
-                                        if !current.is_empty() {
-                                            current.push(' ');
-                                        }
-                                        current.push_str(&video_mp4_url_for_button);
-                                        nostr_text.set(current);
-                                    },
-                                    disabled: video_mp4_url.is_empty(),
-                                    FileVideoIcon { class: "w-3 h-3" }
-                                    "MP4 URL"
+                                // MP4 URL button - only show for videos
+                                if !is_article && !video_mp4_url.is_empty() {
+                                    button {
+                                        class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                        onclick: move |_| {
+                                            let mut current = nostr_text.read().clone();
+                                            if !current.is_empty() {
+                                                current.push(' ');
+                                            }
+                                            current.push_str(&video_mp4_url_for_button);
+                                            nostr_text.set(current);
+                                        },
+                                        FileVideoIcon { class: "w-3 h-3" }
+                                        "MP4 URL"
+                                    }
                                 }
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: move |_| {
-                                        let nip19_value = video_nip19.read().clone();
+                                        let nip19_value = content_nip19.read().clone();
                                         if nip19_value.is_empty() || nip19_value == "nostr:" {
                                             return;
                                         }
@@ -397,7 +435,7 @@ pub fn ShareModal(
                                         current.push_str(&nip19_value);
                                         nostr_text.set(current);
                                     },
-                                    disabled: video_nip19.read().is_empty() || *video_nip19.read() == "nostr:",
+                                    disabled: content_nip19.read().is_empty() || *content_nip19.read() == "nostr:",
                                     HashIcon { class: "w-3 h-3" }
                                     "Nostr Event"
                                 }

@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, ShareModal, icons::MessageCircleIcon};
-use crate::utils::build_thread_tree;
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::stores::pending_comments::get_pending_comments;
 use crate::utils::format_sats_compact;
 use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
 use std::time::Duration;
@@ -38,12 +39,12 @@ pub fn VideoDetail(video_id: String) -> Element {
         loading.set(true);
         error.set(None);
 
+        // Clear profile cache to prevent stale author metadata
+        crate::stores::profiles::PROFILE_CACHE.write().clear();
+
         spawn(async move {
             match load_video_by_id(&id).await {
                 Ok(event) => {
-                    // Clear profile cache for author to ensure fresh metadata on detail pages
-                    let author_pubkey = event.pubkey.to_hex();
-                    crate::stores::profiles::PROFILE_CACHE.write().pop(&author_pubkey);
                     video_event.set(Some(event));
                     loading.set(false);
                 }
@@ -317,42 +318,48 @@ fn LandscapePlayer(event: Event) -> Element {
                         }
                     }
 
-                    {
-                        let comment_vec = comments.read().clone();
-                        let thread_tree = build_thread_tree(comment_vec, &event_id);
+                    if *loading_comments.read() {
+                        div {
+                            class: "flex items-center justify-center py-10",
+                            div {
+                                class: "text-center",
+                                div {
+                                    class: "animate-spin text-4xl mb-2",
+                                    "⚡"
+                                }
+                                p {
+                                    class: "text-muted-foreground",
+                                    "Loading comments..."
+                                }
+                            }
+                        }
+                    } else {
+                        // Only build thread tree after loading completes to avoid caching empty results
+                        {
+                            let comment_vec = comments.read().clone();
+                            let confirmed_tree = build_thread_tree(comment_vec, &event_id);
+                            // Merge pending comments for optimistic display
+                            let pending = get_pending_comments(&event_id);
+                            let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event_id);
 
-                        rsx! {
-                            if *loading_comments.read() {
-                                div {
-                                    class: "flex items-center justify-center py-10",
+                            rsx! {
+                                if thread_tree.is_empty() {
                                     div {
-                                        class: "text-center",
-                                        div {
-                                            class: "animate-spin text-4xl mb-2",
-                                            "⚡"
-                                        }
+                                        class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                        p { "No comments yet" }
                                         p {
-                                            class: "text-muted-foreground",
-                                            "Loading comments..."
+                                            class: "text-sm",
+                                            "Be the first to comment!"
                                         }
                                     }
-                                }
-                            } else if thread_tree.is_empty() {
-                                div {
-                                    class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                    p { "No comments yet" }
-                                    p {
-                                        class: "text-sm",
-                                        "Be the first to comment!"
-                                    }
-                                }
-                            } else {
-                                div {
-                                    class: "divide-y divide-border",
-                                    for node in thread_tree {
-                                        ThreadedComment {
-                                            node: node.clone(),
-                                            depth: 0
+                                } else {
+                                    div {
+                                        class: "divide-y divide-border",
+                                        for node in thread_tree {
+                                            ThreadedComment {
+                                                node: node.clone(),
+                                                depth: 0
+                                            }
                                         }
                                     }
                                 }
@@ -842,12 +849,8 @@ fn VideoInfo(
         });
     }));
 
-    // Fetch comments when modal opens
-    use_effect(use_reactive((&*show_comments_modal.read(), &event_id_for_comments), move |(modal_open, event_id_str)| {
-        if !modal_open {
-            return;
-        }
-
+    // Fetch comments on mount (same pattern as photo_detail)
+    use_effect(use_reactive(&event_id_for_comments, move |event_id_str| {
         let event_id_clone = event_id_str.to_string();
 
         spawn(async move {
@@ -862,17 +865,21 @@ fn VideoInfo(
             };
 
             let event_id_hex = event_id_parsed.to_hex();
+
+            // Create filter for uppercase E tags (NIP-22 comments)
             let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
             let filter_upper = Filter::new()
                 .kind(Kind::Comment)
                 .custom_tag(upper_e_tag, event_id_hex.clone())
                 .limit(500);
 
+            // Create filter for lowercase e tags (standard replies)
             let filter_lower = Filter::new()
                 .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
 
+            // Fetch both filters and combine results
             let mut all_comments = Vec::new();
 
             if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
@@ -883,6 +890,7 @@ fn VideoInfo(
                 all_comments.extend(lower_comments.into_iter());
             }
 
+            // Deduplicate by event ID
             let mut seen_ids = std::collections::HashSet::new();
             let unique_comments: Vec<Event> = all_comments.into_iter()
                 .filter(|event| seen_ids.insert(event.id))
@@ -890,6 +898,7 @@ fn VideoInfo(
 
             let mut sorted_comments = unique_comments;
             sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            log::info!("VideoInfo loaded {} comments", sorted_comments.len());
             comments.set(sorted_comments);
 
             loading_comments.set(false);
@@ -1121,42 +1130,48 @@ fn VideoInfo(
 
                         div {
                             class: "p-6",
-                            {
-                                let comment_vec = comments.read().clone();
-                                let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                            if *loading_comments.read() {
+                                div {
+                                    class: "flex items-center justify-center py-10",
+                                    div {
+                                        class: "text-center",
+                                        div {
+                                            class: "animate-spin text-4xl mb-2",
+                                            "⚡"
+                                        }
+                                        p {
+                                            class: "text-muted-foreground",
+                                            "Loading comments..."
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Only build thread tree after loading completes to avoid caching empty results
+                                {
+                                    let comment_vec = comments.read().clone();
+                                    let confirmed_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                                    // Merge pending comments for optimistic display
+                                    let pending = get_pending_comments(&event_id_parsed);
+                                    let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event_id_parsed);
 
-                                rsx! {
-                                    if *loading_comments.read() {
-                                        div {
-                                            class: "flex items-center justify-center py-10",
+                                    rsx! {
+                                        if thread_tree.is_empty() {
                                             div {
-                                                class: "text-center",
-                                                div {
-                                                    class: "animate-spin text-4xl mb-2",
-                                                    "⚡"
-                                                }
+                                                class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                                p { "No comments yet" }
                                                 p {
-                                                    class: "text-muted-foreground",
-                                                    "Loading comments..."
+                                                    class: "text-sm",
+                                                    "Be the first to comment!"
                                                 }
                                             }
-                                        }
-                                    } else if thread_tree.is_empty() {
-                                        div {
-                                            class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                            p { "No comments yet" }
-                                            p {
-                                                class: "text-sm",
-                                                "Be the first to comment!"
-                                            }
-                                        }
-                                    } else {
-                                        div {
-                                            class: "divide-y divide-border",
-                                            for node in thread_tree {
-                                                ThreadedComment {
-                                                    node: node.clone(),
-                                                    depth: 0
+                                        } else {
+                                            div {
+                                                class: "divide-y divide-border",
+                                                for node in thread_tree {
+                                                    ThreadedComment {
+                                                        node: node.clone(),
+                                                        depth: 0
+                                                    }
                                                 }
                                             }
                                         }
@@ -1189,7 +1204,43 @@ fn VideoInfo(
                     on_close: move |_| show_comment_composer.set(false),
                     on_success: move |_| {
                         show_comment_composer.set(false);
-                        comments.set(Vec::new());
+                        // Reload comments (same pattern as photo_detail)
+                        let event_id = event_id_parsed;
+                        spawn(async move {
+                            loading_comments.set(true);
+                            let event_id_hex = event_id.to_hex();
+
+                            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+                            let filter_upper = Filter::new()
+                                .kind(Kind::Comment)
+                                .custom_tag(upper_e_tag, event_id_hex.clone())
+                                .limit(500);
+
+                            let filter_lower = Filter::new()
+                                .kinds(vec![Kind::TextNote, Kind::Comment])
+                                .event(event_id)
+                                .limit(500);
+
+                            let mut all_comments = Vec::new();
+
+                            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
+                                all_comments.extend(upper_comments.into_iter());
+                            }
+
+                            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
+                                all_comments.extend(lower_comments.into_iter());
+                            }
+
+                            let mut seen_ids = std::collections::HashSet::new();
+                            let unique_comments: Vec<Event> = all_comments.into_iter()
+                                .filter(|event| seen_ids.insert(event.id))
+                                .collect();
+
+                            let mut sorted_comments = unique_comments;
+                            sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                            comments.set(sorted_comments);
+                            loading_comments.set(false);
+                        });
                         show_comments_modal.set(true);
                     }
                 }
