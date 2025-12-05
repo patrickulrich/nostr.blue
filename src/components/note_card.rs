@@ -490,7 +490,7 @@ pub fn NoteCard(
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_| {
                 if !is_hidden {
-                    nav.push(Route::Note { note_id: event_id_nav.clone() });
+                    nav.push(Route::Note { note_id: event_id_nav.clone(), from_voice: None });
                 }
             },
 

@@ -477,7 +477,7 @@ fn EventMentionRenderer(mention: String) -> Element {
 
             rsx! {
                 Link {
-                    to: Route::Note { note_id: event_id.to_hex() },
+                    to: Route::Note { note_id: event_id.to_hex(), from_voice: None },
                     class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     "{short}"
@@ -523,7 +523,7 @@ fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: event_id.clone() },
+            to: Route::Note { note_id: event_id.clone(), from_voice: None },
             class: "block my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
             div {

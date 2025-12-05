@@ -476,6 +476,7 @@ pub fn Home() -> Element {
                         &mut oldest_timestamp,
                         &mut has_more,
                         &mut pagination_loading,
+                        &mut interaction_counts,
                     ).await;
                 }
                 Err(e) => {
@@ -1333,6 +1334,7 @@ async fn append_paginated_items(
     oldest_timestamp: &mut Signal<Option<u64>>,
     has_more: &mut Signal<bool>,
     pagination_loading: &mut Signal<bool>,
+    interaction_counts: &mut Signal<HashMap<String, InteractionCounts>>,
 ) {
     // If no items returned at all, we've reached the end
     if new_items.is_empty() {
@@ -1374,6 +1376,7 @@ async fn append_paginated_items(
         // Append unique items
         if !unique_items.is_empty() {
             let prefetch_items = unique_items.clone();
+            let items_for_counts = unique_items.clone();
             let mut updated = current;
             updated.extend(unique_items);
             feed_state.set(DataState::Loaded(updated));
@@ -1381,6 +1384,19 @@ async fn append_paginated_items(
             // Spawn non-blocking background prefetch for missing metadata
             spawn(async move {
                 prefetch_author_metadata(&prefetch_items).await;
+            });
+
+            // Fetch interaction counts for new items and merge with existing
+            let mut counts_signal = interaction_counts.clone();
+            spawn(async move {
+                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                if let Ok(new_counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                    // Merge new counts with existing
+                    let mut existing = counts_signal.read().clone();
+                    existing.extend(new_counts);
+                    counts_signal.set(existing);
+                    log::info!("Fetched interaction counts for {} paginated items", items_for_counts.len());
+                }
             });
         }
     }

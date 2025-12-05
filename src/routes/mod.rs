@@ -218,8 +218,8 @@ pub enum Route {
         #[route("/profile/:pubkey")]
         Profile { pubkey: String },
 
-        #[route("/note/:note_id")]
-        Note { note_id: String },
+        #[route("/note/:note_id?:from_voice")]
+        Note { note_id: String, from_voice: Option<String> },
 
         #[route("/t/:tag")]
         Hashtag { tag: String },

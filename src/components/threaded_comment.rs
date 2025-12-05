@@ -200,7 +200,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                     move |_| {
                         // Don't navigate if clicking on interactive elements
                         // The event will be stopped by buttons/links
-                        navigator.push(Route::Note { note_id: event_id_click.clone() });
+                        navigator.push(Route::Note { note_id: event_id_click.clone(), from_voice: None });
                     }
                 },
 
@@ -473,7 +473,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 div {
                     class: "ml-4 mt-2",
                     Link {
-                        to: Route::Note { note_id: event.id.to_hex() },
+                        to: Route::Note { note_id: event.id.to_hex(), from_voice: None },
                         class: "text-xs text-blue-500 hover:underline",
                         "→ Continue thread ({children.len()} more replies)"
                     }
