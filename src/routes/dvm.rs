@@ -21,6 +21,7 @@ pub fn DVM() -> Element {
     // Interaction counts cache (event_id -> counts) for batch optimization
     let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
     let mut interactions_loaded = use_signal(|| false);
+    let mut fetch_in_progress = use_signal(|| false);
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -39,18 +40,19 @@ pub fn DVM() -> Element {
 
         // Reset interaction counts on refresh
         interactions_loaded.set(false);
+        fetch_in_progress.set(false);
 
-        // Discover DVMs in background
-        spawn(async move {
-            if let Err(e) = dvm_store::discover_content_dvms().await {
-                log::error!("Failed to discover DVMs: {}", e);
-            }
-        });
-
-        // Request content feed
+        // Discover DVMs and request content feed in parallel
         let provider = *SELECTED_DVM_PROVIDER.peek();
         spawn(async move {
-            if let Err(e) = dvm_store::request_content_feed(provider).await {
+            let (discover_result, feed_result) = futures::join!(
+                dvm_store::discover_content_dvms(),
+                dvm_store::request_content_feed(provider)
+            );
+            if let Err(e) = discover_result {
+                log::error!("Failed to discover DVMs: {}", e);
+            }
+            if let Err(e) = feed_result {
                 log::error!("Failed to request content feed: {}", e);
             }
         });
@@ -64,10 +66,13 @@ pub fn DVM() -> Element {
             return;
         }
 
-        // Only fetch if not already loaded for this batch
-        if *interactions_loaded.peek() {
+        // Only fetch if not already loaded for this batch and no fetch in progress
+        // This guards against race conditions where effect runs multiple times
+        if *interactions_loaded.peek() || *fetch_in_progress.peek() {
             return;
         }
+
+        fetch_in_progress.set(true);
 
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
@@ -80,6 +85,7 @@ pub fn DVM() -> Element {
                     log::error!("Failed to fetch interaction counts: {}", e);
                 }
             }
+            fetch_in_progress.set(false);
         });
     });
 

@@ -206,15 +206,44 @@ fn get_counts_cache() -> &'static Mutex<CountsCache> {
 // NIP-45 COUNT Support (Phase C)
 // ============================================================================
 
+/// NIP-45 support status for a relay
+#[derive(Clone)]
+struct Nip45SupportStatus {
+    /// Whether relay supports COUNT
+    supported: bool,
+    /// When this status was recorded
+    checked_at: Instant,
+}
+
+impl Nip45SupportStatus {
+    fn new(supported: bool) -> Self {
+        Self {
+            supported,
+            checked_at: Instant::now(),
+        }
+    }
+
+    /// Negative results expire after 10 minutes (relay may have been updated)
+    /// Positive results don't expire (once confirmed, unlikely to change)
+    fn is_valid(&self) -> bool {
+        if self.supported {
+            true // Positive results don't expire
+        } else {
+            // Negative results expire after 10 minutes to allow retry
+            self.checked_at.elapsed() < Duration::from_secs(600)
+        }
+    }
+}
+
 /// Cache for tracking which relays support NIP-45 COUNT
 ///
-/// - `true`: Relay supports COUNT (tested successfully)
-/// - `false`: Relay does not support COUNT (timed out or error)
+/// - `Nip45SupportStatus { supported: true }`: Relay supports COUNT (permanent)
+/// - `Nip45SupportStatus { supported: false }`: Relay failed COUNT (TTL: 10 minutes)
 /// - Not present: Unknown, needs testing
-static NIP45_SUPPORT: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+static NIP45_SUPPORT: OnceLock<Mutex<HashMap<String, Nip45SupportStatus>>> = OnceLock::new();
 
 /// Get or initialize the NIP-45 support cache
-fn get_nip45_cache() -> &'static Mutex<HashMap<String, bool>> {
+fn get_nip45_cache() -> &'static Mutex<HashMap<String, Nip45SupportStatus>> {
     NIP45_SUPPORT.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -240,9 +269,10 @@ async fn try_count_from_relays(
 ) -> Option<usize> {
     let client = get_client()?;
 
+    // EventId implements Copy - no need to clone
     let filter = Filter::new()
         .kind(kind)
-        .event(event_id.clone());
+        .event(*event_id);
 
     // Get connected relays
     let relays = client.relays().await;
@@ -251,38 +281,41 @@ async fn try_count_from_relays(
     for (url, relay) in relays.iter() {
         let url_str = url.to_string();
 
-        // Check if we've cached this relay's NIP-45 support
-        let support_status = {
+        // Check if we've cached this relay's NIP-45 support (with TTL for negative results)
+        let should_try = {
             let cache = get_nip45_cache().lock().unwrap();
-            cache.get(&url_str).cloned()
+            match cache.get(&url_str) {
+                Some(status) if status.is_valid() => status.supported,
+                Some(_) => true, // Expired negative status - retry
+                None => true,    // Unknown - try it
+            }
         };
 
-        match support_status {
-            Some(false) => continue, // Skip relays we know don't support COUNT
-            Some(true) | None => {
-                // Try COUNT - use short timeout since COUNT should be fast
-                let count_timeout = Duration::from_millis(timeout.as_millis().min(2000) as u64);
+        if !should_try {
+            continue; // Skip relays we know don't support COUNT (within TTL)
+        }
 
-                match relay.count_events(filter.clone(), count_timeout).await {
-                    Ok(count) => {
-                        // Cache successful result
-                        {
-                            let mut cache = get_nip45_cache().lock().unwrap();
-                            cache.insert(url_str, true);
-                        }
-                        log::debug!("COUNT from {}: {} events", url, count);
-                        return Some(count);
-                    }
-                    Err(e) => {
-                        // Cache failure for this relay
-                        {
-                            let mut cache = get_nip45_cache().lock().unwrap();
-                            cache.insert(url_str, false);
-                        }
-                        log::debug!("COUNT failed on {}: {}", url, e);
-                        // Try next relay
-                    }
+        // Try COUNT - use short timeout since COUNT should be fast
+        let count_timeout = Duration::from_millis(timeout.as_millis().min(2000) as u64);
+
+        match relay.count_events(filter.clone(), count_timeout).await {
+            Ok(count) => {
+                // Cache successful result (permanent)
+                {
+                    let mut cache = get_nip45_cache().lock().unwrap();
+                    cache.insert(url_str, Nip45SupportStatus::new(true));
                 }
+                log::debug!("COUNT from {}: {} events", url, count);
+                return Some(count);
+            }
+            Err(e) => {
+                // Cache failure for this relay (with TTL - will retry after 10 minutes)
+                {
+                    let mut cache = get_nip45_cache().lock().unwrap();
+                    cache.insert(url_str, Nip45SupportStatus::new(false));
+                }
+                log::debug!("COUNT failed on {}: {}", url, e);
+                // Try next relay
             }
         }
     }

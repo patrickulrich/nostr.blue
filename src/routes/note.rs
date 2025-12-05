@@ -45,7 +45,7 @@ async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<V
 
     let filter = Filter::new()
         .ids(parent_ids)
-        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply]);
+        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment]);
 
     nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
 }

@@ -24,6 +24,7 @@ pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};
 pub use data_state::DataState;
 pub use format::{format_sats_with_separator, format_sats_compact, truncate_pubkey, shorten_url};
 pub use repost::{FeedItem, extract_reposted_event};
+pub use validation::{SignerValidationResult, get_current_user_pubkey};
 
 /// Generate a random alphanumeric ID (9 characters)
 /// Used for poll options and other unique identifiers

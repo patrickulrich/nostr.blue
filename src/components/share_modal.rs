@@ -63,8 +63,10 @@ pub fn ShareModal(
     let content_url = if event.kind.is_addressable() {
         // For articles (Kind 30023) and other addressable events, use naddr
         if let Some(coord) = event.coordinate() {
-            let naddr = coord.to_bech32().unwrap_or_else(|_| event.id.to_hex());
-            format!("https://nostr.blue/articles/{}", naddr)
+            match coord.to_bech32() {
+                Ok(naddr) => format!("https://nostr.blue/articles/{}", naddr),
+                Err(_) => format!("https://nostr.blue/videos/{}", event.id.to_hex()),
+            }
         } else {
             format!("https://nostr.blue/videos/{}", event.id.to_hex())
         }

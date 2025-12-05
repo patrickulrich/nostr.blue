@@ -12,8 +12,6 @@
 //! - NIP-96: https://github.com/nostr-protocol/nips/blob/master/96.md
 //! - NIP-98: https://github.com/nostr-protocol/nips/blob/master/98.md
 
-#![allow(dead_code)]
-
 use dioxus::prelude::*;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
@@ -26,13 +24,19 @@ use crate::stores::nostr_client;
 type Result<T, E> = std::result::Result<T, E>;
 
 /// Default NIP-96 server (nostr.build)
+#[allow(dead_code)]
 pub const DEFAULT_NIP96_SERVER: &str = "https://nostr.build";
 pub const NOSTR_BUILD_API_URL: &str = "https://nostr.build/api/v2/nip96/upload";
 
 /// Global signal for NIP-96 upload progress (0-100)
 pub static NIP96_UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
 
+/// Current upload ID to prevent timer race conditions
+/// Each upload gets a unique ID; timer only clears progress if ID matches
+pub static CURRENT_UPLOAD_ID: GlobalSignal<Option<uuid::Uuid>> = Signal::global(|| None);
+
 /// NIP-96 server configuration (from /.well-known/nostr/nip96.json)
+#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Nip96ServerConfig {
     pub api_url: String,
@@ -53,6 +57,7 @@ pub struct Nip96UploadResponse {
     #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // Part of NIP-96 spec, may be used for async uploads
     pub processing_url: Option<String>,
     #[serde(default)]
     pub nip94_event: Option<Nip94EventData>,
@@ -63,6 +68,7 @@ pub struct Nip96UploadResponse {
 pub struct Nip94EventData {
     pub tags: Vec<Vec<String>>,
     #[serde(default)]
+    #[allow(dead_code)] // Part of NIP-94 spec
     pub content: String,
 }
 
@@ -189,9 +195,17 @@ pub async fn upload_to_nip96(
     *NIP96_UPLOAD_PROGRESS.write() = Some(100.0);
 
     // Clear progress after a short delay
-    spawn(async move {
+    // Use spawn_forever so timer survives component unmount, and track upload ID
+    // to prevent race condition where new upload's progress gets cleared by old timer
+    let upload_id = uuid::Uuid::new_v4();
+    *CURRENT_UPLOAD_ID.write() = Some(upload_id);
+    dioxus_core::spawn_forever(async move {
         gloo_timers::future::TimeoutFuture::new(1000).await;
-        *NIP96_UPLOAD_PROGRESS.write() = None;
+        // Only clear if this is still the current upload
+        if *CURRENT_UPLOAD_ID.read() == Some(upload_id) {
+            *NIP96_UPLOAD_PROGRESS.write() = None;
+            *CURRENT_UPLOAD_ID.write() = None;
+        }
     });
 
     log::info!("NIP-96 upload successful: {}", metadata.url);
@@ -300,6 +314,15 @@ async fn upload_with_fetch(
     if !response.ok() {
         let status = response.status();
         let status_text = response.status_text();
+        // Try to get response body for better error diagnostics
+        if let Ok(text_promise) = response.text() {
+            if let Ok(body_js) = JsFuture::from(text_promise).await {
+                if let Some(body) = body_js.as_string() {
+                    log::error!("Upload failed: {} {} - body: {}", status, status_text, body);
+                    return Err(format!("Upload failed: {} {} - {}", status, status_text, body));
+                }
+            }
+        }
         return Err(format!("Upload failed: {} {}", status, status_text));
     }
 
@@ -330,6 +353,7 @@ async fn upload_with_fetch(
 }
 
 /// Get the list of available upload servers
+#[allow(dead_code)]
 pub fn get_upload_servers() -> Vec<(String, String)> {
     let mut servers = vec![
         ("nostr.build".to_string(), NOSTR_BUILD_API_URL.to_string()),

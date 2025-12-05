@@ -229,9 +229,10 @@ pub fn CashuTokenCard(token: String) -> Element {
                         "Claimed {format_amount(*amount)} {unit}!"
                     }
                 }
-                if matches!(&*claim_state.read(), ClaimState::Failed(_)) {
+                if let ClaimState::Failed(error_msg) = &*claim_state.read() {
                     div {
-                        class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm",
+                        class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm cursor-help",
+                        title: "{error_msg}",  // Tooltip with detailed error message
                         "Failed to claim token. Please try again."
                     }
                 }

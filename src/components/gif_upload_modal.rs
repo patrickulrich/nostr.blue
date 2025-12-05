@@ -29,7 +29,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut show = props.show;
 
     // State
-    let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String)>); // (filename, data, mime)
+    // Store: (filename, data, mime, preview_url) - preview_url is an Object URL for efficient preview
+    let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
     let mut caption = use_signal(|| String::new());
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
     let mut uploading = use_signal(|| false);
@@ -51,6 +52,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     // Close modal handler
     let close_modal = move |_| {
         show.set(false);
+        // Revoke object URL to free memory
+        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+            let _ = web_sys::Url::revoke_object_url(url);
+        }
         // Reset state
         selected_file.set(None);
         caption.set(String::new());
@@ -88,8 +93,11 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             return;
                         }
 
+                        // Create Object URL for efficient preview (avoids base64 memory overhead)
+                        let preview_url = create_object_url(&data, &mime_type);
+
                         log::info!("Selected GIF: {} ({} bytes)", filename, data.len());
-                        selected_file.set(Some((filename, data, mime_type)));
+                        selected_file.set(Some((filename, data, mime_type, preview_url)));
                     }
                     Err(e) => {
                         log::error!("Failed to read file: {}", e);
@@ -119,7 +127,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                 return;
             }
 
-            let (_filename, data, mime_type) = file_data.unwrap();
+            let (_filename, data, mime_type, _preview_url) = file_data.unwrap();
             let file_size = data.len();
 
             uploading.set(true);
@@ -226,6 +234,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let handle_clear = {
         let input_id = input_id.clone();
         move |_| {
+            // Revoke object URL to free memory
+            if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+                let _ = web_sys::Url::revoke_object_url(url);
+            }
             selected_file.set(None);
             error.set(None);
             clear_file_input(&input_id.read());
@@ -312,20 +324,29 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             }
                         } else {
                             // File preview
-                            if let Some((filename, data, _)) = selected_file.read().as_ref() {
+                            if let Some((filename, data, _, preview_url)) = selected_file.read().as_ref() {
                                 div {
                                     class: "p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl space-y-3",
 
                                     // File info with preview
                                     div {
                                         class: "flex items-start gap-4",
-                                        // GIF preview
+                                        // GIF preview - use Object URL for efficiency (avoids base64 memory overhead)
                                         div {
                                             class: "w-24 h-24 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-600 flex-shrink-0",
-                                            img {
-                                                class: "w-full h-full object-cover",
-                                                src: format!("data:image/gif;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data)),
-                                                alt: "Preview"
+                                            if let Some(url) = preview_url {
+                                                img {
+                                                    class: "w-full h-full object-cover",
+                                                    src: "{url}",
+                                                    alt: "Preview"
+                                                }
+                                            } else {
+                                                // Fallback to base64 if object URL creation failed
+                                                img {
+                                                    class: "w-full h-full object-cover",
+                                                    src: format!("data:image/gif;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data)),
+                                                    alt: "Preview"
+                                                }
                                             }
                                         }
                                         div {
@@ -524,4 +545,24 @@ fn format_file_size(bytes: usize) -> String {
     } else {
         format!("{} bytes", bytes)
     }
+}
+
+/// Create an Object URL from raw bytes (more memory efficient than base64 for large files)
+fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
+    use web_sys::BlobPropertyBag;
+
+    // Create Uint8Array from data
+    let uint8_array = js_sys::Uint8Array::from(data);
+    let blob_parts = js_sys::Array::new();
+    blob_parts.push(&uint8_array);
+
+    // Create Blob with proper MIME type
+    let blob_options = BlobPropertyBag::new();
+    blob_options.set_type(mime_type);
+
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options)
+        .ok()?;
+
+    // Create Object URL from Blob
+    web_sys::Url::create_object_url_with_blob(&blob).ok()
 }

@@ -21,6 +21,7 @@ pub fn DvmSelectorModal(
         // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50",
+            tabindex: "-1",  // Allow div to receive keyboard events for Escape key
             onclick: move |_| on_close.call(()),
             onkeydown: move |e| {
                 if e.key() == Key::Escape {

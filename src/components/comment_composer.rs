@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use std::time::Duration;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
-use crate::stores::signer::SIGNER_INFO;
 use crate::stores::pending_comments::{
     PendingComment, CommentStatus, add_pending_comment, update_pending_status,
 };
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
+use crate::utils::{SignerValidationResult, get_current_user_pubkey};
 use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -172,21 +172,19 @@ pub fn CommentComposer(
             }
 
             // Get current user's pubkey for optimistic display
-            let author_pubkey = match SIGNER_INFO.read().as_ref() {
-                Some(info) => match PublicKey::from_hex(&info.public_key) {
-                    Ok(pk) => pk,
-                    Err(_) => {
-                        log::error!("Invalid pubkey in signer info");
-                        toast_api.error(
-                            "Unable to publish".to_string(),
-                            ToastOptions::new()
-                                .description("Invalid signer configuration")
-                                .duration(Duration::from_secs(3))
-                        );
-                        return;
-                    }
-                },
-                None => {
+            let author_pubkey = match get_current_user_pubkey() {
+                SignerValidationResult::Ok(pk) => pk,
+                SignerValidationResult::InvalidPubkey => {
+                    log::error!("Invalid pubkey in signer info");
+                    toast_api.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Invalid signer configuration")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+                SignerValidationResult::NotSignedIn => {
                     log::error!("No signer info available");
                     toast_api.error(
                         "Unable to publish".to_string(),

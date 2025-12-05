@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2021"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
@@ -100,6 +100,8 @@ web-sys = { version = "0.3", features = [
     # NIP-96 file upload features
     "FormData",
     "BlobPropertyBag",
+    # Object URL for efficient blob previews (avoids base64 memory overhead)
+    "Url",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }

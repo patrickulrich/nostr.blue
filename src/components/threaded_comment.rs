@@ -329,9 +329,13 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav.clone();
+                    let is_pending_node = is_pending;
+                    let status = pending_status.clone();
                     move |_| {
-                        // Don't navigate if clicking on interactive elements
-                        // The event will be stopped by buttons/links
+                        // Don't navigate to pending comments - they don't exist on relays yet
+                        if is_pending_node && !matches!(status.as_ref(), Some(CommentStatus::Confirmed(_))) {
+                            return;
+                        }
                         navigator.push(Route::Note { note_id: event_id_click.clone(), from_voice: None });
                     }
                 },

@@ -20,6 +20,10 @@ static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
 });
 // Cashu tokens are base64-encoded strings starting with cashuA (V3) or cashuB (V4)
+// This regex is intentionally permissive to capture most token formats.
+// Invalid tokens are handled gracefully by CashuTokenCard which displays
+// a fallback UI when parsing fails. This avoids false negatives from
+// strict regex validation while keeping detection simple.
 static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
 });

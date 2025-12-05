@@ -444,6 +444,12 @@ pub fn merge_pending_into_tree(
 
         // Create display event and thread node for pending comment
         let display_event = pending_comment.to_display_event();
+
+        // Also skip if display event ID happens to match a confirmed event
+        // (edge case where dummy event ID collides with real event)
+        if confirmed_ids.contains(&display_event.id) {
+            continue;
+        }
         let pending_node = ThreadNode::pending(
             display_event,
             pending_comment.local_id.clone(),

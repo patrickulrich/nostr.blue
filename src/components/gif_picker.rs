@@ -351,17 +351,16 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
                 }
-            }
 
-            // Upload modal
-            GifUploadModal {
-                show: show_upload_modal,
-                on_upload: move |gif: crate::stores::gif_store::GifMetadata| {
-                    // Optionally select the uploaded GIF
-                    props.on_gif_selected.call(gif.url.clone());
-                    show_picker.set(false);
-                    show_upload_modal.set(false);
-                },
+                // Upload modal (only rendered when picker is open)
+                GifUploadModal {
+                    show: show_upload_modal,
+                    on_upload: move |gif: crate::stores::gif_store::GifMetadata| {
+                        props.on_gif_selected.call(gif.url.clone());
+                        show_picker.set(false);
+                        show_upload_modal.set(false);
+                    },
+                }
             }
         }
     }

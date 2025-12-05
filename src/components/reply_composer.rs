@@ -1,14 +1,14 @@
 use dioxus::prelude::*;
 use std::time::Duration;
 use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
-use crate::stores::signer::SIGNER_INFO;
 use crate::stores::pending_comments::{
     PendingComment, CommentStatus, add_pending_comment, update_pending_status,
 };
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use nostr_sdk::{Event as NostrEvent, Kind, Timestamp, PublicKey};
+use crate::utils::{SignerValidationResult, get_current_user_pubkey};
+use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -186,21 +186,19 @@ pub fn ReplyComposer(
             }
 
             // Get current user's pubkey for optimistic display
-            let current_user_pubkey = match SIGNER_INFO.read().as_ref() {
-                Some(info) => match PublicKey::from_hex(&info.public_key) {
-                    Ok(pk) => pk,
-                    Err(_) => {
-                        log::error!("Invalid pubkey in signer info");
-                        toast_api.error(
-                            "Unable to reply".to_string(),
-                            ToastOptions::new()
-                                .description("Invalid signer configuration")
-                                .duration(Duration::from_secs(3))
-                        );
-                        return;
-                    }
-                },
-                None => {
+            let current_user_pubkey = match get_current_user_pubkey() {
+                SignerValidationResult::Ok(pk) => pk,
+                SignerValidationResult::InvalidPubkey => {
+                    log::error!("Invalid pubkey in signer info");
+                    toast_api.error(
+                        "Unable to reply".to_string(),
+                        ToastOptions::new()
+                            .description("Invalid signer configuration")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+                SignerValidationResult::NotSignedIn => {
                     log::error!("No signer info available");
                     toast_api.error(
                         "Unable to reply".to_string(),
