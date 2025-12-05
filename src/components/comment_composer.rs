@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use std::time::Duration;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::pending_comments::{
@@ -8,6 +9,7 @@ use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomple
 use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use wasm_bindgen_futures::spawn_local;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -25,6 +27,7 @@ pub fn CommentComposer(
     let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(|| Vec::<String>::new());
+    let toast = consume_toast();
 
     // Calculate total length including media URLs
     let content_len = content.read().len();
@@ -148,38 +151,52 @@ pub fn CommentComposer(
         log::info!("GIF URL inserted: {}", gif_url);
     };
 
-    let handle_publish = move |_| {
-        let mut content_value = content.read().clone();
+    let handle_publish = {
+        let toast_api = toast.clone();
+        move |_| {
+            let mut content_value = content.read().clone();
 
-        // Append media URLs to content
-        if !uploaded_media.read().is_empty() {
-            if !content_value.is_empty() {
-                content_value.push_str("\n\n");
-            }
-            for url in uploaded_media.read().iter() {
-                content_value.push_str(&url);
-                content_value.push('\n');
-            }
-        }
-
-        if content_value.is_empty() || is_over_limit {
-            return;
-        }
-
-        // Get current user's pubkey for optimistic display
-        let author_pubkey = match SIGNER_INFO.read().as_ref() {
-            Some(info) => match PublicKey::from_hex(&info.public_key) {
-                Ok(pk) => pk,
-                Err(_) => {
-                    log::error!("Invalid pubkey in signer info");
-                    return;
+            // Append media URLs to content
+            if !uploaded_media.read().is_empty() {
+                if !content_value.is_empty() {
+                    content_value.push_str("\n\n");
                 }
-            },
-            None => {
-                log::error!("No signer info available");
+                for url in uploaded_media.read().iter() {
+                    content_value.push_str(&url);
+                    content_value.push('\n');
+                }
+            }
+
+            if content_value.is_empty() || is_over_limit {
                 return;
             }
-        };
+
+            // Get current user's pubkey for optimistic display
+            let author_pubkey = match SIGNER_INFO.read().as_ref() {
+                Some(info) => match PublicKey::from_hex(&info.public_key) {
+                    Ok(pk) => pk,
+                    Err(_) => {
+                        log::error!("Invalid pubkey in signer info");
+                        toast_api.error(
+                            "Unable to publish".to_string(),
+                            ToastOptions::new()
+                                .description("Invalid signer configuration")
+                                .duration(Duration::from_secs(3))
+                        );
+                        return;
+                    }
+                },
+                None => {
+                    log::error!("No signer info available");
+                    toast_api.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Please sign in first")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+            };
 
         is_publishing.set(true);
 
@@ -269,6 +286,7 @@ pub fn CommentComposer(
                 }
             }
         });
+        }
     };
 
     rsx! {

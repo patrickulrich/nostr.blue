@@ -5,7 +5,9 @@
 
 use dioxus::prelude::*;
 use std::str::FromStr;
+use std::time::Duration;
 use wasm_bindgen::JsValue;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 use crate::stores::nostr_client::HAS_SIGNER;
 
@@ -77,6 +79,7 @@ pub fn CashuTokenCard(token: String) -> Element {
     let mut is_claiming = use_signal(|| false);
     let mut claim_result = use_signal(|| None::<Result<u64, String>>);
     let mut copied = use_signal(|| false);
+    let toast = consume_toast();
 
     let has_signer = *HAS_SIGNER.read();
 
@@ -119,7 +122,8 @@ pub fn CashuTokenCard(token: String) -> Element {
             e.stop_propagation();
             if let Some(window) = web_sys::window() {
                 let url = format!("cashu://{}", token);
-                let _ = window.location().set_href(&url);
+                // Use open() to avoid disrupting current page if no handler exists
+                let _ = window.open_with_url_and_target(&url, "_blank");
             }
         }
     };
@@ -127,15 +131,26 @@ pub fn CashuTokenCard(token: String) -> Element {
     // Handle copy button
     let handle_copy = {
         let token = token.clone();
+        let toast_api = toast.clone();
         move |e: MouseEvent| {
             e.stop_propagation();
 
             let token = token.clone();
+            let toast_api = toast_api.clone();
             spawn(async move {
-                if copy_to_clipboard(&token).await.is_ok() {
-                    copied.set(true);
-                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                    copied.set(false);
+                match copy_to_clipboard(&token).await {
+                    Ok(_) => {
+                        copied.set(true);
+                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        copied.set(false);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to copy to clipboard: {:?}", e);
+                        toast_api.error(
+                            "Failed to copy".to_string(),
+                            ToastOptions::new().duration(Duration::from_secs(2))
+                        );
+                    }
                 }
             });
         }
