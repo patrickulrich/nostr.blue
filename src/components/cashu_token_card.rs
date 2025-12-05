@@ -7,6 +7,7 @@ use dioxus::prelude::*;
 use std::str::FromStr;
 use std::time::Duration;
 use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::spawn_local;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use cdk::nuts::CurrencyUnit;
 
@@ -116,7 +117,8 @@ pub fn CashuTokenCard(token: String) -> Element {
             let unit = unit_for_claim.clone();
             claim_state.set(ClaimState::Claiming);
 
-            spawn(async move {
+            // Use spawn_local so the task survives component unmount (consistent with comment publishing)
+            spawn_local(async move {
                 match crate::stores::cashu::receive_tokens(token).await {
                     Ok(amount) => {
                         log::info!("Successfully claimed {} {}", amount, unit);

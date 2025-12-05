@@ -232,6 +232,7 @@ pub fn CommentComposer(
         // Clone for async block
         let local_id_clone = local_id.clone();
         let content_for_publish = content_value.clone();
+        let toast_for_async = toast_api.clone();
 
         // Use spawn_local instead of spawn so the task survives component unmount
         spawn_local(async move {
@@ -240,6 +241,12 @@ pub fn CommentComposer(
                 None => {
                     log::error!("Client not initialized");
                     update_pending_status(&local_id_clone, CommentStatus::Failed("Client not initialized".to_string()));
+                    toast_for_async.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Client not initialized")
+                            .duration(Duration::from_secs(3))
+                    );
                     return;
                 }
             };
@@ -271,6 +278,12 @@ pub fn CommentComposer(
                 Err(e) => {
                     log::error!("Failed to publish comment: {}", e);
                     update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
+                    toast_for_async.error(
+                        "Failed to publish".to_string(),
+                        ToastOptions::new()
+                            .description(format!("{}", e))
+                            .duration(Duration::from_secs(3))
+                    );
                 }
             }
         });

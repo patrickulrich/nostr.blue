@@ -74,10 +74,15 @@ impl PendingComment {
 
         // Create a dummy signature (won't verify, but that's OK for display-only)
         // All zeros is a valid 64-byte hex string for Signature parsing
+        // Use unwrap_or_else instead of expect to avoid unhelpful WASM panics
         let dummy_sig = Signature::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000\
              0000000000000000000000000000000000000000000000000000000000000000"
-        ).expect("dummy signature is valid hex");
+        ).unwrap_or_else(|e| {
+            log::error!("Failed to create dummy signature (should never happen): {}", e);
+            // Fallback: create from raw bytes - 64 zero bytes is always valid
+            Signature::from_slice(&[0u8; 64]).expect("64 zero bytes is valid signature format")
+        });
 
         // Construct Event directly with correct author pubkey - no signing needed
         NostrEvent::new(
@@ -98,14 +103,29 @@ pub static PENDING_COMMENTS: GlobalSignal<HashMap<String, Vec<PendingComment>>> 
     Signal::global(|| HashMap::new());
 
 /// Add a pending comment to the store
+///
+/// Includes deduplication: if a pending comment with the same content already exists
+/// for this target and is still in Pending status, the new comment is skipped.
+/// This prevents duplicate comments from rapid double-clicks.
 pub fn add_pending_comment(comment: PendingComment) {
     let target_id = comment.target_event_id.to_hex();
     log::debug!("Adding pending comment {} for target {}", comment.local_id, target_id);
-    PENDING_COMMENTS
-        .write()
-        .entry(target_id)
-        .or_insert_with(Vec::new)
-        .push(comment);
+
+    let mut store = PENDING_COMMENTS.write();
+    let comments = store.entry(target_id).or_insert_with(Vec::new);
+
+    // Prevent duplicates: check if we already have a pending comment with same content
+    let already_exists = comments.iter().any(|c|
+        c.content == comment.content &&
+        matches!(c.status, CommentStatus::Pending)
+    );
+
+    if already_exists {
+        log::warn!("Duplicate pending comment detected, skipping: {}", comment.local_id);
+        return;
+    }
+
+    comments.push(comment);
 }
 
 /// Update status of a pending comment
@@ -279,8 +299,14 @@ pub fn retry_pending_comment(local_id: &str) {
                     }
 
                     // Update pending comment status
-                    if let Ok(event_id_parsed) = EventId::from_hex(&published_event_id) {
-                        update_pending_status(&local_id, CommentStatus::Confirmed(event_id_parsed));
+                    match EventId::from_hex(&published_event_id) {
+                        Ok(event_id_parsed) => {
+                            update_pending_status(&local_id, CommentStatus::Confirmed(event_id_parsed));
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse event ID '{}': {}", published_event_id, e);
+                            update_pending_status(&local_id, CommentStatus::Failed("Event ID parse error".to_string()));
+                        }
                     }
                 }
                 Err(e) => {

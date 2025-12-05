@@ -428,6 +428,11 @@ pub fn merge_pending_into_tree(
     }
     let confirmed_ids = collect_event_ids(&confirmed_tree);
 
+    // Sort pending comments by timestamp to ensure parents are processed before children
+    // This prevents chains of pending comments from being flattened to root level
+    let mut pending = pending;
+    pending.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
     for pending_comment in pending {
         // Skip if this pending comment was already confirmed (by event ID match)
         // This can happen if relay returned the event faster than our timeout
