@@ -8,8 +8,18 @@ use std::str::FromStr;
 use std::time::Duration;
 use wasm_bindgen::JsValue;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use cdk::nuts::CurrencyUnit;
 
 use crate::stores::nostr_client::HAS_SIGNER;
+
+/// State machine for token claim operations
+#[derive(Clone, Debug, PartialEq)]
+enum ClaimState {
+    Idle,
+    Claiming,
+    Success(u64),
+    Failed(String),
+}
 
 /// Format sats amount with thousands separators
 fn format_sats(amount: u64) -> String {
@@ -48,7 +58,7 @@ async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
 struct ParsedTokenInfo {
     amount: u64,
     mint_url: String,
-    unit: String,
+    unit: CurrencyUnit,
 }
 
 /// Parse a Cashu token string
@@ -58,7 +68,7 @@ fn parse_token(token: &str) -> Option<ParsedTokenInfo> {
     let parsed = Token::from_str(token).ok()?;
     let amount = parsed.value().ok()?;
     let mint_url = parsed.mint_url().ok()?.to_string();
-    let unit = parsed.unit().map(|u| format!("{:?}", u).to_lowercase()).unwrap_or_else(|| "sat".to_string());
+    let unit = parsed.unit().unwrap_or_default();
 
     Some(ParsedTokenInfo {
         amount: u64::from(amount),
@@ -76,8 +86,7 @@ fn parse_token(token: &str) -> Option<ParsedTokenInfo> {
 /// - Copy button (copies token to clipboard)
 #[component]
 pub fn CashuTokenCard(token: String) -> Element {
-    let mut is_claiming = use_signal(|| false);
-    let mut claim_result = use_signal(|| None::<Result<u64, String>>);
+    let mut claim_state = use_signal(|| ClaimState::Idle);
     let mut copied = use_signal(|| false);
     let toast = consume_toast();
 
@@ -92,25 +101,25 @@ pub fn CashuTokenCard(token: String) -> Element {
         move |e: MouseEvent| {
             e.stop_propagation();
 
-            if *is_claiming.read() || claim_result.read().is_some() {
+            // Only allow claiming from Idle or Failed state (enables retry)
+            if !matches!(*claim_state.read(), ClaimState::Idle | ClaimState::Failed(_)) {
                 return;
             }
 
             let token = token.clone();
-            is_claiming.set(true);
+            claim_state.set(ClaimState::Claiming);
 
             spawn(async move {
                 match crate::stores::cashu::receive_tokens(token).await {
                     Ok(amount) => {
                         log::info!("Successfully claimed {} sats", amount);
-                        claim_result.set(Some(Ok(amount)));
+                        claim_state.set(ClaimState::Success(amount));
                     }
                     Err(e) => {
                         log::error!("Failed to claim token: {}", e);
-                        claim_result.set(Some(Err(e)));
+                        claim_state.set(ClaimState::Failed(e));
                     }
                 }
-                is_claiming.set(false);
             });
         }
     };
@@ -160,7 +169,13 @@ pub fn CashuTokenCard(token: String) -> Element {
     if let Some(info) = parsed {
         let mint_display = extract_mint_hostname(&info.mint_url);
         let amount_display = format_sats(info.amount);
-        let unit_display = if info.unit == "sat" { "sats" } else { &info.unit };
+        let unit_display = match info.unit {
+            CurrencyUnit::Sat => "sats",
+            CurrencyUnit::Msat => "msats",
+            CurrencyUnit::Usd => "USD",
+            CurrencyUnit::Eur => "EUR",
+            _ => "units",
+        };
 
         rsx! {
             div {
@@ -193,20 +208,16 @@ pub fn CashuTokenCard(token: String) -> Element {
                 }
 
                 // Status messages
-                if let Some(result) = claim_result.read().as_ref() {
-                    match result {
-                        Ok(amount) => rsx! {
-                            div {
-                                class: "mb-3 p-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded-lg text-center text-sm",
-                                "Claimed {format_sats(*amount)} sats!"
-                            }
-                        },
-                        Err(_) => rsx! {
-                            div {
-                                class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm",
-                                "Failed to claim token. Please try again."
-                            }
-                        },
+                if let ClaimState::Success(amount) = &*claim_state.read() {
+                    div {
+                        class: "mb-3 p-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded-lg text-center text-sm",
+                        "Claimed {format_sats(*amount)} sats!"
+                    }
+                }
+                if matches!(&*claim_state.read(), ClaimState::Failed(_)) {
+                    div {
+                        class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm",
+                        "Failed to claim token. Please try again."
                     }
                 }
 
@@ -215,37 +226,40 @@ pub fn CashuTokenCard(token: String) -> Element {
                     class: "flex items-center justify-center gap-2",
 
                     // Claim button
-                    if claim_result.read().as_ref().map(|r| r.is_ok()).unwrap_or(false) {
-                        // Already claimed - show disabled button
-                        button {
-                            class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",
-                            disabled: true,
-                            "Claimed"
-                        }
-                    } else if !has_signer {
-                        // Not signed in
-                        button {
-                            class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",
-                            disabled: true,
-                            title: "Sign in to claim",
-                            "Claim"
-                        }
-                    } else {
-                        // Can claim
-                        button {
-                            class: if *is_claiming.read() {
-                                "px-4 py-2 bg-amber-500 text-white rounded-full text-sm font-medium opacity-75 cursor-wait"
-                            } else {
-                                "px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm font-medium transition"
-                            },
-                            disabled: *is_claiming.read(),
-                            onclick: handle_claim,
-                            if *is_claiming.read() {
+                    match &*claim_state.read() {
+                        ClaimState::Success(_) => rsx! {
+                            // Already claimed - show disabled button
+                            button {
+                                class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",
+                                disabled: true,
+                                "Claimed"
+                            }
+                        },
+                        ClaimState::Claiming => rsx! {
+                            // Currently claiming
+                            button {
+                                class: "px-4 py-2 bg-amber-500 text-white rounded-full text-sm font-medium opacity-75 cursor-wait",
+                                disabled: true,
                                 "Claiming..."
-                            } else {
+                            }
+                        },
+                        _ if !has_signer => rsx! {
+                            // Not signed in
+                            button {
+                                class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",
+                                disabled: true,
+                                title: "Sign in to claim",
                                 "Claim"
                             }
-                        }
+                        },
+                        _ => rsx! {
+                            // Idle or Failed - can (re)try claiming
+                            button {
+                                class: "px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm font-medium transition",
+                                onclick: handle_claim,
+                                "Claim"
+                            }
+                        },
                     }
 
                     // Wallet button

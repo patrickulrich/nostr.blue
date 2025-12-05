@@ -256,21 +256,9 @@ pub fn CommentComposer(
                 (&target_event, None)
             };
 
-            // Build comment using the new CommentTarget API
-            // CommentTarget::event takes (id, kind, relay_hint, marker)
-            let comment_target = CommentTarget::event(
-                comment_to.id,
-                comment_to.kind,
-                None,  // relay hint
-                None   // marker
-            );
-            let root_target = root.map(|r| CommentTarget::event(
-                r.id,
-                r.kind,
-                None,
-                None
-            ));
-            let builder = EventBuilder::comment(content_for_publish, comment_target, root_target);
+            // Build comment using EventBuilder::comment with From<&Event> conversion
+            // This automatically extracts id, kind, and author pubkey for proper NIP-22 tags
+            let builder = EventBuilder::comment(content_for_publish, comment_to, root);
 
             match client.send_event_builder(builder).await {
                 Ok(send_output) => {
