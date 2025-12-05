@@ -23,4 +23,5 @@ pub mod cashu;  // NIP-60 Cashu wallet
 pub mod nwc_store;
 pub mod indexeddb_database;
 pub mod reactions_store;  // NIP-78 preferred reactions
+pub mod dvm_store;  // NIP-90 Data Vending Machines
 

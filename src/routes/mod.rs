@@ -31,6 +31,7 @@ pub mod search;
 
 // Placeholder modules for missing routes
 mod lists;
+pub mod dvm;
 pub mod photos;
 pub mod photo_detail;
 pub mod voicemessages;
@@ -84,6 +85,7 @@ use photo_new::PhotoNew;
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use lists::Lists;
+use dvm::DVM;
 use terms::Terms;
 use privacy::Privacy;
 use cookies::Cookies;
@@ -214,6 +216,9 @@ pub enum Route {
 
         #[route("/lists")]
         Lists {},
+
+        #[route("/dvm")]
+        DVM {},
 
         #[route("/profile/:pubkey")]
         Profile { pubkey: String },

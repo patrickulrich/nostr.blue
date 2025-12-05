@@ -72,6 +72,7 @@ pub mod cashu_terms_modal;
 pub mod nwc_setup_modal;
 pub mod report_modal;
 pub mod add_to_list_modal;
+pub mod dvm_selector_modal;
 
 // pub use note::NoteDisplay;
 pub use note_card::{NoteCard, NoteCardSkeleton};
@@ -141,5 +142,6 @@ pub use nwc_setup_modal::NwcSetupModal;
 pub use report_modal::ReportModal;
 pub use add_to_list_modal::AddToListModal;
 pub use poll_creator_modal::PollCreatorModal;
+pub use dvm_selector_modal::DvmSelectorModal;
 pub mod dialog;
 pub mod toast;
