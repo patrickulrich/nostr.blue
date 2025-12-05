@@ -253,12 +253,15 @@ pub fn ReplyComposer(
             return;
         };
 
+        // Determine if this is a nested reply (replying to a reply vs replying to root)
+        let is_nested_reply = parent_root.is_some();
+
         // Create pending comment for optimistic UI update
         let pending = PendingComment {
             local_id: local_id.clone(),
             content: content_value.clone(),
             target_event_id,
-            parent_comment_id: if parent_root.is_some() {
+            parent_comment_id: if is_nested_reply {
                 Some(reply_to_event.id)
             } else {
                 None
@@ -268,7 +271,7 @@ pub fn ReplyComposer(
             created_at: Timestamp::now(),
             author_pubkey: current_user_pubkey,
             target_event: reply_to_event.clone(),
-            parent_comment: if parent_root.is_some() {
+            parent_comment: if is_nested_reply {
                 Some(reply_to_event.clone())
             } else {
                 None
@@ -333,8 +336,14 @@ pub fn ReplyComposer(
                     }
 
                     // Update pending comment status
-                    if let Ok(event_id_parsed) = EventId::from_hex(&published_event_id) {
-                        update_pending_status(&local_id_clone, CommentStatus::Confirmed(event_id_parsed));
+                    match EventId::from_hex(&published_event_id) {
+                        Ok(event_id_parsed) => {
+                            update_pending_status(&local_id_clone, CommentStatus::Confirmed(event_id_parsed));
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse published event ID '{}': {}", published_event_id, e);
+                            update_pending_status(&local_id_clone, CommentStatus::Failed("Event ID parse error".to_string()));
+                        }
                     }
                     // Note: We don't remove the pending comment here. It will remain visible
                     // until the page is refreshed or navigated away. The merge function will

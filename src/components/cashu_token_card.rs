@@ -17,7 +17,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 enum ClaimState {
     Idle,
     Claiming,
-    Success(u64),
+    Success(u64, String),  // (amount, unit_display)
     Failed(String),
 }
 
@@ -98,6 +98,12 @@ pub fn CashuTokenCard(token: String) -> Element {
     // Handle claim action
     let handle_claim = {
         let token = token.clone();
+        // Capture unit from parsed token for display in success message
+        // CDK's CurrencyUnit implements Display trait (outputs lowercase)
+        let unit_for_claim = parsed.as_ref()
+            .map(|info| info.unit.to_string())
+            .unwrap_or_else(|| "sat".to_string());
+
         move |e: MouseEvent| {
             e.stop_propagation();
 
@@ -107,13 +113,14 @@ pub fn CashuTokenCard(token: String) -> Element {
             }
 
             let token = token.clone();
+            let unit = unit_for_claim.clone();
             claim_state.set(ClaimState::Claiming);
 
             spawn(async move {
                 match crate::stores::cashu::receive_tokens(token).await {
                     Ok(amount) => {
-                        log::info!("Successfully claimed {} sats", amount);
-                        claim_state.set(ClaimState::Success(amount));
+                        log::info!("Successfully claimed {} {}", amount, unit);
+                        claim_state.set(ClaimState::Success(amount, unit));
                     }
                     Err(e) => {
                         log::error!("Failed to claim token: {}", e);
@@ -208,10 +215,10 @@ pub fn CashuTokenCard(token: String) -> Element {
                 }
 
                 // Status messages
-                if let ClaimState::Success(amount) = &*claim_state.read() {
+                if let ClaimState::Success(amount, unit) = &*claim_state.read() {
                     div {
                         class: "mb-3 p-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded-lg text-center text-sm",
-                        "Claimed {format_sats(*amount)} sats!"
+                        "Claimed {format_sats(*amount)} {unit}!"
                     }
                 }
                 if matches!(&*claim_state.read(), ClaimState::Failed(_)) {
@@ -227,7 +234,7 @@ pub fn CashuTokenCard(token: String) -> Element {
 
                     // Claim button
                     match &*claim_state.read() {
-                        ClaimState::Success(_) => rsx! {
+                        ClaimState::Success(_, _) => rsx! {
                             // Already claimed - show disabled button
                             button {
                                 class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",

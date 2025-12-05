@@ -163,7 +163,7 @@ pub fn retry_pending_comment(local_id: &str) {
         found
     };
 
-    let Some((local_id, content, kind, target_event, parent_comment, _target_event_id)) = comment_data else {
+    let Some((local_id, content, kind, target_event, parent_comment, target_event_id)) = comment_data else {
         log::warn!("Retry failed: pending comment {} not found", local_id);
         return;
     };
@@ -213,6 +213,10 @@ pub fn retry_pending_comment(local_id: &str) {
             match client.send_event_builder(builder).await {
                 Ok(send_output) => {
                     log::info!("NIP-22 comment retry successful: {}", send_output.id().to_hex());
+
+                    // Invalidate thread tree cache (matching NIP-10 behavior)
+                    invalidate_thread_tree_cache(&target_event_id);
+
                     update_pending_status(&local_id, CommentStatus::Confirmed(*send_output.id()));
                 }
                 Err(e) => {

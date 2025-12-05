@@ -449,24 +449,29 @@ pub fn merge_pending_into_tree(
         // Determine where to insert
         if let Some(parent_id) = pending_comment.parent_comment_id {
             // Replying to another comment - find and insert as child
-            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, node: ThreadNode) -> bool {
+            // Returns Some(node) if not found (ownership returned), None if consumed
+            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
                 for existing in nodes.iter_mut() {
                     if existing.event.id == *parent_id {
                         existing.children.push(node);
                         // Sort children by timestamp
                         existing.children.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
-                        return true;
-                    }
-                    if insert_as_child(&mut existing.children, parent_id, node.clone()) {
-                        return true;
+                        return None; // Consumed
                     }
                 }
-                false
+                // Try children - pass ownership through each subtree
+                for existing in nodes.iter_mut() {
+                    match insert_as_child(&mut existing.children, parent_id, node) {
+                        None => return None, // Found and consumed in subtree
+                        Some(returned) => node = returned, // Not found, continue with ownership
+                    }
+                }
+                Some(node) // Not found anywhere, return ownership
             }
 
-            if !insert_as_child(&mut confirmed_tree, &parent_id, pending_node.clone()) {
+            if let Some(orphan_node) = insert_as_child(&mut confirmed_tree, &parent_id, pending_node) {
                 // Parent not found (maybe also pending), add to root
-                confirmed_tree.push(pending_node);
+                confirmed_tree.push(orphan_node);
             }
         } else {
             // Top-level comment - add to root

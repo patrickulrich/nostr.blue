@@ -800,4 +800,29 @@ mod tests {
         let image_count = tokens.iter().filter(|t| matches!(t, ContentToken::Image(_))).count();
         assert_eq!(image_count, 3);
     }
+
+    #[test]
+    fn test_parse_cashu_token_v3() {
+        // V3 tokens start with cashuA
+        let tokens = parse_content("cashuAeyJwYXlsb2FkIjp7fX0=", &[]);
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuA")));
+    }
+
+    #[test]
+    fn test_parse_cashu_token_v4() {
+        // V4 tokens start with cashuB
+        let tokens = parse_content("cashuBeyJwYXlsb2FkIjp7fX0=", &[]);
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuB")));
+    }
+
+    #[test]
+    fn test_parse_cashu_token_in_content() {
+        let tokens = parse_content("Check this token cashuAeyJwYXlsb2FkIjp7fX0= for payment", &[]);
+        assert_eq!(tokens.len(), 3); // Text, CashuToken, Text
+        assert!(matches!(&tokens[0], ContentToken::Text(_)));
+        assert!(matches!(&tokens[1], ContentToken::CashuToken(_)));
+        assert!(matches!(&tokens[2], ContentToken::Text(_)));
+    }
 }
