@@ -1,8 +1,12 @@
 use dioxus::prelude::*;
-use crate::utils::ThreadNode;
+use dioxus::events::MediaData;
+use dioxus::web::WebEventExt;
+use wasm_bindgen::JsCast;
+use crate::utils::{ThreadNode, event::is_voice_message};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::voice_messages_store;
 use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
@@ -54,6 +58,33 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    // Voice message state
+    let is_voice = is_voice_message(event);
+    let audio_url = if is_voice { event.content.clone() } else { String::new() };
+    let audio_id = format!("voice-comment-{}", event_id);
+    let mut duration = use_signal(|| 0.0f64);
+    let mut current_time = use_signal(|| 0.0f64);
+    let event_id_parsed = event.id;
+
+    // Parse imeta tags for duration per NIP-92/NIP-94
+    let imeta_duration: Option<f64> = if is_voice {
+        event.tags.iter()
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
+            .and_then(|tag| {
+                for field in tag.as_slice().iter().skip(1) {
+                    let field_str = field.as_str();
+                    if let Some(val) = field_str.strip_prefix("duration ") {
+                        if let Ok(d) = val.parse::<f64>() {
+                            return Some(d);
+                        }
+                    }
+                }
+                None
+            })
+    } else {
+        None
+    };
 
     // Fetch author metadata
     use_effect(move || {
@@ -178,6 +209,93 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
 
+    // Voice message handlers
+    let audio_id_for_effect = audio_id.clone();
+    let audio_id_for_handlers = audio_id.clone();
+
+    // Control audio element based on playback state (for voice messages)
+    use_effect(move || {
+        if !is_voice {
+            return;
+        }
+        let global_state = voice_messages_store::VOICE_PLAYBACK.read();
+        let is_playing = global_state.currently_playing == Some(event_id_parsed);
+        let audio_id_clone = audio_id_for_effect.clone();
+
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => return,
+        };
+        let audio_element = match document.get_element_by_id(&audio_id_clone) {
+            Some(el) => el,
+            None => return,
+        };
+        let audio = match audio_element.dyn_ref::<web_sys::HtmlAudioElement>() {
+            Some(a) => a,
+            None => return,
+        };
+
+        if is_playing {
+            let _ = audio.play().map_err(|e| {
+                log::debug!("Play failed: {:?}", e);
+            });
+        } else {
+            if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
+        }
+    });
+
+    // Voice message event handlers
+    let handle_timeupdate = move |evt: Event<MediaData>| {
+        if let Some(target) = evt.data.as_web_event().target() {
+            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                let time = audio.current_time();
+                current_time.set(time);
+                if voice_messages_store::is_playing(&event_id_parsed) {
+                    voice_messages_store::set_current_time(time);
+                }
+            }
+        }
+    };
+
+    let handle_loadedmetadata = move |evt: Event<MediaData>| {
+        if let Some(target) = evt.data.as_web_event().target() {
+            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                let dur = audio.duration();
+                if !dur.is_nan() {
+                    duration.set(dur);
+                    if voice_messages_store::is_playing(&event_id_parsed) {
+                        voice_messages_store::set_duration(dur);
+                    }
+                }
+            }
+        }
+    };
+
+    let handle_ended = move |_| {
+        voice_messages_store::pause_voice_message();
+        current_time.set(0.0);
+    };
+
+    let toggle_play = move |_| {
+        voice_messages_store::toggle_voice_message(event_id_parsed);
+    };
+
+    // Voice player display values
+    let duration_val = imeta_duration.unwrap_or(*duration.read());
+    let current_time_str = voice_messages_store::format_time(*current_time.read());
+    let duration_str = voice_messages_store::format_time(duration_val);
+    let progress_percent = if duration_val > 0.0 {
+        *current_time.read() / duration_val * 100.0
+    } else {
+        0.0
+    };
+
     // Calculate indentation (left margin)
     let indent_level = depth.min(MAX_DEPTH);
     let margin_left = indent_level * 4; // 4px per level
@@ -200,7 +318,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                     move |_| {
                         // Don't navigate if clicking on interactive elements
                         // The event will be stopped by buttons/links
-                        navigator.push(Route::Note { note_id: event_id_click.clone() });
+                        navigator.push(Route::Note { note_id: event_id_click.clone(), from_voice: None });
                     }
                 },
 
@@ -274,12 +392,76 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             }
                         }
 
-                        // Comment content
+                        // Comment content - voice player or text
                         div {
                             class: "text-sm mt-1",
-                            RichContent {
-                                content: event.content.clone(),
-                                tags: event.tags.clone().to_vec()
+                            if is_voice {
+                                // Inline voice player for voice message replies
+                                div {
+                                    class: "my-2",
+                                    // Hidden audio element
+                                    audio {
+                                        id: "{audio_id_for_handlers}",
+                                        src: "{audio_url}",
+                                        preload: "metadata",
+                                        style: "display: none;",
+                                        ontimeupdate: handle_timeupdate,
+                                        onloadedmetadata: handle_loadedmetadata,
+                                        onended: handle_ended,
+                                        onerror: move |_| {
+                                            log::warn!("Failed to load voice message audio");
+                                        },
+                                    }
+                                    // Compact player controls
+                                    div {
+                                        class: "flex items-center gap-3 bg-muted/30 rounded-lg p-2",
+                                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                                        // Play/Pause button
+                                        button {
+                                            class: "flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                                            onclick: toggle_play,
+                                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id_parsed) {
+                                                // Pause icon
+                                                svg {
+                                                    class: "w-4 h-4",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "currentColor",
+                                                    rect { x: "6", y: "4", width: "4", height: "16" }
+                                                    rect { x: "14", y: "4", width: "4", height: "16" }
+                                                }
+                                            } else {
+                                                // Play icon
+                                                svg {
+                                                    class: "w-4 h-4 ml-0.5",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "currentColor",
+                                                    polygon { points: "8,5 19,12 8,19" }
+                                                }
+                                            }
+                                        }
+                                        // Progress bar and time
+                                        div {
+                                            class: "flex-1",
+                                            div {
+                                                class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                                div {
+                                                    class: "h-full bg-primary transition-all",
+                                                    style: "width: {progress_percent}%"
+                                                }
+                                            }
+                                            div {
+                                                class: "flex justify-between text-xs text-muted-foreground",
+                                                span { "{current_time_str}" }
+                                                span { "{duration_str}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                RichContent {
+                                    content: event.content.clone(),
+                                    tags: event.tags.clone().to_vec()
+                                }
                             }
                         }
 
@@ -473,7 +655,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 div {
                     class: "ml-4 mt-2",
                     Link {
-                        to: Route::Note { note_id: event.id.to_hex() },
+                        to: Route::Note { note_id: event.id.to_hex(), from_voice: None },
                         class: "text-xs text-blue-500 hover:underline",
                         "→ Continue thread ({children.len()} more replies)"
                     }

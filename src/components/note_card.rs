@@ -95,18 +95,11 @@ pub fn NoteCard(
         }
     }));
 
-    // Fetch counts individually if not precomputed (fallback for single-note views)
-    // Always fetch to get per-user interaction state, but only update counts if !has_precomputed
+    // Fetch counts individually (fallback for single-note views and user interaction state)
     // Note: Reactions/likes are handled by use_reaction hook
-    // Note: Only depend on event_id, NOT precomputed_counts - to avoid re-running when batch data arrives
-    let precomputed_for_fetch = precomputed_counts.clone();
+    // Note: Counts may also arrive via precomputed_counts effect - we only update if we found MORE
     use_effect(use_reactive(&event_id_counts, move |event_id_for_counts| {
-        let precomputed = precomputed_for_fetch.clone();
         spawn(async move {
-            // Only consider precomputed if it actually has data (not just zeros from batch init)
-            let has_precomputed = precomputed.as_ref().map_or(false, |c|
-                c.replies > 0 || c.reposts > 0 || c.zap_amount_sats > 0
-            );
             let client = match get_client() {
                 Some(c) => c,
                 None => return,
@@ -227,11 +220,20 @@ pub fn NoteCard(
                     }
                 }
 
-                // Update counts only if we don't have precomputed data
+                // Update counts only if we found MORE than what's currently set
+                // This avoids race conditions with precomputed batch data
                 // Note: likes are handled by use_reaction hook
-                if !has_precomputed {
+                let current_replies = *reply_count.peek();
+                let current_reposts = *repost_count.peek();
+                let current_zaps = *zap_amount_sats.peek();
+
+                if replies > current_replies {
                     reply_count.set(replies.min(500));
+                }
+                if reposts > current_reposts {
                     repost_count.set(reposts.min(500));
+                }
+                if total_sats > current_zaps {
                     zap_amount_sats.set(total_sats);
                 }
 
@@ -488,7 +490,7 @@ pub fn NoteCard(
             class: "border-b border-border p-4 hover:bg-accent/50 transition-colors cursor-pointer",
             onclick: move |_| {
                 if !is_hidden {
-                    nav.push(Route::Note { note_id: event_id_nav.clone() });
+                    nav.push(Route::Note { note_id: event_id_nav.clone(), from_voice: None });
                 }
             },
 

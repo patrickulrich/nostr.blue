@@ -151,7 +151,7 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
 
     rsx! {
         Link {
-            to: Route::Note { note_id: note_bech32 },
+            to: Route::Note { note_id: note_bech32, from_voice: None },
             class: "block px-4 py-3 hover:bg-accent/50 transition-colors border-b border-border last:border-0",
 
             div {

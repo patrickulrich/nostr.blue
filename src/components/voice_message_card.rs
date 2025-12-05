@@ -407,8 +407,8 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
             }
         }
 
-        // Navigate to detail page
-        navigator.push(Route::VoiceMessageDetail { voice_id: voice_id_for_nav.clone() });
+        // Navigate to note detail page with from_voice hint for immediate header
+        navigator.push(Route::Note { note_id: voice_id_for_nav.clone(), from_voice: Some("true".to_string()) });
     };
 
     rsx! {

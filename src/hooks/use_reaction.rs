@@ -141,7 +141,30 @@ pub fn use_reaction(
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction);
+    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction.clone());
+
+    // Watch for late-arriving precomputed data (batch fetch may complete after component mount)
+    // This handles the race condition where NoteCard renders before batch fetch completes
+    use_effect(use_reactive(
+        &(precomputed_count, precomputed_is_liked, precomputed_user_reaction.clone()),
+        move |(count_opt, liked_opt, reaction_opt)| {
+            // Update if precomputed has data that's >= current (batch may have more complete data)
+            if let Some(count) = count_opt {
+                let current = *like_count.peek();
+                // Update if batch has more OR if we're still at zero
+                if count > current || (count > 0 && current == 0) {
+                    like_count.set(count);
+                }
+            }
+            if let Some(liked) = liked_opt {
+                // User liked state from batch - always update to reflect accurate state
+                is_liked.set(liked);
+            }
+            if let Some(reaction) = reaction_opt {
+                user_reaction.set(Some(reaction.clone()));
+            }
+        }
+    ));
 
     // Clone for effect
     let event_id_fetch = event_id.clone();
@@ -247,7 +270,13 @@ pub fn use_reaction(
                 // reflect the most recent action. Final state is liked only if no subsequent unlike.
                 let final_liked = user_liked && !user_unliked;
 
-                like_count.set(positive_count);
+                // Only update count if we found more than current (avoid overwriting batch data)
+                let current_count = *like_count.peek();
+                if positive_count > current_count {
+                    like_count.set(positive_count);
+                }
+
+                // Always update user state - individual fetch has accurate per-user data
                 is_liked.set(final_liked);
                 user_reaction.set(if final_liked { user_emoji } else { None });
             }

@@ -60,6 +60,19 @@ impl Default for TabData {
     }
 }
 
+/// Create default tab data map with all tabs initialized
+fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
+    let mut map = HashMap::new();
+    map.insert(ProfileTab::Posts, TabData::default());
+    map.insert(ProfileTab::Replies, TabData::default());
+    map.insert(ProfileTab::Articles, TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
+    map.insert(ProfileTab::Likes, TabData::default());
+    map
+}
+
 #[component]
 pub fn Profile(pubkey: String) -> Element {
     // State management
@@ -69,17 +82,7 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Tab and events state
     let mut active_tab = use_signal(|| ProfileTab::Posts);
-    let mut tab_data = use_signal(|| {
-        let mut map = HashMap::new();
-        map.insert(ProfileTab::Posts, TabData::default());
-        map.insert(ProfileTab::Replies, TabData::default());
-        map.insert(ProfileTab::Articles, TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
-        map.insert(ProfileTab::Likes, TabData::default());
-        map
-    });
+    let mut tab_data = use_signal(default_tab_data_map);
     let mut loading_events = use_signal(|| false);
     let mut current_tab_has_more = use_signal(|| true);
 
@@ -105,11 +108,7 @@ pub fn Profile(pubkey: String) -> Element {
     // Info dialog state (npub/lightning)
     let mut show_info_dialog = use_signal(|| false);
 
-    // Clone pubkey for various uses
-    let pubkey_for_metadata = pubkey.clone();
-    let pubkey_for_events = pubkey.clone();
-    let pubkey_for_follow = pubkey.clone();
-    let pubkey_for_stats = pubkey.clone();
+    // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_load_more = pubkey.clone();
@@ -128,10 +127,24 @@ pub fn Profile(pubkey: String) -> Element {
         .and_then(|user_pk| parsed_pubkey.map(|profile_pk| user_pk == profile_pk))
         .unwrap_or(false);
 
+    // Reset all state when pubkey changes (handles navigation between profiles)
+    use_effect(use_reactive(&pubkey, move |_new_pubkey| {
+        profile_data.set(None);
+        loading.set(true);
+        error.set(None);
+        active_tab.set(ProfileTab::Posts);
+        tab_data.set(default_tab_data_map());
+        loading_events.set(false);
+        current_tab_has_more.set(true);
+        is_following.set(false);
+        follows_you.set(false);
+        following_count.set(0);
+        followers_count.set(0);
+        post_count.set(0);
+    }));
+
     // Fetch profile metadata
-    use_effect(move || {
-        let pubkey_str = pubkey_for_metadata.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(use_reactive((&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
 
         // Only load if client is initialized
         if !client_initialized {
@@ -194,16 +207,12 @@ pub fn Profile(pubkey: String) -> Element {
 
             loading.set(false);
         });
-    });
+    }));
 
     // Fetch events based on active tab - TWO-PHASE LOADING for instant display
     // Phase 1: Load from DB instantly (cached data)
     // Phase 2: Fetch from relays in background (fresh data)
-    use_effect(move || {
-        let tab = active_tab.read().clone();
-        let pubkey_str = pubkey_for_events.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
+    use_effect(use_reactive((&pubkey, &*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, tab, client_initialized)| {
         // Only load if client is initialized
         if !client_initialized {
             return;
@@ -356,17 +365,16 @@ pub fn Profile(pubkey: String) -> Element {
                 loading_events.set(false);
             });
         });
-    });
+    }));
 
     // Check if following this user
-    use_effect(move || {
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
 
-        let pubkey_str = pubkey_for_follow.clone();
         spawn(async move {
             // Convert pubkey to hex format for comparison
             let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_str) {
@@ -386,18 +394,17 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // OPTIMIZATION: Combined "follows you" check + stats fetch
     // This eliminates a duplicate fetch_contacts() call and runs both in parallel
-    use_effect(move || {
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized {
             return;
         }
 
-        let pubkey_str = pubkey_for_stats.clone();
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
 
@@ -440,7 +447,7 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Load more handler
     let load_more = move || {
