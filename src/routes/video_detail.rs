@@ -1149,7 +1149,10 @@ fn VideoInfo(
                                 // Only build thread tree after loading completes to avoid caching empty results
                                 {
                                     let comment_vec = comments.read().clone();
-                                    let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                                    let confirmed_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                                    // Merge pending comments for optimistic display
+                                    let pending = get_pending_comments(&event_id_parsed);
+                                    let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event_id_parsed);
 
                                     rsx! {
                                         if thread_tree.is_empty() {

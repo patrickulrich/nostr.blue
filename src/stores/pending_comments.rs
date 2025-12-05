@@ -5,7 +5,12 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Timestamp};
+use nostr_sdk::prelude::{EventBuilder, CommentTarget};
 use std::collections::HashMap;
+use wasm_bindgen_futures::spawn_local;
+
+use crate::stores::nostr_client::{get_client, publish_note};
+use crate::utils::thread_tree::invalidate_thread_tree_cache;
 
 /// Status of a pending comment
 #[derive(Clone, Debug, PartialEq)]
@@ -113,4 +118,154 @@ pub fn get_pending_comments(target_event_id: &EventId) -> Vec<PendingComment> {
         .get(&target_event_id.to_hex())
         .cloned()
         .unwrap_or_default()
+}
+
+/// Retry publishing a failed pending comment
+///
+/// This function finds the pending comment by local_id, resets its status to Pending,
+/// and attempts to republish it using the original content and target event data.
+pub fn retry_pending_comment(local_id: &str) {
+    // Find and clone the pending comment data we need for retry
+    let comment_data = {
+        let store = PENDING_COMMENTS.read();
+        let mut found = None;
+        for comments in store.values() {
+            if let Some(comment) = comments.iter().find(|c| c.local_id == local_id) {
+                found = Some((
+                    comment.local_id.clone(),
+                    comment.content.clone(),
+                    comment.kind,
+                    comment.target_event.clone(),
+                    comment.parent_comment.clone(),
+                    comment.target_event_id,
+                ));
+                break;
+            }
+        }
+        found
+    };
+
+    let Some((local_id, content, kind, target_event, parent_comment, _target_event_id)) = comment_data else {
+        log::warn!("Retry failed: pending comment {} not found", local_id);
+        return;
+    };
+
+    // Reset status to Pending
+    update_pending_status(&local_id, CommentStatus::Pending);
+
+    log::info!("Retrying pending comment {}", local_id);
+
+    // Spawn async task to republish
+    spawn_local(async move {
+        if kind == Kind::Comment {
+            // NIP-22 Comment
+            let client = match get_client() {
+                Some(c) => c,
+                None => {
+                    log::error!("Client not initialized for retry");
+                    update_pending_status(&local_id, CommentStatus::Failed("Client not initialized".to_string()));
+                    return;
+                }
+            };
+
+            // Determine comment_to and root based on whether this is a reply to another comment
+            let (comment_to, root) = if let Some(ref parent) = parent_comment {
+                // Replying to a comment: comment_to = parent comment, root = original event
+                (parent, Some(&target_event))
+            } else {
+                // Top-level comment: comment_to = original event, root = None
+                (&target_event, None)
+            };
+
+            // Build comment using CommentTarget API
+            let comment_target = CommentTarget::event(
+                comment_to.id,
+                comment_to.kind,
+                None,  // relay hint
+                None   // marker
+            );
+            let root_target = root.map(|r| CommentTarget::event(
+                r.id,
+                r.kind,
+                None,
+                None
+            ));
+            let builder = EventBuilder::comment(&content, comment_target, root_target);
+
+            match client.send_event_builder(builder).await {
+                Ok(send_output) => {
+                    log::info!("NIP-22 comment retry successful: {}", send_output.id().to_hex());
+                    update_pending_status(&local_id, CommentStatus::Confirmed(*send_output.id()));
+                }
+                Err(e) => {
+                    log::error!("Failed to retry comment: {}", e);
+                    update_pending_status(&local_id, CommentStatus::Failed(format!("{}", e)));
+                }
+            }
+        } else {
+            // NIP-10 Reply (Kind::TextNote)
+            // Build tags for reply following NIP-10
+            let mut tags = Vec::new();
+
+            // Get parent's author pubkey
+            let author_pk = target_event.pubkey.to_hex();
+            let event_id = target_event.id.to_hex();
+
+            // Check if the event we're replying to has a root marker
+            let parent_root = target_event.tags.iter().find_map(|tag| {
+                let tag_vec = tag.clone().to_vec();
+                if tag_vec.len() >= 4
+                    && tag_vec[0] == "e"
+                    && tag_vec[3] == "root" {
+                    Some(tag_vec[1].clone())
+                } else {
+                    None
+                }
+            });
+
+            // Determine thread root for cache invalidation
+            let thread_root_id = parent_root.clone().unwrap_or_else(|| event_id.clone());
+
+            if let Some(root_id) = parent_root {
+                // This is a nested reply (replying to a reply)
+                tags.push(vec!["e".to_string(), root_id, "".to_string(), "root".to_string()]);
+                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "reply".to_string()]);
+            } else {
+                // This is a direct reply to root
+                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "root".to_string()]);
+            }
+
+            // Add p tags: parent author + all p tags from parent event
+            tags.push(vec!["p".to_string(), author_pk.clone()]);
+            for tag in target_event.tags.iter() {
+                let tag_vec = tag.clone().to_vec();
+                if tag_vec.len() >= 2 && tag_vec[0] == "p" {
+                    let pubkey = tag_vec[1].clone();
+                    if pubkey != author_pk {
+                        tags.push(vec!["p".to_string(), pubkey]);
+                    }
+                }
+            }
+
+            match publish_note(content, tags).await {
+                Ok(published_event_id) => {
+                    log::info!("Reply retry successful: {}", published_event_id);
+
+                    // Invalidate thread tree cache
+                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
+                        invalidate_thread_tree_cache(&root_event_id);
+                    }
+
+                    // Update pending comment status
+                    if let Ok(event_id_parsed) = EventId::from_hex(&published_event_id) {
+                        update_pending_status(&local_id, CommentStatus::Confirmed(event_id_parsed));
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to retry reply: {}", e);
+                    update_pending_status(&local_id, CommentStatus::Failed(format!("{}", e)));
+                }
+            }
+        }
+    });
 }

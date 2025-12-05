@@ -3,7 +3,7 @@ use dioxus::events::MediaData;
 use dioxus::web::WebEventExt;
 use wasm_bindgen::JsCast;
 use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
-use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, update_pending_status};
+use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, retry_pending_comment};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
@@ -435,8 +435,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 button {
                                                     class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
                                                     onclick: move |_| {
-                                                        // Reset to pending and let user retry by refreshing
-                                                        update_pending_status(&local_id_retry, CommentStatus::Pending);
+                                                        // Actually retry publishing the comment
+                                                        retry_pending_comment(&local_id_retry);
                                                     },
                                                     "Retry"
                                                 }

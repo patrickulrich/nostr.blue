@@ -186,10 +186,10 @@ pub fn CashuTokenCard(token: String) -> Element {
                                 "Claimed {format_sats(*amount)} sats!"
                             }
                         },
-                        Err(error) => rsx! {
+                        Err(_) => rsx! {
                             div {
                                 class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm",
-                                "{error}"
+                                "Failed to claim token. Please try again."
                             }
                         },
                     }
