@@ -1391,10 +1391,8 @@ async fn append_paginated_items(
             spawn(async move {
                 let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                 if let Ok(new_counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
-                    // Merge new counts with existing
-                    let mut existing = counts_signal.read().clone();
-                    existing.extend(new_counts);
-                    counts_signal.set(existing);
+                    // Merge new counts with existing using Dioxus's WritableHashMapExt for in-place update
+                    counts_signal.extend(new_counts);
                     log::info!("Fetched interaction counts for {} paginated items", items_for_counts.len());
                 }
             });

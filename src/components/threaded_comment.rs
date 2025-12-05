@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus::events::MediaData;
 use dioxus::web::WebEventExt;
 use wasm_bindgen::JsCast;
-use crate::utils::ThreadNode;
+use crate::utils::{ThreadNode, event::is_voice_message};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
@@ -16,11 +16,6 @@ use crate::utils::format_sats_compact;
 use nostr_sdk::{Metadata, Filter, Kind};
 use nostr_sdk::prelude::NostrDatabaseExt;
 use std::time::Duration;
-
-/// Check if an event is a voice message
-fn is_voice_message(event: &nostr_sdk::Event) -> bool {
-    event.kind == Kind::VoiceMessage || event.kind == Kind::VoiceMessageReply
-}
 
 const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
 
@@ -79,8 +74,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             .and_then(|tag| {
                 for field in tag.as_slice().iter().skip(1) {
                     let field_str = field.as_str();
-                    if field_str.starts_with("duration ") {
-                        if let Ok(d) = field_str[9..].parse::<f64>() {
+                    if let Some(val) = field_str.strip_prefix("duration ") {
+                        if let Ok(d) = val.parse::<f64>() {
                             return Some(d);
                         }
                     }
@@ -245,9 +240,13 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
         };
 
         if is_playing {
-            let _ = audio.play();
+            let _ = audio.play().map_err(|e| {
+                log::debug!("Play failed: {:?}", e);
+            });
         } else {
-            let _ = audio.pause();
+            if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
         }
     });
 
@@ -409,6 +408,9 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                         ontimeupdate: handle_timeupdate,
                                         onloadedmetadata: handle_loadedmetadata,
                                         onended: handle_ended,
+                                        onerror: move |_| {
+                                            log::warn!("Failed to load voice message audio");
+                                        },
                                     }
                                     // Compact player controls
                                     div {

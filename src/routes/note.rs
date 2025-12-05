@@ -2,15 +2,10 @@ use dioxus::prelude::*;
 use crate::stores::nostr_client;
 use crate::routes::Route;
 use crate::components::{NoteCard, ThreadedComment, ClientInitializing, VoiceMessageCard};
-use crate::utils::build_thread_tree;
+use crate::utils::{build_thread_tree, event::is_voice_message};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
-
-/// Helper to check if an event is a voice message
-fn is_voice_message(event: &NostrEvent) -> bool {
-    event.kind == Kind::VoiceMessage || event.kind == Kind::VoiceMessageReply
-}
 
 // Helper functions for parallel loading
 
