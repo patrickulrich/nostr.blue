@@ -7,13 +7,20 @@ use dioxus::prelude::*;
 use crate::stores::{nostr_client, dvm_store};
 use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
 use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
+use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
 use nostr_sdk::PublicKey;
+use std::collections::HashMap;
+use std::time::Duration;
 
 /// Main DVM page component
 #[component]
 pub fn DVM() -> Element {
     let mut show_selector = use_signal(|| false);
     let mut refresh_trigger = use_signal(|| 0);
+
+    // Interaction counts cache (event_id -> counts) for batch optimization
+    let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+    let mut interactions_loaded = use_signal(|| false);
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -30,6 +37,9 @@ pub fn DVM() -> Element {
             return;
         }
 
+        // Reset interaction counts on refresh
+        interactions_loaded.set(false);
+
         // Discover DVMs in background
         spawn(async move {
             if let Err(e) = dvm_store::discover_content_dvms().await {
@@ -42,6 +52,33 @@ pub fn DVM() -> Element {
         spawn(async move {
             if let Err(e) = dvm_store::request_content_feed(provider).await {
                 log::error!("Failed to request content feed: {}", e);
+            }
+        });
+    });
+
+    // Fetch interaction counts when feed events change
+    use_effect(move || {
+        let events = DVM_FEED_EVENTS.read().clone();
+
+        if events.is_empty() {
+            return;
+        }
+
+        // Only fetch if not already loaded for this batch
+        if *interactions_loaded.peek() {
+            return;
+        }
+
+        spawn(async move {
+            let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
+            match fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                Ok(counts) => {
+                    interaction_counts.set(counts);
+                    interactions_loaded.set(true);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch interaction counts: {}", e);
+                }
             }
         });
     });
@@ -181,6 +218,7 @@ pub fn DVM() -> Element {
                         NoteCard {
                             key: "{event.id.to_hex()}",
                             event: event.clone(),
+                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
                             collapsible: true
                         }
                     }

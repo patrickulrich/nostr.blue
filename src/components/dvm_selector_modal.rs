@@ -22,6 +22,11 @@ pub fn DvmSelectorModal(
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50",
             onclick: move |_| on_close.call(()),
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    on_close.call(());
+                }
+            },
 
             // Modal content
             div {
@@ -38,6 +43,7 @@ pub fn DvmSelectorModal(
                     button {
                         class: "p-1 hover:bg-accent rounded",
                         onclick: move |_| on_close.call(()),
+                        "aria-label": "Close dialog",
                         "\u{2715}"
                     }
                 }
