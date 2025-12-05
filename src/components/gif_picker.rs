@@ -148,7 +148,10 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                         button {
                             class: "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-1 transition",
-                            onclick: move |_| show_picker.set(false),
+                            onclick: move |_| {
+                                show_picker.set(false);
+                                show_upload_modal.set(false);
+                            },
                             "✕"
                         }
                     }
@@ -207,6 +210,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         props.on_gif_selected.call(gif_url_for_click.clone());
                                                         add_recent_gif(gif_clone.clone());
                                                         show_picker.set(false);
+                                                        show_upload_modal.set(false);
                                                     },
                                                     img {
                                                         src: "{thumb_url}",
@@ -288,6 +292,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         props.on_gif_selected.call(gif_url_for_click.clone());
                                                         add_recent_gif(gif_clone.clone());
                                                         show_picker.set(false);
+                                                        show_upload_modal.set(false);
                                                     },
                                                     img {
                                                         src: "{thumb_url}",
@@ -355,6 +360,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                     // Optionally select the uploaded GIF
                     props.on_gif_selected.call(gif.url.clone());
                     show_picker.set(false);
+                    show_upload_modal.set(false);
                 },
             }
         }

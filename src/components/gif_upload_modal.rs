@@ -36,15 +36,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
 
-    // Read upload progress
-    let nip96_progress = nip96_store::NIP96_UPLOAD_PROGRESS.read();
-    let blossom_progress = blossom_store::UPLOAD_PROGRESS.read();
-
-    // Get current progress based on selected server
-    let progress = match *upload_server.read() {
-        UploadServer::NostrBuild => *nip96_progress,
-        UploadServer::Blossom => *blossom_progress,
-    };
+    // Derive progress reactively based on selected server
+    // Using use_memo ensures proper re-renders when global signals change
+    let progress = use_memo(move || {
+        match *upload_server.read() {
+            UploadServer::NostrBuild => *nip96_store::NIP96_UPLOAD_PROGRESS.read(),
+            UploadServer::Blossom => *blossom_store::UPLOAD_PROGRESS.read(),
+        }
+    });
 
     // Generate unique input ID
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
@@ -70,7 +69,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
                 match read_file_as_bytes(&input_id).await {
                     Ok((filename, data, mime_type)) => {
-                        // Validate it's a GIF
+                        // Validate GIF magic bytes (GIF87a or GIF89a)
+                        // This is more reliable than MIME type or extension which can be spoofed
+                        if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
+                            error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
+                            return;
+                        }
+
+                        // Also check MIME type or extension as secondary validation
                         if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
                             error.set(Some("Please select a GIF file".to_string()));
                             return;
@@ -400,13 +406,13 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     class: "w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2",
                                     div {
                                         class: "bg-blue-600 h-2 rounded-full transition-all duration-300",
-                                        style: format!("width: {}%", progress.unwrap_or(0.0)),
+                                        style: format!("width: {}%", progress.read().unwrap_or(0.0)),
                                     }
                                 }
                                 p {
                                     class: "text-xs text-gray-500 dark:text-gray-400 text-center",
                                     {
-                                        if let Some(p) = progress {
+                                        if let Some(p) = *progress.read() {
                                             format!("Uploading... {:.0}%", p)
                                         } else {
                                             "Uploading...".to_string()

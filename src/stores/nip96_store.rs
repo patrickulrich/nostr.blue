@@ -139,8 +139,13 @@ pub async fn upload_to_nip96(
     *NIP96_UPLOAD_PROGRESS.write() = Some(0.0);
 
     // Get signer for NIP-98 authentication
-    let signer = nostr_client::get_signer()
-        .ok_or("Not authenticated. Please sign in to upload files.")?;
+    let signer = match nostr_client::get_signer() {
+        Some(s) => s,
+        None => {
+            *NIP96_UPLOAD_PROGRESS.write() = None;
+            return Err("Not authenticated. Please sign in to upload files.".to_string());
+        }
+    };
 
     *NIP96_UPLOAD_PROGRESS.write() = Some(10.0);
 
@@ -155,19 +160,31 @@ pub async fn upload_to_nip96(
     *NIP96_UPLOAD_PROGRESS.write() = Some(20.0);
 
     // Create NIP-98 authorization header
-    let authorization = create_nip98_auth(&signer, NOSTR_BUILD_API_URL, &file_hash_hex).await?;
+    let authorization = match create_nip98_auth(&signer, NOSTR_BUILD_API_URL, &file_hash_hex).await {
+        Ok(auth) => auth,
+        Err(e) => {
+            *NIP96_UPLOAD_PROGRESS.write() = None;
+            return Err(e);
+        }
+    };
 
     log::info!("NIP-98 auth created");
     *NIP96_UPLOAD_PROGRESS.write() = Some(30.0);
 
     // Upload using web_sys fetch API with FormData
-    let metadata = upload_with_fetch(
+    let metadata = match upload_with_fetch(
         file_data,
         mime_type,
         caption,
         alt,
         authorization,
-    ).await?;
+    ).await {
+        Ok(m) => m,
+        Err(e) => {
+            *NIP96_UPLOAD_PROGRESS.write() = None;
+            return Err(e);
+        }
+    };
 
     *NIP96_UPLOAD_PROGRESS.write() = Some(100.0);
 
