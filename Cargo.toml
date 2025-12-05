@@ -12,7 +12,7 @@ dioxus = { version = "0.7.1", features = ["web", "router"] }
 dioxus-stores = "0.7.1"
 
 # Nostr protocol
-nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60"] }
+nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60", "nip98"] }
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip44", "nip59", "nip57"] }
 nostr-database = { version = "0.44", default-features = false }
 nostr-indexeddb = { version = "0.44" }
@@ -97,6 +97,9 @@ web-sys = { version = "0.3", features = [
     "IdbVersionChangeEvent",
     "IdbCursorWithValue",
     "IdbKeyRange",
+    # NIP-96 file upload features
+    "FormData",
+    "BlobPropertyBag",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
