@@ -93,6 +93,9 @@ pub fn Home() -> Element {
             // Reset real-time subscription flag to allow fresh subscription
             realtime_started.set(false);
 
+            // Reset interactions_loaded so new feed type gets full fetch (not sync)
+            interactions_loaded.set(false);
+
             // Note: Profile cache NOT cleared - 5-min TTL handles staleness
             // Clearing was causing slow avatar loading on page navigation
 
