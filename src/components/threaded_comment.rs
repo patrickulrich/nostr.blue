@@ -25,11 +25,13 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
 
-    // Extract pending state from node source
-    let (is_pending, pending_local_id, pending_status) = match &node.source {
-        ThreadNodeSource::Confirmed => (false, None, None),
-        ThreadNodeSource::Pending { local_id, status } => {
-            (true, Some(local_id.clone()), Some(status.clone()))
+    // Extract pending state and author pubkey from node source
+    // For pending comments, use the explicitly stored author_pubkey since the display event
+    // may have a dummy pubkey from the unsigned event construction
+    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node.source {
+        ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
+        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
+            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
         }
     };
 
@@ -40,7 +42,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
-    let author_pubkey = event.pubkey;
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
     let author_pubkey_repost = author_pubkey_str.clone();

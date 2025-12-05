@@ -5,8 +5,10 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Timestamp};
-use nostr_sdk::prelude::{EventBuilder, CommentTarget};
+use nostr_sdk::prelude::{EventBuilder, CommentTarget, Tags};
+use nostr_sdk::secp256k1::schnorr::Signature;
 use std::collections::HashMap;
+use std::str::FromStr;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::stores::nostr_client::{get_client, publish_note};
@@ -53,24 +55,40 @@ pub struct PendingComment {
 impl PendingComment {
     /// Create a pseudo-Event for display purposes
     /// This allows ThreadedComment to render pending comments using the same UI
+    ///
+    /// Uses Event::new() directly to construct an event with the correct author pubkey
+    /// without requiring cryptographic signing. The signature is a dummy value since
+    /// this event is only used for local display and is never verified or published.
     pub fn to_display_event(&self) -> NostrEvent {
-        // Create a minimal event structure for display
-        // We use a temporary keypair to sign, since we need a valid Event struct
-        // The signature doesn't matter since this is just for local display
-        let temp_keys = nostr_sdk::Keys::generate();
-        let unsigned = nostr_sdk::EventBuilder::new(self.kind, &self.content)
-            .custom_created_at(self.created_at)
-            .build(self.author_pubkey);
+        // Use empty tags for display event
+        let tags = Tags::new();
 
-        // Sign with temp keys to get a valid Event structure
-        // Replace the pubkey with the actual author's pubkey for display
-        unsigned.sign_with_keys(&temp_keys).unwrap_or_else(|_| {
-            // Fallback: create a minimal event if signing fails
-            nostr_sdk::EventBuilder::text_note(&self.content)
-                .custom_created_at(self.created_at)
-                .sign_with_keys(&temp_keys)
-                .expect("Failed to create fallback event")
-        })
+        // Compute the event ID correctly using the real author pubkey
+        let id = EventId::new(
+            &self.author_pubkey,
+            &self.created_at,
+            &self.kind,
+            &tags,
+            &self.content,
+        );
+
+        // Create a dummy signature (won't verify, but that's OK for display-only)
+        // All zeros is a valid 64-byte hex string for Signature parsing
+        let dummy_sig = Signature::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000\
+             0000000000000000000000000000000000000000000000000000000000000000"
+        ).expect("dummy signature is valid hex");
+
+        // Construct Event directly with correct author pubkey - no signing needed
+        NostrEvent::new(
+            id,
+            self.author_pubkey,
+            self.created_at,
+            self.kind,
+            tags,
+            &self.content,
+            dummy_sig,
+        )
     }
 }
 

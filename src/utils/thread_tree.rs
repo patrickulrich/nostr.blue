@@ -1,5 +1,5 @@
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, TagKind};
+use nostr_sdk::{Event, EventId, PublicKey, TagKind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
@@ -16,6 +16,8 @@ pub enum ThreadNodeSource {
     Pending {
         local_id: String,
         status: CommentStatus,
+        /// Author's public key (stored explicitly since display event may have dummy pubkey)
+        author_pubkey: PublicKey,
     },
 }
 
@@ -45,11 +47,11 @@ impl ThreadNode {
     }
 
     /// Create a pending thread node
-    pub fn pending(event: Event, local_id: String, status: CommentStatus) -> Self {
+    pub fn pending(event: Event, local_id: String, status: CommentStatus, author_pubkey: PublicKey) -> Self {
         Self {
             event,
             children: Vec::new(),
-            source: ThreadNodeSource::Pending { local_id, status },
+            source: ThreadNodeSource::Pending { local_id, status, author_pubkey },
         }
     }
 }
@@ -441,6 +443,7 @@ pub fn merge_pending_into_tree(
             display_event,
             pending_comment.local_id.clone(),
             pending_comment.status.clone(),
+            pending_comment.author_pubkey,
         );
 
         // Determine where to insert
