@@ -22,8 +22,8 @@ enum ClaimState {
     Failed(String),
 }
 
-/// Format sats amount with thousands separators
-fn format_sats(amount: u64) -> String {
+/// Format amount with thousands separators (works for any currency unit)
+fn format_amount(amount: u64) -> String {
     let s = amount.to_string();
     let mut result = String::new();
     for (i, c) in s.chars().rev().enumerate() {
@@ -100,10 +100,16 @@ pub fn CashuTokenCard(token: String) -> Element {
     let handle_claim = {
         let token = token.clone();
         // Capture unit from parsed token for display in success message
-        // CDK's CurrencyUnit implements Display trait (outputs lowercase)
+        // Use same plural form as header for consistency (CDK's Display returns lowercase singular)
         let unit_for_claim = parsed.as_ref()
-            .map(|info| info.unit.to_string())
-            .unwrap_or_else(|| "sat".to_string());
+            .map(|info| match info.unit {
+                CurrencyUnit::Sat => "sats",
+                CurrencyUnit::Msat => "msats",
+                CurrencyUnit::Usd => "USD",
+                CurrencyUnit::Eur => "EUR",
+                _ => "units",
+            }.to_string())
+            .unwrap_or_else(|| "sats".to_string());
 
         move |e: MouseEvent| {
             e.stop_propagation();
@@ -155,7 +161,7 @@ pub fn CashuTokenCard(token: String) -> Element {
 
             let token = token.clone();
             let toast_api = toast_api.clone();
-            spawn(async move {
+            spawn_local(async move {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {
                         copied.set(true);
@@ -177,7 +183,7 @@ pub fn CashuTokenCard(token: String) -> Element {
     // Render based on parse result
     if let Some(info) = parsed {
         let mint_display = extract_mint_hostname(&info.mint_url);
-        let amount_display = format_sats(info.amount);
+        let amount_display = format_amount(info.amount);
         let unit_display = match info.unit {
             CurrencyUnit::Sat => "sats",
             CurrencyUnit::Msat => "msats",
@@ -220,7 +226,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                 if let ClaimState::Success(amount, unit) = &*claim_state.read() {
                     div {
                         class: "mb-3 p-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded-lg text-center text-sm",
-                        "Claimed {format_sats(*amount)} {unit}!"
+                        "Claimed {format_amount(*amount)} {unit}!"
                     }
                 }
                 if matches!(&*claim_state.read(), ClaimState::Failed(_)) {

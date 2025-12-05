@@ -254,12 +254,14 @@ pub fn retry_pending_comment(local_id: &str) {
             let event_id = target_event.id.to_hex();
 
             // Check if the event we're replying to has a root marker
+            // Use as_slice() to avoid unnecessary cloning
             let parent_root = target_event.tags.iter().find_map(|tag| {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 4
-                    && tag_vec[0] == "e"
-                    && tag_vec[3] == "root" {
-                    Some(tag_vec[1].clone())
+                let tag_slice = tag.as_slice();
+                if tag_slice.len() >= 4
+                    && tag_slice.first().map(|s| s.as_str()) == Some("e")
+                    && tag_slice.get(3).map(|s| s.as_str()) == Some("root")
+                {
+                    tag_slice.get(1).map(|s| s.to_string())
                 } else {
                     None
                 }
@@ -278,13 +280,15 @@ pub fn retry_pending_comment(local_id: &str) {
             }
 
             // Add p tags: parent author + all p tags from parent event
+            // Use as_slice() to avoid unnecessary cloning
             tags.push(vec!["p".to_string(), author_pk.clone()]);
             for tag in target_event.tags.iter() {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 2 && tag_vec[0] == "p" {
-                    let pubkey = tag_vec[1].clone();
-                    if pubkey != author_pk {
-                        tags.push(vec!["p".to_string(), pubkey]);
+                let tag_slice = tag.as_slice();
+                if tag_slice.len() >= 2 && tag_slice.first().map(|s| s.as_str()) == Some("p") {
+                    if let Some(pubkey) = tag_slice.get(1) {
+                        if pubkey.as_str() != author_pk {
+                            tags.push(vec!["p".to_string(), pubkey.to_string()]);
+                        }
                     }
                 }
             }
