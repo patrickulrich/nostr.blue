@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::gif_store::{GIF_RESULTS, GIF_LOADING, RECENT_GIFS, load_initial_gifs, load_more_gifs, add_recent_gif, search_gifs, GifResultsStoreStoreExt, RecentGifsStoreStoreExt};
+use crate::components::gif_upload_modal::GifUploadModal;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct GifPickerProps {
@@ -11,6 +12,7 @@ pub struct GifPickerProps {
 #[component]
 pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
+    let mut show_upload_modal = use_signal(|| false);
     let mut position_right = use_signal(|| true); // Whether to show popup to the right of button
     let button_id = use_signal(|| format!("gif-picker-{}", uuid::Uuid::new_v4()));
     let mut initialized = use_signal(|| false);
@@ -146,7 +148,10 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                         button {
                             class: "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-1 transition",
-                            onclick: move |_| show_picker.set(false),
+                            onclick: move |_| {
+                                show_picker.set(false);
+                                show_upload_modal.set(false);
+                            },
                             "✕"
                         }
                     }
@@ -205,6 +210,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         props.on_gif_selected.call(gif_url_for_click.clone());
                                                         add_recent_gif(gif_clone.clone());
                                                         show_picker.set(false);
+                                                        show_upload_modal.set(false);
                                                     },
                                                     img {
                                                         src: "{thumb_url}",
@@ -286,6 +292,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                         props.on_gif_selected.call(gif_url_for_click.clone());
                                                         add_recent_gif(gif_clone.clone());
                                                         show_picker.set(false);
+                                                        show_upload_modal.set(false);
                                                     },
                                                     img {
                                                         src: "{thumb_url}",
@@ -306,31 +313,55 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
 
-                    // Footer with Load More button
+                    // Footer with Load More and Upload buttons
                     if !gif_results.data().read().is_empty() {
                         div {
                             class: "p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-b-xl",
-                            button {
-                                class: "w-full px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center gap-2",
-                                disabled: *gif_loading,
-                                onclick: move |_| {
-                                    spawn(async move {
-                                        load_more_gifs().await;
-                                    });
-                                },
-                                if *gif_loading {
-                                    span {
-                                        class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
+                            div {
+                                class: "flex gap-2",
+                                // Load More button
+                                button {
+                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center gap-2",
+                                    disabled: *gif_loading,
+                                    onclick: move |_| {
+                                        spawn(async move {
+                                            load_more_gifs().await;
+                                        });
+                                    },
+                                    if *gif_loading {
+                                        span {
+                                            class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
+                                        }
+                                        "Loading..."
+                                    } else {
+                                        span { "⬇️" }
+                                        "Load More"
                                     }
-                                    "Loading More GIFs..."
-                                } else {
-                                    span { "⬇️" }
-                                    "Load More GIFs"
+                                }
+                                // Upload GIF button
+                                button {
+                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2",
+                                    onclick: move |_| {
+                                        show_upload_modal.set(true);
+                                    },
+                                    span { "⬆️" }
+                                    "Upload GIF"
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            // Upload modal
+            GifUploadModal {
+                show: show_upload_modal,
+                on_upload: move |gif: crate::stores::gif_store::GifMetadata| {
+                    // Optionally select the uploaded GIF
+                    props.on_gif_selected.call(gif.url.clone());
+                    show_picker.set(false);
+                    show_upload_modal.set(false);
+                },
             }
         }
     }

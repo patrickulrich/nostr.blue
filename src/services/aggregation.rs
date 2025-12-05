@@ -40,6 +40,8 @@ pub struct InteractionCounts {
     pub user_liked: Option<bool>,
     /// The current user's reaction emoji if they reacted (None if not checked or no reaction)
     pub user_reaction: Option<String>,
+    /// The URL for custom emoji reactions (NIP-30) - only set if user_reaction is a custom emoji
+    pub user_reaction_url: Option<String>,
 }
 
 /// Cache entry with TTL tracking
@@ -146,9 +148,12 @@ impl CountsCache {
                         if content == "-" {
                             cached.counts.user_liked = Some(false);
                             cached.counts.user_reaction = None;
+                            cached.counts.user_reaction_url = None;
                         } else {
                             cached.counts.user_liked = Some(true);
                             cached.counts.user_reaction = Some(content.to_string());
+                            // Note: emoji_url is not available in increment context
+                            // This is only used for live updates, full data comes from fetch
                         }
                     }
                 }
@@ -528,10 +533,31 @@ pub async fn fetch_interaction_counts_batch(
                         // User unliked - they don't currently like this
                         counts.user_liked = Some(false);
                         counts.user_reaction = None;
+                        counts.user_reaction_url = None;
                     } else {
                         // User reacted positively
                         counts.user_liked = Some(true);
                         counts.user_reaction = Some(content.to_string());
+
+                        // Check for NIP-30 custom emoji - extract URL from emoji tag
+                        if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
+                            let shortcode = &content[1..content.len()-1];
+                            // Find emoji tag with matching shortcode
+                            let emoji_url = event.tags.iter().find_map(|tag| {
+                                let tag_slice = tag.as_slice();
+                                if tag_slice.len() >= 3
+                                    && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                    && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                {
+                                    tag_slice.get(2).map(|s| s.to_string())
+                                } else {
+                                    None
+                                }
+                            });
+                            counts.user_reaction_url = emoji_url;
+                        } else {
+                            counts.user_reaction_url = None;
+                        }
                     }
                 }
             },
@@ -680,9 +706,29 @@ pub async fn sync_interaction_counts(
                             if content == "-" {
                                 counts.user_liked = Some(false);
                                 counts.user_reaction = None;
+                                counts.user_reaction_url = None;
                             } else {
                                 counts.user_liked = Some(true);
                                 counts.user_reaction = Some(content.to_string());
+
+                                // Check for NIP-30 custom emoji - extract URL from emoji tag
+                                if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
+                                    let shortcode = &content[1..content.len()-1];
+                                    let emoji_url = event.tags.iter().find_map(|tag| {
+                                        let tag_slice = tag.as_slice();
+                                        if tag_slice.len() >= 3
+                                            && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                            && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                        {
+                                            tag_slice.get(2).map(|s| s.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    counts.user_reaction_url = emoji_url;
+                                } else {
+                                    counts.user_reaction_url = None;
+                                }
                             }
                         }
                     }

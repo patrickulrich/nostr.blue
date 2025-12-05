@@ -131,6 +131,15 @@ pub fn use_reaction(
                 ReactionEmoji::Like
             } else if r == "-" {
                 ReactionEmoji::Unlike
+            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+                // NIP-30 custom emoji - check if we have the URL
+                let shortcode = r[1..r.len()-1].to_string();
+                if let Some(url) = c.user_reaction_url.as_ref() {
+                    ReactionEmoji::Custom { shortcode, url: url.clone() }
+                } else {
+                    // No URL available, fall back to showing shortcode as text
+                    ReactionEmoji::Standard(r.clone())
+                }
             } else {
                 ReactionEmoji::Standard(r.clone())
             }

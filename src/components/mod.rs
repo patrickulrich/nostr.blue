@@ -115,6 +115,7 @@ pub use reaction_picker::InlineReactionPicker;
 pub use reaction_button::ReactionButton;
 pub use reaction_defaults_modal::ReactionDefaultsModal;
 pub use gif_picker::GifPicker;
+pub mod gif_upload_modal;
 pub use mention_autocomplete::MentionAutocomplete;
 pub use share_modal::ShareModal;
 pub use radial_menu::RadialMenu;

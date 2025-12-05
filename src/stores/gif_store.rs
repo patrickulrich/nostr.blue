@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet};
+use std::str::FromStr;
 use std::time::Duration;
 
 /// GIF metadata from Nostr (NIP-94 format)
@@ -362,5 +363,125 @@ pub fn add_recent_gif(gif: GifMetadata) {
     // Limit size
     if recent.len() > MAX_RECENT_GIFS {
         recent.truncate(MAX_RECENT_GIFS);
+    }
+}
+
+/// Gifbuddy relay for publishing uploaded GIFs
+const GIFBUDDY_RELAY: &str = "wss://relay.gifbuddy.lol";
+
+/// Publish a GIF as a NIP-94 FileMetadata event (kind 1063)
+///
+/// This publishes the uploaded GIF to relay.gifbuddy.lol and the user's relays
+/// with the `gifbuddyupload` tag for discoverability.
+///
+/// # Arguments
+/// * `url` - The URL of the uploaded GIF
+/// * `mime_type` - MIME type (should be "image/gif")
+/// * `hash` - SHA-256 hash of the file
+/// * `caption` - Description/caption for the GIF
+/// * `size` - Optional file size in bytes
+/// * `dimensions` - Optional dimensions (width, height)
+///
+/// # Returns
+/// * `Ok(String)` - Event ID of the published event
+/// * `Err(String)` - Error message if publishing fails
+pub async fn publish_gif_event(
+    url: String,
+    mime_type: String,
+    hash: String,
+    caption: String,
+    size: Option<usize>,
+    dimensions: Option<(u32, u32)>,
+) -> Result<String, String> {
+    use nostr_sdk::prelude::*;
+
+    log::info!("Publishing GIF event for: {}", url);
+
+    let client = crate::stores::nostr_client::get_client()
+        .ok_or("Client not initialized")?;
+
+    let signer = crate::stores::nostr_client::get_signer()
+        .ok_or("Not authenticated. Please sign in to publish.")?;
+
+    // Parse URL
+    let file_url = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+    // Parse hash
+    let sha256_hash = nostr::hashes::sha256::Hash::from_str(&hash)
+        .map_err(|e| format!("Invalid hash: {}", e))?;
+
+    // Build NIP-94 FileMetadata
+    let mut metadata = nip94::FileMetadata::new(file_url, mime_type, sha256_hash);
+
+    if let Some(s) = size {
+        metadata = metadata.size(s);
+    }
+
+    if let Some((w, h)) = dimensions {
+        metadata = metadata.dimensions(ImageDimensions {
+            width: w as u64,
+            height: h as u64,
+        });
+    }
+
+    // Create the event builder
+    let builder = EventBuilder::file_metadata(&caption, metadata);
+
+    // Add gifbuddyupload tag for compatibility with gifbuddy ecosystem
+    let tags = vec![
+        Tag::hashtag("gifbuddyupload"),
+        Tag::custom(TagKind::Custom("alt".into()), vec![caption.clone()]),
+        Tag::custom(TagKind::Custom("summary".into()), vec![caption.clone()]),
+    ];
+
+    let builder = builder.tags(tags);
+
+    // Sign the event
+    let event = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            builder.sign(&keys).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            builder.sign(browser_signer.as_ref()).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            builder.sign(nostr_connect.as_ref()).await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
+    };
+
+    let event_id = event.id.to_string();
+    log::info!("Created GIF event: {}", event_id);
+
+    // Ensure relays are connected
+    crate::stores::nostr_client::ensure_relays_ready(&client).await;
+
+    // First, try to add gifbuddy relay temporarily
+    let gifbuddy_url = Url::parse(GIFBUDDY_RELAY).map_err(|e| format!("Invalid relay URL: {}", e))?;
+    if let Err(e) = client.add_relay(&gifbuddy_url).await {
+        log::warn!("Could not add gifbuddy relay: {}", e);
+    }
+
+    // Connect to gifbuddy relay
+    if let Err(e) = client.connect_relay(&gifbuddy_url).await {
+        log::warn!("Could not connect to gifbuddy relay: {}", e);
+    }
+
+    // Publish to all connected relays (including gifbuddy)
+    match client.send_event(&event).await {
+        Ok(output) => {
+            log::info!("Published GIF event to {} relays", output.success.len());
+            if !output.failed.is_empty() {
+                log::warn!("Failed to publish to {} relays", output.failed.len());
+            }
+            Ok(event_id)
+        }
+        Err(e) => {
+            log::error!("Failed to publish GIF event: {}", e);
+            Err(format!("Failed to publish: {}", e))
+        }
     }
 }
