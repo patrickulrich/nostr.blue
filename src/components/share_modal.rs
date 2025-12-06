@@ -65,10 +65,10 @@ pub fn ShareModal(
         if let Some(coord) = event.coordinate() {
             match coord.to_bech32() {
                 Ok(naddr) => format!("https://nostr.blue/articles/{}", naddr),
-                Err(_) => format!("https://nostr.blue/videos/{}", event.id.to_hex()),
+                Err(_) => format!("https://nostr.blue/articles/{}", event.id.to_hex()),
             }
         } else {
-            format!("https://nostr.blue/videos/{}", event.id.to_hex())
+            format!("https://nostr.blue/articles/{}", event.id.to_hex())
         }
     } else {
         format!("https://nostr.blue/videos/{}", event.id.to_hex())

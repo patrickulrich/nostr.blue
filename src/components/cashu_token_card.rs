@@ -83,7 +83,8 @@ pub fn CashuTokenCard(token: String) -> Element {
     let mut copied = use_signal(|| false);
     let toast = consume_toast();
 
-    let has_signer = *HAS_SIGNER.read();
+    // Make has_signer reactive - read from the store when needed instead of capturing once
+    let has_signer = use_memo(move || *HAS_SIGNER.read());
 
     // Parse token once
     let parsed = parse_token(&token);
@@ -251,7 +252,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                                 "Claiming..."
                             }
                         },
-                        _ if !has_signer => rsx! {
+                        _ if !*has_signer.read() => rsx! {
                             // Not signed in
                             button {
                                 class: "px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full text-sm font-medium cursor-not-allowed",
