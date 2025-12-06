@@ -5,6 +5,7 @@ use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
+use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
@@ -59,6 +60,19 @@ impl Default for TabData {
     }
 }
 
+/// Create default tab data map with all tabs initialized
+fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
+    let mut map = HashMap::new();
+    map.insert(ProfileTab::Posts, TabData::default());
+    map.insert(ProfileTab::Replies, TabData::default());
+    map.insert(ProfileTab::Articles, TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
+    map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
+    map.insert(ProfileTab::Likes, TabData::default());
+    map
+}
+
 #[component]
 pub fn Profile(pubkey: String) -> Element {
     // State management
@@ -68,17 +82,7 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Tab and events state
     let mut active_tab = use_signal(|| ProfileTab::Posts);
-    let mut tab_data = use_signal(|| {
-        let mut map = HashMap::new();
-        map.insert(ProfileTab::Posts, TabData::default());
-        map.insert(ProfileTab::Replies, TabData::default());
-        map.insert(ProfileTab::Articles, TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Photos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Videos), TabData::default());
-        map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
-        map.insert(ProfileTab::Likes, TabData::default());
-        map
-    });
+    let mut tab_data = use_signal(default_tab_data_map);
     let mut loading_events = use_signal(|| false);
     let mut current_tab_has_more = use_signal(|| true);
 
@@ -104,11 +108,7 @@ pub fn Profile(pubkey: String) -> Element {
     // Info dialog state (npub/lightning)
     let mut show_info_dialog = use_signal(|| false);
 
-    // Clone pubkey for various uses
-    let pubkey_for_metadata = pubkey.clone();
-    let pubkey_for_events = pubkey.clone();
-    let pubkey_for_follow = pubkey.clone();
-    let pubkey_for_stats = pubkey.clone();
+    // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_load_more = pubkey.clone();
@@ -127,10 +127,24 @@ pub fn Profile(pubkey: String) -> Element {
         .and_then(|user_pk| parsed_pubkey.map(|profile_pk| user_pk == profile_pk))
         .unwrap_or(false);
 
+    // Reset all state when pubkey changes (handles navigation between profiles)
+    use_effect(use_reactive(&pubkey, move |_new_pubkey| {
+        profile_data.set(None);
+        loading.set(true);
+        error.set(None);
+        active_tab.set(ProfileTab::Posts);
+        tab_data.set(default_tab_data_map());
+        loading_events.set(false);
+        current_tab_has_more.set(true);
+        is_following.set(false);
+        follows_you.set(false);
+        following_count.set(0);
+        followers_count.set(0);
+        post_count.set(0);
+    }));
+
     // Fetch profile metadata
-    use_effect(move || {
-        let pubkey_str = pubkey_for_metadata.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(use_reactive((&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
 
         // Only load if client is initialized
         if !client_initialized {
@@ -193,16 +207,12 @@ pub fn Profile(pubkey: String) -> Element {
 
             loading.set(false);
         });
-    });
+    }));
 
     // Fetch events based on active tab - TWO-PHASE LOADING for instant display
     // Phase 1: Load from DB instantly (cached data)
     // Phase 2: Fetch from relays in background (fresh data)
-    use_effect(move || {
-        let tab = active_tab.read().clone();
-        let pubkey_str = pubkey_for_events.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
+    use_effect(use_reactive((&pubkey, &*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, tab, client_initialized)| {
         // Only load if client is initialized
         if !client_initialized {
             return;
@@ -253,7 +263,8 @@ pub fn Profile(pubkey: String) -> Element {
                     log::info!("Phase 1 complete: showing {} events from DB instantly", db_outcome.events.len());
 
                     // Prefetch metadata for DB results
-                    let db_events_for_metadata = db_outcome.events.clone();
+                    // Include original authors from reposts for better UX
+                    let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
                     spawn(async move {
                         prefetch_author_metadata(&db_events_for_metadata).await;
                     });
@@ -313,8 +324,10 @@ pub fn Profile(pubkey: String) -> Element {
                             }
 
                             // Prefetch metadata for new events
+                            // Include original authors from reposts for better UX
+                            let events_for_prefetch = expand_events_for_prefetch(&new_events);
                             spawn(async move {
-                                prefetch_author_metadata(&new_events).await;
+                                prefetch_author_metadata(&events_for_prefetch).await;
                             });
                         } else {
                             log::info!("Phase 2: no new events from relays (all already in DB, has_more: {})", has_more);
@@ -352,17 +365,16 @@ pub fn Profile(pubkey: String) -> Element {
                 loading_events.set(false);
             });
         });
-    });
+    }));
 
     // Check if following this user
-    use_effect(move || {
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
 
-        let pubkey_str = pubkey_for_follow.clone();
         spawn(async move {
             // Convert pubkey to hex format for comparison
             let hex_pubkey = if let Ok(pk) = PublicKey::from_bech32(&pubkey_str) {
@@ -382,18 +394,17 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // OPTIMIZATION: Combined "follows you" check + stats fetch
     // This eliminates a duplicate fetch_contacts() call and runs both in parallel
-    use_effect(move || {
+    use_effect(use_reactive(&pubkey, move |pubkey_str| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized {
             return;
         }
 
-        let pubkey_str = pubkey_for_stats.clone();
         let is_authenticated = auth_store::is_authenticated();
         let my_pubkey = auth_store::get_pubkey();
 
@@ -436,7 +447,7 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Load more handler
     let load_more = move || {
@@ -491,8 +502,10 @@ pub fn Profile(pubkey: String) -> Element {
                     current_tab_has_more.set(has_more_val);
 
                     // Spawn non-blocking background prefetch for missing metadata
+                    // Include original authors from reposts for better UX
+                    let events_for_prefetch = expand_events_for_prefetch(&outcome.events);
                     spawn(async move {
-                        prefetch_author_metadata(&outcome.events).await;
+                        prefetch_author_metadata(&events_for_prefetch).await;
                     });
                 }
                 Err(e) => {
@@ -950,21 +963,25 @@ pub fn Profile(pubkey: String) -> Element {
                                     match &tab {
                                         ProfileTab::Articles => rsx! {
                                             ArticleCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Photos) => rsx! {
                                             PhotoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Videos) => rsx! {
                                             VideoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
                                         ProfileTab::Media(MediaSubTab::Verts) => rsx! {
                                             VertsVideoCard {
+                                                key: "{event.id}",
                                                 event: event.clone()
                                             }
                                         },
@@ -973,31 +990,60 @@ pub fn Profile(pubkey: String) -> Element {
                                             match event.kind.as_u16() {
                                                 20 => rsx! {
                                                     PhotoCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 21 | 22 => rsx! {
                                                     VideoCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 30023 => rsx! {
                                                     ArticleCard {
+                                                        key: "{event.id}",
                                                         event: event.clone()
                                                     }
                                                 },
                                                 _ => rsx! {
                                                     NoteCard {
+                                                        key: "{event.id}",
                                                         event: event.clone(),
                                                         collapsible: true
                                                     }
                                                 }
                                             }
                                         },
-                                        _ => rsx! {
-                                            NoteCard {
-                                                event: event.clone(),
-                                                collapsible: true
+                                        _ => {
+                                            // Handle reposts in Posts tab
+                                            if event.kind == Kind::Repost {
+                                                // Extract the original event from the repost content
+                                                match extract_reposted_event(event) {
+                                                    Ok(original_event) => {
+                                                        let repost_info = Some((event.pubkey, event.created_at));
+                                                        rsx! {
+                                                            NoteCard {
+                                                                key: "{event.id}",
+                                                                event: original_event,
+                                                                repost_info: repost_info,
+                                                                collapsible: true
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        log::warn!("Failed to extract reposted event {}: {}", event.id, e);
+                                                        rsx! {}
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! {
+                                                    NoteCard {
+                                                        key: "{event.id}",
+                                                        event: event.clone(),
+                                                        collapsible: true
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1448,7 +1494,14 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 /// Build a filter for the given tab type
 fn build_tab_filter(public_key: PublicKey, tab: &ProfileTab, until: Option<u64>, limit: usize) -> Filter {
     let mut filter = match tab {
-        ProfileTab::Posts | ProfileTab::Replies => {
+        ProfileTab::Posts => {
+            // Include both text notes and reposts for the Posts tab
+            Filter::new()
+                .author(public_key)
+                .kinds(vec![Kind::TextNote, Kind::Repost])
+                .limit(limit)
+        }
+        ProfileTab::Replies => {
             Filter::new()
                 .author(public_key)
                 .kind(Kind::TextNote)
@@ -1498,16 +1551,23 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
     match tab {
         ProfileTab::Posts => {
             // Filter for posts only (no e-tags = not replies)
-            // Use SDK's event_ids() to check for e-tags
+            // Reposts (kind 6) are always included - they have e-tags but aren't replies
             events.into_iter()
-                .filter(|e| e.tags.event_ids().next().is_none())
+                .filter(|e| {
+                    // Always include reposts
+                    if e.kind == Kind::Repost {
+                        return true;
+                    }
+                    // For text notes, only include non-replies (no e-tags)
+                    e.tags.event_ids().next().is_none()
+                })
                 .collect()
         }
         ProfileTab::Replies => {
             // Filter for replies only (with e-tags)
-            // Use SDK's event_ids() to check for e-tags
+            // Exclude reposts - they're not replies
             events.into_iter()
-                .filter(|e| e.tags.event_ids().next().is_some())
+                .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
                 .collect()
         }
         _ => events, // No filtering needed for other tabs
@@ -1665,7 +1725,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
     match tab {
         ProfileTab::Posts => {
-            // Fetch kind 1 events until we have 50 posts (without e-tags)
+            // Fetch kind 1 (text notes) and kind 6 (reposts) until we have 50 posts
             let mut all_posts = Vec::new();
             let mut current_until = until;
             let mut total_fetched = 0;
@@ -1674,7 +1734,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
                     .author(public_key.clone())
-                    .kind(Kind::TextNote)
+                    .kinds(vec![Kind::TextNote, Kind::Repost])
                     .limit(100); // Fetch more at once to reduce round trips
 
                 if let Some(until_ts) = current_until {
@@ -1696,9 +1756,9 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 // Get the oldest event timestamp BEFORE filtering
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
-                // Filter for posts only (no e-tags) using SDK's event_ids()
+                // Filter: keep all reposts, but for text notes only keep those without e-tags (not replies)
                 let posts: Vec<NostrEvent> = events.into_iter()
-                    .filter(|e| e.tags.event_ids().next().is_none())
+                    .filter(|e| e.kind == Kind::Repost || e.tags.event_ids().next().is_none())
                     .collect();
 
                 all_posts.extend(posts);

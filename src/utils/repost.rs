@@ -64,6 +64,25 @@ impl FeedItem {
     }
 }
 
+/// Expand events to include original authors from reposts for metadata prefetching.
+/// For each repost, includes both the repost event and the original event so that
+/// metadata for both the reposter and original author can be prefetched.
+pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
+    events
+        .iter()
+        .flat_map(|e| {
+            if is_repost(e) {
+                match extract_reposted_event(e) {
+                    Ok(original) => vec![e.clone(), original],
+                    Err(_) => vec![e.clone()],
+                }
+            } else {
+                vec![e.clone()]
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

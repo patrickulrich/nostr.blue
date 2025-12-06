@@ -1,122 +1,100 @@
+//! Explore/Discover Page
+//!
+//! Displays a feed of notes recommended by a Data Vending Machine (DVM).
+//! Users can select which DVM provider to use via a gear icon.
+
 use dioxus::prelude::*;
-use crate::stores::nostr_client;
-use crate::components::{NoteCard, ArticleCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Filter, Kind, Timestamp};
+use crate::stores::{nostr_client, dvm_store};
+use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
+use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
+use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
+use nostr_sdk::PublicKey;
+use std::collections::HashMap;
 use std::time::Duration;
 
+/// Main Explore page component - DVM-powered content discovery
 #[component]
 pub fn Explore() -> Element {
-    // State for feed events
-    let mut events = use_signal(|| Vec::<Event>::new());
-    let mut loading = use_signal(|| false);
-    let mut error = use_signal(|| None::<String>);
+    let mut show_selector = use_signal(|| false);
     let mut refresh_trigger = use_signal(|| 0);
-    let mut has_more = use_signal(|| true);
-    let mut oldest_timestamp = use_signal(|| None::<u64>);
 
-    // Load initial feed
+    // Interaction counts cache (event_id -> counts) for batch optimization
+    let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+    let mut interactions_loaded = use_signal(|| false);
+
+    let feed_loading = *DVM_FEED_LOADING.read();
+    let feed_error = DVM_FEED_ERROR.read().clone();
+    let feed_events = DVM_FEED_EVENTS.read().clone();
+    let selected_provider = SELECTED_DVM_PROVIDER.read().clone();
+
+    // Load DVMs and feed on mount and when client initializes
     use_effect(move || {
-        let trigger = *refresh_trigger.read();
+        // Subscribe to both refresh_trigger AND client_initialized
+        let _ = refresh_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        // Only load if client is initialized
         if !client_initialized {
             return;
         }
 
-        loading.set(true);
-        error.set(None);
-        oldest_timestamp.set(None);
+        // Reset interaction counts on refresh
+        interactions_loaded.set(false);
 
-        // Note: Profile cache NOT cleared - 5-min TTL handles staleness
+        // Discover DVMs in background
+        spawn(async move {
+            if let Err(e) = dvm_store::discover_content_dvms().await {
+                log::error!("Failed to discover DVMs: {}", e);
+            }
+        });
 
-        // If trigger > 0, this is a refresh - fetch from relays for fresh data
-        let is_refresh = trigger > 0;
+        // Request content feed
+        let provider = *SELECTED_DVM_PROVIDER.peek();
+        spawn(async move {
+            if let Err(e) = dvm_store::request_content_feed(provider).await {
+                log::error!("Failed to request content feed: {}", e);
+            }
+        });
+    });
+
+    // Fetch interaction counts when feed events change
+    use_effect(move || {
+        let events = DVM_FEED_EVENTS.read().clone();
+
+        if events.is_empty() {
+            return;
+        }
+
+        // Only fetch if not already loaded for this batch
+        if *interactions_loaded.peek() {
+            return;
+        }
 
         spawn(async move {
-            let result = if is_refresh {
-                load_global_feed_refresh().await
-            } else {
-                load_global_feed(None).await
-            };
-
-            match result {
-                Ok(feed_events) => {
-                    if let Some(last_event) = feed_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                    }
-                    has_more.set(feed_events.len() >= 50);
-
-                    // Display events immediately (NoteCard shows fallback until metadata loads)
-                    events.set(feed_events.clone());
-                    loading.set(false);
-
-                    // Spawn non-blocking background prefetch for metadata
-                    spawn(async move {
-                        prefetch_author_metadata(&feed_events).await;
-                    });
+            let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
+            match fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                Ok(counts) => {
+                    interaction_counts.set(counts);
+                    interactions_loaded.set(true);
                 }
                 Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
+                    log::error!("Failed to fetch interaction counts: {}", e);
                 }
             }
         });
     });
 
-    // Load more function
-    let load_more = move || {
-        log::info!("explore load_more called - loading: {}, has_more: {}",
-                   *loading.peek(), *has_more.peek());
-
-        if *loading.peek() || !*has_more.peek() {
-            log::info!("explore load_more blocked by guards");
-            return;
+    // Get current provider name for display
+    let current_provider_name = {
+        let providers = DVM_PROVIDERS.read();
+        if let Some(pubkey) = selected_provider {
+            providers.iter()
+                .find(|p| p.pubkey == pubkey)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Selected DVM".to_string())
+        } else {
+            "Default DVM".to_string()
         }
-
-        log::info!("explore load_more setting loading to true and spawning");
-        loading.set(true);
-
-        spawn(async move {
-            // Read signals fresh on each invocation to avoid stale closure bug
-            let until = *oldest_timestamp.read();
-
-            log::info!("explore load_more spawn executing - until: {:?}", until);
-
-            match load_global_feed(until).await {
-                Ok(new_events) => {
-                    if let Some(last_event) = new_events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                    }
-                    has_more.set(new_events.len() >= 50);
-
-                    // Append new events
-                    let mut current = events.read().clone();
-                    current.extend(new_events.clone());
-                    events.set(current);
-                    loading.set(false);
-
-                    // Spawn non-blocking background prefetch for missing metadata
-                    spawn(async move {
-                        prefetch_author_metadata(&new_events).await;
-                    });
-                }
-                Err(e) => {
-                    log::error!("Failed to load more events: {}", e);
-                    loading.set(false);
-                }
-            }
-        });
     };
-
-    // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
-
 
     rsx! {
         div {
@@ -127,113 +105,136 @@ pub fn Explore() -> Element {
                 class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div {
                     class: "px-4 py-3 flex items-center justify-between",
-                    h2 {
-                        class: "text-xl font-bold",
-                        "🌍 Explore"
-                    }
-                    button {
-                        class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
-                        disabled: *loading.read(),
-                        onclick: move |_| {
-                            let current = *refresh_trigger.read();
-                            refresh_trigger.set(current + 1);
-                        },
-                        title: "Refresh feed",
-                        if *loading.read() && events.read().is_empty() {
-                            span {
-                                class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
-                            }
-                        } else {
-                            "🔄"
+                    div {
+                        h2 {
+                            class: "text-xl font-bold",
+                            "Explore"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "Powered by {current_provider_name}"
                         }
                     }
-                }
-                div {
-                    class: "px-4 pb-3",
-                    p {
-                        class: "text-sm text-muted-foreground",
-                        "Discover posts from across the Nostr network"
-                    }
-                }
-            }
-
-            // Error state
-            if let Some(err) = error.read().as_ref() {
-                div {
-                    class: "p-4",
                     div {
-                        class: "p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg",
-                        "❌ {err}"
-                    }
-                }
-            }
-
-            // Loading state (initial)
-            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && events.read().is_empty()) {
-                // Show client initializing animation during:
-                // 1. Client initialization
-                // 2. Initial feed load (loading + no events, regardless of error state)
-                ClientInitializing {}
-            }
-
-            // Events feed
-            if !events.read().is_empty() {
-                div {
-                    class: "divide-y divide-border",
-                    for event in events.read().iter() {
-                        // Check if this is a long-form article (NIP-23)
-                        if event.kind == Kind::LongFormTextNote {
-                            ArticleCard {
-                                key: "{event.id}",
-                                event: event.clone()
-                            }
-                        } else {
-                            NoteCard {
-                                event: event.clone(),
-                                collapsible: true
-                            }
-                        }
-                    }
-                }
-
-                // Infinite scroll sentinel / loading indicator
-                if *has_more.read() {
-                    div {
-                        id: "{sentinel_id}",
-                        class: "p-8 flex justify-center",
-                        if *loading.read() {
-                            span {
-                                class: "flex items-center gap-2 text-muted-foreground",
+                        class: "flex items-center gap-2",
+                        // Refresh button
+                        button {
+                            class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
+                            disabled: feed_loading,
+                            onclick: move |_| {
+                                dvm_store::clear_feed();
+                                let next = *refresh_trigger.peek() + 1;
+                                refresh_trigger.set(next);
+                            },
+                            title: "Refresh feed",
+                            if feed_loading {
                                 span {
                                     class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
                                 }
-                                "Loading more..."
+                            } else {
+                                "🔄"
                             }
                         }
-                    }
-                } else if !events.read().is_empty() {
-                    div {
-                        class: "p-8 text-center text-muted-foreground",
-                        "You've reached the end"
+                        // Settings/DVM selector button
+                        button {
+                            class: "p-2 hover:bg-accent rounded-full transition",
+                            onclick: move |_| show_selector.set(true),
+                            title: "Select DVM provider",
+                            "⚙️"
+                        }
                     }
                 }
             }
 
-            // Empty state (no error, not loading, no events)
-            if !*loading.read() && events.read().is_empty() && error.read().is_none() {
+            // Content
+            if !*nostr_client::CLIENT_INITIALIZED.read() {
+                ClientInitializing {}
+            } else if feed_loading && feed_events.is_empty() {
+                // Loading state
                 div {
-                    class: "text-center py-12",
-                    div {
-                        class: "text-6xl mb-4",
-                        "🌍"
-                    }
-                    h3 {
-                        class: "text-xl font-semibold mb-2",
-                        "No posts found"
+                    class: "flex flex-col items-center justify-center py-20 gap-4",
+                    span {
+                        class: "inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
                     }
                     p {
                         class: "text-muted-foreground",
-                        "Try refreshing or check back later"
+                        "Requesting content from DVM..."
+                    }
+                }
+            } else if let Some(error) = feed_error {
+                // Error state
+                div {
+                    class: "p-6 text-center",
+                    div {
+                        class: "max-w-md mx-auto",
+                        div {
+                            class: "text-4xl mb-4",
+                            "⚠️"
+                        }
+                        h3 {
+                            class: "text-lg font-semibold mb-2",
+                            "Failed to load feed"
+                        }
+                        p {
+                            class: "text-muted-foreground text-sm mb-4",
+                            "{error}"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition",
+                            onclick: move |_| {
+                                dvm_store::clear_feed();
+                                let next = *refresh_trigger.peek() + 1;
+                                refresh_trigger.set(next);
+                            },
+                            "Try Again"
+                        }
+                    }
+                }
+            } else if feed_events.is_empty() {
+                // Empty state
+                div {
+                    class: "p-6 text-center",
+                    div {
+                        class: "max-w-md mx-auto",
+                        div {
+                            class: "text-6xl mb-4",
+                            "🔍"
+                        }
+                        h3 {
+                            class: "text-lg font-semibold mb-2",
+                            "No content yet"
+                        }
+                        p {
+                            class: "text-muted-foreground text-sm",
+                            "The DVM hasn't returned any content. Try selecting a different provider or refreshing."
+                        }
+                    }
+                }
+            } else {
+                // Feed content
+                div {
+                    class: "divide-y divide-border",
+                    for event in feed_events.iter() {
+                        NoteCard {
+                            key: "{event.id.to_hex()}",
+                            event: event.clone(),
+                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                            collapsible: true
+                        }
+                    }
+                }
+            }
+
+            // DVM Selector Modal
+            if *show_selector.read() {
+                DvmSelectorModal {
+                    on_close: move |_| show_selector.set(false),
+                    on_select: move |pubkey: Option<PublicKey>| {
+                        dvm_store::set_selected_provider(pubkey);
+                        show_selector.set(false);
+                        dvm_store::clear_feed();
+                        let next = *refresh_trigger.peek() + 1;
+                        refresh_trigger.set(next);
                     }
                 }
             }
@@ -241,59 +242,3 @@ pub fn Explore() -> Element {
     }
 }
 
-// Helper function to load global feed
-async fn load_global_feed(until: Option<u64>) -> Result<Vec<Event>, String> {
-    load_global_feed_impl(until, false).await
-}
-
-async fn load_global_feed_refresh() -> Result<Vec<Event>, String> {
-    load_global_feed_impl(None, true).await
-}
-
-async fn load_global_feed_impl(until: Option<u64>, force_relay: bool) -> Result<Vec<Event>, String> {
-    log::info!("Loading global feed (until: {:?}, force_relay: {})...", until, force_relay);
-
-    // Create filter for recent text notes (kind 1)
-    let mut filter = Filter::new()
-        .kind(Kind::TextNote)
-        .limit(50);
-
-    // Add until timestamp if provided for pagination
-    if let Some(until_ts) = until {
-        filter = filter.until(Timestamp::from(until_ts));
-    }
-
-    log::info!("Fetching events with filter: {:?}", filter);
-
-    // For refresh, fetch directly from relays to get fresh data
-    // For initial load/pagination, use aggregated pattern (database-first)
-    let fetch_result = if force_relay {
-        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
-    } else {
-        nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
-    };
-
-    match fetch_result {
-        Ok(events) => {
-            log::info!("Loaded {} events", events.len());
-
-            // Convert to Vec and sort by created_at (newest first)
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-            Ok(event_vec)
-        }
-        Err(e) => {
-            log::error!("Failed to fetch events: {}", e);
-            Err(format!("Failed to fetch events: {}", e))
-        }
-    }
-}
-
-/// Batch prefetch author metadata for all events
-async fn prefetch_author_metadata(events: &[Event]) {
-    use crate::utils::profile_prefetch;
-
-    // Use optimized prefetch utility - no string conversions, direct database queries
-    profile_prefetch::prefetch_event_authors(events).await;
-}

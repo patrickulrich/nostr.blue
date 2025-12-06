@@ -1,8 +1,15 @@
 use dioxus::prelude::*;
+use std::time::Duration;
 use crate::stores::nostr_client::{HAS_SIGNER, get_client};
+use crate::stores::pending_comments::{
+    PendingComment, CommentStatus, add_pending_comment, update_pending_status,
+};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
-use nostr_sdk::{Event as NostrEvent, EventBuilder};
+use crate::utils::{SignerValidationResult, get_current_user_pubkey};
+use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
 use nostr_sdk::prelude::*;
+use dioxus_core::spawn_forever;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -17,9 +24,9 @@ pub fn CommentComposer(
     on_success: EventHandler<()>,
 ) -> Element {
     let mut content = use_signal(|| String::new());
-    let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(|| Vec::<String>::new());
+    let toast = consume_toast();
 
     // Calculate total length including media URLs
     let content_len = content.read().len();
@@ -37,7 +44,7 @@ pub fn CommentComposer(
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
+    let can_publish = char_count > 0 && !is_over_limit && has_signer;
 
     let is_reply = parent_comment.is_some();
 
@@ -143,35 +150,97 @@ pub fn CommentComposer(
         log::info!("GIF URL inserted: {}", gif_url);
     };
 
-    let handle_publish = move |_| {
-        let mut content_value = content.read().clone();
+    let handle_publish = {
+        let toast_api = toast.clone();
+        move |_| {
+            let mut content_value = content.read().clone();
 
-        // Append media URLs to content
-        if !uploaded_media.read().is_empty() {
-            if !content_value.is_empty() {
-                content_value.push_str("\n\n");
+            // Append media URLs to content
+            if !uploaded_media.read().is_empty() {
+                if !content_value.is_empty() {
+                    content_value.push_str("\n\n");
+                }
+                for url in uploaded_media.read().iter() {
+                    content_value.push_str(&url);
+                    content_value.push('\n');
+                }
             }
-            for url in uploaded_media.read().iter() {
-                content_value.push_str(&url);
-                content_value.push('\n');
+
+            if content_value.is_empty() || is_over_limit {
+                return;
             }
-        }
 
-        if content_value.is_empty() || is_over_limit {
-            return;
-        }
-
-        is_publishing.set(true);
+            // Get current user's pubkey for optimistic display
+            let author_pubkey = match get_current_user_pubkey() {
+                SignerValidationResult::Ok(pk) => pk,
+                SignerValidationResult::InvalidPubkey => {
+                    log::error!("Invalid pubkey in signer info");
+                    toast_api.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Invalid signer configuration")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+                SignerValidationResult::NotSignedIn => {
+                    log::error!("No signer info available");
+                    toast_api.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Please sign in first")
+                            .duration(Duration::from_secs(3))
+                    );
+                    return;
+                }
+            };
 
         let target_event = comment_on.clone();
         let parent = parent_comment.clone();
 
-        spawn(async move {
+        // Generate unique local ID for tracking this pending comment
+        let local_id = uuid::Uuid::new_v4().to_string();
+
+        // Create pending comment for optimistic UI update
+        let pending = PendingComment {
+            local_id: local_id.clone(),
+            content: content_value.clone(),
+            target_event_id: target_event.id,
+            parent_comment_id: parent.as_ref().map(|p| p.id),
+            kind: Kind::Comment,
+            status: CommentStatus::Pending,
+            created_at: Timestamp::now(),
+            author_pubkey,
+            target_event: target_event.clone(),
+            parent_comment: parent.clone(),
+        };
+
+        // Add to pending store immediately (optimistic update)
+        add_pending_comment(pending);
+
+        // Clear form immediately for better UX (optimistic UI)
+        content.set(String::new());
+        uploaded_media.set(Vec::new());
+        on_success.call(());
+
+        // Clone for async block
+        let local_id_clone = local_id.clone();
+        let content_for_publish = content_value.clone();
+        let toast_for_async = toast_api.clone();
+
+        // Use spawn_forever so the task survives component unmount
+        spawn_forever(async move {
             let client = match get_client() {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    is_publishing.set(false);
+                    update_pending_status(&local_id_clone, CommentStatus::Failed("Client not initialized".to_string()));
+                    toast_for_async.error(
+                        "Unable to publish".to_string(),
+                        ToastOptions::new()
+                            .description("Client not initialized")
+                            .duration(Duration::from_secs(3))
+                    );
                     return;
                 }
             };
@@ -188,36 +257,31 @@ pub fn CommentComposer(
                 (&target_event, None)
             };
 
-            // Build comment using the new CommentTarget API
-            // CommentTarget::event takes (id, kind, relay_hint, marker)
-            let comment_target = CommentTarget::event(
-                comment_to.id,
-                comment_to.kind,
-                None,  // relay hint
-                None   // marker
-            );
-            let root_target = root.map(|r| CommentTarget::event(
-                r.id,
-                r.kind,
-                None,
-                None
-            ));
-            let builder = EventBuilder::comment(content_value, comment_target, root_target);
+            // Build comment using EventBuilder::comment with From<&Event> conversion
+            // This automatically extracts id, kind, and author pubkey for proper NIP-22 tags
+            let builder = EventBuilder::comment(content_for_publish, comment_to, root);
 
             match client.send_event_builder(builder).await {
-                Ok(event_id) => {
-                    log::info!("NIP-22 comment published: {}", event_id.to_hex());
-                    content.set(String::new());
-                    uploaded_media.set(Vec::new());
-                    is_publishing.set(false);
-                    on_success.call(());
+                Ok(send_output) => {
+                    log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
+                    update_pending_status(&local_id_clone, CommentStatus::Confirmed(*send_output.id()));
+                    // Note: We don't remove the pending comment here. It will remain visible
+                    // until the page is refreshed or navigated away. The merge function will
+                    // skip duplicates once the relay data is fetched on next load.
                 }
                 Err(e) => {
                     log::error!("Failed to publish comment: {}", e);
-                    is_publishing.set(false);
+                    update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
+                    toast_for_async.error(
+                        "Failed to publish".to_string(),
+                        ToastOptions::new()
+                            .description(format!("{}", e))
+                            .duration(Duration::from_secs(3))
+                    );
                 }
             }
         });
+        }
     };
 
     rsx! {
@@ -362,7 +426,6 @@ pub fn CommentComposer(
                                     let current = *show_media_uploader.read();
                                     show_media_uploader.set(!current);
                                 },
-                                disabled: *is_publishing.read(),
                                 "📎 Media"
                             }
 
@@ -394,11 +457,7 @@ pub fn CommentComposer(
                             },
                             disabled: !can_publish,
                             onclick: handle_publish,
-                            if *is_publishing.read() {
-                                "Publishing..."
-                            } else {
-                                "Publish Comment"
-                            }
+                            "Publish Comment"
                         }
                     }
                 }

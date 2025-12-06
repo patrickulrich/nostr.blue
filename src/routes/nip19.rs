@@ -104,7 +104,8 @@ async fn decode_and_redirect(identifier: &str) -> Result<Route, String> {
             Ok(event_id) => {
                 log::info!("Decoded note: {}", event_id);
                 Ok(Route::Note {
-                    note_id: event_id.to_hex()
+                    note_id: event_id.to_hex(),
+                    from_voice: None,
                 })
             }
             Err(e) => Err(format!("Invalid note ID: {}", e))

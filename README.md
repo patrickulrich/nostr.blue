@@ -2,7 +2,7 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.6.6-blue)
+![Version](https://img.shields.io/badge/version-0.6.7-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.77+-orange)
 ![CDK](https://img.shields.io/badge/CDK-0.13.4-purple)
@@ -330,7 +330,7 @@ Production builds are optimized with:
 | [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md) | Calendar Events | ❌ |
 | [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live Activities | ✅ |
 | [NIP-54](https://github.com/nostr-protocol/nips/blob/master/54.md) | Wiki | ❌ |
-| [NIP-56](https://github.com/nostr-protocol/nips/blob/master/56.md) | Reporting | ❌ |
+| [NIP-56](https://github.com/nostr-protocol/nips/blob/master/56.md) | Reporting | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps | ✅ |
 | [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ❌ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
@@ -357,8 +357,9 @@ Production builds are optimized with:
 | [NIP-89](https://github.com/nostr-protocol/nips/blob/master/89.md) | App Handlers | ❌ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-92](https://github.com/nostr-protocol/nips/blob/master/92.md) | Media Attachments | ✅ |
-| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata | ❌ |
-| [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | HTTP Auth | ❌ |
+| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata | ✅ |
+| [NIP-96](https://github.com/nostr-protocol/nips/blob/master/96.md) | HTTP File Storage | ✅ |
+| [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | HTTP Auth | ✅ |
 | [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md) | Classified Listings | ❌ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice Messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web Bookmarks | ✅ |

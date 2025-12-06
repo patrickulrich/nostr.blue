@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32, JsonUtil};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_reaction, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{HeartIcon, MessageCircleIcon, BookmarkIcon, ZapIcon};
-use crate::components::ZapModal;
+use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
+use crate::components::{ZapModal, ReactionButton};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -119,16 +120,20 @@ pub fn VideoCard(event: Event) -> Element {
     let event_id_counts = event_id.clone();
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
 
-    // State for counts
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_for_like.clone(),
+        None, // No precomputed counts for videos
+    );
+
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
 
     // State for author profile
@@ -159,50 +164,38 @@ pub fn VideoCard(event: Event) -> Element {
                 Err(_) => return,
             };
 
-            // Fetch reply count
-            let reply_filter = Filter::new()
+            // Fetch reply count - query both lowercase e and uppercase E tags for NIP-22 compatibility
+            let interaction_filter = Filter::new()
                 .kinds(vec![Kind::TextNote, Kind::Comment])
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
-                reply_count.set(replies.len());
-            }
-
-            // Fetch like count
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
+            // NIP-22 uppercase E tag query for comments referencing root
+            let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
+            let nip22_filter = Filter::new()
+                .kind(Kind::Comment)
+                .custom_tag(upper_e_tag, event_id_for_counts.clone())
                 .limit(500);
 
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
-                            }
-                        }
-                    }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
+            // Fetch both filter types and deduplicate by event ID
+            let mut all_reply_ids = std::collections::HashSet::new();
+            if let Ok(events) = client.fetch_events(interaction_filter, Duration::from_secs(5)).await {
+                for event in events.iter() {
+                    all_reply_ids.insert(event.id);
                 }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
             }
+            if let Ok(events) = client.fetch_events(nip22_filter, Duration::from_secs(5)).await {
+                for event in events.iter() {
+                    all_reply_ids.insert(event.id);
+                }
+            }
+            reply_count.set(all_reply_ids.len());
+
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch zap amount
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 
@@ -307,31 +300,7 @@ pub fn VideoCard(event: Event) -> Element {
         });
     }));
 
-    // Handle like action
-    let handle_like = move |_| {
-        if *is_liking.read() || !has_signer {
-            return;
-        }
-
-        let event_id_clone = event_id_like.clone();
-        let author_pk = author_pubkey_for_like.clone();
-        is_liking.set(true);
-
-        spawn(async move {
-            match publish_reaction(event_id_clone, author_pk, "+".to_string()).await {
-                Ok(_) => {
-                    is_liked.set(true);
-                    let current_count = *like_count.read();
-                    like_count.set(current_count + 1);
-                }
-                Err(e) => {
-                    log::error!("Failed to publish like: {}", e);
-                }
-            }
-
-            is_liking.set(false);
-        });
-    };
+    // Note: Like action is handled by use_reaction hook
 
     // Handle bookmark action
     let handle_bookmark = move |_| {
@@ -467,7 +436,7 @@ pub fn VideoCard(event: Event) -> Element {
 
                 // Reply/Comment
                 Link {
-                    to: Route::Note { note_id: event_id.clone() },
+                    to: Route::Note { note_id: event_id.clone(), from_voice: None },
                     class: "flex items-center gap-2 hover:text-blue-500 transition",
                     MessageCircleIcon { class: "w-5 h-5" }
                     if *reply_count.read() > 0 {
@@ -475,22 +444,12 @@ pub fn VideoCard(event: Event) -> Element {
                     }
                 }
 
-                // Like
-                button {
-                    class: if *is_liked.read() {
-                        "flex items-center gap-2 text-red-500 hover:text-red-600 transition"
-                    } else {
-                        "flex items-center gap-2 hover:text-red-500 transition"
-                    },
-                    disabled: *is_liking.read() || !has_signer,
-                    onclick: handle_like,
-                    HeartIcon {
-                        class: "w-5 h-5",
-                        filled: *is_liked.read()
-                    }
-                    if *like_count.read() > 0 {
-                        span { class: "text-sm", "{like_count.read()}" }
-                    }
+                // Like button with reaction picker
+                ReactionButton {
+                    reaction: reaction.clone(),
+                    has_signer: has_signer,
+                    icon_class: "w-5 h-5".to_string(),
+                    count_class: "text-sm".to_string(),
                 }
 
                 // Zap

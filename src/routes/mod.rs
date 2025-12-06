@@ -31,6 +31,7 @@ pub mod search;
 
 // Placeholder modules for missing routes
 mod lists;
+pub mod dvm;
 pub mod photos;
 pub mod photo_detail;
 pub mod voicemessages;
@@ -84,6 +85,7 @@ use photo_new::PhotoNew;
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use lists::Lists;
+use dvm::DVM;
 use terms::Terms;
 use privacy::Privacy;
 use cookies::Cookies;
@@ -197,8 +199,8 @@ pub enum Route {
         #[route("/cashuwallet")]
         CashuWallet {},
 
-        #[route("/notes/new")]
-        NoteNew {},
+        #[route("/notes/new?:quote")]
+        NoteNew { quote: Option<String> },
 
         #[route("/articles/new")]
         ArticleNew {},
@@ -215,11 +217,14 @@ pub enum Route {
         #[route("/lists")]
         Lists {},
 
+        #[route("/dvm")]
+        DVM {},
+
         #[route("/profile/:pubkey")]
         Profile { pubkey: String },
 
-        #[route("/note/:note_id")]
-        Note { note_id: String },
+        #[route("/note/:note_id?:from_voice")]
+        Note { note_id: String, from_voice: Option<String> },
 
         #[route("/t/:tag")]
         Hashtag { tag: String },
@@ -270,7 +275,7 @@ fn Layout() -> Element {
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
         current_route,
-        Route::NoteNew {}
+        Route::NoteNew { .. }
         | Route::ArticleNew {}
         | Route::PhotoNew {}
         | Route::VideoNewLandscape {}
@@ -593,7 +598,7 @@ fn Layout() -> Element {
                                     on_close: move |_| radial_menu_open.set(false),
                                     on_note_click: move |_| {
                                         radial_menu_open.set(false);
-                                        navigator.push(Route::NoteNew {});
+                                        navigator.push(Route::NoteNew { quote: None });
                                     },
                                     on_article_click: move |_| {
                                         radial_menu_open.set(false);

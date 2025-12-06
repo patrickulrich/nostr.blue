@@ -19,6 +19,14 @@ static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
 static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
 });
+// Cashu tokens are base64-encoded strings starting with cashuA (V3) or cashuB (V4)
+// This regex is intentionally permissive to capture most token formats.
+// Invalid tokens are handled gracefully by CashuTokenCard which displays
+// a fallback UI when parsing fails. This avoids false negatives from
+// strict regex validation while keeping detection simple.
+static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
+});
 
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +71,8 @@ pub enum ContentToken {
     Tidal(String),           // Embed URL
     // Zap.stream - Nostr live streaming
     ZapStream(String),       // naddr from zap.stream URL
+    // Cashu ecash tokens
+    CashuToken(String),      // cashuA.../cashuB... token string
 }
 
 /// Parse note content into structured tokens
@@ -153,6 +163,12 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     for mat in HASHTAG_PATTERN.find_iter(content) {
         let hashtag = mat.as_str()[1..].to_string(); // Remove the #
         matches.push((mat.start(), mat.end(), ContentToken::Hashtag(hashtag)));
+    }
+
+    // Find all cashu tokens (using precompiled static regex)
+    for mat in CASHU_PATTERN.find_iter(content) {
+        let token_str = mat.as_str().to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::CashuToken(token_str)));
     }
 
     // Sort matches by position
@@ -787,5 +803,30 @@ mod tests {
         let tokens = parse_content(content, &[]);
         let image_count = tokens.iter().filter(|t| matches!(t, ContentToken::Image(_))).count();
         assert_eq!(image_count, 3);
+    }
+
+    #[test]
+    fn test_parse_cashu_token_v3() {
+        // V3 tokens start with cashuA
+        let tokens = parse_content("cashuAeyJwYXlsb2FkIjp7fX0=", &[]);
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuA")));
+    }
+
+    #[test]
+    fn test_parse_cashu_token_v4() {
+        // V4 tokens start with cashuB
+        let tokens = parse_content("cashuBeyJwYXlsb2FkIjp7fX0=", &[]);
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(&tokens[0], ContentToken::CashuToken(t) if t.starts_with("cashuB")));
+    }
+
+    #[test]
+    fn test_parse_cashu_token_in_content() {
+        let tokens = parse_content("Check this token cashuAeyJwYXlsb2FkIjp7fX0= for payment", &[]);
+        assert_eq!(tokens.len(), 3); // Text, CashuToken, Text
+        assert!(matches!(&tokens[0], ContentToken::Text(_)));
+        assert!(matches!(&tokens[1], ContentToken::CashuToken(_)));
+        assert!(matches!(&tokens[2], ContentToken::Text(_)));
     }
 }

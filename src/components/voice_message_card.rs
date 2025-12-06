@@ -4,10 +4,12 @@ use dioxus::web::WebEventExt;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, EventId};
 use crate::routes::Route;
 use crate::stores::{nostr_client, voice_messages_store};
+use crate::hooks::use_reaction;
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::{ZapModal, VoiceReplyComposer};
-use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
+use crate::components::{ZapModal, VoiceReplyComposer, ReactionButton};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
+use crate::stores::nostr_client::HAS_SIGNER;
 use wasm_bindgen::JsCast;
 use std::time::Duration;
 use js_sys;
@@ -29,15 +31,20 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     let mut is_loading = use_signal(|| true);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
-    let mut is_liking = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
+    let has_signer = *HAS_SIGNER.read();
 
-    // Reaction counts and states
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_str.clone(),
+        author_pubkey.clone(),
+        None, // No precomputed counts for voice messages
+    );
+
+    // Reaction counts and states (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
-    let mut is_liked = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_zapped = use_signal(|| false);
 
@@ -118,36 +125,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 reply_count.set(replies.len());
             }
 
-            // Fetch like count (kind 7 reactions)
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
-                            }
-                        }
-                    }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
-                }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
-            }
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch repost count (kind 6 reposts)
             let repost_filter = Filter::new()
@@ -174,7 +152,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
             // Fetch zap receipts (kind 9735)
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 
@@ -331,29 +309,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     };
 
     // Clone values for interaction handlers
-    let event_id_for_like = event_id_str.clone();
-    let author_for_like = author_pubkey.clone();
     let event_id_for_repost = event_id_str.clone();
     let author_for_repost = author_pubkey.clone();
 
-    // Like handler
-    let handle_like = move |_| {
-        let event_id_copy = event_id_for_like.clone();
-        let event_author_copy = author_for_like.clone();
-        is_liking.set(true);
-        spawn(async move {
-            match nostr_client::publish_reaction(event_id_copy, event_author_copy, "+".to_string()).await {
-                Ok(_) => {
-                    log::info!("Like published successfully");
-                    is_liked.set(true);
-                    let current_count = *like_count.read();
-                    like_count.set(current_count + 1);
-                }
-                Err(e) => log::error!("Failed to publish like: {}", e),
-            }
-            is_liking.set(false);
-        });
-    };
+    // Note: Like handler is provided by use_reaction hook
 
     // Repost handler
     let handle_repost = move |_| {
@@ -448,8 +407,8 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
             }
         }
 
-        // Navigate to detail page
-        navigator.push(Route::VoiceMessageDetail { voice_id: voice_id_for_nav.clone() });
+        // Navigate to note detail page with from_voice hint for immediate header
+        navigator.push(Route::Note { note_id: voice_id_for_nav.clone(), from_voice: Some("true".to_string()) });
     };
 
     rsx! {
@@ -592,22 +551,12 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                     }
                 }
 
-                // Like button
-                button {
-                    class: if *is_liked.read() {
-                        "flex items-center gap-1 text-red-500 transition group"
-                    } else {
-                        "flex items-center gap-1 hover:text-red-500 transition group"
-                    },
-                    onclick: handle_like,
-                    disabled: *is_liking.read() || *is_liked.read(),
-                    HeartIcon {
-                        class: "w-4 h-4 group-hover:scale-110 transition",
-                        filled: *is_liked.read()
-                    }
-                    if *like_count.read() > 0 {
-                        span { class: "text-sm", "{like_count.read()}" }
-                    }
+                // Like button with reaction picker
+                ReactionButton {
+                    reaction: reaction.clone(),
+                    has_signer: has_signer,
+                    icon_class: "w-4 h-4".to_string(),
+                    count_class: "text-sm".to_string(),
                 }
 
                 // Zap button

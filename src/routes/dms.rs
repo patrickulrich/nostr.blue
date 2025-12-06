@@ -565,6 +565,7 @@ fn ConversationView(pubkey: String) -> Element {
 
                             rsx! {
                                 MessageBubble {
+                                    key: "{msg.id()}",
                                     content: content.clone(),
                                     is_mine: is_mine,
                                     timestamp: msg.created_at(),

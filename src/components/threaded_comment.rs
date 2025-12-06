@@ -1,11 +1,17 @@
 use dioxus::prelude::*;
-use crate::utils::ThreadNode;
-use crate::components::{RichContent, ReplyComposer, ZapModal};
+use dioxus::events::MediaData;
+use dioxus::web::WebEventExt;
+use wasm_bindgen::JsCast;
+use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
+use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, retry_pending_comment};
+use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, publish_reaction, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::voice_messages_store;
+use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{HeartIcon, MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::format_sats_compact;
 use nostr_sdk::{Metadata, Filter, Kind};
@@ -19,6 +25,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
 
+    // Extract pending state and author pubkey from node source
+    // For pending comments, use the explicitly stored author_pubkey since the display event
+    // may have a dummy pubkey from the unsigned event construction
+    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node.source {
+        ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
+        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
+            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
+        }
+    };
+
     // Clone values needed for closures
     let event_id = event.id.to_string();
     let event_id_like = event_id.clone();
@@ -26,7 +42,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
-    let author_pubkey = event.pubkey;
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
     let author_pubkey_repost = author_pubkey_str.clone();
@@ -34,8 +49,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut author_metadata = use_signal(|| None::<Metadata>);
 
     // State for interactions
-    let mut is_liking = use_signal(|| false);
-    let mut is_liked = use_signal(|| false);
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
@@ -44,11 +57,44 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
 
-    // State for counts
+    // Reaction hook - handles like state with optimistic updates and toggle support
+    let reaction = use_reaction(
+        event_id_like.clone(),
+        author_pubkey_like.clone(),
+        None, // No precomputed counts for comments
+    );
+
+    // State for counts (likes handled by use_reaction hook)
     let mut reply_count = use_signal(|| 0usize);
-    let mut like_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
+    // Voice message state
+    let is_voice = is_voice_message(event);
+    let audio_url = if is_voice { event.content.clone() } else { String::new() };
+    let audio_id = format!("voice-comment-{}", event_id);
+    let mut duration = use_signal(|| 0.0f64);
+    let mut current_time = use_signal(|| 0.0f64);
+    let event_id_parsed = event.id;
+
+    // Parse imeta tags for duration per NIP-92/NIP-94
+    let imeta_duration: Option<f64> = if is_voice {
+        event.tags.iter()
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
+            .and_then(|tag| {
+                for field in tag.as_slice().iter().skip(1) {
+                    let field_str = field.as_str();
+                    if let Some(val) = field_str.strip_prefix("duration ") {
+                        if let Ok(d) = val.parse::<f64>() {
+                            return Some(d);
+                        }
+                    }
+                }
+                None
+            })
+    } else {
+        None
+    };
 
     // Fetch author metadata
     use_effect(move || {
@@ -92,37 +138,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 reply_count.set(replies.len());
             }
 
-            // Fetch like count
-            let like_filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(500);
-
-            if let Ok(likes) = client.fetch_events(like_filter, Duration::from_secs(5)).await {
-                // Get current user's pubkey to check if they've already liked
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
-                let mut user_has_liked = false;
-                let mut positive_likes = 0;
-
-                // Check if current user has liked and count only positive reactions
-                if let Some(ref user_pk) = current_user_pubkey {
-                    for like in likes.iter() {
-                        // Per NIP-25, only count reactions with content != "-" as likes
-                        if like.content.trim() != "-" {
-                            positive_likes += 1;
-                            if like.pubkey.to_string() == *user_pk {
-                                user_has_liked = true;
-                            }
-                        }
-                    }
-                } else {
-                    // If no user logged in, still count only positive reactions
-                    positive_likes = likes.iter().filter(|like| like.content.trim() != "-").count();
-                }
-
-                like_count.set(positive_likes);
-                is_liked.set(user_has_liked);
-            }
+            // Note: Reactions/likes are handled by use_reaction hook
 
             // Fetch repost count
             let repost_filter = Filter::new()
@@ -151,7 +167,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
             // Fetch zap receipts (kind 9735) and calculate total
             let zap_filter = Filter::new()
-                .kind(Kind::from(9735))
+                .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
 
@@ -191,12 +207,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     });
 
     // Button class helpers
-    let like_button_class = if *is_liked.read() {
-        "flex items-center text-red-500 hover:text-red-600 transition"
-    } else {
-        "flex items-center text-muted-foreground hover:text-red-500 transition"
-    };
-
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 hover:text-green-600 transition"
     } else {
@@ -207,6 +217,93 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
         "flex items-center text-blue-500 hover:text-blue-600 transition"
     } else {
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
+    };
+
+    // Voice message handlers
+    let audio_id_for_effect = audio_id.clone();
+    let audio_id_for_handlers = audio_id.clone();
+
+    // Control audio element based on playback state (for voice messages)
+    use_effect(move || {
+        if !is_voice {
+            return;
+        }
+        let global_state = voice_messages_store::VOICE_PLAYBACK.read();
+        let is_playing = global_state.currently_playing == Some(event_id_parsed);
+        let audio_id_clone = audio_id_for_effect.clone();
+
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => return,
+        };
+        let audio_element = match document.get_element_by_id(&audio_id_clone) {
+            Some(el) => el,
+            None => return,
+        };
+        let audio = match audio_element.dyn_ref::<web_sys::HtmlAudioElement>() {
+            Some(a) => a,
+            None => return,
+        };
+
+        if is_playing {
+            let _ = audio.play().map_err(|e| {
+                log::debug!("Play failed: {:?}", e);
+            });
+        } else {
+            if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
+        }
+    });
+
+    // Voice message event handlers
+    let handle_timeupdate = move |evt: Event<MediaData>| {
+        if let Some(target) = evt.data.as_web_event().target() {
+            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                let time = audio.current_time();
+                current_time.set(time);
+                if voice_messages_store::is_playing(&event_id_parsed) {
+                    voice_messages_store::set_current_time(time);
+                }
+            }
+        }
+    };
+
+    let handle_loadedmetadata = move |evt: Event<MediaData>| {
+        if let Some(target) = evt.data.as_web_event().target() {
+            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                let dur = audio.duration();
+                if !dur.is_nan() {
+                    duration.set(dur);
+                    if voice_messages_store::is_playing(&event_id_parsed) {
+                        voice_messages_store::set_duration(dur);
+                    }
+                }
+            }
+        }
+    };
+
+    let handle_ended = move |_| {
+        voice_messages_store::pause_voice_message();
+        current_time.set(0.0);
+    };
+
+    let toggle_play = move |_| {
+        voice_messages_store::toggle_voice_message(event_id_parsed);
+    };
+
+    // Voice player display values
+    let duration_val = imeta_duration.unwrap_or(*duration.read());
+    let current_time_str = voice_messages_store::format_time(*current_time.read());
+    let duration_str = voice_messages_store::format_time(duration_val);
+    let progress_percent = if duration_val > 0.0 {
+        *current_time.read() / duration_val * 100.0
+    } else {
+        0.0
     };
 
     // Calculate indentation (left margin)
@@ -224,14 +321,22 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
             // Comment card - clickable to navigate to thread
             div {
-                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
+                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70"
+                } else {
+                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer"
+                },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav.clone();
+                    let is_pending_node = is_pending;
+                    let status = pending_status.clone();
                     move |_| {
-                        // Don't navigate if clicking on interactive elements
-                        // The event will be stopped by buttons/links
-                        navigator.push(Route::Note { note_id: event_id_click.clone() });
+                        // Don't navigate to pending comments - they don't exist on relays yet
+                        if is_pending_node && !matches!(status.as_ref(), Some(CommentStatus::Confirmed(_))) {
+                            return;
+                        }
+                        navigator.push(Route::Note { note_id: event_id_click.clone(), from_voice: None });
                     }
                 },
 
@@ -303,14 +408,128 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 class: "text-xs text-muted-foreground",
                                 "{format_relative_time_ex(event.created_at, true, true)}"
                             }
+
+                            // Pending status badge
+                            if is_pending {
+                                match pending_status.as_ref() {
+                                    Some(CommentStatus::Pending) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
+                                            "Posting..."
+                                        }
+                                    },
+                                    Some(CommentStatus::Confirmed(_)) => rsx! {
+                                        span {
+                                            class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+                                            "Posted!"
+                                        }
+                                    },
+                                    Some(CommentStatus::Failed(error)) => {
+                                        let local_id_retry = pending_local_id.clone().unwrap_or_default();
+                                        let local_id_dismiss = pending_local_id.clone().unwrap_or_default();
+                                        let error_msg = error.clone();
+                                        rsx! {
+                                            div {
+                                                class: "ml-2 flex items-center gap-2 flex-wrap",
+                                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                                span {
+                                                    class: "px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full",
+                                                    title: "{error_msg}",
+                                                    "Failed"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
+                                                    onclick: move |_| {
+                                                        // Actually retry publishing the comment
+                                                        retry_pending_comment(&local_id_retry);
+                                                    },
+                                                    "Retry"
+                                                }
+                                                button {
+                                                    class: "px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground",
+                                                    onclick: move |_| {
+                                                        remove_pending_comment(&local_id_dismiss);
+                                                    },
+                                                    "Dismiss"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    None => rsx! {}
+                                }
+                            }
                         }
 
-                        // Comment content
+                        // Comment content - voice player or text
                         div {
                             class: "text-sm mt-1",
-                            RichContent {
-                                content: event.content.clone(),
-                                tags: event.tags.clone().to_vec()
+                            if is_voice {
+                                // Inline voice player for voice message replies
+                                div {
+                                    class: "my-2",
+                                    // Hidden audio element
+                                    audio {
+                                        id: "{audio_id_for_handlers}",
+                                        src: "{audio_url}",
+                                        preload: "metadata",
+                                        style: "display: none;",
+                                        ontimeupdate: handle_timeupdate,
+                                        onloadedmetadata: handle_loadedmetadata,
+                                        onended: handle_ended,
+                                        onerror: move |_| {
+                                            log::warn!("Failed to load voice message audio");
+                                        },
+                                    }
+                                    // Compact player controls
+                                    div {
+                                        class: "flex items-center gap-3 bg-muted/30 rounded-lg p-2",
+                                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                                        // Play/Pause button
+                                        button {
+                                            class: "flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                                            onclick: toggle_play,
+                                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id_parsed) {
+                                                // Pause icon
+                                                svg {
+                                                    class: "w-4 h-4",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "currentColor",
+                                                    rect { x: "6", y: "4", width: "4", height: "16" }
+                                                    rect { x: "14", y: "4", width: "4", height: "16" }
+                                                }
+                                            } else {
+                                                // Play icon
+                                                svg {
+                                                    class: "w-4 h-4 ml-0.5",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "currentColor",
+                                                    polygon { points: "8,5 19,12 8,19" }
+                                                }
+                                            }
+                                        }
+                                        // Progress bar and time
+                                        div {
+                                            class: "flex-1",
+                                            div {
+                                                class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                                div {
+                                                    class: "h-full bg-primary transition-all",
+                                                    style: "width: {progress_percent}%"
+                                                }
+                                            }
+                                            div {
+                                                class: "flex justify-between text-xs text-muted-foreground",
+                                                span { "{current_time_str}" }
+                                                span { "{duration_str}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                RichContent {
+                                    content: event.content.clone(),
+                                    tags: event.tags.clone().to_vec()
+                                }
                             }
                         }
 
@@ -394,64 +613,12 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 }
                             }
 
-                            // Like button
-                            button {
-                                class: "{like_button_class} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded",
-                                disabled: !has_signer || *is_liking.read(),
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    if !has_signer || *is_liking.read() {
-                                        return;
-                                    }
-
-                                    let currently_liked = *is_liked.read();
-                                    let event_id_clone = event_id_like.clone();
-                                    let author_pubkey_clone = author_pubkey_like.clone();
-
-                                    is_liking.set(true);
-
-                                    if currently_liked {
-                                        // Unlike
-                                        is_liked.set(false);
-                                        let current_count = *like_count.read();
-                                        like_count.set(current_count.saturating_sub(1));
-                                        is_liking.set(false);
-                                    } else {
-                                        // Like
-                                        spawn(async move {
-                                            match publish_reaction(event_id_clone, author_pubkey_clone, "+".to_string()).await {
-                                                Ok(reaction_id) => {
-                                                    log::info!("Liked event, reaction ID: {}", reaction_id);
-                                                    is_liked.set(true);
-                                                    let current_count = *like_count.read();
-                                                    like_count.set(current_count.saturating_add(1));
-                                                    is_liking.set(false);
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Failed to like event: {}", e);
-                                                    is_liking.set(false);
-                                                }
-                                            }
-                                        });
-                                    }
-                                },
-                                HeartIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: *is_liked.read()
-                                }
-                                span {
-                                    class: "text-xs",
-                                    {
-                                        let count = *like_count.read();
-                                        if count > 500 {
-                                            "500+".to_string()
-                                        } else if count > 0 {
-                                            count.to_string()
-                                        } else {
-                                            "".to_string()
-                                        }
-                                    }
-                                }
+                            // Like button with reaction picker
+                            ReactionButton {
+                                reaction: reaction.clone(),
+                                has_signer: has_signer,
+                                icon_class: "h-4 w-4".to_string(),
+                                count_class: "text-xs".to_string(),
                             }
 
                             // Zap button (only show if author has lightning address)
@@ -556,7 +723,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 div {
                     class: "ml-4 mt-2",
                     Link {
-                        to: Route::Note { note_id: event.id.to_hex() },
+                        to: Route::Note { note_id: event.id.to_hex(), from_voice: None },
                         class: "text-xs text-blue-500 hover:underline",
                         "→ Continue thread ({children.len()} more replies)"
                     }

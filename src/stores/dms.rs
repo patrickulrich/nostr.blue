@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
+use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -22,6 +22,14 @@ pub enum ConversationMessage {
 }
 
 impl ConversationMessage {
+    /// Get a unique identifier for this message (for keying in UI lists)
+    pub fn id(&self) -> EventId {
+        match self {
+            Self::Nip04 { event } => event.id,
+            Self::Nip17 { gift_wrap, .. } => gift_wrap.id,
+        }
+    }
+
     /// Get the actual message timestamp (uses rumor timestamp for NIP-17)
     pub fn created_at(&self) -> Timestamp {
         match self {

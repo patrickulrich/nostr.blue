@@ -2,12 +2,13 @@ use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind};
 use crate::routes::Route;
 use crate::stores::bookmarks;
-use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer, ClientInitializing};
+use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer, ClientInitializing, ShareModal};
 use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, calculate_read_time
 };
-use crate::utils::build_thread_tree;
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::stores::pending_comments::get_pending_comments;
 use std::time::Duration;
 
 #[component]
@@ -20,6 +21,14 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut comments = use_signal(|| Vec::<NostrEvent>::new());
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
+
+    // Like button state
+    let mut is_liking = use_signal(|| false);
+    let mut is_liked = use_signal(|| false);
+    let mut like_count = use_signal(|| 0usize);
+
+    let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
 
     // Decode naddr and fetch article - wait for client to be initialized
     use_effect(move || {
@@ -123,6 +132,57 @@ pub fn ArticleDetail(naddr: String) -> Element {
                 }
 
                 loading_comments.set(false);
+            });
+        }
+    });
+
+    // Fetch reactions (likes) for the article
+    use_effect(move || {
+        let article_data = article.read();
+
+        if let Some(event) = article_data.as_ref() {
+            let event_id = event.id;
+
+            // Get current user pubkey to detect if they've liked
+            let current_user_pubkey = crate::stores::signer::SIGNER_INFO.read()
+                .as_ref()
+                .map(|info| info.public_key.clone());
+
+            spawn(async move {
+                // Fetch Kind 7 (Reaction) events for this article
+                let filter = Filter::new()
+                    .kind(Kind::Reaction)
+                    .event(event_id)
+                    .limit(500);
+
+                match crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                    Ok(reaction_events) => {
+                        // Count likes (reactions with "+" or emoji content)
+                        let mut likes = 0;
+                        let mut user_has_liked = false;
+
+                        for reaction in &reaction_events {
+                            // Count positive reactions (+ or emoji)
+                            if reaction.content != "-" {
+                                likes += 1;
+                            }
+
+                            // Check if current user has liked
+                            if let Some(ref user_pk) = current_user_pubkey {
+                                if reaction.pubkey.to_hex() == *user_pk && reaction.content != "-" {
+                                    user_has_liked = true;
+                                }
+                            }
+                        }
+
+                        like_count.set(likes);
+                        is_liked.set(user_has_liked);
+                        log::info!("Loaded {} reactions for article, user has liked: {}", likes, user_has_liked);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch reactions: {}", e);
+                    }
+                }
             });
         }
     });
@@ -302,11 +362,64 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                     div {
                                         class: "flex items-center justify-center gap-4",
 
-                                        // Like button (placeholder - implement later)
-                                        button {
-                                            class: "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent transition",
-                                            HeartIcon { class: "w-5 h-5" }
-                                            span { "Like" }
+                                        // Like button with optimistic update
+                                        {
+                                            let event_id_like = event_id.clone();
+                                            let author_pubkey_like = author_pubkey.clone();
+                                            rsx! {
+                                                button {
+                                                    class: if *is_liked.read() {
+                                                        "flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-500 transition"
+                                                    } else {
+                                                        "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent transition"
+                                                    },
+                                                    disabled: !has_signer || *is_liking.read() || *is_liked.read(),
+                                                    onclick: move |_| {
+                                                        if !has_signer || *is_liking.read() || *is_liked.read() {
+                                                            return;
+                                                        }
+
+                                                        let event_id_clone = event_id_like.clone();
+                                                        let author_pubkey_clone = author_pubkey_like.clone();
+
+                                                        is_liking.set(true);
+
+                                                        spawn(async move {
+                                                            match crate::stores::nostr_client::publish_reaction(
+                                                                event_id_clone,
+                                                                author_pubkey_clone,
+                                                                "+".to_string(),
+                                                                None
+                                                            ).await {
+                                                                Ok(reaction_id) => {
+                                                                    log::info!("Liked article, reaction ID: {}", reaction_id);
+                                                                    is_liked.set(true);
+                                                                    // Optimistic update - increment count
+                                                                    let current_count = *like_count.read();
+                                                                    like_count.set(current_count.saturating_add(1));
+                                                                }
+                                                                Err(e) => {
+                                                                    log::error!("Failed to like article: {}", e);
+                                                                }
+                                                            }
+                                                            is_liking.set(false);
+                                                        });
+                                                    },
+                                                    HeartIcon {
+                                                        class: "w-5 h-5",
+                                                        filled: *is_liked.read()
+                                                    }
+                                                    span {
+                                                        if *is_liking.read() {
+                                                            "..."
+                                                        } else if *like_count.read() > 0 {
+                                                            "{like_count.read()}"
+                                                        } else {
+                                                            "Like"
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         // Bookmark button
@@ -332,9 +445,10 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                             }
                                         }
 
-                                        // Share button (placeholder - implement later)
+                                        // Share button
                                         button {
                                             class: "flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-accent transition",
+                                            onclick: move |_| show_share_modal.set(true),
                                             ShareIcon { class: "w-5 h-5" }
                                             span { "Share" }
                                         }
@@ -358,42 +472,48 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                         }
                                     }
 
-                                    {
-                                        let comment_vec = comments.read().clone();
-                                        let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                    if *loading_comments.read() {
+                                        div {
+                                            class: "flex items-center justify-center py-10",
+                                            div {
+                                                class: "text-center",
+                                                div {
+                                                    class: "animate-spin text-4xl mb-2",
+                                                    "⚡"
+                                                }
+                                                p {
+                                                    class: "text-muted-foreground",
+                                                    "Loading comments..."
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Only build thread tree after loading completes to avoid caching empty results
+                                        {
+                                            let comment_vec = comments.read().clone();
+                                            let confirmed_tree = build_thread_tree(comment_vec, &event.id);
+                                            // Merge pending comments for optimistic display
+                                            let pending = get_pending_comments(&event.id);
+                                            let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
-                                        rsx! {
-                                            if *loading_comments.read() {
-                                                div {
-                                                    class: "flex items-center justify-center py-10",
+                                            rsx! {
+                                                if thread_tree.is_empty() {
                                                     div {
-                                                        class: "text-center",
-                                                        div {
-                                                            class: "animate-spin text-4xl mb-2",
-                                                            "⚡"
-                                                        }
+                                                        class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                                        p { "No comments yet" }
                                                         p {
-                                                            class: "text-muted-foreground",
-                                                            "Loading comments..."
+                                                            class: "text-sm",
+                                                            "Be the first to comment!"
                                                         }
                                                     }
-                                                }
-                                            } else if thread_tree.is_empty() {
-                                                div {
-                                                    class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                                    p { "No comments yet" }
-                                                    p {
-                                                        class: "text-sm",
-                                                        "Be the first to comment!"
-                                                    }
-                                                }
-                                            } else {
-                                                div {
-                                                    class: "divide-y divide-border",
-                                                    for node in thread_tree {
-                                                        ThreadedComment {
-                                                            node: node.clone(),
-                                                            depth: 0
+                                                } else {
+                                                    div {
+                                                        class: "divide-y divide-border",
+                                                        for node in thread_tree {
+                                                            ThreadedComment {
+                                                                node: node.clone(),
+                                                                depth: 0
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -426,6 +546,14 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                                 loading_comments.set(false);
                                             });
                                         }
+                                    }
+                                }
+
+                                // Share modal
+                                if *show_share_modal.read() {
+                                    ShareModal {
+                                        event: event.clone(),
+                                        on_close: move |_| show_share_modal.set(false)
                                     }
                                 }
                             }

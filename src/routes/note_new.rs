@@ -5,9 +5,15 @@ use crate::components::{MediaUploader, EmojiPicker, GifPicker};
 const MAX_LENGTH: usize = 5000;
 
 #[component]
-pub fn NoteNew() -> Element {
+pub fn NoteNew(quote: Option<String>) -> Element {
     let navigator = navigator();
-    let mut content = use_signal(|| String::new());
+
+    // Initialize content with quote reference if provided
+    let initial_content = quote.as_ref()
+        .map(|q| format!("\nnostr:{}", q))
+        .unwrap_or_default();
+
+    let mut content = use_signal(move || initial_content);
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);
 
@@ -119,7 +125,7 @@ pub fn NoteNew() -> Element {
                     class: "flex items-center justify-between p-4 border-b border-border",
                     h2 {
                         class: "text-xl font-bold",
-                        "Create Note"
+                        if quote.is_some() { "Quote Note" } else { "Create Note" }
                     }
                     button {
                         class: "text-muted-foreground hover:text-foreground transition",

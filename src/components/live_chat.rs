@@ -293,6 +293,7 @@ pub fn LiveChat(
                 } else {
                     for message in messages.read().iter() {
                         ChatMessage {
+                            key: "{message.id}",
                             event: message.clone()
                         }
                     }
