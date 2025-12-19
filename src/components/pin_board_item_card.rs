@@ -360,7 +360,7 @@ pub fn PinGrid(
                     key: "{pin.event_id}",
                     pin: pin.clone(),
                     show_remove: show_remove,
-                    on_remove: on_remove.clone(),
+                    on_remove: on_remove,
                 }
             }
 

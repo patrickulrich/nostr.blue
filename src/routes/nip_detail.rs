@@ -14,7 +14,7 @@ use std::time::Duration;
 pub fn NipDetail(nip_id: String) -> Element {
     // State
     let mut nip_content = use_signal(|| None::<String>);
-    let mut nip_title = use_signal(|| String::new());
+    let mut nip_title = use_signal(String::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
@@ -22,10 +22,10 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut is_custom = use_signal(|| false);
     let mut custom_event = use_signal(|| None::<NostrEvent>);
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut related_kinds = use_signal(|| Vec::<String>::new());
+    let mut related_kinds = use_signal(Vec::<String>::new);
 
     // Comments state
-    let mut comments = use_signal(|| Vec::<NostrEvent>::new());
+    let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
 

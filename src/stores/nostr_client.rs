@@ -908,7 +908,7 @@ pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<Stri
             PublicKey::from_hex(&contact_str)
                 .or_else(|_| PublicKey::parse(&contact_str))
                 .ok()
-                .map(|pubkey| Contact::new(pubkey))
+                .map(Contact::new)
         })
         .collect();
 
@@ -1889,7 +1889,7 @@ fn detect_mime_type(url: &str) -> Option<String> {
     let path = url_lower
         .split('?').next()?  // Remove query string
         .split('#').next()?; // Remove fragment
-    let extension = path.split('.').last()?;
+    let extension = path.split('.').next_back()?;
 
     match extension {
         // Image types

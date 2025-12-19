@@ -1,18 +1,18 @@
-/// Virtual scrolling component with dynamic height support (Phase 3.1)
-///
-/// Renders only visible items in large lists to maintain smooth performance.
-/// Handles 10,000+ items efficiently by rendering only what's in the viewport.
-///
-/// # Features
-/// - Dynamic height tracking for variable-sized items
-/// - Configurable overscan for smooth scrolling
-/// - Automatic height measurement via DOM
-/// - Memory-efficient: O(viewport_size) DOM nodes vs O(total_items)
-///
-/// # Performance Impact
-/// - Before: Rendering 1000 notes = 1000 DOM nodes (slow, memory intensive)
-/// - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
-/// - Maintains 60fps even with 10,000+ items
+//! Virtual scrolling component with dynamic height support (Phase 3.1)
+//!
+//! Renders only visible items in large lists to maintain smooth performance.
+//! Handles 10,000+ items efficiently by rendering only what's in the viewport.
+//!
+//! # Features
+//! - Dynamic height tracking for variable-sized items
+//! - Configurable overscan for smooth scrolling
+//! - Automatic height measurement via DOM
+//! - Memory-efficient: O(viewport_size) DOM nodes vs O(total_items)
+//!
+//! # Performance Impact
+//! - Before: Rendering 1000 notes = 1000 DOM nodes (slow, memory intensive)
+//! - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
+//! - Maintains 60fps even with 10,000+ items
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -342,7 +342,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
 
                     LAST_SCROLL_UPDATE.store(now, Ordering::Relaxed);
 
-                    let mut state = virtual_state.clone();
+                    let mut state = virtual_state;
                     // Note: Element storage not available on non-WASM
                     state.write().scroll_top = 0.0; // Fallback for non-WASM
                     log::trace!("Updated scroll_top (non-WASM fallback)");
@@ -364,7 +364,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                         let item_index = *index;
                         let item_rc = item.clone();
                         #[allow(unused_variables)]
-                        let state = virtual_state.clone();
+                        let state = virtual_state;
                         rsx! {
                             div {
                                 key: "{index}",

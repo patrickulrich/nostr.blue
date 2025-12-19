@@ -1,22 +1,22 @@
-/// Timed serializer with debouncing for LocalStorage operations
-///
-/// Reduces frequent write operations by batching updates within a time window.
-/// Inspired by Notedeck's approach to minimize storage I/O.
-///
-/// # Benefits
-/// - Reduces LocalStorage writes from dozens per second to one per interval
-/// - Prevents UI jank from synchronous storage operations
-/// - Saves battery on mobile devices
-/// - Reduces wear on storage (especially important for embedded devices)
-///
-/// # Example
-/// ```
-/// // Instead of saving on every bookmark toggle:
-/// bookmarks.save_immediately(); // Called 10x per second = 10 writes
-///
-/// // Use debounced saving:
-/// bookmarks.request_save(); // Called 10x per second = 1 write after 1s delay
-/// ```
+//! Timed serializer with debouncing for LocalStorage operations
+//!
+//! Reduces frequent write operations by batching updates within a time window.
+//! Inspired by Notedeck's approach to minimize storage I/O.
+//!
+//! # Benefits
+//! - Reduces LocalStorage writes from dozens per second to one per interval
+//! - Prevents UI jank from synchronous storage operations
+//! - Saves battery on mobile devices
+//! - Reduces wear on storage (especially important for embedded devices)
+//!
+//! # Example
+//! ```
+//! // Instead of saving on every bookmark toggle:
+//! bookmarks.save_immediately(); // Called 10x per second = 10 writes
+//!
+//! // Use debounced saving:
+//! bookmarks.request_save(); // Called 10x per second = 1 write after 1s delay
+//! ```
 
 use gloo_timers::callback::Timeout;
 use std::cell::RefCell;

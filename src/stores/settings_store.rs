@@ -183,7 +183,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
 #[allow(dead_code)] // Called from theme_store.rs
 pub async fn update_theme(theme: theme_store::Theme) {
     // Apply theme locally (using internal function to avoid recursion)
-    theme_store::set_theme_internal(theme.clone());
+    theme_store::set_theme_internal(theme);
 
     // Update settings
     let mut settings = SETTINGS.read().clone();

@@ -84,7 +84,7 @@ pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long
         _ => {
             // For older than 7 days, show the date
             let dt = DateTime::from_timestamp(ts as i64, 0)
-                .unwrap_or_else(|| Utc::now());
+                .unwrap_or_else(Utc::now);
             dt.format("%b %d").to_string()
         }
     }
@@ -100,7 +100,7 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
     let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
-        .unwrap_or_else(|| Utc::now());
+        .unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 

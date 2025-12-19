@@ -57,7 +57,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 
     if url.contains("github.com") {
         let parts: Vec<&str> = url
-            .split(|c| c == '/' || c == ':')
+            .split(['/', ':'])
             .filter(|s| !s.is_empty() && *s != "https" && *s != "http" && *s != "git@github.com" && *s != "github.com")
             .collect();
 

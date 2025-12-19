@@ -268,9 +268,9 @@ pub fn mime_type_for_kind(kind: u16) -> NostrMimeType {
                 REPLACEABILITY_NONREPLACEABLE
             };
 
-            let category = if kind >= 30000 && kind < 40000 {
+            let category = if (30000..40000).contains(&kind) {
                 CATEGORY_ARTICLE // Addressable events are often articles
-            } else if kind >= 10000 && kind < 20000 {
+            } else if (10000..20000).contains(&kind) {
                 CATEGORY_METADATA // Replaceable lists are often metadata
             } else {
                 CATEGORY_NOTE
@@ -285,7 +285,7 @@ pub fn mime_type_for_kind(kind: u16) -> NostrMimeType {
 pub fn is_replaceable_kind(kind: u16) -> bool {
     // Regular replaceable: 10000-19999
     // Addressable/parameterized replaceable: 30000-39999
-    (kind >= 10000 && kind < 20000) || (kind >= 30000 && kind < 40000)
+    (10000..20000).contains(&kind) || (30000..40000).contains(&kind)
 }
 
 /// Generate m and M tags for an event kind

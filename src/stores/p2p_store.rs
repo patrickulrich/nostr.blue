@@ -559,7 +559,7 @@ pub fn derive_market_price(orders: &[P2POrder]) -> Option<f64> {
             let market_price = raw_price / (1.0 + premium / 100.0);
 
             // Sanity check: reject absurd prices (less than $1k or more than $1M per BTC)
-            if market_price >= 1_000.0 && market_price <= 1_000_000.0 {
+            if (1_000.0..=1_000_000.0).contains(&market_price) {
                 Some(market_price)
             } else {
                 None
@@ -576,7 +576,7 @@ pub fn derive_market_price(orders: &[P2POrder]) -> Option<f64> {
     implied_prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = implied_prices.len() / 2;
 
-    if implied_prices.len() % 2 == 0 && implied_prices.len() > 1 {
+    if implied_prices.len().is_multiple_of(2) && implied_prices.len() > 1 {
         // Even count: average of two middle values
         Some((implied_prices[mid - 1] + implied_prices[mid]) / 2.0)
     } else {

@@ -62,7 +62,7 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
-    let _new_recipient = use_signal(|| String::new());
+    let _new_recipient = use_signal(String::new);
     let mut active_tab = use_signal(|| DmTab::DirectMessages);
     let mut selected_mls_group = use_signal(|| None::<String>);
     let mut new_mls_group_mode = use_signal(|| false);
@@ -161,7 +161,7 @@ pub fn DMs() -> Element {
 
     // Manual refresh function
     let refresh_dms = move |_| {
-        if refreshing.read().clone() {
+        if *refreshing.read() {
             return;
         }
 
@@ -556,7 +556,7 @@ fn MlsGroupsList(
                     class: "divide-y divide-border",
                     for group in groups {
                         {
-                            let group_id = hex::encode(&group.nostr_group_id);
+                            let group_id = hex::encode(group.nostr_group_id);
                             let group_id_clone = group_id.clone();
                             let is_selected = selected_group.as_ref() == Some(&group_id);
 
@@ -624,10 +624,10 @@ fn NewMlsGroupComposer(
     on_cancel: EventHandler<()>,
     on_created: EventHandler<String>
 ) -> Element {
-    let mut group_name = use_signal(|| String::new());
-    let mut group_description = use_signal(|| String::new());
-    let mut member_input = use_signal(|| String::new());
-    let mut members = use_signal(|| Vec::<String>::new());
+    let mut group_name = use_signal(String::new);
+    let mut group_description = use_signal(String::new);
+    let mut member_input = use_signal(String::new);
+    let mut members = use_signal(Vec::<String>::new);
     let mut creating = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
@@ -692,7 +692,7 @@ fn NewMlsGroupComposer(
 
             match mdk_store::create_mls_group(name, description, member_list, relays).await {
                 Ok(group) => {
-                    let group_id = hex::encode(&group.nostr_group_id);
+                    let group_id = hex::encode(group.nostr_group_id);
                     log::info!("Created MLS group: {}", group_id);
                     on_created.call(group_id);
                 }
@@ -870,7 +870,7 @@ fn NewMlsGroupComposer(
 /// MLS group view component
 #[component]
 fn MlsGroupView(group_id: String) -> Element {
-    let mut message_input = use_signal(|| String::new());
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
     let mut loading = use_signal(|| true);
     let messages_container_id = use_signal(|| format!("mls-messages-{}", uuid::Uuid::new_v4()));
@@ -1280,9 +1280,9 @@ fn ConversationListItem(
 
 #[component]
 fn ConversationView(pubkey: String) -> Element {
-    let mut message_input = use_signal(|| String::new());
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
-    let mut decrypted_messages = use_signal(|| Vec::<(ConversationMessage, String)>::new());
+    let mut decrypted_messages = use_signal(Vec::<(ConversationMessage, String)>::new);
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
@@ -1482,7 +1482,7 @@ fn ConversationView(pubkey: String) -> Element {
                         }
                     }
                     Link {
-                        to: Route::Profile { pubkey: pubkey },
+                        to: Route::Profile { pubkey },
                         class: "text-xs text-blue-500 hover:underline",
                         "View profile"
                     }
@@ -1691,8 +1691,8 @@ fn NewDMComposer(
     on_cancel: EventHandler<()>,
     on_send: EventHandler<String>
 ) -> Element {
-    let mut recipient_input = use_signal(|| String::new());
-    let mut message_input = use_signal(|| String::new());
+    let mut recipient_input = use_signal(String::new);
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 

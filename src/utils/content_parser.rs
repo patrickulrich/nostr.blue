@@ -10,7 +10,7 @@ static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 /// Clean trailing punctuation from URLs that may have been captured by regex
 fn clean_url_trailing_punctuation(url: &str) -> &str {
-    url.trim_end_matches(|c| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '>'))
+    url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
 }
 // Nostr URI pattern - matches nostr: followed by valid NIP-19 prefixes
 // Permissive alphanumeric match; SDK validation via Nip19::from_bech32 handles bech32 correctness

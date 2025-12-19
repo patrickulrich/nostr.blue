@@ -300,7 +300,7 @@ fn format_timestamp(timestamp: u64) -> String {
     use chrono::{DateTime, Utc, Local};
 
     let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| Utc::now());
+        .unwrap_or_else(Utc::now);
     let local_dt = dt.with_timezone(&Local);
     let now = Local::now();
     let duration = now.signed_duration_since(local_dt);

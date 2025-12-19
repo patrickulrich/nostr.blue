@@ -182,7 +182,7 @@ async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
         .await
         .map_err(|e| format!("Failed to parse geocode response: {}", e))?;
 
-    Ok(photon.features.first().map(|f| feature_to_location(f)))
+    Ok(photon.features.first().map(feature_to_location))
 }
 
 /// Convert Photon feature to GeoLocation

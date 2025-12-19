@@ -1,8 +1,8 @@
-/// NIP-65: Relay List Metadata (kind 10002)
-/// NIP-17: Private Direct Message Relay Lists (kind 10050)
-///
-/// This module provides centralized relay management using Nostr-native relay lists.
-/// It implements the Outbox model for intelligent relay routing.
+//! NIP-65: Relay List Metadata (kind 10002)
+//! NIP-17: Private Direct Message Relay Lists (kind 10050)
+//!
+//! This module provides centralized relay management using Nostr-native relay lists.
+//! It implements the Outbox model for intelligent relay routing.
 
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;

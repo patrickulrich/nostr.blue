@@ -25,8 +25,8 @@ pub fn ShareModal(
 ) -> Element {
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
-    let mut nostr_text = use_signal(|| String::new());
-    let mut dm_recipient = use_signal(|| String::new());
+    let mut nostr_text = use_signal(String::new);
+    let mut dm_recipient = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);
@@ -86,12 +86,12 @@ pub fn ShareModal(
     };
 
     // Generate NIP-19 identifier with relay hints from author's write relays
-    let content_nip19 = use_signal(|| String::new());
+    let content_nip19 = use_signal(String::new);
 
     // Generate nevent/naddr (with gossip, relay hints are not needed)
     {
         let event_clone = event.clone();
-        let mut content_nip19_clone = content_nip19.clone();
+        let mut content_nip19_clone = content_nip19;
         use_effect(move || {
             let event_for_async = event_clone.clone();
             spawn(async move {

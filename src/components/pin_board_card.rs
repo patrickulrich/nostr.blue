@@ -568,8 +568,8 @@ pub fn PinBoardMosaicGrid(
                 PinBoardCardMosaic {
                     key: "{board.a_tag}",
                     board: board.clone(),
-                    on_click: on_board_click.clone(),
-                    on_zap_request: on_zap_request.clone(),
+                    on_click: on_board_click,
+                    on_zap_request: on_zap_request,
                     // Assign size variant based on index for variety
                     // Boards with images will use natural aspect ratio anyway
                     size_variant: if board.image.is_some() {

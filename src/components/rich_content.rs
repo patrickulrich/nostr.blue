@@ -1495,7 +1495,7 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                 class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
                 onclick: {
                     let artist_id_nav = artist.id.clone();
-                    let navigator = nav.clone();
+                    let navigator = nav;
                     move |e: MouseEvent| {
                         e.stop_propagation();
                         // Navigate to artist page

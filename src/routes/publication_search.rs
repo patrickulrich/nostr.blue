@@ -54,7 +54,7 @@ fn parse_query_to_reference(query: &str) -> Option<BookReference> {
 pub fn PublicationSearch(query: String) -> Element {
     let nav = use_navigator();
     let mut loading = use_signal(|| true);
-    let mut results = use_signal(|| Vec::new());
+    let mut results = use_signal(Vec::new);
     let mut error = use_signal(|| None::<String>);
 
     // Parse the query into a book reference

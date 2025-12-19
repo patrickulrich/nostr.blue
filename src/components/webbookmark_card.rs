@@ -49,7 +49,7 @@ pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEven
     // Handle delete
     let handle_delete = {
         let event_clone = event.clone();
-        let mut deleting = deleting.clone();
+        let mut deleting = deleting;
         move |_| {
             let event_for_delete = event_clone.clone();
             deleting.set(true);
@@ -71,7 +71,7 @@ pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEven
     // Handle toggle favorite
     let handle_toggle_favorite = {
         let event_clone = event.clone();
-        let mut toggling_favorite = toggling_favorite.clone();
+        let mut toggling_favorite = toggling_favorite;
         move |_| {
             let event_for_toggle = event_clone.clone();
             let current_fav = is_fav;
@@ -95,7 +95,7 @@ pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEven
     // Handle edit
     let handle_edit = {
         let event_clone = event.clone();
-        let mut show_actions_edit = show_actions.clone();
+        let mut show_actions_edit = show_actions;
         move |_| {
             if let Some(ref handler) = on_edit {
                 handler.call(event_clone.clone());
@@ -343,7 +343,7 @@ pub fn WebBookmarkCardSkeleton() -> Element {
 /// Format timestamp to relative time
 fn format_timestamp(timestamp: u64) -> String {
     let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| Utc::now());
+        .unwrap_or_else(Utc::now);
     let local_dt = dt.with_timezone(&Local);
     let now = Local::now();
     let duration = now.signed_duration_since(local_dt);

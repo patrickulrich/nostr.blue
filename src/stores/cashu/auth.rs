@@ -38,7 +38,7 @@ pub use cdk_common::{
 
 /// Global cache for mint auth states
 pub static MINT_AUTH_STATES: GlobalSignal<HashMap<String, MintAuthState>> =
-    GlobalSignal::new(|| HashMap::new());
+    GlobalSignal::new(HashMap::new);
 
 /// Get auth state for a mint (from cache)
 pub fn get_mint_auth_state(mint_url: &str) -> Option<MintAuthState> {

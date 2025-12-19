@@ -34,13 +34,13 @@ impl BadgesTab {
 #[component]
 pub fn BadgesHome() -> Element {
     let mut active_tab = use_signal(|| BadgesTab::MyBadges);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
 
     // Data state
-    let mut my_badges = use_signal(|| Vec::<BadgeDefinition>::new());
-    let mut pending_awards = use_signal(|| Vec::<(BadgeAward, Option<BadgeDefinition>)>::new());
-    let mut all_badges = use_signal(|| Vec::<BadgeDefinition>::new());
-    let mut created_badges = use_signal(|| Vec::<BadgeDefinition>::new());
+    let mut my_badges = use_signal(Vec::<BadgeDefinition>::new);
+    let mut pending_awards = use_signal(Vec::<(BadgeAward, Option<BadgeDefinition>)>::new);
+    let mut all_badges = use_signal(Vec::<BadgeDefinition>::new);
+    let mut created_badges = use_signal(Vec::<BadgeDefinition>::new);
 
     // Loading state
     let mut loading = use_signal(|| true);
@@ -405,7 +405,7 @@ fn BadgeCard(badge: BadgeDefinition) -> Element {
 
     rsx! {
         Link {
-            to: Route::BadgeDetail { naddr: naddr },
+            to: Route::BadgeDetail { naddr },
             class: "group block bg-card border border-border rounded-xl overflow-hidden hover:border-primary/50 transition",
 
             // Image

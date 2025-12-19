@@ -71,7 +71,7 @@ pub fn Calendar() -> Element {
     // Compute event dates for mini calendar highlights (using filtered events)
     let filtered_event_dates = use_memo(move || {
         filtered_events.read().iter()
-            .map(|e| get_event_date(e))
+            .map(get_event_date)
             .collect::<HashSet<String>>()
     });
 
@@ -304,7 +304,7 @@ pub fn Calendar() -> Element {
                                     button {
                                         class: "hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-accent transition",
                                         onclick: {
-                                            let filtered_events = filtered_events.clone();
+                                            let filtered_events = filtered_events;
                                             move |_| {
                                                 // Extract CalendarEvent items from filtered events
                                                 let calendar_events: Vec<CalendarEvent> = filtered_events.read()
@@ -347,7 +347,7 @@ pub fn Calendar() -> Element {
                                     button {
                                         class: "sm:hidden p-2 border border-border rounded-lg hover:bg-accent transition",
                                         onclick: {
-                                            let filtered_events = filtered_events.clone();
+                                            let filtered_events = filtered_events;
                                             move |_| {
                                                 let calendar_events: Vec<CalendarEvent> = filtered_events.read()
                                                     .iter()

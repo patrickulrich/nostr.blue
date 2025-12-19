@@ -16,12 +16,10 @@ pub fn MusicRadio() -> Element {
         "R&B", "Alternative", "Indie", "Ambient"
     ];
 
-    let time_periods = vec![
-        (1, "24 hours"),
+    let time_periods = [(1, "24 hours"),
         (7, "7 days"),
         (30, "30 days"),
-        (90, "90 days"),
-    ];
+        (90, "90 days")];
 
     // Start radio
     let start_radio = move |_| {

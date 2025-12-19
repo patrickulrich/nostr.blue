@@ -40,7 +40,7 @@ pub fn BoardSlideover(
     let board_a_tag = board.a_tag.clone();
 
     // State for pins (fetched separately)
-    let mut pins = use_signal(|| Vec::<Pin>::new());
+    let mut pins = use_signal(Vec::<Pin>::new);
     let mut pins_loading = use_signal(|| true);
 
     // State for author profile
@@ -135,12 +135,12 @@ pub fn BoardSlideover(
 
     // Handle board delete
     let nav = navigator();
-    let on_close_for_delete = on_close.clone();
+    let on_close_for_delete = on_close;
     let handle_delete = move |_| {
         deleting.set(true);
         let board_clone = board_for_delete.clone();
-        let nav = nav.clone();
-        let on_close = on_close_for_delete.clone();
+        let nav = nav;
+        let on_close = on_close_for_delete;
 
         spawn(async move {
             match delete_pinboard(&board_clone).await {

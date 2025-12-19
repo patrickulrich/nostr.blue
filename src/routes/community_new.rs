@@ -15,7 +15,7 @@ pub fn CommunityNew() -> Element {
     let mut image_url = use_signal(String::new);
     let mut rules = use_signal(String::new);
     let mut moderator_input = use_signal(String::new);
-    let mut moderators = use_signal(|| Vec::<String>::new());
+    let mut moderators = use_signal(Vec::<String>::new);
     let mut creating = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 

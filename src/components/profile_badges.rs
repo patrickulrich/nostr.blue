@@ -13,7 +13,7 @@ use crate::utils::nip58::{self, BadgeDefinition};
 /// Shows accepted badges for a user profile
 #[component]
 pub fn ProfileBadgesSection(pubkey: String) -> Element {
-    let mut badges = use_signal(|| Vec::<BadgeDefinition>::new());
+    let mut badges = use_signal(Vec::<BadgeDefinition>::new);
     let mut loading = use_signal(|| true);
     let mut selected_badge = use_signal(|| None::<BadgeDefinition>);
     let mut show_modal = use_signal(|| false);

@@ -321,8 +321,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                 {
                                                     // Get host-aware identifier (use p tag host if available, otherwise event publisher)
                                                     let event_pubkey = event.pubkey.to_string();
-                                                    let author_identifier = meta.host_pubkey.as_ref()
-                                                        .map(|s| s.as_str())
+                                                    let author_identifier = meta.host_pubkey.as_deref()
                                                         .unwrap_or(&event_pubkey);
 
                                                     let host_verified = meta.host_verified;

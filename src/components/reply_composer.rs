@@ -21,10 +21,10 @@ pub fn ReplyComposer(
     on_close: EventHandler<()>,
     on_success: EventHandler<()>,
 ) -> Element {
-    let mut content = use_signal(|| String::new());
+    let mut content = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
-    let mut uploaded_media = use_signal(|| Vec::<String>::new());
+    let mut uploaded_media = use_signal(Vec::<String>::new);
     let mut show_poll_modal = use_signal(|| false);
     let toast = consume_toast();
 
@@ -166,7 +166,7 @@ pub fn ReplyComposer(
     };
 
     let handle_publish = {
-        let toast_api = toast.clone();
+        let toast_api = toast;
         move |_| {
             let mut content_value = content.read().clone();
 
@@ -176,7 +176,7 @@ pub fn ReplyComposer(
                     content_value.push_str("\n\n");
                 }
                 for url in uploaded_media.read().iter() {
-                    content_value.push_str(&url);
+                    content_value.push_str(url);
                     content_value.push('\n');
                 }
             }
@@ -349,7 +349,7 @@ pub fn ReplyComposer(
                 }
                 Err(e) => {
                     log::error!("Failed to publish reply: {}", e);
-                    update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
+                    update_pending_status(&local_id_clone, CommentStatus::Failed(e.to_string()));
                 }
             }
         });

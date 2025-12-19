@@ -17,6 +17,7 @@ pub struct RecipeDetails {
 
 /// Parsed recipe content from markdown
 #[derive(Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub struct ParsedRecipe {
     pub chef_notes: Option<String>,
     pub details: RecipeDetails,
@@ -25,17 +26,6 @@ pub struct ParsedRecipe {
     pub additional_resources: Option<String>,
 }
 
-impl Default for ParsedRecipe {
-    fn default() -> Self {
-        Self {
-            chef_notes: None,
-            details: RecipeDetails::default(),
-            ingredients: Vec::new(),
-            directions: Vec::new(),
-            additional_resources: None,
-        }
-    }
-}
 
 /// Recipe metadata extracted from event tags
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -161,8 +151,7 @@ pub fn parse_recipe(markdown: &str) -> Result<ParsedRecipe, ValidationError> {
 fn parse_details(content: &str, details: &mut RecipeDetails) -> Result<(), ValidationError> {
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with("- ") {
-            let rest = &line[2..];
+        if let Some(rest) = line.strip_prefix("- ") {
             if let Some((key, value)) = rest.split_once(": ") {
                 let value = value.trim();
                 match key {

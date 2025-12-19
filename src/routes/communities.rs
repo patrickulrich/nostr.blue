@@ -19,16 +19,16 @@ use std::collections::HashSet;
 #[component]
 pub fn Communities() -> Element {
     // Main communities list
-    let mut communities = use_signal(|| Vec::<Community>::new());
+    let mut communities = use_signal(Vec::<Community>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
     // User's communities with membership info (sorted by role)
-    let mut user_communities_with_membership = use_signal(|| Vec::<CommunityWithMembership>::new());
+    let mut user_communities_with_membership = use_signal(Vec::<CommunityWithMembership>::new);
     let mut user_communities_loading = use_signal(|| false);
 
     // Pinned communities
-    let mut pinned_communities = use_signal(|| Vec::<CommunityWithMembership>::new());
+    let mut pinned_communities = use_signal(Vec::<CommunityWithMembership>::new);
     let mut pinned_loading = use_signal(|| false);
 
     // Search state

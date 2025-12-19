@@ -28,18 +28,18 @@ impl NipsTab {
 pub fn NipsHome() -> Element {
     // Tab and search state
     let mut active_tab = use_signal(|| NipsTab::Official);
-    let mut search_query = use_signal(|| String::new());
-    let mut search_input = use_signal(|| String::new()); // Debounced input
+    let mut search_query = use_signal(String::new);
+    let mut search_input = use_signal(String::new); // Debounced input
 
     // Search results state (overlay)
-    let mut search_results = use_signal(|| Vec::<Event>::new());
+    let mut search_results = use_signal(Vec::<Event>::new);
     let mut search_loading = use_signal(|| false);
     let mut is_searching = use_signal(|| false); // True when search overlay is active
 
     // Data state
-    let mut official_nips = use_signal(|| Vec::<OfficialNip>::new());
-    let mut custom_nips = use_signal(|| Vec::<Event>::new());
-    let mut event_kinds = use_signal(|| Vec::<EventKindInfo>::new());
+    let mut official_nips = use_signal(Vec::<OfficialNip>::new);
+    let mut custom_nips = use_signal(Vec::<Event>::new);
+    let mut event_kinds = use_signal(Vec::<EventKindInfo>::new);
 
     // Loading and pagination state
     let mut loading = use_signal(|| false);
@@ -606,10 +606,10 @@ pub fn NipNew() -> Element {
     });
 
     // Form state
-    let mut title = use_signal(|| String::new());
-    let mut identifier = use_signal(|| String::new());
-    let content = use_signal(|| String::new());
-    let mut related_kinds_input = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut identifier = use_signal(String::new);
+    let content = use_signal(String::new);
+    let mut related_kinds_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 

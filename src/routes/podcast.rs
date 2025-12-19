@@ -19,7 +19,7 @@ use std::time::Duration;
 /// Podcast home page
 #[component]
 pub fn PodcastHome() -> Element {
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     let mut active_tab = use_signal(|| PodcastTab::Discover);
 
     rsx! {

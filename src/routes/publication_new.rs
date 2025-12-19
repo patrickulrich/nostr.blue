@@ -23,7 +23,7 @@ pub fn PublicationNew() -> Element {
     let mut auto_identifier = use_signal(|| true);
 
     // Section management
-    let mut sections = use_signal(|| Vec::<SectionDraft>::new());
+    let mut sections = use_signal(Vec::<SectionDraft>::new);
     let mut current_section_idx = use_signal(|| None::<usize>);
     let mut show_preview = use_signal(|| false);
 
@@ -356,7 +356,7 @@ pub fn PublicationNew() -> Element {
                                     index: idx,
                                     section: section.clone(),
                                     on_update: {
-                                        let mut sections = sections.clone();
+                                        let mut sections = sections;
                                         move |(idx, updated): (usize, SectionDraft)| {
                                             let mut secs = sections.read().clone();
                                             if idx < secs.len() {
@@ -366,7 +366,7 @@ pub fn PublicationNew() -> Element {
                                         }
                                     },
                                     on_remove: {
-                                        let mut sections = sections.clone();
+                                        let mut sections = sections;
                                         move |idx: usize| {
                                             let mut secs = sections.read().clone();
                                             if idx < secs.len() {

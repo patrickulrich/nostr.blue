@@ -285,7 +285,7 @@ pub async fn fetch_recipes(limit: usize, until: Option<u64>) -> StdResult<Vec<Ca
         Ok(events) => {
             let recipes: Vec<CachedRecipe> = events
                 .iter()
-                .filter_map(|e| parse_recipe_event(e))
+                .filter_map(parse_recipe_event)
                 .collect();
 
             cache_recipes(&recipes);
@@ -317,7 +317,7 @@ pub async fn fetch_recipes_by_tag(tag: &str, limit: usize, until: Option<u64>) -
         Ok(events) => {
             let recipes: Vec<CachedRecipe> = events
                 .iter()
-                .filter_map(|e| parse_recipe_event(e))
+                .filter_map(parse_recipe_event)
                 .collect();
 
             cache_recipes(&recipes);
@@ -350,7 +350,7 @@ pub async fn fetch_recipes_by_author(pubkey_hex: &str, limit: usize, until: Opti
         Ok(events) => {
             let recipes: Vec<CachedRecipe> = events
                 .iter()
-                .filter_map(|e| parse_recipe_event(e))
+                .filter_map(parse_recipe_event)
                 .collect();
 
             cache_recipes(&recipes);
@@ -424,7 +424,7 @@ pub async fn fetch_recipe_engagement(a_tag: &str) -> StdResult<RecipeEngagement,
                 e.tags.iter()
                     .find(|t| t.kind().to_string() == "bolt11")
                     .and_then(|t| t.content())
-                    .and_then(|_| {
+                    .and({
                         // Parse amount from bolt11 - simplified
                         // Real implementation would use lightning-invoice crate
                         None::<u64>

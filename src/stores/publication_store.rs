@@ -650,7 +650,7 @@ pub async fn fetch_publications(limit: usize, until: Option<u64>) -> StdResult<V
         Ok(events) => {
             let publications: Vec<PublicationIndex> = events
                 .iter()
-                .filter_map(|e| parse_publication_index(e))
+                .filter_map(parse_publication_index)
                 .collect();
 
             cache_publications(&publications);
@@ -778,7 +778,7 @@ pub async fn fetch_publications_by_author(pubkey_hex: &str, limit: usize) -> Std
         Ok(events) => {
             let publications: Vec<PublicationIndex> = events
                 .iter()
-                .filter_map(|e| parse_publication_index(e))
+                .filter_map(parse_publication_index)
                 .collect();
 
             cache_publications(&publications);
@@ -803,7 +803,7 @@ pub async fn search_publications_with_filter(filter: Filter, limit: usize) -> St
         Ok(events) => {
             let publications: Vec<PublicationIndex> = events
                 .iter()
-                .filter_map(|e| parse_publication_index(e))
+                .filter_map(parse_publication_index)
                 .collect();
 
             cache_publications(&publications);

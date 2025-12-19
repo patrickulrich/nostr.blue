@@ -9,7 +9,7 @@ pub fn CashuMintDiscoveryModal(
     on_mint_selected: EventHandler<String>,
 ) -> Element {
     let mut is_loading = use_signal(|| true);
-    let mut discovered_mints = use_signal(|| Vec::<DiscoveredMint>::new());
+    let mut discovered_mints = use_signal(Vec::<DiscoveredMint>::new);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut selected_mint = use_signal(|| Option::<String>::None);
     let mut is_adding = use_signal(|| false);
@@ -50,7 +50,7 @@ pub fn CashuMintDiscoveryModal(
     };
 
     // Get existing mints to filter out already added ones (memoized to avoid cloning on every render)
-    let existing_mints = use_memo(move || cashu::get_mints());
+    let existing_mints = use_memo(cashu::get_mints);
 
     // Precompute display names for discovered mints to avoid URL parsing on every render
     let mints_with_display = use_memo(move || {

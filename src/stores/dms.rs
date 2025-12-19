@@ -250,7 +250,7 @@ pub async fn init_dms() -> Result<(), String> {
                     .cloned();
 
                 if let Some(other_pk) = other_pubkey {
-                    let group_id_hex = hex::encode(&group.nostr_group_id);
+                    let group_id_hex = hex::encode(group.nostr_group_id);
                     let mls_messages = mdk_store::get_messages(&group_id_hex);
 
                     log::info!("Integrating {} MLS messages from 1:1 group with {}",
@@ -286,7 +286,7 @@ pub async fn init_dms() -> Result<(), String> {
 
     // Sort messages in each conversation by timestamp (uses actual rumor timestamp for NIP-17)
     for conversation in conversations.values_mut() {
-        conversation.messages.sort_by(|a, b| a.created_at().cmp(&b.created_at()));
+        conversation.messages.sort_by_key(|a| a.created_at());
     }
 
     log::info!("Organized into {} conversations", conversations.len());

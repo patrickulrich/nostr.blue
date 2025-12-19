@@ -67,7 +67,7 @@ pub fn PodcastSoundbites(props: PodcastSoundbitesProps) -> Element {
                         soundbite: soundbite.clone(),
                         index: idx,
                         episode_title: props.episode_title.clone(),
-                        on_play: props.on_play.clone(),
+                        on_play: props.on_play,
                         compact: props.compact
                     }
                 }
@@ -106,7 +106,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
 
     let handle_play = {
         let sb = soundbite.clone();
-        let on_play = props.on_play.clone();
+        let on_play = props.on_play;
         move |_| {
             if let Some(handler) = &on_play {
                 handler.call(sb.clone());
@@ -450,7 +450,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
 
     let handle_play = {
         let sb = soundbite.clone();
-        let on_play = props.on_play.clone();
+        let on_play = props.on_play;
         move |_| {
             if let Some(handler) = &on_play {
                 handler.call(sb.clone());

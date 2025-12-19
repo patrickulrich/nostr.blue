@@ -517,7 +517,7 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
             let proofs = wallet
                 .mint(quote_id, cdk::amount::SplitTarget::default(), None)
                 .await
-                .map_err(|e| super::errors::CashuWalletError::Cdk(e))?;
+                .map_err(super::errors::CashuWalletError::Cdk)?;
 
             let amount: u64 = proofs
                 .iter()
@@ -628,7 +628,7 @@ async fn recover_unrecorded_proofs(mint_url: &str) -> CashuResult<RecoveryResult
     let cdk_proofs = wallet
         .get_unspent_proofs()
         .await
-        .map_err(|e| super::errors::CashuWalletError::Cdk(e))?;
+        .map_err(super::errors::CashuWalletError::Cdk)?;
 
     // Get our known proof secrets
     let known_proofs = get_all_proofs_for_mint(mint_url);
@@ -1187,7 +1187,7 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
         let _ = cashu_cdk_bridge::sync_wallet_state().await;
     }
 
-    Ok((checked, paid, total_minted as u64))
+    Ok((checked, paid, total_minted))
 }
 
 /// Check and process all pending melt quotes

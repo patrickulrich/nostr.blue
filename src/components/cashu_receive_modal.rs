@@ -6,7 +6,7 @@ use crate::stores::cashu::ReceiveTokensOptions;
 pub fn CashuReceiveModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut token_string = use_signal(|| String::new());
+    let mut token_string = use_signal(String::new);
     let mut is_receiving = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut success_message = use_signal(|| Option::<String>::None);

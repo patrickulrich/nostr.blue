@@ -12,14 +12,14 @@ pub struct ProfileEditorModalProps {
 #[component]
 pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     // Form fields
-    let mut name = use_signal(|| String::new());
-    let mut display_name = use_signal(|| String::new());
-    let mut about = use_signal(|| String::new());
-    let mut picture = use_signal(|| String::new());
-    let mut banner = use_signal(|| String::new());
-    let mut website = use_signal(|| String::new());
-    let mut nip05 = use_signal(|| String::new());
-    let mut lud16 = use_signal(|| String::new());
+    let mut name = use_signal(String::new);
+    let mut display_name = use_signal(String::new);
+    let mut about = use_signal(String::new);
+    let mut picture = use_signal(String::new);
+    let mut banner = use_signal(String::new);
+    let mut website = use_signal(String::new);
+    let mut nip05 = use_signal(String::new);
+    let mut lud16 = use_signal(String::new);
 
     // NIP-24 fields
     let mut is_bot = use_signal(|| false);

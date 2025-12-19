@@ -500,7 +500,7 @@ pub fn CommunityPostCard(
             // Reply composer modal
             if *show_reply_composer.read() {
                 {
-                    let on_reply_success_clone = on_reply_success.clone();
+                    let on_reply_success_clone = on_reply_success;
                     rsx! {
                         CommunityPostComposer {
                             community: community.clone(),

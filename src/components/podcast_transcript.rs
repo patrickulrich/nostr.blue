@@ -105,7 +105,7 @@ pub fn PodcastTranscript(props: PodcastTranscriptProps) -> Element {
                 TranscriptContent {
                     transcript: transcript.clone(),
                     current_time: props.current_time,
-                    on_seek: props.on_seek.clone(),
+                    on_seek: props.on_seek,
                     compact: props.compact
                 }
             }
@@ -156,7 +156,7 @@ fn TranscriptContent(props: TranscriptContentProps) -> Element {
                 TranscriptView {
                     cues: cues,
                     current_time: props.current_time,
-                    on_seek: props.on_seek.clone(),
+                    on_seek: props.on_seek,
                     compact: props.compact
                 }
             }
@@ -220,7 +220,7 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
                     key: "{idx}",
                     cue: cue.clone(),
                     is_current: Some(idx) == current_idx,
-                    on_click: props.on_seek.clone(),
+                    on_click: props.on_seek,
                     compact: props.compact
                 }
             }
@@ -267,7 +267,7 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
 
     let handle_click = {
         let start_time = cue.start_time;
-        let on_click = props.on_click.clone();
+        let on_click = props.on_click;
         move |_| {
             if let Some(handler) = &on_click {
                 handler.call(start_time);

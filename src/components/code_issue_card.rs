@@ -28,7 +28,7 @@ pub fn CodeIssueCard(
 
                 // Status badge
                 CodeStatusBadge {
-                    status: issue.status.clone(),
+                    status: issue.status,
                     size: BadgeSize::Small,
                 }
 

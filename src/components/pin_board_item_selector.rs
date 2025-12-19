@@ -30,12 +30,12 @@ pub struct PinToBoardModalProps {
 /// Modal for selecting which board to pin content to
 #[component]
 pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
-    let mut boards = use_signal(|| Vec::<Pinboard>::new());
+    let mut boards = use_signal(Vec::<Pinboard>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
     let mut saving = use_signal(|| false);
     let mut success = use_signal(|| false);
-    let mut selected_board_addrs = use_signal(|| Vec::<String>::new());
+    let mut selected_board_addrs = use_signal(Vec::<String>::new);
     let mut pin_note = use_signal(String::new);
 
     // Fetch user's boards on mount
@@ -58,8 +58,8 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
     let content_type = props.content_type.clone();
     let reference = props.reference.clone();
     let title = props.title.clone();
-    let on_close = props.on_close.clone();
-    let on_success = props.on_success.clone();
+    let on_close = props.on_close;
+    let on_success = props.on_success;
 
     let handle_add = move |_| {
         let selected = selected_board_addrs.read().clone();
@@ -68,8 +68,8 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
         let reference = reference.clone();
         let title = title.clone();
         let note = pin_note.read().clone();
-        let _on_close = on_close.clone();
-        let on_success = on_success.clone();
+        let _on_close = on_close;
+        let on_success = on_success;
 
         saving.set(true);
         error_msg.set(None);

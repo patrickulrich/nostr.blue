@@ -23,15 +23,15 @@ pub fn CalendarEventNew() -> Element {
     let mut summary = use_signal(String::new);
     let mut content = use_signal(String::new);
     let mut event_type = use_signal(|| EventType::TimeBased);
-    let mut start_date = use_signal(|| get_today());
+    let mut start_date = use_signal(get_today);
     let mut start_time = use_signal(|| "09:00".to_string());
-    let mut end_date = use_signal(|| get_today());
+    let mut end_date = use_signal(get_today);
     let mut end_time = use_signal(|| "10:00".to_string());
     let mut location = use_signal(String::new);
     let mut locations = use_signal(Vec::<String>::new);
     let mut image_url = use_signal(String::new);
     let mut hashtags_input = use_signal(String::new);
-    let mut timezone = use_signal(|| get_local_timezone());
+    let mut timezone = use_signal(get_local_timezone);
     let mut is_private = use_signal(|| false);
 
     // Publishing state
@@ -74,7 +74,7 @@ pub fn CalendarEventNew() -> Element {
 
     // Handle publish
     let handle_publish = {
-        let navigator = navigator.clone();
+        let navigator = navigator;
         move |_| {
             if !*can_publish.read() {
                 return;
@@ -98,7 +98,7 @@ pub fn CalendarEventNew() -> Element {
             is_publishing.set(true);
             error_message.set(None);
 
-            let nav = navigator.clone();
+            let nav = navigator;
             spawn(async move {
                 // Combine locations
                 let mut all_locations = locations_val;
@@ -108,7 +108,7 @@ pub fn CalendarEventNew() -> Element {
 
                 // Parse hashtags
                 let hashtags: Vec<String> = hashtags_val
-                    .split(|c: char| c == ',' || c == ' ' || c == '#')
+                    .split([',', ' ', '#'])
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
@@ -513,7 +513,7 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     let day: i32 = parts[2].parse().unwrap_or(1);
 
     let time_parts: Vec<&str> = time.split(':').collect();
-    let hours: u32 = time_parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let hours: u32 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minutes: u32 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
 
     let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);

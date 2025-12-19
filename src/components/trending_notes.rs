@@ -6,7 +6,7 @@ use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn TrendingNotes() -> Element {
-    let mut trending_notes = use_signal(|| Vec::<TrendingNote>::new());
+    let mut trending_notes = use_signal(Vec::<TrendingNote>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| false);
 

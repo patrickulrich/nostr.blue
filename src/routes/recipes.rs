@@ -18,19 +18,19 @@ use crate::routes::Route;
 #[component]
 pub fn RecipesHome() -> Element {
     // Collections state
-    let mut collections = use_signal(|| Vec::<Collection>::new());
+    let mut collections = use_signal(Vec::<Collection>::new);
     let mut collections_loading = use_signal(|| true);
 
     // Popular chefs state
-    let mut popular_chefs = use_signal(|| Vec::<PopularChef>::new());
+    let mut popular_chefs = use_signal(Vec::<PopularChef>::new);
     let mut chefs_loading = use_signal(|| true);
 
     // Discover recipes state
-    let mut discover_recipes = use_signal(|| Vec::<CachedRecipe>::new());
+    let mut discover_recipes = use_signal(Vec::<CachedRecipe>::new);
     let mut discover_loading = use_signal(|| true);
 
     // Hot tags state
-    let mut popular_tags = use_signal(|| Vec::<TagWithCount>::new());
+    let mut popular_tags = use_signal(Vec::<TagWithCount>::new);
     let mut tags_loading = use_signal(|| true);
 
     // Culture section expand state

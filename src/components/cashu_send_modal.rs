@@ -10,7 +10,7 @@ use crate::utils::{shorten_url, format::truncate_pubkey};
 pub fn CashuSendModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut amount = use_signal(|| String::new());
+    let mut amount = use_signal(String::new);
     let mints = cashu::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut is_sending = use_signal(|| false);
@@ -18,7 +18,7 @@ pub fn CashuSendModal(
     let mut token_result = use_signal(|| Option::<String>::None);
     // P2PK (send to npub) support
     let mut p2pk_enabled = use_signal(|| false);
-    let mut recipient_pubkey = use_signal(|| String::new());
+    let mut recipient_pubkey = use_signal(String::new);
     // Fee estimation
     let mut estimated_fee = use_signal(|| Option::<u64>::None);
     let mut is_estimating_fee = use_signal(|| false);

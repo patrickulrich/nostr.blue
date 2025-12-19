@@ -29,9 +29,9 @@ enum CommunityTab {
 #[component]
 pub fn CommunityPage(a_tag: String) -> Element {
     let mut community = use_signal(|| None::<Community>);
-    let mut posts = use_signal(|| Vec::<CommunityPost>::new());
-    let mut thread_tree = use_signal(|| Vec::<CommunityThread>::new());
-    let mut pending_posts = use_signal(|| Vec::<CommunityPost>::new());
+    let mut posts = use_signal(Vec::<CommunityPost>::new);
+    let mut thread_tree = use_signal(Vec::<CommunityThread>::new);
+    let mut pending_posts = use_signal(Vec::<CommunityPost>::new);
     let mut loading_community = use_signal(|| true);
     let mut loading_posts = use_signal(|| true);
     let mut loading_pending = use_signal(|| false);
@@ -41,7 +41,7 @@ pub fn CommunityPage(a_tag: String) -> Element {
     let mut refresh_trigger = use_signal(|| 0u32);
 
     // Interaction counts for posts
-    let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+    let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
 
     // Pagination state
     let mut oldest_timestamp = use_signal(|| None::<u64>);

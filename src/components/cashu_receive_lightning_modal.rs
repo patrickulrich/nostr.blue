@@ -8,7 +8,7 @@ use qrcode::{QrCode, render::svg};
 pub fn CashuReceiveLightningModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut amount = use_signal(|| String::new());
+    let mut amount = use_signal(String::new);
     let mints = cashu::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut is_generating = use_signal(|| false);
@@ -48,8 +48,8 @@ pub fn CashuReceiveLightningModal(
                 mint_status.set(Some("Connecting...".to_string()));
 
                 // Clone reactive handles into the async task to observe cancellation
-                let is_polling_clone = is_polling.clone();
-                let quote_info_clone = quote_info.clone();
+                let is_polling_clone = is_polling;
+                let quote_info_clone = quote_info;
 
                 spawn(async move {
                     // Try WebSocket subscription first (NUT-17)

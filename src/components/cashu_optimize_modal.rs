@@ -8,7 +8,7 @@ pub fn CashuOptimizeModal(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut is_optimizing = use_signal(|| false);
-    let mut results = use_signal(|| Vec::<(String, ConsolidationResult)>::new());
+    let mut results = use_signal(Vec::<(String, ConsolidationResult)>::new);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut is_complete = use_signal(|| false);
 

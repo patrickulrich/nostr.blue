@@ -40,10 +40,10 @@ pub struct MentionAutocompleteProps {
 #[component]
 pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let mut show_autocomplete = use_signal(|| false);
-    let search_results = use_signal(|| Vec::<ProfileSearchResult>::new());
+    let search_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut selected_index = use_signal(|| 0usize);
     let is_searching = use_signal(|| false);
-    let mention_query = use_signal(|| String::new());
+    let mention_query = use_signal(String::new);
     let mention_start_pos = use_signal(|| 0usize);
     let mut internal_cursor_pos = use_signal(|| 0usize);
 
@@ -58,7 +58,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let relay_search_task = use_signal(|| None::<Task>);
 
     // Contact list cache
-    let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
+    let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
 
     // Fetch contacts on mount
     use_effect(move || {
@@ -70,7 +70,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
-        let cursor_pos = get_cursor_position(&**textarea_id.read());
+        let cursor_pos = get_cursor_position(&textarea_id.read());
         internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
@@ -85,7 +85,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 
         // Update dropdown position if showing
         if *show_autocomplete.read() {
-            update_dropdown_position(&**textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below);
+            update_dropdown_position(&textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below);
         }
     };
 
@@ -121,7 +121,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                         insert_mention(
                             profile.clone(),
                             props.content,
-                            props.on_input.clone(),
+                            props.on_input,
                             *mention_start_pos.read(),
                             mention_query.read().len(),
                             (**textarea_id.read()).clone(),
@@ -146,7 +146,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 
     // Shared helper to update cursor position from DOM
     let mut sync_cursor_position = move || {
-        let cursor_pos = get_cursor_position(&**textarea_id.read());
+        let cursor_pos = get_cursor_position(&textarea_id.read());
         internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let text = props.content.read();
@@ -192,7 +192,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     *dropdown_left.read(),
                     *show_below.read(),
                     props.content,
-                    props.on_input.clone(),
+                    props.on_input,
                     *mention_start_pos.read(),
                     mention_query.read().len(),
                     (**textarea_id.read()).clone(),
@@ -537,7 +537,7 @@ fn render_dropdown(
                                             insert_mention(
                                                 profile_clone.clone(),
                                                 content,
-                                                on_input.clone(),
+                                                on_input,
                                                 mention_start_pos,
                                                 query_len,
                                                 (*textarea_id_clone).clone(),

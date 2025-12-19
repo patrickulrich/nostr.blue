@@ -8,7 +8,7 @@ use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 /// Global key package relays for MLS
-pub static KEY_PACKAGE_RELAYS: GlobalSignal<Vec<String>> = Signal::global(|| vec![]);
+pub static KEY_PACKAGE_RELAYS: GlobalSignal<Vec<String>> = Signal::global(std::vec::Vec::new);
 
 /// Fetch key package relays (kind 10051) for a user
 pub async fn fetch_key_package_relays(pubkey: &str) -> std::result::Result<(), String> {

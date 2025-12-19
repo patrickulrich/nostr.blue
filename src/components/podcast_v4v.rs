@@ -272,14 +272,14 @@ pub fn V4VBoostButton(props: V4VBoostButtonProps) -> Element {
                             {
                                 let amt = *amount;
                                 let vb = value_block.clone();
-                                let on_boost = props.on_boost.clone();
+                                let on_boost = props.on_boost;
                                 rsx! {
                                     button {
                                         key: "{amt}",
                                         class: "px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 text-sm font-medium transition",
                                         onclick: move |_| {
                                             let vb = vb.clone();
-                                            let on_boost = on_boost.clone();
+                                            let on_boost = on_boost;
                                             show_menu.set(false);
                                             is_sending.set(true);
                                             spawn(async move {
@@ -339,17 +339,17 @@ struct CustomBoostInputProps {
 
 #[component]
 fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
-    let mut amount = use_signal(|| String::new());
+    let mut amount = use_signal(String::new);
     let mut is_sending = use_signal(|| false);
 
     let handle_send = {
         let vb = props.value_block.clone();
-        let on_send = props.on_send.clone();
+        let on_send = props.on_send;
         move |_| {
             if let Ok(amt) = amount.read().parse::<u64>() {
                 if amt > 0 {
                     let vb = vb.clone();
-                    let on_send = on_send.clone();
+                    let on_send = on_send;
                     is_sending.set(true);
                     spawn(async move {
                         if let Ok(_) = send_v4v_payment(&vb, amt).await {

@@ -94,10 +94,10 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
 #[component]
 pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     // Determine initial is_voice_note from prop (for immediate correct header on deep-link)
-    let initial_is_voice = from_voice.as_ref().map_or(false, |v| v == "true");
+    let initial_is_voice = from_voice.as_ref().is_some_and(|v| v == "true");
     let mut note_data = use_signal(|| None::<NostrEvent>);
-    let mut parent_events = use_signal(|| Vec::<NostrEvent>::new());
-    let mut replies = use_signal(|| Vec::<NostrEvent>::new());
+    let mut parent_events = use_signal(Vec::<NostrEvent>::new);
+    let mut replies = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| true);
     let mut loading_parents = use_signal(|| false);
     let mut loading_replies = use_signal(|| false);
@@ -204,7 +204,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             // Determine back route based on whether this is a voice message
             // Prefer the from_voice prop for immediate correct display, then update from loaded data
             {
-                let data_is_voice = note_data.read().as_ref().map(|e| is_voice_message(e));
+                let data_is_voice = note_data.read().as_ref().map(is_voice_message);
                 let is_voice_note = data_is_voice.unwrap_or(initial_is_voice);
                 let back_route = if is_voice_note { Route::VoiceMessages {} } else { Route::Home {} };
                 let title = if is_voice_note { "Voice Message" } else { "Post" };

@@ -101,7 +101,7 @@ pub fn Profile(pubkey: String) -> Element {
 
     // DM dialog state
     let mut show_dm_dialog = use_signal(|| false);
-    let mut dm_message = use_signal(|| String::new());
+    let mut dm_message = use_signal(String::new);
     let mut dm_sending = use_signal(|| false);
     let mut dm_error = use_signal(|| None::<String>);
 
@@ -109,7 +109,7 @@ pub fn Profile(pubkey: String) -> Element {
     let mut show_info_dialog = use_signal(|| false);
 
     // Pinned notes state
-    let mut pinned_events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
 
     // Clone pubkey for rsx! block usage
@@ -506,7 +506,7 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_load_more.clone();
-        let mut post_count_clone = post_count.clone();
+        let mut post_count_clone = post_count;
 
         loading_events.set(true);
 
@@ -855,13 +855,13 @@ pub fn Profile(pubkey: String) -> Element {
                                         let year = v.get("year").and_then(|y| y.as_u64());
 
                                         match (month, day, year) {
-                                            (Some(m), Some(d), Some(y)) if m >= 1 && m <= 12 => {
+                                            (Some(m), Some(d), Some(y)) if (1..=12).contains(&m) => {
                                                 Some(format!("{} {}, {}", months[m - 1], d, y))
                                             }
-                                            (Some(m), Some(d), None) if m >= 1 && m <= 12 => {
+                                            (Some(m), Some(d), None) if (1..=12).contains(&m) => {
                                                 Some(format!("{} {}", months[m - 1], d))
                                             }
-                                            (Some(m), None, None) if m >= 1 && m <= 12 => {
+                                            (Some(m), None, None) if (1..=12).contains(&m) => {
                                                 Some(months[m - 1].to_string())
                                             }
                                             _ => None
@@ -1541,7 +1541,7 @@ fn parse_video_meta(event: &NostrEvent) -> VideoMeta {
 fn VertsVideoCard(event: NostrEvent) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Play/pause video on hover (only if no thumbnail)
@@ -1865,7 +1865,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
-                    .author(public_key.clone())
+                    .author(public_key)
                     .kinds(vec![Kind::TextNote, Kind::Repost])
                     .limit(100); // Fetch more at once to reduce round trips
 
@@ -1933,7 +1933,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
-                    .author(public_key.clone())
+                    .author(public_key)
                     .kind(Kind::TextNote)
                     .limit(100);
 

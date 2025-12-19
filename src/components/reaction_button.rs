@@ -32,7 +32,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut custom_emoji_failed = use_signal(|| false);
 
     // Reset custom emoji failed state when reaction changes
-    let user_reaction_for_effect = props.reaction.user_reaction.clone();
+    let user_reaction_for_effect = props.reaction.user_reaction;
     use_effect(use_reactive(&*user_reaction_for_effect.read(), move |_| {
         custom_emoji_failed.set(false);
     }));

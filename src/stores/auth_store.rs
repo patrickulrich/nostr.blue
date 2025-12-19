@@ -18,6 +18,7 @@ use nostr_sdk::nips::nip46::NostrConnectURI;
 
 /// Authentication state
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AuthState {
     pub pubkey: Option<String>,
     pub is_authenticated: bool,
@@ -32,15 +33,6 @@ pub enum LoginMethod {
     RemoteSigner,      // NIP-46 (nostr-connect)
 }
 
-impl Default for AuthState {
-    fn default() -> Self {
-        Self {
-            pubkey: None,
-            is_authenticated: false,
-            login_method: None,
-        }
-    }
-}
 
 /// Global authentication state
 pub static AUTH_STATE: GlobalSignal<AuthState> = Signal::global(AuthState::default);
@@ -531,7 +523,7 @@ pub fn sign_message(message: &str) -> Result<String, String> {
 /// Export private key as nsec
 pub fn export_nsec() -> Result<String, String> {
     let keys = get_keys().ok_or("Not logged in with private key")?;
-    Ok(keys.secret_key().to_bech32().map_err(|e| e.to_string())?)
+    keys.secret_key().to_bech32().map_err(|e| e.to_string())
 }
 
 /// Export public key as npub

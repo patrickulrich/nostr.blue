@@ -291,7 +291,7 @@ pub async fn receive_tokens_with_options(
         .map_err(|e| format!("Failed to get proofs: {}", e))?;
 
     // Convert to ProofData
-    let proof_data: Vec<ProofData> = new_proofs.iter().map(|p| cdk_proof_to_proof_data(p)).collect();
+    let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
     // Create extended token event with P2PK support
     let extended_proofs: Vec<ExtendedCashuProof> = proof_data

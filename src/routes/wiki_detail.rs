@@ -353,7 +353,7 @@ fn BacklinksCollapsiblePanel(
 fn MergeRequestsPanel(a_tag: String) -> Element {
     let mut is_expanded = use_signal(|| false);
     let mut is_loading = use_signal(|| false);
-    let mut merge_requests = use_signal(|| Vec::<WikiMergeRequest>::new());
+    let mut merge_requests = use_signal(Vec::<WikiMergeRequest>::new);
     let mut has_fetched = use_signal(|| false);
 
     // Fetch merge requests when expanded for the first time

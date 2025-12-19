@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 #[component]
 pub fn SettingsBlocklist() -> Element {
-    let mut blocked_users = use_signal(|| Vec::<String>::new());
-    let mut user_profiles = use_signal(|| HashMap::<String, profiles::Profile>::new());
+    let mut blocked_users = use_signal(Vec::<String>::new);
+    let mut user_profiles = use_signal(HashMap::<String, profiles::Profile>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
     let refresh_trigger = use_signal(|| 0);

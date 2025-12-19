@@ -129,7 +129,7 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // State for comment composer
-    let mut comment_text = use_signal(|| String::new());
+    let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
 
     // State for zap modal
@@ -677,7 +677,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     {
                         let count = *reply_count.read();
                         if count == 1 {
-                            format!("View 1 comment")
+                            "View 1 comment".to_string()
                         } else {
                             format!("View all {} comments", count)
                         }

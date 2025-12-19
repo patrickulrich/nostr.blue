@@ -197,8 +197,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let llm_val = llm.read().clone();
         let summary_val = conversation_summary.read().clone();
         let prompt_url_val = prompt_url.read().clone();
-        let on_save = props.on_save.clone();
-        let mut show = props.show.clone();
+        let on_save = props.on_save;
+        let mut show = props.show;
 
         spawn(async move {
             let result = match current_tab {

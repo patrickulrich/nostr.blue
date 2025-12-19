@@ -39,7 +39,7 @@ pub struct BookPickerModalProps {
 pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut active_tab = use_signal(|| BookPickerTab::Browse);
     let mut search_query = use_signal(String::new);
-    let mut search_results = use_signal(|| Vec::<PublicationIndex>::new());
+    let mut search_results = use_signal(Vec::<PublicationIndex>::new);
     let mut is_searching = use_signal(|| false);
     // Debounce counter to cancel stale search requests
     let mut debounce_counter = use_signal(|| 0u32);
@@ -414,7 +414,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                         // Extract d-tag from address
                                                         let section_name = section_ref.address
                                                             .split(':')
-                                                            .last()
+                                                            .next_back()
                                                             .unwrap_or(&section_ref.address);
                                                         let chapter_num = (idx + 1).to_string();
                                                         rsx! {

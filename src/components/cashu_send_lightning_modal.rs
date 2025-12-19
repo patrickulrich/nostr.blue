@@ -24,7 +24,7 @@ enum PaymentMode {
 pub fn CashuSendLightningModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut invoice = use_signal(|| String::new());
+    let mut invoice = use_signal(String::new);
     let mints = get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
     let mut is_creating_quote = use_signal(|| false);
@@ -44,9 +44,9 @@ pub fn CashuSendLightningModal(
     // MPP state
     let mut payment_mode = use_signal(|| PaymentMode::Single);
     let mut mpp_quote = use_signal(|| Option::<MppQuoteInfo>::None);
-    let mut mpp_allocations = use_signal(|| Vec::<(String, u64)>::new());
-    let mut mint_balances = use_signal(|| Vec::<(String, u64)>::new());
-    let mut mpp_mint_balances = use_signal(|| Vec::<(String, u64)>::new()); // Only MPP-supporting mints
+    let mut mpp_allocations = use_signal(Vec::<(String, u64)>::new);
+    let mut mint_balances = use_signal(Vec::<(String, u64)>::new);
+    let mut mpp_mint_balances = use_signal(Vec::<(String, u64)>::new); // Only MPP-supporting mints
 
     // Read melt progress for UI updates
     let melt_progress = MELT_PROGRESS.read();

@@ -351,7 +351,7 @@ pub async fn fetch_wiki_pages(limit: usize, until: Option<u64>) -> StdResult<Vec
         Ok(events) => {
             let pages: Vec<CachedWikiPage> = events
                 .iter()
-                .filter_map(|e| parse_wiki_page_event(e))
+                .filter_map(parse_wiki_page_event)
                 .collect();
 
             cache_wiki_pages(&pages);
@@ -467,7 +467,7 @@ pub async fn fetch_wiki_backlinks(identifier: &str, limit: usize) -> StdResult<V
         Ok(events) => {
             let pages: Vec<CachedWikiPage> = events
                 .iter()
-                .filter_map(|e| parse_wiki_page_event(e))
+                .filter_map(parse_wiki_page_event)
                 .collect();
 
             // Cache backlinks
@@ -504,7 +504,7 @@ pub async fn fetch_wiki_pages_by_author(pubkey_hex: &str, limit: usize) -> StdRe
         Ok(events) => {
             let pages: Vec<CachedWikiPage> = events
                 .iter()
-                .filter_map(|e| parse_wiki_page_event(e))
+                .filter_map(parse_wiki_page_event)
                 .collect();
 
             cache_wiki_pages(&pages);
@@ -625,7 +625,7 @@ pub async fn publish_wiki_page(
 
     // Generate or use provided identifier
     let d_tag = identifier
-        .map(|s| normalize_wiki_dtag(s))
+        .map(normalize_wiki_dtag)
         .unwrap_or_else(|| normalize_wiki_dtag(title));
 
     // Build tags
