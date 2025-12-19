@@ -432,10 +432,8 @@ fn ReactionNotification(event: NostrEvent) -> Element {
         "❤️".to_string() // Default to heart if empty or just "+"
     } else if event.content == "-" {
         "👎".to_string() // Thumbs down for downvote
-    } else if custom_emoji_url.is_some() {
-        event.content.clone() // Will show as custom image below
     } else {
-        event.content.clone() // Regular emoji
+        event.content.clone() // Regular emoji or custom emoji (shown as image below if custom_emoji_url.is_some())
     };
 
     // Get the event ID that was reacted to
@@ -868,12 +866,10 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
     let lower = bolt11.to_lowercase();
 
     // Find where the amount starts (after "lnbc" or "lntb" etc)
-    let prefix_end = if lower.starts_with("lnbc") {
-        4
-    } else if lower.starts_with("lntb") {
-        4
-    } else if lower.starts_with("lnbcrt") {
+    let prefix_end = if lower.starts_with("lnbcrt") {
         6
+    } else if lower.starts_with("lnbc") || lower.starts_with("lntb") {
+        4
     } else {
         return None;
     };

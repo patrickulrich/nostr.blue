@@ -205,6 +205,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 }
 
 /// Detect @ mention in text at cursor position
+#[allow(clippy::too_many_arguments)]
 fn detect_mention(
     text: &str,
     cursor_pos: usize,
@@ -308,6 +309,7 @@ fn detect_mention(
 }
 
 /// Insert a mention into the textarea
+#[allow(clippy::too_many_arguments)]
 fn insert_mention(
     profile: ProfileSearchResult,
     content: Signal<String>,
@@ -482,6 +484,7 @@ fn update_dropdown_position(
 }
 
 /// Render the autocomplete dropdown
+#[allow(clippy::too_many_arguments)]
 fn render_dropdown(
     results: &[ProfileSearchResult],
     selected_index: usize,

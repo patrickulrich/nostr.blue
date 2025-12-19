@@ -153,7 +153,6 @@ pub fn CashuTokenCard(token: String) -> Element {
             e.stop_propagation();
 
             let token = token.clone();
-            let toast_api = toast_api;
             spawn_forever(async move {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {

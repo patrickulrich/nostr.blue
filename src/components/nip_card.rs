@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::github_nips::OfficialNip;
-use crate::utils::truncate_pubkey;
+use crate::utils::{truncate_pubkey, format::truncate_with_word_break, time::format_relative_time};
 
 /// Card component for displaying an official NIP from GitHub
 #[component]
@@ -151,23 +151,10 @@ pub fn CustomNipCard(
     };
 
     // Format timestamp
-    let timestamp = format_relative_time(event.created_at.as_secs());
+    let timestamp = format_relative_time(event.created_at);
 
     // Create preview from content
-    let preview = {
-        let content = &event.content;
-        let char_count = content.chars().count();
-        if char_count > 150 {
-            let truncated: String = content.chars().take(150).collect();
-            if let Some(last_space) = truncated.rfind(' ') {
-                format!("{}...", &truncated[..last_space])
-            } else {
-                format!("{}...", truncated)
-            }
-        } else {
-            content.clone()
-        }
-    };
+    let preview = truncate_with_word_break(&event.content, 150);
 
     rsx! {
         Link {
@@ -284,26 +271,3 @@ pub fn NipCardSkeleton() -> Element {
     }
 }
 
-/// Format a timestamp as a relative time string
-fn format_relative_time(timestamp_secs: u64) -> String {
-    let now = instant::now() as u64 / 1000;
-    let diff = now.saturating_sub(timestamp_secs);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
-    } else if diff < 604800 {
-        format!("{}d ago", diff / 86400)
-    } else if diff < 2592000 {
-        format!("{}w ago", diff / 604800)
-    } else {
-        // Format as date
-        let date = chrono::DateTime::from_timestamp(timestamp_secs as i64, 0)
-            .map(|dt| dt.format("%b %d, %Y").to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        date
-    }
-}

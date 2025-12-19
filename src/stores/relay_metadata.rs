@@ -66,17 +66,14 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
     for tag in event.tags.iter() {
         // Try to extract relay URL from the tag
         // For NIP-65, we're looking for tags like ["r", "wss://relay.url", "read"|"write"]
-        if let Some(standardized) = tag.as_standardized() {
-            // Check if this is a Relay tag
-            if let nostr_sdk::TagStandard::Relay(relay_url) = standardized {
-                log::debug!("Found relay tag: {}", relay_url);
-                relays.push(RelayConfig {
-                    url: relay_url.to_string(),
-                    read: true,
-                    write: true,
-                });
-                continue;
-            }
+        if let Some(nostr_sdk::TagStandard::Relay(relay_url)) = tag.as_standardized() {
+            log::debug!("Found relay tag: {}", relay_url);
+            relays.push(RelayConfig {
+                url: relay_url.to_string(),
+                read: true,
+                write: true,
+            });
+            continue;
         }
 
         // Fallback: try parsing as custom 'r' tag

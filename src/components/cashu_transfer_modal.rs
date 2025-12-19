@@ -10,7 +10,7 @@ fn select_valid_mint(
 ) -> Option<String> {
     // If current is valid and not excluded, keep it
     if !current.is_empty()
-        && mints.contains(&current.to_string())
+        && mints.iter().any(|m| m == current)
         && (exclude != Some(current))
     {
         return Some(current.to_string());

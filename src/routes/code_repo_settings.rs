@@ -392,12 +392,9 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 DeleteConfirmModal {
                     repo_name: repo_name.read().clone(),
                     on_cancel: move |_| show_delete_confirm.set(false),
-                    on_confirm: {
-                        let nav = nav;
-                        move |_| {
-                            // Navigate back to repositories since delete isn't implemented
-                            let _ = nav.push(Route::CodeRepositories {});
-                        }
+                    on_confirm: move |_| {
+                        // Navigate back to repositories since delete isn't implemented
+                        let _ = nav.push(Route::CodeRepositories {});
                     }
                 }
             }

@@ -227,6 +227,7 @@ use calendar_event_new::CalendarEventNew;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Route {
     #[layout(Layout)]
         #[route("/")]

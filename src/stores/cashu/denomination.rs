@@ -39,6 +39,7 @@ impl DenominationStrategy {
     /// CDK SplitTarget semantics (from crates/cashu/src/amount.rs):
     /// - SplitTarget::None = "least amount of proofs" (larger denominations, power-of-two)
     /// - SplitTarget::Value(Amount) = "most proofs that add up to value" (many small proofs)
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_split_target(&self) -> SplitTarget {
         match self {
             Self::PowerOfTwo => SplitTarget::default(),

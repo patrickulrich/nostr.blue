@@ -8,7 +8,12 @@ use wasm_bindgen::JsCast;
 
 /// Language detection from file extension
 fn detect_language(filename: &str) -> &'static str {
-    let extension = filename.rsplit('.').next().unwrap_or("");
+    // Handle extensionless files properly (rsplit returns filename if no dot)
+    let extension = filename
+        .rsplit_once('.')
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(_, ext)| ext)
+        .unwrap_or("");
     match extension {
         "rs" => "rust",
         "js" | "mjs" => "javascript",
@@ -45,7 +50,12 @@ fn detect_language(filename: &str) -> &'static str {
 
 /// Check if file is likely binary based on extension
 fn is_binary_extension(filename: &str) -> bool {
-    let extension = filename.rsplit('.').next().unwrap_or("");
+    // Handle extensionless files properly
+    let extension = filename
+        .rsplit_once('.')
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(_, ext)| ext)
+        .unwrap_or("");
     matches!(
         extension,
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |

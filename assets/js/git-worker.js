@@ -109,7 +109,7 @@ const methods = {
           }
         }
       } catch (e2) {
-        throw new Error(`Could not resolve ref: ${e.message}`);
+        throw new Error(`Could not resolve ref: ${e2.message || e.message}`);
       }
     }
 
@@ -151,21 +151,36 @@ const methods = {
    * Read file content at a given ref
    */
   async readFile({ dir, ref = 'HEAD', filepath }) {
-    const commitOid = await git.resolveRef({ fs, dir, ref });
-    const { blob } = await git.readBlob({
-      fs,
-      dir,
-      oid: commitOid,
-      filepath,
-    });
-    return new TextDecoder().decode(blob);
+    let commitOid;
+    try {
+      commitOid = await git.resolveRef({ fs, dir, ref });
+    } catch (e) {
+      throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
+    }
+
+    try {
+      const { blob } = await git.readBlob({
+        fs,
+        dir,
+        oid: commitOid,
+        filepath,
+      });
+      return new TextDecoder().decode(blob);
+    } catch (e) {
+      throw new Error(`Could not read file '${filepath}': ${e.message}`);
+    }
   },
 
   /**
    * Get commit log
    */
   async log({ dir, ref = 'HEAD', depth = 50 }) {
-    const commits = await git.log({ fs, dir, ref, depth });
+    let commits;
+    try {
+      commits = await git.log({ fs, dir, ref, depth });
+    } catch (e) {
+      throw new Error(`Could not get log for ref '${ref}': ${e.message}`);
+    }
     return commits.map((c) => ({
       oid: c.oid,
       message: c.commit.message,
@@ -206,6 +221,11 @@ const methods = {
    * Delete a cached repo
    */
   async deleteRepo({ dir }) {
+    // Validate dir parameter to prevent path traversal
+    if (!dir || dir.includes('..') || dir.startsWith('/')) {
+      return { success: false, error: 'Invalid directory path' };
+    }
+
     try {
       // Recursively delete directory
       const deleteRecursive = async (path) => {

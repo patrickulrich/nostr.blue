@@ -2,14 +2,12 @@
 pub fn format_sats_with_separator(sats: u64) -> String {
     let s = sats.to_string();
     let mut result = String::new();
-    let mut count = 0;
 
-    for c in s.chars().rev() {
+    for (count, c) in s.chars().rev().enumerate() {
         if count > 0 && count % 3 == 0 {
             result.push(',');
         }
         result.push(c);
-        count += 1;
     }
 
     result.chars().rev().collect()
@@ -44,6 +42,29 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
     let prefix: String = chars[..8].iter().collect();
     let suffix: String = chars[chars.len() - 8..].iter().collect();
     format!("{}...{}", prefix, suffix)
+}
+
+/// Truncates text at a word boundary to avoid breaking words
+/// Returns text with "..." suffix if truncated
+pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    if let Some(last_space) = truncated.rfind(' ') {
+        format!("{}...", &truncated[..last_space])
+    } else {
+        format!("{}...", truncated)
+    }
+}
+
+/// Extracts the domain from a URL (e.g., "https://example.com/path" -> "example.com")
+pub fn extract_domain(url: &str) -> Option<String> {
+    url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .and_then(|s| s.split('/').next())
+        .map(|s| s.to_string())
 }
 
 /// Shortens a URL for display by stripping protocol and truncating

@@ -135,9 +135,7 @@ fn categorize_persons(persons: Vec<Person>) -> (Vec<Person>, Vec<Person>, Vec<Pe
 
         if role == "host" || role.contains("host") {
             hosts.push(person);
-        } else if role == "guest" || role.contains("guest") {
-            guests.push(person);
-        } else if group == "cast" {
+        } else if role == "guest" || role.contains("guest") || group == "cast" {
             guests.push(person);
         } else if group == "crew" || !role.is_empty() {
             crew.push(person);

@@ -201,11 +201,9 @@ pub fn add_auth_header(
             }
             AuthRequired::Blind => {
                 // Get blind auth token from cache
-                if let Some(token) = get_blind_auth_for_request(mint_url) {
-                    if let AuthToken::BlindAuth(bat) = token {
-                        headers.push(("Blind-auth".to_string(), bat.to_string()));
-                        return Ok(());
-                    }
+                if let Some(AuthToken::BlindAuth(bat)) = get_blind_auth_for_request(mint_url) {
+                    headers.push(("Blind-auth".to_string(), bat.to_string()));
+                    return Ok(());
                 }
                 Err("Blind auth required but no tokens available. Please request blind auth tokens.".to_string())
             }

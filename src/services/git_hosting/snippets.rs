@@ -124,6 +124,7 @@ pub async fn search_snippets(query: &str, limit: usize) -> Result<Vec<DisplaySni
 }
 
 /// Publish a new code snippet
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_snippet(
     code: &str,
     language: Option<&str>,

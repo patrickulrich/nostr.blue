@@ -129,7 +129,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     };
 
     // Handle citation selection
-    let mut handle_citation_click = move |citation: CachedCitation| {
+    let handle_citation_click = move |citation: CachedCitation| {
         selected_citation.set(Some(citation));
     };
 
@@ -272,7 +272,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                                                 class: "rounded-lg {selected_class}",
                                                 CitationCardCompact {
                                                     citation: citation_clone.clone(),
-                                                    on_click: move |c| handle_citation_click(c),
+                                                    on_click: handle_citation_click,
                                                 }
                                             }
                                         }
