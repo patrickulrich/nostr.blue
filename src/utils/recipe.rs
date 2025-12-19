@@ -186,8 +186,8 @@ fn parse_ingredients(content: &str) -> Result<Vec<String>, ValidationError> {
     let mut ingredients = Vec::new();
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with("- ") {
-            let ingredient = line[2..].trim();
+        if let Some(stripped) = line.strip_prefix("- ") {
+            let ingredient = stripped.trim();
             if ingredient.len() > 9999 {
                 return Err(ValidationError::IngredientTooLong);
             }
@@ -241,6 +241,7 @@ fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
 }
 
 /// Extract recipe metadata from a Kind 30023 event
+#[allow(clippy::field_reassign_with_default)]
 pub fn extract_metadata(event: &Event) -> RecipeMetadata {
     let mut meta = RecipeMetadata::default();
 

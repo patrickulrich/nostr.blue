@@ -34,9 +34,8 @@ self.addEventListener('activate', (event) => {
             return caches.delete(k);
           })
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 // Fetch - network first for navigation, cache first for assets

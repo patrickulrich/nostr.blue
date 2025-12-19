@@ -1729,7 +1729,7 @@ async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) 
 
     let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
 
-    log::info!("DB Phase: loaded {} {} events", processed.len(), format!("{:?}", tab));
+    log::info!("DB Phase: loaded {} {:?} events", processed.len(), tab);
 
     Ok(LoadOutcome {
         events: processed,
@@ -1762,7 +1762,7 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
 
     let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
 
-    log::info!("Relay Phase: fetched {} {} events (raw: {})", processed.len(), format!("{:?}", tab), relay_count);
+    log::info!("Relay Phase: fetched {} {:?} events (raw: {})", processed.len(), tab, relay_count);
 
     Ok(LoadOutcome {
         events: processed,

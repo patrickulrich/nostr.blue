@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use crate::utils::nip34::Issue;
 use crate::routes::Route;
 use crate::components::code_status_badge::{CodeStatusBadge, BadgeSize};
+use crate::components::icons::CommentIcon;
 
 /// Issue card component for lists
 #[component]
@@ -53,19 +54,7 @@ pub fn CodeIssueCard(
                             span { "·" }
                             div {
                                 class: "flex items-center gap-1",
-                                svg {
-                                    class: "w-3.5 h-3.5",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                                }
+                                CommentIcon { class: "w-3.5 h-3.5".to_string() }
                                 span { "{issue.comment_count}" }
                             }
                         }
@@ -103,12 +92,7 @@ pub fn CodeIssueRow(issue: Issue) -> Element {
 
             // Status indicator
             div {
-                class: match issue.status {
-                    crate::utils::nip34::IssueStatus::Open => "w-2 h-2 rounded-full bg-green-500",
-                    crate::utils::nip34::IssueStatus::Closed => "w-2 h-2 rounded-full bg-red-500",
-                    crate::utils::nip34::IssueStatus::Applied => "w-2 h-2 rounded-full bg-purple-500",
-                    crate::utils::nip34::IssueStatus::Draft => "w-2 h-2 rounded-full bg-gray-500",
-                },
+                class: format!("w-2 h-2 rounded-full {}", issue.status.bg_class()),
             }
 
             // Title
@@ -121,19 +105,7 @@ pub fn CodeIssueRow(issue: Issue) -> Element {
             if issue.comment_count > 0 {
                 div {
                     class: "flex items-center gap-1 text-sm text-muted-foreground",
-                    svg {
-                        class: "w-3.5 h-3.5",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                    }
+                    CommentIcon { class: "w-3.5 h-3.5".to_string() }
                     span { "{issue.comment_count}" }
                 }
             }

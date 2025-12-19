@@ -204,6 +204,7 @@ pub fn PinBoardsHome() -> Element {
     };
 
     // Pre-compute zap modal data (must be before rsx!)
+    #[allow(clippy::type_complexity)]
     let zap_modal_data: Option<(String, String, Option<String>, Option<String>, String)> = {
         if *show_zap_modal.read() {
             if let Some(ref board) = *zap_board.read() {

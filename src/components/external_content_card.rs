@@ -117,6 +117,7 @@ fn BookCard(props: BookCardProps) -> Element {
             a {
                 href: "{book_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full hover:bg-amber-500/20 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -131,6 +132,7 @@ fn BookCard(props: BookCardProps) -> Element {
         a {
             href: "{book_url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             // Book cover

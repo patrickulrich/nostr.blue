@@ -6,10 +6,28 @@
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 
+/// Extract file extension from filename
+/// Returns empty string for extensionless files or dotfiles (e.g., ".gitignore")
+fn extract_extension(filename: &str) -> &str {
+    filename
+        .rsplit_once('.')
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(_, ext)| ext)
+        .unwrap_or("")
+}
+
 /// Language detection from file extension
 fn detect_language(filename: &str) -> &'static str {
-    let extension = filename.rsplit('.').next().unwrap_or("");
-    match extension {
+    // Special case: match full filename for extensionless special files
+    // These files don't have extensions, so we check the basename first
+    let basename = filename.rsplit('/').next().unwrap_or(filename);
+    match basename.to_lowercase().as_str() {
+        "dockerfile" => return "dockerfile",
+        "makefile" | "gnumakefile" => return "makefile",
+        _ => {}
+    }
+
+    match extract_extension(filename) {
         "rs" => "rust",
         "js" | "mjs" => "javascript",
         "jsx" => "jsx",
@@ -35,8 +53,6 @@ fn detect_language(filename: &str) -> &'static str {
         "toml" => "toml",
         "xml" => "xml",
         "md" | "mdx" => "markdown",
-        "dockerfile" | "Dockerfile" => "dockerfile",
-        "makefile" | "Makefile" => "makefile",
         "vue" => "vue",
         "svelte" => "svelte",
         _ => "plaintext",
@@ -45,9 +61,8 @@ fn detect_language(filename: &str) -> &'static str {
 
 /// Check if file is likely binary based on extension
 fn is_binary_extension(filename: &str) -> bool {
-    let extension = filename.rsplit('.').next().unwrap_or("");
     matches!(
-        extension,
+        extract_extension(filename),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |
         "pdf" | "doc" | "docx" | "xls" | "xlsx" |
         "zip" | "tar" | "gz" | "rar" | "7z" |

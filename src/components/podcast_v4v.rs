@@ -352,7 +352,7 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                     let on_send = on_send;
                     is_sending.set(true);
                     spawn(async move {
-                        if let Ok(_) = send_v4v_payment(&vb, amt).await {
+                        if send_v4v_payment(&vb, amt).await.is_ok() {
                             on_send.call(amt);
                         }
                         is_sending.set(false);

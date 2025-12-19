@@ -63,8 +63,9 @@ pub fn BoardSlideover(
 
     // Fetch pins when slideover opens
     // Re-run when show, board, or collaborative status changes
-    use_effect(use_reactive!(|(board_a_tag, owner_pubkey_for_pins, is_collaborative)| {
-        let shown = *show.read();
+    let show_signal = show;
+    use_effect(use_reactive!(|(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative)| {
+        let shown = *show_signal.read();
         if !shown {
             return;
         }
@@ -139,7 +140,6 @@ pub fn BoardSlideover(
     let handle_delete = move |_| {
         deleting.set(true);
         let board_clone = board_for_delete.clone();
-        let nav = nav;
         let on_close = on_close_for_delete;
 
         spawn(async move {

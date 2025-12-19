@@ -486,10 +486,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 /// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
 fn parse_naddr(note_id: &str) -> (String, String) {
     // First try to decode as NIP-19 bech32 naddr
-    if let Ok(nip19) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
-        if let nostr_sdk::nips::nip19::Nip19::Coordinate(coord) = nip19 {
-            return (coord.public_key.to_hex(), coord.identifier.clone());
-        }
+    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
+        return (coord.public_key.to_hex(), coord.identifier.clone());
     }
 
     // Fall back to colon-split logic for non-bech32 formats

@@ -1562,6 +1562,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
 // ============================================================================
 
 /// Publish a date-based calendar event (kind 31922)
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_date_event(
     title: &str,
     start_date: &str,  // YYYY-MM-DD
@@ -1627,6 +1628,7 @@ pub async fn publish_date_event(
 }
 
 /// Publish a time-based calendar event (kind 31923)
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_time_event(
     title: &str,
     start_timestamp: u64,
@@ -1855,6 +1857,7 @@ pub async fn fetch_booking_data(pubkey: &str) -> StdResult<(Vec<AvailabilityTemp
 }
 
 /// Publish an availability template (kind 31926)
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_availability_template(
     title: &str,
     duration_minutes: u32,

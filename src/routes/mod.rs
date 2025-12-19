@@ -227,6 +227,7 @@ use calendar_event_new::CalendarEventNew;
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Route {
     #[layout(Layout)]
         #[route("/")]
@@ -738,7 +739,7 @@ fn Layout() -> Element {
                                         },
                                         // All other items use standard NavLink
                                         _ => {
-                                            if let Some(route) = item.to_route(auth.pubkey.as_deref()) {
+                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                 rsx! {
                                                     NavLink {
                                                         key: "{item:?}",
@@ -781,7 +782,7 @@ fn Layout() -> Element {
                                             // Render More menu items dynamically
                                             for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
                                                 {
-                                                    if let Some(route) = item.to_route(auth.pubkey.as_deref()) {
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                         rsx! {
                                                             Link {
                                                                 key: "{item:?}-more",
@@ -976,7 +977,7 @@ fn Layout() -> Element {
                                                 },
                                                 // All other items use standard NavLink
                                                 _ => {
-                                                    if let Some(route) = item.to_route(auth.pubkey.as_deref()) {
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                         rsx! {
                                                             div {
                                                                 key: "{item:?}-mobile",
@@ -1024,7 +1025,7 @@ fn Layout() -> Element {
                                                     // Render More menu items dynamically (mobile)
                                                     for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
                                                         {
-                                                            if let Some(route) = item.to_route(auth.pubkey.as_deref()) {
+                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                                 rsx! {
                                                                     Link {
                                                                         key: "{item:?}-mobile-more",

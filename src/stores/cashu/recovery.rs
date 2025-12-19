@@ -256,13 +256,13 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
             match state.state {
                 State::Spent => {
                     // Proof is spent - mark locally and clean up
-                    move_proofs_to_spent(&[proof.secret.clone()]);
+                    move_proofs_to_spent(std::slice::from_ref(&proof.secret));
                     result.spent_found += 1;
                     result.sats_cleaned += proof.amount;
 
                     // Remove from pending-at-mint if it was there
                     if is_proof_pending_at_mint(&proof.secret) {
-                        remove_from_pending_at_mint(&[proof.secret.clone()]);
+                        remove_from_pending_at_mint(std::slice::from_ref(&proof.secret));
                     }
 
                     log::debug!("Proof {} marked as spent ({} sats)", &proof.secret[..8], proof.amount);
@@ -271,7 +271,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                     // Proof is pending at mint (lightning in-flight)
                     result.pending_found += 1;
                     if !is_proof_pending_at_mint(&proof.secret) {
-                        register_proofs_pending_at_mint(&[proof.secret.clone()]);
+                        register_proofs_pending_at_mint(std::slice::from_ref(&proof.secret));
                         log::debug!("Proof {} registered as pending at mint", &proof.secret[..8]);
                     }
                 }
@@ -279,8 +279,8 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                     // Proof is unspent at mint
                     if is_proof_pending_at_mint(&proof.secret) {
                         // Was pending but now unspent = payment failed, revert
-                        remove_from_pending_at_mint(&[proof.secret.clone()]);
-                        revert_proofs_to_spendable(&[proof.secret.clone()]);
+                        remove_from_pending_at_mint(std::slice::from_ref(&proof.secret));
+                        revert_proofs_to_spendable(std::slice::from_ref(&proof.secret));
                         log::info!(
                             "Proof {} reverted to spendable (payment failed)",
                             &proof.secret[..8]
@@ -307,7 +307,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                     } else {
                         // Orphaned reserve - no transaction ID means this was from a
                         // crashed/interrupted operation that never completed setup
-                        revert_proofs_to_spendable(&[proof.secret.clone()]);
+                        revert_proofs_to_spendable(std::slice::from_ref(&proof.secret));
                         log::info!(
                             "Proof {} reverted from Reserved to Unspent (orphaned reserve)",
                             &proof.secret[..8]
@@ -319,7 +319,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                     // This is similar to Pending - keep it pending until mint confirms
                     result.pending_found += 1;
                     if !is_proof_pending_at_mint(&proof.secret) {
-                        register_proofs_pending_at_mint(&[proof.secret.clone()]);
+                        register_proofs_pending_at_mint(std::slice::from_ref(&proof.secret));
                         log::debug!("Proof {} registered as pending (PendingSpent)", &proof.secret[..8]);
                     }
                 }

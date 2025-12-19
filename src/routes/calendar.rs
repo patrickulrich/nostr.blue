@@ -303,27 +303,24 @@ pub fn Calendar() -> Element {
                                 if is_logged_in && !filtered_events.read().is_empty() {
                                     button {
                                         class: "hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-accent transition",
-                                        onclick: {
-                                            let filtered_events = filtered_events;
-                                            move |_| {
-                                                // Extract CalendarEvent items from filtered events
-                                                let calendar_events: Vec<CalendarEvent> = filtered_events.read()
-                                                    .iter()
-                                                    .filter_map(|e| {
-                                                        if let UnifiedEvent::Calendar(cal) = e {
-                                                            Some(cal.clone())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect();
+                                        onclick: move |_| {
+                                            // Extract CalendarEvent items from filtered events
+                                            let calendar_events: Vec<CalendarEvent> = filtered_events.read()
+                                                .iter()
+                                                .filter_map(|e| {
+                                                    if let UnifiedEvent::Calendar(cal) = e {
+                                                        Some(cal.clone())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
 
-                                                if !calendar_events.is_empty() {
-                                                    let ics_content = export_events_to_ics(&calendar_events);
-                                                    let today = get_today();
-                                                    let filename = format!("nostr_calendar_{}.ics", today);
-                                                    download_ics(&filename, &ics_content);
-                                                }
+                                            if !calendar_events.is_empty() {
+                                                let ics_content = export_events_to_ics(&calendar_events);
+                                                let today = get_today();
+                                                let filename = format!("nostr_calendar_{}.ics", today);
+                                                download_ics(&filename, &ics_content);
                                             }
                                         },
                                         // Download icon
@@ -346,26 +343,23 @@ pub fn Calendar() -> Element {
                                     // Mobile export button (icon only)
                                     button {
                                         class: "sm:hidden p-2 border border-border rounded-lg hover:bg-accent transition",
-                                        onclick: {
-                                            let filtered_events = filtered_events;
-                                            move |_| {
-                                                let calendar_events: Vec<CalendarEvent> = filtered_events.read()
-                                                    .iter()
-                                                    .filter_map(|e| {
-                                                        if let UnifiedEvent::Calendar(cal) = e {
-                                                            Some(cal.clone())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect();
+                                        onclick: move |_| {
+                                            let calendar_events: Vec<CalendarEvent> = filtered_events.read()
+                                                .iter()
+                                                .filter_map(|e| {
+                                                    if let UnifiedEvent::Calendar(cal) = e {
+                                                        Some(cal.clone())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
 
-                                                if !calendar_events.is_empty() {
-                                                    let ics_content = export_events_to_ics(&calendar_events);
-                                                    let today = get_today();
-                                                    let filename = format!("nostr_calendar_{}.ics", today);
-                                                    download_ics(&filename, &ics_content);
-                                                }
+                                            if !calendar_events.is_empty() {
+                                                let ics_content = export_events_to_ics(&calendar_events);
+                                                let today = get_today();
+                                                let filename = format!("nostr_calendar_{}.ics", today);
+                                                download_ics(&filename, &ics_content);
                                             }
                                         },
                                         svg {

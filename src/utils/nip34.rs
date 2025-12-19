@@ -34,6 +34,7 @@ impl IssueStatus {
     }
 
     /// Get the Kind for this status
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_kind(&self) -> Kind {
         match self {
             Self::Open => Kind::GitStatusOpen,
@@ -60,6 +61,16 @@ impl IssueStatus {
             Self::Applied => "status-applied",
             Self::Closed => "status-closed",
             Self::Draft => "status-draft",
+        }
+    }
+
+    /// Tailwind background color class for status indicators
+    pub fn bg_class(&self) -> &'static str {
+        match self {
+            Self::Open => "bg-green-500",
+            Self::Applied => "bg-purple-500",
+            Self::Closed => "bg-red-500",
+            Self::Draft => "bg-gray-500",
         }
     }
 }
@@ -683,6 +694,7 @@ pub fn encode_nevent(
 }
 
 /// Decode a nevent bech32 to event info
+#[allow(clippy::type_complexity)]
 pub fn decode_nevent(nevent: &str) -> Result<(EventId, Option<PublicKey>, Option<Kind>, Vec<RelayUrl>), Nip34Error> {
     use nostr::nips::nip19::{Nip19Event, FromBech32};
     let decoded = Nip19Event::from_bech32(nevent)?;

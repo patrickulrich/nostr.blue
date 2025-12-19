@@ -73,99 +73,96 @@ pub fn CalendarEventNew() -> Element {
     };
 
     // Handle publish
-    let handle_publish = {
-        let navigator = navigator;
-        move |_| {
-            if !*can_publish.read() {
-                return;
+    let handle_publish = move |_| {
+        if !*can_publish.read() {
+            return;
+        }
+
+        let title_val = title.read().clone();
+        let summary_val = summary.read().clone();
+        let content_val = content.read().clone();
+        let event_type_val = *event_type.read();
+        let start_date_val = start_date.read().clone();
+        let start_time_val = start_time.read().clone();
+        let end_date_val = end_date.read().clone();
+        let end_time_val = end_time.read().clone();
+        let locations_val = locations.read().clone();
+        let single_location = location.read().clone();
+        let image_val = image_url.read().clone();
+        let hashtags_val = hashtags_input.read().clone();
+        let timezone_val = timezone.read().clone();
+        let is_private_val = *is_private.read();
+
+        is_publishing.set(true);
+        error_message.set(None);
+
+        let nav = navigator;
+        spawn(async move {
+            // Combine locations
+            let mut all_locations = locations_val;
+            if !single_location.trim().is_empty() {
+                all_locations.push(single_location.trim().to_string());
             }
 
-            let title_val = title.read().clone();
-            let summary_val = summary.read().clone();
-            let content_val = content.read().clone();
-            let event_type_val = *event_type.read();
-            let start_date_val = start_date.read().clone();
-            let start_time_val = start_time.read().clone();
-            let end_date_val = end_date.read().clone();
-            let end_time_val = end_time.read().clone();
-            let locations_val = locations.read().clone();
-            let single_location = location.read().clone();
-            let image_val = image_url.read().clone();
-            let hashtags_val = hashtags_input.read().clone();
-            let timezone_val = timezone.read().clone();
-            let is_private_val = *is_private.read();
+            // Parse hashtags
+            let hashtags: Vec<String> = hashtags_val
+                .split([',', ' ', '#'])
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
 
-            is_publishing.set(true);
-            error_message.set(None);
+            // Publish based on event type
+            let result = match event_type_val {
+                EventType::DateBased => {
+                    let end_date_opt = if end_date_val != start_date_val {
+                        Some(end_date_val.as_str())
+                    } else {
+                        None
+                    };
 
-            let nav = navigator;
-            spawn(async move {
-                // Combine locations
-                let mut all_locations = locations_val;
-                if !single_location.trim().is_empty() {
-                    all_locations.push(single_location.trim().to_string());
+                    calendar_store::publish_date_event(
+                        &title_val,
+                        &start_date_val,
+                        end_date_opt,
+                        if summary_val.is_empty() { None } else { Some(&summary_val) },
+                        if content_val.is_empty() { None } else { Some(&content_val) },
+                        if image_val.is_empty() { None } else { Some(&image_val) },
+                        &all_locations,
+                        &hashtags,
+                        is_private_val,
+                    ).await
                 }
+                EventType::TimeBased => {
+                    // Convert date/time to timestamps
+                    let start_ts = parse_datetime_to_timestamp(&start_date_val, &start_time_val);
+                    let end_ts = parse_datetime_to_timestamp(&end_date_val, &end_time_val);
 
-                // Parse hashtags
-                let hashtags: Vec<String> = hashtags_val
-                    .split([',', ' ', '#'])
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                // Publish based on event type
-                let result = match event_type_val {
-                    EventType::DateBased => {
-                        let end_date_opt = if end_date_val != start_date_val {
-                            Some(end_date_val.as_str())
-                        } else {
-                            None
-                        };
-
-                        calendar_store::publish_date_event(
-                            &title_val,
-                            &start_date_val,
-                            end_date_opt,
-                            if summary_val.is_empty() { None } else { Some(&summary_val) },
-                            if content_val.is_empty() { None } else { Some(&content_val) },
-                            if image_val.is_empty() { None } else { Some(&image_val) },
-                            &all_locations,
-                            &hashtags,
-                            is_private_val,
-                        ).await
-                    }
-                    EventType::TimeBased => {
-                        // Convert date/time to timestamps
-                        let start_ts = parse_datetime_to_timestamp(&start_date_val, &start_time_val);
-                        let end_ts = parse_datetime_to_timestamp(&end_date_val, &end_time_val);
-
-                        calendar_store::publish_time_event(
-                            &title_val,
-                            start_ts,
-                            if end_ts > start_ts { Some(end_ts) } else { None },
-                            if summary_val.is_empty() { None } else { Some(&summary_val) },
-                            if content_val.is_empty() { None } else { Some(&content_val) },
-                            if image_val.is_empty() { None } else { Some(&image_val) },
-                            &all_locations,
-                            &hashtags,
-                            if timezone_val.is_empty() { None } else { Some(&timezone_val) },
-                            is_private_val,
-                        ).await
-                    }
-                };
-
-                match result {
-                    Ok(naddr) => {
-                        // Navigate to the new event
-                        nav.push(Route::CalendarEventDetail { naddr, from: Some("calendar".to_string()) });
-                    }
-                    Err(e) => {
-                        error_message.set(Some(e));
-                        is_publishing.set(false);
-                    }
+                    calendar_store::publish_time_event(
+                        &title_val,
+                        start_ts,
+                        if end_ts > start_ts { Some(end_ts) } else { None },
+                        if summary_val.is_empty() { None } else { Some(&summary_val) },
+                        if content_val.is_empty() { None } else { Some(&content_val) },
+                        if image_val.is_empty() { None } else { Some(&image_val) },
+                        &all_locations,
+                        &hashtags,
+                        if timezone_val.is_empty() { None } else { Some(&timezone_val) },
+                        is_private_val,
+                    ).await
                 }
-            });
-        }
+            };
+
+            match result {
+                Ok(naddr) => {
+                    // Navigate to the new event
+                    nav.push(Route::CalendarEventDetail { naddr, from: Some("calendar".to_string()) });
+                }
+                Err(e) => {
+                    error_message.set(Some(e));
+                    is_publishing.set(false);
+                }
+            }
+        });
     };
 
     rsx! {

@@ -2,14 +2,12 @@
 pub fn format_sats_with_separator(sats: u64) -> String {
     let s = sats.to_string();
     let mut result = String::new();
-    let mut count = 0;
 
-    for c in s.chars().rev() {
+    for (count, c) in s.chars().rev().enumerate() {
         if count > 0 && count % 3 == 0 {
             result.push(',');
         }
         result.push(c);
-        count += 1;
     }
 
     result.chars().rev().collect()
@@ -44,6 +42,29 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
     let prefix: String = chars[..8].iter().collect();
     let suffix: String = chars[chars.len() - 8..].iter().collect();
     format!("{}...{}", prefix, suffix)
+}
+
+/// Truncates text at a word boundary to avoid breaking words
+/// Returns text with "..." suffix if truncated
+/// Fully char-aware implementation - no byte slicing for UTF-8 safety
+pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+
+    // Find the last space within the first max_chars characters
+    let last_space_pos = chars[..max_chars]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, c)| **c == ' ')
+        .map(|(i, _)| i);
+
+    // Truncate at word boundary if found, otherwise at max_chars
+    let truncate_at = last_space_pos.unwrap_or(max_chars);
+    let result: String = chars[..truncate_at].iter().collect();
+    format!("{}...", result)
 }
 
 /// Shortens a URL for display by stripping protocol and truncating

@@ -662,6 +662,7 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
 /// 2. Removes all tokens for the mint
 /// 3. Publishes deletion events
 /// 4. Updates wallet state
+///
 /// Returns (event_count, total_amount) on success.
 pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     use nostr_sdk::signer::NostrSigner;

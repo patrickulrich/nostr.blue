@@ -21,7 +21,9 @@ pub struct BlossomServersStore {
     pub data: Vec<String>,
 }
 
-pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| { let mut store = BlossomServersStore::default(); store.data = vec![DEFAULT_SERVER.to_string()]; Store::new(store) });
+pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| {
+    Store::new(BlossomServersStore { data: vec![DEFAULT_SERVER.to_string()] })
+});
 
 /// Track if servers have been loaded from Nostr
 pub static SERVERS_LOADED: GlobalSignal<bool> = Signal::global(|| false);

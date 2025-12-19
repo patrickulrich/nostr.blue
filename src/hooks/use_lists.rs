@@ -59,6 +59,7 @@ impl UserList {
 
 /// Hook to fetch all user lists (NIP-51)
 /// Returns (lists, loading, error, refresh)
+#[allow(clippy::type_complexity)]
 pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<String>>, Signal<u32>) {
     let mut lists = use_signal(Vec::<UserList>::new);
     let mut loading = use_signal(|| false);

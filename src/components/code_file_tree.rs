@@ -7,6 +7,19 @@ use dioxus::prelude::*;
 use crate::services::git_worker::FileEntry;
 use crate::routes::Route;
 
+/// Get static padding class for tree depth (Tailwind requires static classes)
+/// Clamps at depth 4 (pl-20) to prevent excessive indentation for deeply nested directories
+fn get_indent_class(depth: usize) -> &'static str {
+    match depth {
+        0 => "pl-0",
+        1 => "pl-4",
+        2 => "pl-8",
+        3 => "pl-12",
+        4 => "pl-16",
+        _ => "pl-20", // Clamped at pl-20 for depth > 4
+    }
+}
+
 /// File/folder icon based on entry type and extension
 #[component]
 fn FileIcon(entry: FileEntry) -> Element {
@@ -74,7 +87,7 @@ pub fn FileTreeEntry(
     git_ref: String,
     #[props(default = 0)] depth: usize,
 ) -> Element {
-    let indent_class = format!("pl-{}", depth * 4);
+    let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
 
     let route = if is_dir {

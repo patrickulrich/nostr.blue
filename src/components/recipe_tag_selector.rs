@@ -76,7 +76,7 @@ pub fn RecipeTagSelector(
                     for tag in tags.iter() {
                         RecipeTagChipEditable {
                             tag: tag.clone(),
-                            on_remove: move |t| remove_tag(t),
+                            on_remove: remove_tag,
                         }
                     }
                 }

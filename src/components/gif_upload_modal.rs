@@ -67,47 +67,44 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
 
     // File selection handler
-    let handle_file_select = {
-        let input_id = input_id;
-        move |_evt: Event<FormData>| {
-            let input_id = input_id.read().clone();
-            spawn(async move {
-                error.set(None);
+    let handle_file_select = move |_evt: Event<FormData>| {
+        let input_id = input_id.read().clone();
+        spawn(async move {
+            error.set(None);
 
-                match read_file_as_bytes(&input_id).await {
-                    Ok((filename, data, mime_type)) => {
-                        // Validate GIF magic bytes (GIF87a or GIF89a)
-                        // This is more reliable than MIME type or extension which can be spoofed
-                        if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
-                            error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
-                            return;
-                        }
-
-                        // Also check MIME type or extension as secondary validation
-                        if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
-                            error.set(Some("Please select a GIF file".to_string()));
-                            return;
-                        }
-
-                        // Check file size (max 21MB like gifbuddy)
-                        if data.len() > 21 * 1024 * 1024 {
-                            error.set(Some("File too large. Maximum size is 21MB".to_string()));
-                            return;
-                        }
-
-                        // Create Object URL for efficient preview (avoids base64 memory overhead)
-                        let preview_url = create_object_url(&data, &mime_type);
-
-                        log::info!("Selected GIF: {} ({} bytes)", filename, data.len());
-                        selected_file.set(Some((filename, data, mime_type, preview_url)));
+            match read_file_as_bytes(&input_id).await {
+                Ok((filename, data, mime_type)) => {
+                    // Validate GIF magic bytes (GIF87a or GIF89a)
+                    // This is more reliable than MIME type or extension which can be spoofed
+                    if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
+                        error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
+                        return;
                     }
-                    Err(e) => {
-                        log::error!("Failed to read file: {}", e);
-                        error.set(Some(format!("Failed to read file: {}", e)));
+
+                    // Also check MIME type or extension as secondary validation
+                    if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
+                        error.set(Some("Please select a GIF file".to_string()));
+                        return;
                     }
+
+                    // Check file size (max 21MB like gifbuddy)
+                    if data.len() > 21 * 1024 * 1024 {
+                        error.set(Some("File too large. Maximum size is 21MB".to_string()));
+                        return;
+                    }
+
+                    // Create Object URL for efficient preview (avoids base64 memory overhead)
+                    let preview_url = create_object_url(&data, &mime_type);
+
+                    log::info!("Selected GIF: {} ({} bytes)", filename, data.len());
+                    selected_file.set(Some((filename, data, mime_type, preview_url)));
                 }
-            });
-        }
+                Err(e) => {
+                    log::error!("Failed to read file: {}", e);
+                    error.set(Some(format!("Failed to read file: {}", e)));
+                }
+            }
+        });
     };
 
     // Upload handler
@@ -248,17 +245,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
 
     // Clear file selection
-    let handle_clear = {
-        let input_id = input_id;
-        move |_| {
-            // Revoke object URL to free memory
-            if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
-                let _ = web_sys::Url::revoke_object_url(url);
-            }
-            selected_file.set(None);
-            error.set(None);
-            clear_file_input(&input_id.read());
+    let handle_clear = move |_| {
+        // Revoke object URL to free memory
+        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+            let _ = web_sys::Url::revoke_object_url(url);
         }
+        selected_file.set(None);
+        error.set(None);
+        clear_file_input(&input_id.read());
     };
 
     // Don't render if not visible

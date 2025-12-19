@@ -135,7 +135,7 @@ impl DisplayEpisode {
             artist_art_url: None,
             album: None,
             album_id: None,
-            duration: self.duration.map(|d| d as u32),
+            duration: self.duration.map(|d| d.min(u32::MAX as u64) as u32),
             media_url: self.audio_url.clone(),
             album_art_url: self.image.clone().or(self.podcast_image.clone()),
             msat_total: None,
@@ -550,12 +550,18 @@ fn format_date(date_str: &str) -> String {
 fn parse_rfc2822_to_timestamp(date_str: &str) -> Option<u64> {
     // Try RFC 2822 parsing first (e.g., "Tue, 05 Dec 2023 14:30:00 +0000")
     if let Ok(dt) = chrono::DateTime::parse_from_rfc2822(date_str) {
-        return Some(dt.timestamp() as u64);
+        // Handle pre-1970 dates gracefully (negative timestamps)
+        let ts = dt.timestamp();
+        if ts >= 0 {
+            return Some(ts as u64);
+        }
     }
 
     // Try RFC 3339 / ISO 8601 (e.g., "2023-12-05T14:30:00Z")
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
-        return Some(dt.timestamp() as u64);
+        // Handle pre-1970 dates gracefully (negative timestamps)
+        let ts = dt.timestamp();
+        return if ts >= 0 { Some(ts as u64) } else { None };
     }
 
     None

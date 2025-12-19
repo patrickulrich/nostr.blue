@@ -64,32 +64,44 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
     let mut relays = Vec::new();
 
     for tag in event.tags.iter() {
-        // Try to extract relay URL from the tag
-        // For NIP-65, we're looking for tags like ["r", "wss://relay.url", "read"|"write"]
-        if let Some(standardized) = tag.as_standardized() {
-            // Check if this is a Relay tag
-            if let nostr_sdk::TagStandard::Relay(relay_url) = standardized {
-                log::debug!("Found relay tag: {}", relay_url);
-                relays.push(RelayConfig {
-                    url: relay_url.to_string(),
-                    read: true,
-                    write: true,
-                });
-                continue;
-            }
+        let slice = tag.as_slice();
+
+        // Check if this is an 'r' tag (NIP-65 relay list)
+        if slice.first().map(|s| s.as_str()) != Some("r") {
+            continue;
         }
 
-        // Fallback: try parsing as custom 'r' tag
-        if tag.kind() == TagKind::Custom("r".into()) {
-            if let Some(url) = tag.content() {
-                log::debug!("Found 'r' tag: {}", url);
-                relays.push(RelayConfig {
-                    url: url.to_string(),
-                    read: true,
-                    write: true,
-                });
+        // Get URL at index 1
+        let Some(url) = slice.get(1) else {
+            continue;
+        };
+
+        // Get optional marker at index 2 to determine read/write permissions
+        // No marker = both read and write
+        // "read" = read only
+        // "write" = write only
+        let marker = slice.get(2).map(|s| s.as_str());
+        let (read, write) = match marker {
+            None => (true, true),
+            Some("read") => (true, false),
+            Some("write") => (false, true),
+            Some(unknown) => {
+                log::warn!("Unknown relay marker '{}' for {}, skipping", unknown, url);
+                continue;
             }
-        }
+        };
+
+        log::debug!(
+            "Found relay tag: {} (read={}, write={})",
+            url,
+            read,
+            write
+        );
+        relays.push(RelayConfig {
+            url: url.to_string(),
+            read,
+            write,
+        });
     }
 
     log::info!("Parsed {} relays from event", relays.len());

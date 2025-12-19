@@ -551,7 +551,7 @@ pub fn Home() -> Element {
             let pending_len = pending.len();
 
             // Sort pending posts by timestamp (newest first)
-            pending.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            pending.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             // Match feed_state by reference to avoid cloning entire state
             let current_items = match &*feed_state.read() {
@@ -1588,7 +1588,7 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             log::info!("After processing: {} feed items (raw: {})", feed_items.len(), raw_count);
 
@@ -1697,7 +1697,7 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<FeedItem>
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             // If no events found, fall back to global feed
             if feed_items.is_empty() {
@@ -1762,7 +1762,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             Ok(feed_items)
         }
