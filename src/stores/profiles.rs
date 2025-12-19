@@ -8,6 +8,43 @@ use std::num::NonZeroUsize;
 use lru::LruCache;
 use chrono::{DateTime, Utc};
 
+/// Birthday information per NIP-24
+/// Each field is optional to allow partial dates
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Birthday {
+    pub year: Option<u16>,
+    pub month: Option<u8>,
+    pub day: Option<u8>,
+}
+
+impl Birthday {
+    /// Format birthday for display (e.g., "January 15" or "January 15, 1990")
+    #[allow(dead_code)]
+    pub fn format_display(&self) -> Option<String> {
+        let months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ];
+
+        match (self.month, self.day, self.year) {
+            (Some(m), Some(d), Some(y)) if m >= 1 && m <= 12 => {
+                Some(format!("{} {}, {}", months[(m - 1) as usize], d, y))
+            }
+            (Some(m), Some(d), None) if m >= 1 && m <= 12 => {
+                Some(format!("{} {}", months[(m - 1) as usize], d))
+            }
+            (Some(m), None, Some(y)) if m >= 1 && m <= 12 => {
+                Some(format!("{} {}", months[(m - 1) as usize], y))
+            }
+            (Some(m), None, None) if m >= 1 && m <= 12 => {
+                Some(months[(m - 1) as usize].to_string())
+            }
+            (None, None, Some(y)) => Some(y.to_string()),
+            _ => None,
+        }
+    }
+}
+
 /// User profile metadata from Kind 0 events
 #[derive(Clone, Debug, PartialEq)]
 pub struct Profile {
@@ -20,6 +57,10 @@ pub struct Profile {
     pub nip05: Option<String>,
     pub lud16: Option<String>,
     pub website: Option<String>,
+    /// Whether this account is a bot (NIP-24)
+    pub bot: Option<bool>,
+    /// Birthday information (NIP-24)
+    pub birthday: Option<Birthday>,
     pub fetched_at: DateTime<Utc>,
 }
 
@@ -78,8 +119,9 @@ impl Profile {
 pub static PROFILE_CACHE: GlobalSignal<LruCache<String, Profile>> =
     Signal::global(|| LruCache::new(NonZeroUsize::new(5000).unwrap()));
 
-/// Cache TTL in seconds (5 minutes)
-const CACHE_TTL_SECONDS: i64 = 300;
+/// Cache TTL in seconds (24 hours)
+/// Increased from 5 minutes to reduce network requests for stable profile data
+const CACHE_TTL_SECONDS: i64 = 24 * 60 * 60;
 
 /// Get a profile from cache only (synchronous)
 pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
@@ -120,6 +162,8 @@ pub fn get_profile(pubkey: &str) -> Option<nostr_sdk::Metadata> {
 }
 
 /// Fetch a profile from relays by pubkey
+/// Returns cached profile immediately if available (even if stale),
+/// and spawns a background refresh if stale
 pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
     // Check cache first
     if let Some(cached_profile) = PROFILE_CACHE.read().peek(&pubkey) {
@@ -128,12 +172,26 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
             log::debug!("Using cached profile for {}", pubkey);
             return Ok(cached_profile.clone());
         }
+        // Stale but exists - return cached immediately, refresh in background
+        log::debug!("Profile {} is stale, refreshing in background", pubkey);
+        let pk = pubkey.clone();
+        let cached = cached_profile.clone();
+        spawn(async move {
+            let _ = fetch_profile_from_relays(&pk).await;
+        });
+        return Ok(cached);
     }
 
+    // Not in cache - fetch synchronously
+    fetch_profile_from_relays(&pubkey).await
+}
+
+/// Internal function to fetch profile from relays and update cache
+async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
     log::info!("Fetching profile from database/relays for {}", pubkey);
 
-    let public_key = PublicKey::from_bech32(&pubkey)
-        .or_else(|_| PublicKey::from_hex(&pubkey))
+    let public_key = PublicKey::from_bech32(pubkey)
+        .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch Kind 0 metadata events using aggregated query
@@ -148,13 +206,13 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 let profile = parse_profile_event(&event)?;
 
                 // Cache the profile
-                PROFILE_CACHE.write().put(pubkey.clone(), profile.clone());
+                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
 
                 Ok(profile)
             } else {
                 // No profile found, return empty profile
                 let profile = Profile {
-                    pubkey: pubkey.clone(),
+                    pubkey: pubkey.to_string(),
                     name: None,
                     display_name: None,
                     about: None,
@@ -163,11 +221,13 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                     nip05: None,
                     lud16: None,
                     website: None,
+                    bot: None,
+                    birthday: None,
                     fetched_at: Utc::now(),
                 };
 
                 // Cache the empty profile to avoid re-fetching
-                PROFILE_CACHE.write().put(pubkey, profile.clone());
+                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
 
                 Ok(profile)
             }
@@ -177,7 +237,7 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
 
             // Return empty profile on error
             let profile = Profile {
-                pubkey: pubkey.clone(),
+                pubkey: pubkey.to_string(),
                 name: None,
                 display_name: None,
                 about: None,
@@ -186,6 +246,8 @@ pub async fn fetch_profile(pubkey: String) -> Result<Profile, String> {
                 nip05: None,
                 lud16: None,
                 website: None,
+                bot: None,
+                birthday: None,
                 fetched_at: Utc::now(),
             };
 
@@ -200,6 +262,40 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
     let metadata: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
 
+    // Parse bot field (NIP-24) - can be boolean or truthy string
+    let bot = metadata.get("bot").and_then(|v| {
+        if let Some(b) = v.as_bool() {
+            Some(b)
+        } else if let Some(s) = v.as_str() {
+            // Handle string values like "true" or "1"
+            match s.to_lowercase().as_str() {
+                "true" | "1" | "yes" => Some(true),
+                "false" | "0" | "no" => Some(false),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    });
+
+    // Parse birthday field (NIP-24) - object with optional year, month, day
+    let birthday = metadata.get("birthday").and_then(|v| {
+        if v.is_object() {
+            let year = v.get("year").and_then(|y| y.as_u64()).map(|y| y as u16);
+            let month = v.get("month").and_then(|m| m.as_u64()).map(|m| m as u8);
+            let day = v.get("day").and_then(|d| d.as_u64()).map(|d| d as u8);
+
+            // Only return Some if at least one field is present
+            if year.is_some() || month.is_some() || day.is_some() {
+                Some(Birthday { year, month, day })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
     Ok(Profile {
         pubkey: event.pubkey.to_string(),
         name: metadata.get("name").and_then(|v| v.as_str()).map(String::from),
@@ -210,6 +306,8 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
         nip05: metadata.get("nip05").and_then(|v| v.as_str()).map(String::from),
         lud16: metadata.get("lud16").and_then(|v| v.as_str()).map(String::from),
         website: metadata.get("website").and_then(|v| v.as_str()).map(String::from),
+        bot,
+        birthday,
         fetched_at: Utc::now(),
     })
 }

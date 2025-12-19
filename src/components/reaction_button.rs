@@ -37,10 +37,13 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
         custom_emoji_failed.set(false);
     }));
 
-    // Viewport-aware positioning signals
+    // Viewport-aware positioning signals (mutated in wasm32 only)
     let button_id = use_signal(|| format!("reaction-btn-{}", uuid::Uuid::new_v4()));
+    #[allow(unused_mut, unused_variables)]
     let mut picker_top = use_signal(|| 0.0);
+    #[allow(unused_mut)]
     let mut picker_left = use_signal(|| 0.0);
+    #[allow(unused_mut, unused_variables)]
     let mut position_below = use_signal(|| false);
 
     let is_liked = *props.reaction.is_liked.read();

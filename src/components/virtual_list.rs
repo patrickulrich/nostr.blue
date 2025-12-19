@@ -265,11 +265,11 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
         div {
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
-            onmounted: move |evt| {
+            onmounted: move |_evt| {
                 #[cfg(target_arch = "wasm32")]
                 {
                     // Store container element and measure viewport height
-                    let element = evt.data();
+                    let element = _evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
                         *container_element.write() = Some(html_element.clone());
 
@@ -363,27 +363,29 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     {
                         let item_index = *index;
                         let item_rc = item.clone();
+                        #[allow(unused_variables)]
                         let state = virtual_state.clone();
                         rsx! {
                             div {
                                 key: "{index}",
                                 class: "virtual-item",
-                                onmounted: move |evt| {
-                                    let mut state = state.clone();
-
+                                onmounted: move |_evt| {
                                     // Measure using the mounted element directly (no global IDs)
                                     #[cfg(target_arch = "wasm32")]
-                                    spawn(async move {
-                                        let element = evt.data();
-                                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
-                                            let rect = html_element.get_bounding_client_rect();
-                                            let height = rect.height();
-                                            if height > 0.0 {
-                                                state.write().set_item_height(item_index, height);
-                                                log::trace!("Measured item {} height: {}px", item_index, height);
+                                    {
+                                        let mut state = state.clone();
+                                        spawn(async move {
+                                            let element = _evt.data();
+                                            if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                                                let rect = html_element.get_bounding_client_rect();
+                                                let height = rect.height();
+                                                if height > 0.0 {
+                                                    state.write().set_item_height(item_index, height);
+                                                    log::trace!("Measured item {} height: {}px", item_index, height);
+                                                }
                                             }
-                                        }
-                                    });
+                                        });
+                                    }
                                 },
                                 {(props.item_content)(item_rc, item_index)}
                             }

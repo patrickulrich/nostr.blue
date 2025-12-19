@@ -71,6 +71,31 @@
   display: none;
 }
 
+/* Styled thin scrollbar matching app theme */
+.scrollbar-styled {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted)) transparent;
+}
+
+.scrollbar-styled::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-styled::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.scrollbar-styled::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 3px;
+}
+
+.scrollbar-styled::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
 /* Wallet loading animation - pulsing dots */
 @keyframes wallet-pulse {
   0%, 100% {
@@ -93,4 +118,122 @@
       opacity: 1;
     }
   }
+}
+
+/* ============================================================================
+   NKBIP-03 Citation Styles
+   ============================================================================ */
+
+/* Inline citations - clickable links */
+.citation-inline {
+  @apply text-primary cursor-pointer hover:underline;
+}
+
+/* Footnote/endnote superscripts */
+.citation-footnote,
+.citation-endnote {
+  @apply text-xs px-0.5;
+}
+
+.citation-footnote a,
+.citation-endnote a {
+  @apply text-primary hover:underline no-underline;
+}
+
+/* Foot-end reference arrow */
+.citation-end-ref {
+  @apply text-[0.6rem] text-muted-foreground hover:text-primary ml-0.5;
+}
+
+/* Block quotes with citations */
+.citation-quote {
+  @apply my-4;
+}
+
+.citation-quote blockquote {
+  @apply border-l-4 border-primary pl-4 py-2 bg-muted/30 rounded-r italic;
+}
+
+.citation-quote figcaption {
+  @apply text-sm text-muted-foreground mt-2 not-italic;
+}
+
+.citation-quote figcaption cite {
+  @apply font-medium;
+}
+
+/* Unresolved citation styling */
+.citation-unresolved {
+  @apply opacity-60;
+}
+
+.citation-unresolved a {
+  @apply decoration-dotted;
+}
+
+/* Footnotes section */
+.citation-footnotes,
+.citation-footnotes-container {
+  @apply mt-6 pt-4;
+}
+
+.citation-footnotes .citation-divider {
+  @apply border-border mb-4;
+}
+
+.citation-footnotes .citation-list {
+  @apply list-decimal pl-6 space-y-2 text-sm;
+}
+
+/* Endnotes/References section */
+.citation-endnotes,
+.citation-endnotes-container {
+  @apply mt-8 pt-4;
+}
+
+.citation-endnotes .citation-heading {
+  @apply text-lg font-semibold mb-4;
+}
+
+.citation-endnotes .citation-list {
+  @apply list-decimal pl-6 space-y-3 text-sm;
+}
+
+/* Individual citation entries in footnotes/endnotes */
+.citation-entry {
+  @apply leading-relaxed;
+}
+
+.citation-entry .citation-link {
+  @apply text-foreground hover:text-primary;
+}
+
+.citation-entry .citation-backref {
+  @apply ml-2 text-muted-foreground hover:text-primary text-xs no-underline;
+}
+
+/* Citation type badges */
+.citation-type-badge {
+  @apply mr-1.5 text-sm;
+}
+
+.citation-type-internal {
+  @apply text-primary;
+}
+
+.citation-type-external {
+  @apply text-blue-500;
+}
+
+.citation-type-hardcopy {
+  @apply text-amber-600 dark:text-amber-400;
+}
+
+.citation-type-prompt {
+  @apply text-purple-500;
+}
+
+/* Loading state for citations being fetched */
+.citation-loading {
+  @apply opacity-60 animate-pulse;
 }

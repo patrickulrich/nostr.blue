@@ -17,7 +17,6 @@ use super::cashu::{
     TokenData, ProofData, ProofState, WalletTokensStoreStoreExt,
     DleqData, PENDING_BY_MINT_SECRETS, WALLET_STATE,
 };
-use super::indexeddb_database::IndexedDbDatabase;
 
 /// Global MultiMintWallet instance
 /// Replaces the previous WALLET_CACHE HashMap approach
@@ -45,7 +44,7 @@ pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(|| Wal
 
 /// Initialize the MultiMintWallet with the given seed and localstore
 pub async fn init_multi_wallet(
-    localstore: Arc<IndexedDbDatabase>,
+    localstore: Arc<super::indexeddb_database::IndexedDbDatabase>,
     seed: [u8; 64],
 ) -> Result<Arc<MultiMintWallet>, String> {
     // Clear CDK-specific state (but NOT WALLET_STATUS - that would trigger init loop)

@@ -5,7 +5,8 @@ use nostr_sdk::prelude::{Coordinate, ToBech32};
 use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
-use crate::components::{StreamStatus, parse_nip53_live_event, extract_live_event_host};
+use crate::components::StreamStatus;
+use crate::utils::nip53::{parse_nip53_live_event, extract_live_event_host};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
