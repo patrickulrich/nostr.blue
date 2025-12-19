@@ -1,6 +1,39 @@
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use nostr_sdk::Timestamp;
 
+// ============================================================================
+// Duration Safety Utilities
+// ============================================================================
+
+/// Convert a duration in seconds (f64) to milliseconds (u32) with overflow protection.
+///
+/// Uses saturating arithmetic to prevent overflow/underflow when converting
+/// potentially large or negative durations to milliseconds for use with timers.
+///
+/// # Arguments
+/// * `seconds` - Duration in seconds as f64
+///
+/// # Returns
+/// * `u32` - Milliseconds, clamped to valid range [0, u32::MAX]
+///
+/// # Examples
+/// ```
+/// assert_eq!(safe_duration_millis(1.5), 1500);
+/// assert_eq!(safe_duration_millis(-1.0), 0);
+/// assert_eq!(safe_duration_millis(5_000_000.0), u32::MAX); // Clamped
+/// ```
+pub fn safe_duration_millis(seconds: f64) -> u32 {
+    if seconds <= 0.0 {
+        return 0;
+    }
+    let millis = seconds * 1000.0;
+    if millis > u32::MAX as f64 {
+        u32::MAX
+    } else {
+        millis as u32
+    }
+}
+
 /// Format a timestamp as relative time
 ///
 /// # Arguments

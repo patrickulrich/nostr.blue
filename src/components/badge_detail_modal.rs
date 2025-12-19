@@ -9,6 +9,7 @@ use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
+use crate::utils::truncate_pubkey;
 
 /// Badge detail modal component
 #[component]
@@ -23,22 +24,30 @@ pub fn BadgeDetailModal(
 ) -> Element {
     let mut processing = use_signal(|| false);
 
+    // Reset processing state when is_accepted changes (operation completed by parent)
+    use_effect(use_reactive!(|is_accepted| {
+        processing.set(false);
+        // Suppress unused variable warning - we react to the value changing
+        let _ = is_accepted;
+    }));
+
     // Get issuer profile
     let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
     let badge_pubkey = badge.pubkey.clone();
 
-    use_effect(move || {
-        let pk = badge_pubkey.clone();
-        if let Some(profile) = profiles::get_profile(&pk) {
+    // Only re-run when badge pubkey changes (not every render)
+    use_effect(use_reactive!(|badge_pubkey| {
+        if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
         }
-    });
+    }));
 
+    // Get issuer display name with UTF-8 safe truncation
     let issuer_name = issuer_profile
         .read()
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &badge.pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&badge.pubkey));
 
     rsx! {
         // Modal overlay

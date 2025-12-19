@@ -38,9 +38,10 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     let mut display_date = use_signal(|| props.selected_date.clone());
 
     // When selected_date changes, update display
-    use_effect(move || {
+    // Only re-run when selected_date prop changes (not every render)
+    use_effect(use_reactive!(|selected_date_for_effect| {
         display_date.set(selected_date_for_effect.clone());
-    });
+    }));
 
     let today = get_today();
 
@@ -65,7 +66,8 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
 
     let month_names = ["January", "February", "March", "April", "May", "June",
                        "July", "August", "September", "October", "November", "December"];
-    let month_name = month_names[(month - 1) as usize];
+    // Safe bounds check for month index (1-12 maps to 0-11)
+    let month_name = month_names.get((month.saturating_sub(1)) as usize).unwrap_or(&"Unknown");
 
     // Navigation handlers
     let go_prev_month = {

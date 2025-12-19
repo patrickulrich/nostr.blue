@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered, delete_pin};
 use crate::stores::auth_store;
+use crate::utils::truncate_pubkey;
 use crate::components::pin_board_card::HashtagBadge;
 use crate::components::pin_board_item_card::PinCard;
 use crate::components::{ZapModal, ShareModal, ConfirmModal};
@@ -61,7 +62,8 @@ pub fn BoardSlideover(
     let owner_pubkey_for_pins = board.pubkey.clone();
 
     // Fetch pins when slideover opens
-    use_effect(move || {
+    // Re-run when show, board, or collaborative status changes
+    use_effect(use_reactive!(|(board_a_tag, owner_pubkey_for_pins, is_collaborative)| {
         let shown = *show.read();
         if !shown {
             return;
@@ -89,10 +91,11 @@ pub fn BoardSlideover(
             }
             pins_loading.set(false);
         });
-    });
+    }));
 
     // Fetch author's profile metadata
-    use_effect(move || {
+    // Only re-run when author pubkey changes (not every render)
+    use_effect(use_reactive!(|author_pubkey_for_fetch| {
         let pubkey_str = author_pubkey_for_fetch.clone();
 
         spawn(async move {
@@ -115,18 +118,12 @@ pub fn BoardSlideover(
                 author_metadata.set(Some(metadata));
             }
         });
-    });
+    }));
 
-    // Get display name from metadata
+    // Get display name from metadata (using UTF-8 safe truncation)
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
@@ -160,9 +157,19 @@ pub fn BoardSlideover(
         });
     };
 
-    // Handle pin removal
+    // Handle pin removal with confirmation
     let handle_pin_remove = move |pin: Pin| {
         let event_id = pin.event_id.clone();
+
+        // Confirm before deleting
+        let confirmed = web_sys::window()
+            .and_then(|w| w.confirm_with_message("Remove this pin from the board?").ok())
+            .unwrap_or(false);
+
+        if !confirmed {
+            return;
+        }
+
         spawn(async move {
             match delete_pin(&event_id).await {
                 Ok(_) => {

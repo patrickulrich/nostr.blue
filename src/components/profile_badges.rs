@@ -45,7 +45,7 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
                                 match nip58::fetch_badge_by_coordinate(&coord).await {
                                     Ok(badge) => Some(badge),
                                     Err(e) => {
-                                        log::warn!("Failed to fetch badge {}: {}", coord, e);
+                                        crate::utils::log_fetch_error(&format!("badge {}", coord), e);
                                         None
                                     }
                                 }
@@ -63,7 +63,7 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
                     badges.set(Vec::new());
                 }
                 Err(e) => {
-                    log::warn!("Failed to fetch profile badges: {}", e);
+                    crate::utils::log_fetch_error("profile badges", e);
                     badges.set(Vec::new());
                 }
             }

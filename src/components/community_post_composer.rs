@@ -69,10 +69,28 @@ pub fn CommunityPostComposer(
 
     let on_close_backdrop = on_close.clone();
 
+    // Helper to check for unsaved content and confirm close
+    let confirm_close = move |handler: EventHandler<()>| {
+        let has_content = !content.read().trim().is_empty();
+        if has_content {
+            let confirmed = web_sys::window()
+                .and_then(|w| w.confirm_with_message("You have unsaved content. Discard it?").ok())
+                .unwrap_or(false);
+            if confirmed {
+                handler.call(());
+            }
+        } else {
+            handler.call(());
+        }
+    };
+
+    let on_close_for_backdrop = on_close_backdrop.clone();
+    let on_close_for_button = on_close.clone();
+
     rsx! {
         div {
             class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
-            onclick: move |_| on_close_backdrop.call(()),
+            onclick: move |_| confirm_close(on_close_for_backdrop.clone()),
 
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",
@@ -91,7 +109,7 @@ pub fn CommunityPostComposer(
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| confirm_close(on_close_for_button.clone()),
                         svg {
                             class: "w-5 h-5",
                             xmlns: "http://www.w3.org/2000/svg",

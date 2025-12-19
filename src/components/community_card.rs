@@ -531,7 +531,11 @@ pub fn CommunityCardCompact(community: Community) -> Element {
                 if !community.moderators.is_empty() {
                     p {
                         class: "text-xs text-muted-foreground",
-                        "{community.moderators.len()} moderators"
+                        if community.moderators.len() == 1 {
+                            "1 moderator"
+                        } else {
+                            "{community.moderators.len()} moderators"
+                        }
                     }
                 }
             }

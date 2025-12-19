@@ -66,9 +66,6 @@ pub struct ContentMenuProps {
     /// Optional event ID (hex) for non-addressable or as fallback
     #[props(default)]
     pub event_id: Option<String>,
-    /// Optional coordinate string (kind:pubkey:d-tag)
-    #[props(default)]
-    pub coordinate: Option<String>,
 }
 
 #[component]
@@ -97,7 +94,6 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let naddr_report = naddr.clone();
     let naddr_pin_board = naddr.clone();
     let event_id_for_list = props.event_id.clone().unwrap_or_default();
-    let _coordinate = props.coordinate.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -257,19 +253,33 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                             // Create nostr: URI
                             let nostr_uri = format!("nostr:{}", naddr_to_copy);
 
-                            // Copy to clipboard
-                            if let Some(window) = web_sys::window() {
-                                let clipboard = window.navigator().clipboard();
-                                let _ = clipboard.write_text(&nostr_uri);
-
-                                toast_api.success(
-                                    "Copied!".to_string(),
-                                    ToastOptions::new()
-                                        .description(format!("Link to {} copied to clipboard", content_name))
-                                        .duration(Duration::from_secs(2))
-                                        .permanent(false),
-                                );
-                            }
+                            // Copy to clipboard (await the promise for proper error handling)
+                            spawn(async move {
+                                if let Some(window) = web_sys::window() {
+                                    let clipboard = window.navigator().clipboard();
+                                    let promise = clipboard.write_text(&nostr_uri);
+                                    match wasm_bindgen_futures::JsFuture::from(promise).await {
+                                        Ok(_) => {
+                                            toast_api.success(
+                                                "Copied!".to_string(),
+                                                ToastOptions::new()
+                                                    .description(format!("Link to {} copied to clipboard", content_name))
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                        Err(_) => {
+                                            toast_api.error(
+                                                "Failed to copy".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Could not access clipboard".to_string())
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                    }
+                                }
+                            });
                         },
                         span {
                             class: "text-sm",

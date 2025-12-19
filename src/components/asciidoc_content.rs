@@ -57,8 +57,9 @@ pub fn AsciiDocContent(
     let mut citations_loading = use_signal(|| false);
 
     // Check if content has citations on mount and fetch them
+    // Only re-run when content or enable_citations changes (not every render)
     let content_clone = content.clone();
-    use_effect(move || {
+    use_effect(use_reactive!(|(content_clone, enable_citations)| {
         if enable_citations && content_has_citations(&content_clone) {
             let identifiers = extract_citation_identifiers(&content_clone);
             if !identifiers.is_empty() {
@@ -80,14 +81,14 @@ pub fn AsciiDocContent(
                             resolved_citations.set(resolved);
                         }
                         Err(e) => {
-                            log::warn!("Failed to fetch citations: {}", e);
+                            crate::utils::log_fetch_error("citations for article", e);
                         }
                     }
                     citations_loading.set(false);
                 });
             }
         }
-    });
+    }));
 
     // Render content with citations if enabled
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
@@ -124,9 +125,13 @@ pub fn AsciiDocContent(
     };
 
     // Notify parent of citation metadata if callback is provided
-    if let (Some(ref handler), Some(ref metadata)) = (&on_citations_loaded, &citation_metadata) {
-        handler.call(metadata.clone());
-    }
+    // Only re-run when citation_metadata changes (not every render) to avoid infinite loops
+    let citation_metadata_for_effect = citation_metadata.clone();
+    use_effect(use_reactive!(|citation_metadata_for_effect| {
+        if let (Some(ref handler), Some(ref metadata)) = (&on_citations_loaded, &citation_metadata_for_effect) {
+            handler.call(metadata.clone());
+        }
+    }));
 
     rsx! {
         div {

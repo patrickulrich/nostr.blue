@@ -686,8 +686,10 @@ async fn generate_v4v_invoice(
     let recipient_share = (amount_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64;
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
 
-    log::info!("Generating invoice for {} ({}) - {} sats ({}% split)",
-        recipient_name, lnaddress, recipient_share, (recipient.split * 100) / total_split);
+    // Use floating point for accurate percentage display
+    let split_percentage = (recipient.split as f64 * 100.0) / total_split as f64;
+    log::info!("Generating invoice for {} ({}) - {} sats ({:.1}% split)",
+        recipient_name, lnaddress, recipient_share, split_percentage);
 
     // Prepare the zap/payment comment
     let full_comment = if comment.is_empty() {

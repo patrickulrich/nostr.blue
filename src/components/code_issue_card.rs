@@ -11,7 +11,6 @@ use crate::components::code_status_badge::{CodeStatusBadge, BadgeSize};
 #[component]
 pub fn CodeIssueCard(
     issue: Issue,
-    #[props(default = false)] show_repo: bool,
 ) -> Element {
     let title = issue.subject.clone().unwrap_or_else(|| {
         // Use first line of content as title if no subject

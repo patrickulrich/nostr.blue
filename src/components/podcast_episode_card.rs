@@ -212,8 +212,9 @@ pub struct PodcastEpisodeCardProps {
     #[props(default = true)]
     pub show_description: bool,
     /// Optional playlist for continuous playback
+    /// Uses Rc to avoid O(n²) cloning when used in episode lists
     #[props(default)]
-    pub playlist: Option<Vec<MusicTrack>>,
+    pub playlist: Option<std::rc::Rc<Vec<MusicTrack>>>,
 }
 
 /// Podcast episode card component
@@ -234,6 +235,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     });
 
     // Handle play button click
+    // Clone the Rc (cheap pointer copy, not Vec clone)
     let playlist = props.playlist.clone();
     let handle_play = {
         let episode = episode.clone();
@@ -253,8 +255,11 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
             drop(player_state);
 
             // Play this episode
+            // Dereference Rc to Vec only when user actually clicks play (single clone)
             let track = episode.to_music_track();
-            music_player::play_track(track, playlist.clone(), None);
+            // (**rc) dereferences &Rc -> Rc (auto-deref) -> &Vec (Deref trait), then clone the Vec
+            let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
+            music_player::play_track(track, playlist_vec, None);
         }
     };
 
@@ -438,7 +443,9 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                         let playlist = playlist.clone();
                         move |_| {
                             let track = episode.to_music_track();
-                            music_player::play_track(track, playlist.clone(), None);
+                            // Dereference Rc to Vec only when user clicks (single clone)
+                            let playlist_vec = playlist.as_ref().map(|rc| (**rc).clone());
+                            music_player::play_track(track, playlist_vec, None);
                         }
                     },
                     dangerous_inner_html: if *is_playing.read() {

@@ -48,7 +48,7 @@ fn is_binary_extension(filename: &str) -> bool {
     let extension = filename.rsplit('.').next().unwrap_or("");
     matches!(
         extension,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "svg" |
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |
         "pdf" | "doc" | "docx" | "xls" | "xlsx" |
         "zip" | "tar" | "gz" | "rar" | "7z" |
         "exe" | "dll" | "so" | "dylib" |

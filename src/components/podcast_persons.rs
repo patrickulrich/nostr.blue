@@ -38,8 +38,8 @@ pub fn PodcastPersons(props: PodcastPersonsProps) -> Element {
 
     let mut show_all = use_signal(|| false);
 
-    // Group by role/group if not compact
-    let (hosts, guests, crew) = categorize_persons(&props.persons);
+    // Group by role/group if not compact (clone once, then move into categories)
+    let (hosts, guests, crew) = categorize_persons(props.persons.clone());
 
     let display_persons: Vec<&Person> = if props.max_visible > 0 && !*show_all.read() {
         props.persons.iter().take(props.max_visible).collect()
@@ -123,7 +123,8 @@ pub fn PodcastPersons(props: PodcastPersonsProps) -> Element {
 }
 
 /// Categorize persons into hosts, guests, and crew
-fn categorize_persons(persons: &[Person]) -> (Vec<Person>, Vec<Person>, Vec<Person>) {
+/// Takes ownership to avoid per-item cloning (O(1) clone at call site vs O(n) clones)
+fn categorize_persons(persons: Vec<Person>) -> (Vec<Person>, Vec<Person>, Vec<Person>) {
     let mut hosts = Vec::new();
     let mut guests = Vec::new();
     let mut crew = Vec::new();
@@ -133,16 +134,16 @@ fn categorize_persons(persons: &[Person]) -> (Vec<Person>, Vec<Person>, Vec<Pers
         let group = person.group.as_deref().unwrap_or("").to_lowercase();
 
         if role == "host" || role.contains("host") {
-            hosts.push(person.clone());
+            hosts.push(person);
         } else if role == "guest" || role.contains("guest") {
-            guests.push(person.clone());
+            guests.push(person);
         } else if group == "cast" {
-            guests.push(person.clone());
+            guests.push(person);
         } else if group == "crew" || !role.is_empty() {
-            crew.push(person.clone());
+            crew.push(person);
         } else {
             // Default to guests for unspecified
-            guests.push(person.clone());
+            guests.push(person);
         }
     }
 

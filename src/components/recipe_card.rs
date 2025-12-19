@@ -105,7 +105,6 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
     let author_pubkey_menu = author_pubkey.clone();
     let naddr_menu = naddr.clone();
     let event_id = recipe.event.id.to_hex();
-    let coordinate = recipe.a_tag.clone();
 
     rsx! {
         div {
@@ -119,7 +118,6 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
                     author_pubkey: author_pubkey_menu,
                     naddr: naddr_menu,
                     event_id: Some(event_id),
-                    coordinate: Some(coordinate),
                 }
             }
 

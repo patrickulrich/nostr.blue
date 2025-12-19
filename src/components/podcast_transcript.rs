@@ -132,13 +132,15 @@ struct TranscriptContentProps {
 fn TranscriptContent(props: TranscriptContentProps) -> Element {
     let transcript_url = props.transcript.url.clone();
     let transcript_type = props.transcript.transcript_type.clone();
+    let transcript_type_for_parse = transcript_type.clone();
 
-    // Fetch transcript content
+    // Fetch transcript content using the actual transcript type
     let content = use_resource(move || {
         let url = transcript_url.clone();
+        let ttype = transcript_type.clone();
         async move { fetch_transcript(&TranscriptRef {
             url,
-            transcript_type: "text/plain".to_string(),
+            transcript_type: ttype,
             language: None,
             rel: None,
         }).await }
@@ -148,7 +150,7 @@ fn TranscriptContent(props: TranscriptContentProps) -> Element {
     match &*content_read {
         Some(Ok(text)) => {
             // Parse based on type
-            let cues = parse_transcript(text, &transcript_type);
+            let cues = parse_transcript(text, &transcript_type_for_parse);
             drop(content_read);
             rsx! {
                 TranscriptView {
@@ -427,7 +429,10 @@ fn parse_vtt_timestamp(ts: &str) -> f64 {
 /// Parse SRT format (similar to VTT)
 fn parse_srt(content: &str) -> Vec<TranscriptCue> {
     // SRT is similar to VTT but uses comma instead of period for milliseconds
-    parse_vtt(&content.replace(',', "."))
+    // in timestamps (HH:MM:SS,mmm format). The timestamp parser already handles
+    // this conversion, so we can pass the content directly without corrupting
+    // commas in the actual transcript text.
+    parse_vtt(content)
 }
 
 /// Parse JSON transcript format
@@ -497,8 +502,17 @@ fn extract_speaker(text: &str) -> (Option<String>, String) {
     // Check for "Speaker: " prefix
     if let Some(colon_pos) = text.find(": ") {
         let potential_speaker = &text[..colon_pos];
-        // Only treat as speaker if it's relatively short (name-like)
-        if potential_speaker.len() < 30 && !potential_speaker.contains(' ') {
+        // Only treat as speaker if it's name-like:
+        // - Relatively short (under 40 chars for multi-word names like "Dr. John Smith")
+        // - Has at most 4 words (to avoid treating sentences as speakers)
+        // - Doesn't start with common sentence starters
+        let word_count = potential_speaker.split_whitespace().count();
+        let is_sentence_start = potential_speaker.starts_with("The ")
+            || potential_speaker.starts_with("A ")
+            || potential_speaker.starts_with("This ")
+            || potential_speaker.starts_with("That ")
+            || potential_speaker.starts_with("It ");
+        if potential_speaker.len() < 40 && word_count <= 4 && !is_sentence_start {
             return (
                 Some(potential_speaker.to_string()),
                 text[colon_pos + 2..].to_string(),

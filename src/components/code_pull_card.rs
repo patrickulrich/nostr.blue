@@ -11,7 +11,6 @@ use crate::components::code_status_badge::{CodeStatusBadge, BadgeSize};
 #[component]
 pub fn CodePullCard(
     pr: PullRequest,
-    #[props(default = false)] show_repo: bool,
 ) -> Element {
     // Extract title from content (first line or subject)
     let title = pr.content.lines().next().unwrap_or("Untitled patch").to_string();

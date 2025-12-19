@@ -10,9 +10,6 @@ use crate::components::icons::PinIcon;
 pub struct PinnedNotesCarouselProps {
     /// Pinned note events to display
     pub events: Vec<NostrEvent>,
-    /// Whether this is the current user's profile
-    #[props(default = false)]
-    pub is_own_profile: bool,
 }
 
 /// Horizontal carousel displaying pinned notes

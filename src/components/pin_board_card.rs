@@ -15,6 +15,7 @@ use crate::stores::pin_boards_store::{
 };
 use crate::stores::auth_store;
 use crate::components::icons::PinIcon;
+use crate::utils::truncate_pubkey;
 
 // ============================================================================
 // Hashtag Badge Component
@@ -55,7 +56,8 @@ pub fn PinBoardCard(
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // Fetch author's profile metadata
-    use_effect(move || {
+    // Only re-run when author pubkey changes (not every render)
+    use_effect(use_reactive!(|author_pubkey_for_fetch| {
         let pubkey_str = author_pubkey_for_fetch.clone();
 
         spawn(async move {
@@ -80,18 +82,12 @@ pub fn PinBoardCard(
                 author_metadata.set(Some(metadata));
             }
         });
-    });
+    }));
 
-    // Get display name from metadata or fallback
+    // Get display name from metadata or fallback (using UTF-8 safe truncation)
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
@@ -266,7 +262,8 @@ pub fn PinBoardCardMosaic(
     let mut reaction_loading = use_signal(|| false);
 
     // Fetch author's profile metadata
-    use_effect(move || {
+    // Only re-run when author pubkey changes (not every render)
+    use_effect(use_reactive!(|author_pubkey_for_fetch| {
         let pubkey_str = author_pubkey_for_fetch.clone();
 
         spawn(async move {
@@ -291,7 +288,7 @@ pub fn PinBoardCardMosaic(
                 author_metadata.set(Some(metadata));
             }
         });
-    });
+    }));
 
     // Fetch reaction state for this board
     {
@@ -314,16 +311,10 @@ pub fn PinBoardCardMosaic(
         });
     }
 
-    // Get display name from metadata or fallback
+    // Get display name from metadata or fallback (using UTF-8 safe truncation)
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

@@ -8,6 +8,7 @@
 
 use dioxus::prelude::*;
 use crate::utils::podcast::Soundbite;
+use crate::utils::safe_duration_millis;
 use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
 use crate::components::icons;
@@ -114,10 +115,10 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
                 music_player::seek_to(sb.start_time);
             }
             is_playing.set(true);
-            // Reset playing state after duration
+            // Reset playing state after duration (using safe conversion to prevent overflow)
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new((duration * 1000.0) as u32).await;
+                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }
@@ -306,7 +307,7 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new((duration * 1000.0) as u32).await;
+                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }
@@ -459,7 +460,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new((duration * 1000.0) as u32).await;
+                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration)).await;
                 is_playing.set(false);
             });
         }

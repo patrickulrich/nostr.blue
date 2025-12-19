@@ -2,6 +2,7 @@
 //! Select publications and book references to insert into wiki pages and publications
 
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use crate::stores::publication_store::{
     PublicationIndex, search_publications, get_all_cached_publications,
     fetch_publications,
@@ -40,6 +41,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| Vec::<PublicationIndex>::new());
     let mut is_searching = use_signal(|| false);
+    // Debounce counter to cancel stale search requests
+    let mut debounce_counter = use_signal(|| 0u32);
 
     // Selected publication and reference building
     let mut selected_publication = use_signal(|| None::<PublicationIndex>);
@@ -57,7 +60,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             if is_shown {
                 loading.set(true);
                 spawn(async move {
-                    let _ = fetch_publications(100, None).await;
+                    if let Err(e) = fetch_publications(100, None).await {
+                        crate::utils::log_fetch_error("publications", e);
+                    }
                     loading.set(false);
                 });
                 // Reset selection when opening
@@ -71,22 +76,44 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         },
     ));
 
-    // Handle search
+    // Handle search with 300ms debouncing to avoid excessive requests
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
 
         if query.is_empty() {
             search_results.set(Vec::new());
+            is_searching.set(false);
             return;
         }
 
+        // Increment counter to invalidate any pending search
+        debounce_counter.set(debounce_counter() + 1);
+        let current_counter = debounce_counter();
+
         is_searching.set(true);
         spawn(async move {
+            // Wait 300ms before searching
+            TimeoutFuture::new(300).await;
+
+            // Check if this search is still valid (no newer keystroke)
+            if debounce_counter() != current_counter {
+                return; // Stale request, another search is pending
+            }
+
             match search_publications(&query, 50).await {
-                Ok(results) => search_results.set(results),
+                Ok(results) => {
+                    // Double-check counter after async operation
+                    if debounce_counter() == current_counter {
+                        search_results.set(results);
+                    }
+                }
                 Err(e) => log::warn!("Publication search failed: {}", e),
             }
-            is_searching.set(false);
+
+            // Only clear searching state if this is still the current search
+            if debounce_counter() == current_counter {
+                is_searching.set(false);
+            }
         });
     };
 
@@ -134,8 +161,16 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         book_reference.read().as_ref().map(|r| r.raw.clone()).unwrap_or_default()
     });
 
-    // Close modal
+    // Close modal with search-in-progress warning
     let close_modal = move |_| {
+        if *is_searching.read() {
+            let confirmed = web_sys::window()
+                .and_then(|w| w.confirm_with_message("A search is in progress. Close anyway?").ok())
+                .unwrap_or(false);
+            if !confirmed {
+                return;
+            }
+        }
         props.show.set(false);
     };
 

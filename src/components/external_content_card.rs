@@ -157,7 +157,17 @@ fn BookCard(props: BookCardProps) -> Element {
                             }
                         }
                     },
-                    Some(Err(_)) | None => rsx! {
+                    Some(Err(_)) => rsx! {
+                        h4 {
+                            class: "font-semibold text-sm",
+                            "ISBN: {isbn}"
+                        }
+                        p {
+                            class: "text-xs text-muted-foreground",
+                            "Could not load book info"
+                        }
+                    },
+                    None => rsx! {
                         h4 {
                             class: "font-semibold text-sm",
                             "ISBN: {isbn}"
@@ -372,7 +382,11 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
                                     span { class: "text-muted-foreground", "Fee" }
                                     span {
                                         class: "font-mono",
-                                        "{tx.fee} sats ({tx.fee / tx.vsize as u64} sat/vB)"
+                                        if tx.vsize > 0 {
+                                            "{tx.fee} sats ({tx.fee / tx.vsize as u64} sat/vB)"
+                                        } else {
+                                            "{tx.fee} sats"
+                                        }
                                     }
                                 }
 

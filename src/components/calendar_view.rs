@@ -168,7 +168,7 @@ fn DayView(props: DayViewProps) -> Element {
                 div {
                     class: "absolute inset-0 left-16",
                     for pe in positioned.iter() {
-                        {render_positioned_event(pe, props.on_event_click.clone())}
+                        {render_positioned_event(pe)}
                     }
                 }
             }
@@ -317,7 +317,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                                 let positioned = position_day_events(&day_events, date);
                                 rsx! {
                                     for pe in positioned.iter() {
-                                        {render_positioned_event(pe, props.on_event_click.clone())}
+                                        {render_positioned_event(pe)}
                                     }
                                 }
                             }
@@ -780,7 +780,7 @@ fn get_event_hover_color(event: &UnifiedEvent) -> &'static str {
 }
 
 /// Render a positioned event
-fn render_positioned_event(pe: &PositionedEvent, _on_click: Option<EventHandler<UnifiedEvent>>) -> Element {
+fn render_positioned_event(pe: &PositionedEvent) -> Element {
     let bg_color = get_event_color(&pe.event);
     let hover_color = get_event_hover_color(&pe.event);
 

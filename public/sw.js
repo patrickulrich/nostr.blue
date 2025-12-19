@@ -2,6 +2,7 @@
 const CACHE_NAME = 'nostr-blue-v1';
 const STATIC_ASSETS = [
   '/',
+  '/index.html',  // Required for SPA offline fallback routing
   '/tailwind.css',
   // Removed: '/git-worker.js' - 672KB, only needed for /code routes (loaded on-demand)
   '/voice-recorder.js',
@@ -14,9 +15,11 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[SW] Caching static assets');
       return cache.addAll(STATIC_ASSETS);
+    }).then(() => {
+      // skipWaiting must be inside waitUntil to ensure caching completes first
+      self.skipWaiting();
     })
   );
-  self.skipWaiting();
 });
 
 // Activate - clean old caches

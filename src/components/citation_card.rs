@@ -44,10 +44,6 @@ pub fn CitationCard(
     let naddr = citation.naddr.clone().unwrap_or_default();
     let event_id = citation.event.id.to_hex();
     let author_pubkey = citation.event.pubkey.to_hex();
-    let coordinate = citation.a_tag.clone();
-
-    // Use Citation::short_display() for compact display (USES PREVIOUSLY UNUSED FUNCTION)
-    let _short_display = citation.citation.short_display();
 
     // Truncate content preview
     let preview = if content_preview.chars().count() > 120 {
@@ -89,7 +85,6 @@ pub fn CitationCard(
                     author_pubkey: author_pubkey.clone(),
                     naddr: naddr.clone(),
                     event_id: Some(event_id.clone()),
-                    coordinate: coordinate,
                 }
             }
 

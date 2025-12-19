@@ -34,7 +34,6 @@ pub fn PublicationCard(publication: PublicationIndex) -> Element {
     let author_hex_menu = author_hex.clone();
     let naddr_menu = publication.naddr.clone();
     let event_id = publication.event.id.to_hex();
-    let coordinate = publication.a_tag.clone();
 
     rsx! {
         div {
@@ -49,7 +48,6 @@ pub fn PublicationCard(publication: PublicationIndex) -> Element {
                     author_pubkey: author_hex_menu,
                     naddr: naddr_menu,
                     event_id: Some(event_id),
-                    coordinate: Some(coordinate),
                 }
             }
 

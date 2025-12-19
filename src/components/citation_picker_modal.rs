@@ -64,7 +64,9 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                     loading.set(true);
                     let pk_clone = pk.clone();
                     spawn(async move {
-                        let _ = fetch_citations_by_author(&pk_clone, 100).await;
+                        if let Err(e) = fetch_citations_by_author(&pk_clone, 100).await {
+                            crate::utils::log_fetch_error("citations", e);
+                        }
                         loading.set(false);
                     });
                 }
@@ -110,9 +112,10 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     // Generate markup preview
     let markup_preview = use_memo(move || {
         if let Some(ref citation) = *selected_citation.read() {
+            // EventId.to_bech32() returns Result<String, Infallible> - unwrap is safe
             let identifier = citation.naddr.as_ref()
                 .cloned()
-                .unwrap_or_else(|| citation.event.id.to_bech32().unwrap_or_default());
+                .unwrap_or_else(|| citation.event.id.to_bech32().unwrap());
             let style = *selected_style.read();
             format!("{}{}", style.markup_prefix(), identifier)
         } else {
@@ -133,9 +136,10 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     // Handle insert
     let handle_insert = move |_| {
         if let Some(ref citation) = *selected_citation.read() {
+            // EventId.to_bech32() returns Result<String, Infallible> - unwrap is safe
             let identifier = citation.naddr.as_ref()
                 .cloned()
-                .unwrap_or_else(|| citation.event.id.to_bech32().unwrap_or_default());
+                .unwrap_or_else(|| citation.event.id.to_bech32().unwrap());
             let style = *selected_style.read();
             let markup = format!("{}{}", style.markup_prefix(), identifier);
 

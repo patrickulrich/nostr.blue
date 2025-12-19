@@ -38,7 +38,6 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
     let author_hex_menu = author_hex.clone();
     let naddr = page.article.naddr.clone();
     let event_id = page.event.id.to_hex();
-    let coordinate = page.article.coordinate.clone();
 
     rsx! {
         div {
@@ -53,7 +52,6 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
                     author_pubkey: author_hex_menu,
                     naddr: naddr,
                     event_id: Some(event_id),
-                    coordinate: Some(coordinate),
                 }
             }
 

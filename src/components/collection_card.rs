@@ -3,6 +3,7 @@
 //! Matches ~/frontend CollectionCard.svelte (w-64 h-40)
 
 use dioxus::prelude::*;
+use crate::utils::is_valid_http_url;
 
 /// Collection card for the explore page
 #[component]
@@ -12,10 +13,12 @@ pub fn CollectionCard(
     #[props(default)] image_url: Option<String>,
     on_click: EventHandler<()>,
 ) -> Element {
-    let bg_style = if let Some(ref url) = image_url {
-        format!("background-image: url('{}'); background-size: cover; background-position: center;", url)
-    } else {
-        String::new()
+    // Validate URL before using in CSS to prevent injection
+    let bg_style = match &image_url {
+        Some(url) if is_valid_http_url(url) => {
+            format!("background-image: url('{}'); background-size: cover; background-position: center;", url)
+        }
+        _ => String::new(),
     };
 
     rsx! {

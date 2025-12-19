@@ -9,7 +9,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
-use crate::utils::{format_sats_compact, nip73, nip48};
+use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url};
 use nostr::nips::nip48::Protocol;
 use std::time::Duration;
 
@@ -968,6 +968,24 @@ pub fn NoteCard(
 fn ProxyBadge(proxy_info: nip48::ProxyInfo) -> Element {
     let display_name = proxy_info.display_name();
     let source_url = proxy_info.id.clone();
+
+    // Validate URL to prevent javascript: or other dangerous schemes
+    if !is_valid_http_url(&source_url) {
+        // Don't render link for invalid URLs - just show the icon
+        return rsx! {
+            span {
+                class: "inline-flex items-center text-muted-foreground",
+                title: "Bridged from {display_name}",
+                match &proxy_info.protocol {
+                    Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
+                }
+            }
+        };
+    }
 
     rsx! {
         a {

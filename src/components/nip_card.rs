@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::github_nips::OfficialNip;
+use crate::utils::truncate_pubkey;
 
 /// Card component for displaying an official NIP from GitHub
 #[component]
@@ -90,7 +91,8 @@ pub fn CustomNipCard(
     let mut author_metadata = use_signal(|| None::<Metadata>);
 
     // Fetch author's profile metadata if not provided
-    use_effect(move || {
+    // Only re-run when author pubkey changes (not every render)
+    use_effect(use_reactive!(|(author_pubkey_for_fetch, author_name_for_effect)| {
         if author_name_for_effect.is_some() {
             return; // Skip fetch if already provided
         }
@@ -119,19 +121,13 @@ pub fn CustomNipCard(
                 author_metadata.set(Some(metadata));
             }
         });
-    });
+    }));
 
-    // Get display name from metadata or fallback
+    // Get display name from metadata or fallback (using UTF-8 safe truncation)
     let display_name = author_name.or_else(|| {
         author_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
-    }).unwrap_or_else(|| {
-        if author_pubkey.len() > 16 {
-            format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-        } else {
-            author_pubkey.clone()
-        }
-    });
+    }).unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_picture.clone().or_else(|| {
         author_metadata.read().as_ref()

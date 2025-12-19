@@ -1070,8 +1070,7 @@ pub fn Profile(pubkey: String) -> Element {
                                         "Pinned"
                                     }
                                     PinnedNotesCarousel {
-                                        events: pinned_events.read().clone(),
-                                        is_own_profile: is_own_profile
+                                        events: pinned_events.read().clone()
                                     }
                                 }
                             }

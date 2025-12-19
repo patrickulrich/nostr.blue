@@ -274,7 +274,12 @@ pub fn ChapterProgressIndicator(
             // Chapter markers
             for (idx, chapter) in visible_chapters.iter().enumerate() {
                 {
-                    let position = (chapter.start_time / total_duration * 100.0).min(100.0);
+                    // Guard against division by zero
+                    let position = if total_duration > 0.0 {
+                        (chapter.start_time / total_duration * 100.0).min(100.0)
+                    } else {
+                        0.0
+                    };
                     let is_current = Some(idx) == current_chapter_idx;
 
                     rsx! {
@@ -288,10 +293,19 @@ pub fn ChapterProgressIndicator(
                 }
             }
 
-            // Playback progress
-            div {
-                class: "absolute left-0 top-0 h-full bg-primary rounded-full",
-                style: "width: {(current_time / total_duration * 100.0).min(100.0)}%"
+            // Playback progress (guard against division by zero)
+            {
+                let progress_width = if total_duration > 0.0 {
+                    (current_time / total_duration * 100.0).min(100.0)
+                } else {
+                    0.0
+                };
+                rsx! {
+                    div {
+                        class: "absolute left-0 top-0 h-full bg-primary rounded-full",
+                        style: "width: {progress_width}%"
+                    }
+                }
             }
         }
     }

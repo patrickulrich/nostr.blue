@@ -342,8 +342,13 @@ pub fn BranchSelector(
                 }
             }
 
-            // Dropdown menu
+            // Dropdown menu with click-outside backdrop
             if is_open() {
+                // Backdrop to close when clicking outside
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |_| is_open.set(false),
+                }
                 div {
                     class: "absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-50 py-1",
 

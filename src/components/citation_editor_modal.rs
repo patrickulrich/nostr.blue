@@ -10,6 +10,7 @@ use crate::stores::citation_store::{
 };
 use crate::stores::auth_store;
 use crate::utils::nkbip03::Citation;
+use crate::utils::is_valid_http_url;
 use crate::components::icons::{XIcon, BookOpenIcon, GlobeIcon, Link2Icon, SettingsIcon};
 
 /// Tab for citation type selection
@@ -158,7 +159,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                 has_cited_text && !coordinate.read().trim().is_empty()
             }
             CitationEditorTab::External => {
-                has_cited_text && !url.read().trim().is_empty()
+                // Validate URL is a proper HTTP(S) URL for security
+                has_cited_text && is_valid_http_url(url.read().trim())
             }
             CitationEditorTab::Hardcopy => {
                 has_cited_text
@@ -166,7 +168,10 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                     && !author.read().trim().is_empty()
             }
             CitationEditorTab::Prompt => {
-                has_cited_text && !llm.read().trim().is_empty()
+                let prompt_url_str = prompt_url.read();
+                let prompt_url_valid = prompt_url_str.trim().is_empty()
+                    || is_valid_http_url(prompt_url_str.trim());
+                has_cited_text && !llm.read().trim().is_empty() && prompt_url_valid
             }
         }
     });
@@ -239,7 +244,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
                     // Refresh user's citations
                     if let Some(pk) = auth_store::get_pubkey() {
-                        let _ = fetch_citations_by_author(&pk, 200).await;
+                        if let Err(e) = fetch_citations_by_author(&pk, 200).await {
+                            crate::utils::log_fetch_error("citations refresh", e);
+                        }
                     }
 
                     // Callback
