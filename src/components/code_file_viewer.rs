@@ -6,6 +6,16 @@
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 
+/// Extract file extension from filename
+/// Returns empty string for extensionless files or dotfiles (e.g., ".gitignore")
+fn extract_extension(filename: &str) -> &str {
+    filename
+        .rsplit_once('.')
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(_, ext)| ext)
+        .unwrap_or("")
+}
+
 /// Language detection from file extension
 fn detect_language(filename: &str) -> &'static str {
     // Special case: match full filename for extensionless special files
@@ -17,13 +27,7 @@ fn detect_language(filename: &str) -> &'static str {
         _ => {}
     }
 
-    // Handle extensionless files properly (rsplit returns filename if no dot)
-    let extension = filename
-        .rsplit_once('.')
-        .filter(|(name, _)| !name.is_empty())
-        .map(|(_, ext)| ext)
-        .unwrap_or("");
-    match extension {
+    match extract_extension(filename) {
         "rs" => "rust",
         "js" | "mjs" => "javascript",
         "jsx" => "jsx",
@@ -57,14 +61,8 @@ fn detect_language(filename: &str) -> &'static str {
 
 /// Check if file is likely binary based on extension
 fn is_binary_extension(filename: &str) -> bool {
-    // Handle extensionless files properly
-    let extension = filename
-        .rsplit_once('.')
-        .filter(|(name, _)| !name.is_empty())
-        .map(|(_, ext)| ext)
-        .unwrap_or("");
     matches!(
-        extension,
+        extract_extension(filename),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |
         "pdf" | "doc" | "docx" | "xls" | "xlsx" |
         "zip" | "tar" | "gz" | "rar" | "7z" |

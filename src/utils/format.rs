@@ -46,26 +46,25 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
 
 /// Truncates text at a word boundary to avoid breaking words
 /// Returns text with "..." suffix if truncated
-/// Uses UTF-8 safe character-based indexing to avoid panic on multi-byte chars
+/// Fully char-aware implementation - no byte slicing for UTF-8 safety
 pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
-    let char_count = text.chars().count();
-    if char_count <= max_chars {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
         return text.to_string();
     }
-    // Find byte index at max_chars characters (safe UTF-8 boundary)
-    let byte_limit = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(i, _)| i)
-        .unwrap_or(text.len());
-    let truncated = &text[..byte_limit];
-    // rfind returns byte index, but since we're searching for ASCII space ' '
-    // and slicing from the original text, the boundary is safe
-    if let Some(last_space) = truncated.rfind(' ') {
-        format!("{}...", &text[..last_space])
-    } else {
-        format!("{}...", truncated)
-    }
+
+    // Find the last space within the first max_chars characters
+    let last_space_pos = chars[..max_chars]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, c)| **c == ' ')
+        .map(|(i, _)| i);
+
+    // Truncate at word boundary if found, otherwise at max_chars
+    let truncate_at = last_space_pos.unwrap_or(max_chars);
+    let result: String = chars[..truncate_at].iter().collect();
+    format!("{}...", result)
 }
 
 /// Shortens a URL for display by stripping protocol and truncating

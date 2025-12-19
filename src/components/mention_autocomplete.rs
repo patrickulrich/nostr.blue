@@ -8,6 +8,18 @@ use wasm_bindgen::JsCast;
 
 use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
 
+/// Groups autocomplete-related signals to reduce parameter count in helper functions
+#[derive(Clone, Copy)]
+struct AutocompleteState {
+    show: Signal<bool>,
+    query: Signal<String>,
+    start_pos: Signal<usize>,
+    results: Signal<Vec<ProfileSearchResult>>,
+    selected_index: Signal<usize>,
+    is_searching: Signal<bool>,
+    relay_search_task: Signal<Option<Task>>,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct MentionAutocompleteProps {
     /// Current content of the textarea
@@ -39,12 +51,16 @@ pub struct MentionAutocompleteProps {
 
 #[component]
 pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
-    let mut show_autocomplete = use_signal(|| false);
-    let search_results = use_signal(Vec::<ProfileSearchResult>::new);
-    let mut selected_index = use_signal(|| 0usize);
-    let is_searching = use_signal(|| false);
-    let mention_query = use_signal(String::new);
-    let mention_start_pos = use_signal(|| 0usize);
+    // Group autocomplete signals into a single struct
+    let mut autocomplete = AutocompleteState {
+        show: use_signal(|| false),
+        query: use_signal(String::new),
+        start_pos: use_signal(|| 0usize),
+        results: use_signal(Vec::<ProfileSearchResult>::new),
+        selected_index: use_signal(|| 0usize),
+        is_searching: use_signal(|| false),
+        relay_search_task: use_signal(|| None::<Task>),
+    };
     let mut internal_cursor_pos = use_signal(|| 0usize);
 
     // Dropdown positioning
@@ -53,9 +69,6 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let mut show_below = use_signal(|| true);
 
     let textarea_id = use_signal(|| Rc::new(format!("mention-textarea-{}", uuid::Uuid::new_v4())));
-
-    // Debounced relay search task
-    let relay_search_task = use_signal(|| None::<Task>);
 
     // Contact list cache
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
@@ -81,58 +94,58 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         props.on_input.call(new_value.clone());
 
         // Detect @ mentions
-        detect_mention(&new_value, cursor_pos, show_autocomplete, mention_query, mention_start_pos, is_searching, search_results, selected_index, relay_search_task, contact_pubkeys, &props.thread_participants);
+        detect_mention(&new_value, cursor_pos, &mut autocomplete, contact_pubkeys, &props.thread_participants);
 
         // Update dropdown position if showing
-        if *show_autocomplete.read() {
+        if *autocomplete.show.read() {
             update_dropdown_position(&textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below);
         }
     };
 
     let handle_keydown = move |evt: DioxusEvent<KeyboardData>| {
-        if !*show_autocomplete.read() {
+        if !*autocomplete.show.read() {
             return;
         }
 
         let key = evt.key();
-        let results = search_results.read();
+        let results = autocomplete.results.read();
 
         match key {
             Key::ArrowDown => {
                 evt.prevent_default();
-                let current = *selected_index.read();
+                let current = *autocomplete.selected_index.read();
                 let max = results.len().saturating_sub(1);
                 if current < max {
-                    selected_index.set(current + 1);
+                    autocomplete.selected_index.set(current + 1);
                 }
             }
             Key::ArrowUp => {
                 evt.prevent_default();
-                let current = *selected_index.read();
+                let current = *autocomplete.selected_index.read();
                 if current > 0 {
-                    selected_index.set(current - 1);
+                    autocomplete.selected_index.set(current - 1);
                 }
             }
             Key::Enter => {
                 if !results.is_empty() {
                     evt.prevent_default();
-                    let selected = results.get(*selected_index.read());
+                    let selected = results.get(*autocomplete.selected_index.read());
                     if let Some(profile) = selected {
                         insert_mention(
                             profile.clone(),
                             props.content,
                             props.on_input,
-                            *mention_start_pos.read(),
-                            mention_query.read().len(),
+                            *autocomplete.start_pos.read(),
+                            autocomplete.query.read().len(),
                             (**textarea_id.read()).clone(),
-                            show_autocomplete,
+                            autocomplete.show,
                             props.cursor_position,
                         );
                     }
                 }
             }
             Key::Escape => {
-                show_autocomplete.set(false);
+                autocomplete.show.set(false);
             }
             _ => {}
         }
@@ -183,20 +196,20 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             }
 
             // Autocomplete dropdown
-            if *show_autocomplete.read() {
+            if *autocomplete.show.read() {
                 {render_dropdown(
-                    &search_results.read(),
-                    *selected_index.read(),
-                    *is_searching.read(),
+                    &autocomplete.results.read(),
+                    *autocomplete.selected_index.read(),
+                    *autocomplete.is_searching.read(),
                     *dropdown_top.read(),
                     *dropdown_left.read(),
                     *show_below.read(),
                     props.content,
                     props.on_input,
-                    *mention_start_pos.read(),
-                    mention_query.read().len(),
+                    *autocomplete.start_pos.read(),
+                    autocomplete.query.read().len(),
                     (**textarea_id.read()).clone(),
-                    show_autocomplete,
+                    autocomplete.show,
                     props.cursor_position,
                 )}
             }
@@ -205,17 +218,10 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 }
 
 /// Detect @ mention in text at cursor position
-#[allow(clippy::too_many_arguments)]
 fn detect_mention(
     text: &str,
     cursor_pos: usize,
-    mut show_autocomplete: Signal<bool>,
-    mut mention_query: Signal<String>,
-    mut mention_start_pos: Signal<usize>,
-    mut is_searching: Signal<bool>,
-    mut search_results: Signal<Vec<ProfileSearchResult>>,
-    mut selected_index: Signal<usize>,
-    mut relay_search_task: Signal<Option<Task>>,
+    state: &mut AutocompleteState,
     contact_pubkeys: Signal<Vec<PublicKey>>,
     thread_pubkeys: &[PublicKey],
 ) {
@@ -231,36 +237,40 @@ fn detect_mention(
 
         // Check if there's whitespace after @ (if so, don't show autocomplete)
         if after_at.contains(char::is_whitespace) {
-            show_autocomplete.set(false);
+            state.show.set(false);
             return;
         }
 
         // Valid mention query
         let query = after_at.to_string();
-        mention_query.set(query.clone());
-        mention_start_pos.set(at_pos);
-        show_autocomplete.set(true);
-        selected_index.set(0);
+        state.query.set(query.clone());
+        state.start_pos.set(at_pos);
+        state.show.set(true);
+        state.selected_index.set(0);
 
         // Search cached profiles immediately (no debounce for instant results)
         let contacts = contact_pubkeys.read().clone();
         let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
-        search_results.set(cached_results.clone());
+        state.results.set(cached_results.clone());
 
         log::debug!("Autocomplete search for '{}': found {} results ({} thread participants)",
             query, cached_results.len(), thread_pubkeys.len());
 
         // Only query relays if we don't have enough results and query is long enough
         if query.len() >= 2 && cached_results.len() < 5 {
-            is_searching.set(true);
+            state.is_searching.set(true);
 
             // Cancel previous relay search task if any
-            if let Some(task) = relay_search_task.read().as_ref() {
+            if let Some(task) = state.relay_search_task.read().as_ref() {
                 task.cancel();
             }
 
             // Capture query for stale result verification
             let query_snapshot = query.clone();
+            let query_signal = state.query;
+            let mut results_signal = state.results;
+            let mut searching_signal = state.is_searching;
+            let mut task_signal = state.relay_search_task;
 
             // Start new relay search task with debounce
             let new_task = spawn(async move {
@@ -280,31 +290,31 @@ fn detect_mention(
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
                         // Only update results if query hasn't changed (avoid stale results)
-                        if mention_query.read().as_str() == query_snapshot.as_str() {
-                            search_results.set(results);
-                            is_searching.set(false);
+                        if query_signal.read().as_str() == query_snapshot.as_str() {
+                            results_signal.set(results);
+                            searching_signal.set(false);
                         } else {
                             log::debug!("Ignoring stale search results for '{}' (current query: '{}')",
-                                query_snapshot, mention_query.read());
+                                query_snapshot, query_signal.read());
                         }
                     }
                     Err(e) => {
                         log::error!("Profile search failed: {}", e);
                         // Only clear searching state if query hasn't changed
-                        if mention_query.read().as_str() == query_snapshot.as_str() {
-                            is_searching.set(false);
+                        if query_signal.read().as_str() == query_snapshot.as_str() {
+                            searching_signal.set(false);
                         }
                     }
                 }
             });
 
-            relay_search_task.set(Some(new_task));
+            task_signal.set(Some(new_task));
         } else {
-            is_searching.set(false);
+            state.is_searching.set(false);
         }
     } else {
         // No @ found before cursor
-        show_autocomplete.set(false);
+        state.show.set(false);
     }
 }
 
