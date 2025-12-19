@@ -6,7 +6,7 @@ use crate::components::VoiceRecorder;
 pub fn VoiceMessageNew() -> Element {
     let navigator = navigator();
     let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
-    let mut hashtags = use_signal(|| String::new());
+    let mut hashtags = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
 

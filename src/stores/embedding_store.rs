@@ -135,7 +135,7 @@ pub fn cache_embeddings(source_event_id: &str, embeddings: Vec<EmbeddingEvent>) 
 /// Add a single embedding to cache
 pub fn add_embedding_to_cache(embedding: EmbeddingEvent) {
     let mut cache = EMBEDDINGS_CACHE.write();
-    let entry = cache.entry(embedding.source_event_id.clone()).or_insert_with(Vec::new);
+    let entry = cache.entry(embedding.source_event_id.clone()).or_default();
 
     // Don't add duplicates
     if !entry.iter().any(|e| e.event_id == embedding.event_id) {
@@ -307,7 +307,7 @@ pub async fn fetch_embeddings_for_event(source_event_id: &str) -> StdResult<Vec<
         Ok(events) => {
             let embeddings: Vec<EmbeddingEvent> = events
                 .iter()
-                .filter_map(|e| parse_embedding_event(e))
+                .filter_map(parse_embedding_event)
                 .collect();
 
             cache_embeddings(source_event_id, embeddings.clone());
@@ -341,7 +341,7 @@ pub async fn fetch_embeddings_by_author(pubkey_hex: &str, limit: usize) -> StdRe
         Ok(events) => {
             let embeddings: Vec<EmbeddingEvent> = events
                 .iter()
-                .filter_map(|e| parse_embedding_event(e))
+                .filter_map(parse_embedding_event)
                 .collect();
 
             // Cache each embedding

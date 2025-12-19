@@ -253,10 +253,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             let _ = audio.play().map_err(|e| {
                 log::debug!("Play failed: {:?}", e);
             });
-        } else {
-            if let Err(e) = audio.pause() {
-                log::debug!("Pause failed: {:?}", e);
-            }
+        } else if let Err(e) = audio.pause() {
+            log::debug!("Pause failed: {:?}", e);
         }
     });
 
@@ -328,7 +326,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
-                    let navigator = nav.clone();
+                    let navigator = nav;
                     let is_pending_node = is_pending;
                     let status = pending_status.clone();
                     move |_| {
@@ -676,10 +674,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                             if let Err(e) = bookmarks::unbookmark_event(event_id_clone).await {
                                                 log::error!("Failed to unbookmark: {}", e);
                                             }
-                                        } else {
-                                            if let Err(e) = bookmarks::bookmark_event(event_id_clone).await {
-                                                log::error!("Failed to bookmark: {}", e);
-                                            }
+                                        } else if let Err(e) = bookmarks::bookmark_event(event_id_clone).await {
+                                            log::error!("Failed to bookmark: {}", e);
                                         }
                                         is_bookmarking.set(false);
                                     });

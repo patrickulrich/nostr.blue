@@ -15,7 +15,7 @@ pub fn RecipesByTag(tag: String) -> Element {
     let tag_for_load_more = tag.clone();
     let tag_for_display = tag.clone();
 
-    let mut recipes = use_signal(|| Vec::<CachedRecipe>::new());
+    let mut recipes = use_signal(Vec::<CachedRecipe>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 

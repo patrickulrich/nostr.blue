@@ -24,7 +24,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
     let naddr_for_edit = naddr.clone();
 
     let mut board = use_signal(|| None::<Pinboard>);
-    let mut pins = use_signal(|| Vec::<Pin>::new());
+    let mut pins = use_signal(Vec::<Pin>::new);
     let mut loading = use_signal(|| true);
     let mut pins_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -154,7 +154,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
             drop(board_ref);
             deleting.set(true);
 
-            let nav = nav.clone();
+            let nav = nav;
             spawn(async move {
                 match delete_pinboard(&board_clone).await {
                     Ok(_) => {

@@ -18,7 +18,7 @@ const POPULAR_LANGUAGES: &[&str] = &[
 #[component]
 pub fn CodeSnippets() -> Element {
     let mut language_filter = use_signal(|| None::<String>);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
 
     // Snippets state
     let mut snippets_result = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
@@ -188,8 +188,8 @@ pub fn CodeSnippets() -> Element {
                                     true
                                 } else {
                                     s.code.to_lowercase().contains(&search)
-                                        || s.name.as_ref().map_or(false, |n| n.to_lowercase().contains(&search))
-                                        || s.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&search))
+                                        || s.name.as_ref().is_some_and(|n| n.to_lowercase().contains(&search))
+                                        || s.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&search))
                                 }
                             })
                             .collect();

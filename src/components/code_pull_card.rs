@@ -26,7 +26,7 @@ pub fn CodePullCard(
 
                 // Status badge
                 CodeStatusBadge {
-                    status: pr.status.clone(),
+                    status: pr.status,
                     size: BadgeSize::Small,
                 }
 

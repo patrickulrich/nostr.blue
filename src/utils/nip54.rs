@@ -349,7 +349,7 @@ pub fn parse_wiki_redirect(event: &Event) -> Result<WikiRedirect, String> {
         normalize_wiki_dtag(&event.content)
     } else {
         get_tag_value(event, "a")
-            .and_then(|coord| coord.split(':').last().map(|s| s.to_string()))
+            .and_then(|coord| coord.split(':').next_back().map(|s| s.to_string()))
             .ok_or("Missing redirect target")?
     };
 

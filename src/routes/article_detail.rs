@@ -18,7 +18,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut comments = use_signal(|| Vec::<NostrEvent>::new());
+    let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
@@ -596,7 +596,7 @@ fn format_timestamp(timestamp: u64) -> String {
     use chrono::{DateTime, Utc};
 
     let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| Utc::now());
+        .unwrap_or_else(Utc::now);
 
     dt.format("%B %d, %Y").to_string()
 }

@@ -265,7 +265,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
 
     // Format duration
     let duration_str = episode.duration
-        .map(|d| format_duration(d))
+        .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
 
     // Image URL with fallback

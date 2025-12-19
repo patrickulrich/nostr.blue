@@ -17,7 +17,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut position_right = use_signal(|| true); // Whether to show popup to the right of button
     let button_id = use_signal(|| format!("gif-picker-{}", uuid::Uuid::new_v4()));
     let mut initialized = use_signal(|| false);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     #[allow(unused_mut)]
     let mut picker_top = use_signal(|| 0.0);
     #[allow(unused_mut)]
@@ -33,7 +33,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     // Debounced search effect
     use_effect(move || {
         let query = search_query.read().clone();
-        if initialized.read().clone() {
+        if *initialized.read() {
             spawn(async move {
                 // Wait 300ms for debouncing
                 #[cfg(target_family = "wasm")]

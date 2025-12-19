@@ -86,7 +86,7 @@ pub fn CodeImport() -> Element {
     };
 
     let handle_publish = {
-        let _nav = nav.clone();
+        let _nav = nav;
         move |_| {
             let repo = match github_repo.read().clone() {
                 Some(r) => r,

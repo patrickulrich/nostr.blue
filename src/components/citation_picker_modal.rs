@@ -43,7 +43,7 @@ pub struct CitationPickerModalProps {
 pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut active_tab = use_signal(|| PickerTab::MyCitations);
     let mut search_query = use_signal(String::new);
-    let mut search_results = use_signal(|| Vec::<CachedCitation>::new());
+    let mut search_results = use_signal(Vec::<CachedCitation>::new);
     let mut is_searching = use_signal(|| false);
 
     // Selected citation

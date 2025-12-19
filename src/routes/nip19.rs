@@ -154,7 +154,7 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                     30311 => {
                         // Live stream events use note_id from event
                         // For now, return error since we need to fetch the actual event
-                        Err(format!("Live stream naddr routing requires event fetch. Please use the event ID directly."))
+                        Err("Live stream naddr routing requires event fetch. Please use the event ID directly.".to_string())
                     },
                     // Calendar events (NIP-52)
                     31922 | 31923 => Ok(Route::CalendarEventDetail {

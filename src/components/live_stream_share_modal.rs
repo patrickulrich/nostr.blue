@@ -29,8 +29,8 @@ pub fn LiveStreamShareModal(
 ) -> Element {
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
-    let mut nostr_text = use_signal(|| String::new());
-    let mut dm_recipient = use_signal(|| String::new());
+    let mut nostr_text = use_signal(String::new);
+    let mut dm_recipient = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);

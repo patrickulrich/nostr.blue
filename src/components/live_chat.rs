@@ -56,9 +56,9 @@ pub fn LiveChat(
     stream_author_pubkey: String,
     stream_d_tag: String,
 ) -> Element {
-    let mut messages = use_signal(|| Vec::<Event>::new());
+    let mut messages = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
-    let mut message_input = use_signal(|| String::new());
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
     // Make has_signer reactive - read from the store when needed instead of capturing once
     let has_signer = use_memo(move || *HAS_SIGNER.read());

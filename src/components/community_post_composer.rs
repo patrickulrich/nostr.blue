@@ -25,8 +25,8 @@ pub fn CommunityPostComposer(
     // Clone values for closures
     let community_for_post = community.clone();
     let reply_to_for_post = reply_to.clone();
-    let on_success_for_post = on_success.clone();
-    let on_close_for_post = on_close.clone();
+    let on_success_for_post = on_success;
+    let on_close_for_post = on_close;
 
     let handle_submit = move |_| {
         let content_text = content.read().trim().to_string();
@@ -37,8 +37,8 @@ pub fn CommunityPostComposer(
 
         let community = community_for_post.clone();
         let reply_to = reply_to_for_post.clone();
-        let on_success = on_success_for_post.clone();
-        let on_close = on_close_for_post.clone();
+        let on_success = on_success_for_post;
+        let on_close = on_close_for_post;
 
         posting.set(true);
         error.set(None);
@@ -67,7 +67,7 @@ pub fn CommunityPostComposer(
         });
     };
 
-    let on_close_backdrop = on_close.clone();
+    let on_close_backdrop = on_close;
 
     // Helper to check for unsaved content and confirm close
     let confirm_close = move |handler: EventHandler<()>| {
@@ -84,13 +84,13 @@ pub fn CommunityPostComposer(
         }
     };
 
-    let on_close_for_backdrop = on_close_backdrop.clone();
-    let on_close_for_button = on_close.clone();
+    let on_close_for_backdrop = on_close_backdrop;
+    let on_close_for_button = on_close;
 
     rsx! {
         div {
             class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
-            onclick: move |_| confirm_close(on_close_for_backdrop.clone()),
+            onclick: move |_| confirm_close(on_close_for_backdrop),
 
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",
@@ -109,7 +109,7 @@ pub fn CommunityPostComposer(
                     }
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
-                        onclick: move |_| confirm_close(on_close_for_button.clone()),
+                        onclick: move |_| confirm_close(on_close_for_button),
                         svg {
                             class: "w-5 h-5",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -294,7 +294,7 @@ pub fn CommunityPostComposerInline(
     let has_signer = *HAS_SIGNER.read();
 
     let community_for_post = community.clone();
-    let on_success_for_post = on_success.clone();
+    let on_success_for_post = on_success;
 
     let handle_submit = move |_| {
         let content_text = content.read().trim().to_string();
@@ -303,7 +303,7 @@ pub fn CommunityPostComposerInline(
         }
 
         let community = community_for_post.clone();
-        let on_success = on_success_for_post.clone();
+        let on_success = on_success_for_post;
 
         posting.set(true);
         error.set(None);

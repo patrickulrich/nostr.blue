@@ -47,7 +47,7 @@ pub fn PodcastChapters(props: PodcastChaptersProps) -> Element {
                 ChapterList {
                     chapters: chapter_list,
                     current_time: props.current_time,
-                    on_seek: props.on_seek.clone(),
+                    on_seek: props.on_seek,
                     compact: props.compact
                 }
             }
@@ -108,7 +108,7 @@ pub fn ChapterList(props: ChapterListProps) -> Element {
                     key: "{idx}",
                     chapter: (*chapter).clone(),
                     is_current: Some(idx) == current_chapter_idx,
-                    on_click: props.on_seek.clone(),
+                    on_click: props.on_seek,
                     compact: props.compact
                 }
             }
@@ -147,7 +147,7 @@ fn ChapterItem(props: ChapterItemProps) -> Element {
 
     let handle_click = {
         let start_time = chapter.start_time;
-        let on_click = props.on_click.clone();
+        let on_click = props.on_click;
         move |_| {
             if let Some(handler) = &on_click {
                 handler.call(start_time);

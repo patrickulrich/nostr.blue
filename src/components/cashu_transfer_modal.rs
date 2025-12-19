@@ -11,14 +11,14 @@ fn select_valid_mint(
     // If current is valid and not excluded, keep it
     if !current.is_empty()
         && mints.contains(&current.to_string())
-        && exclude.map_or(true, |ex| ex != current)
+        && (exclude != Some(current))
     {
         return Some(current.to_string());
     }
 
     // Otherwise, find first valid alternative
     mints.iter()
-        .find(|m| exclude.map_or(true, |ex| *m != ex))
+        .find(|m| exclude.is_none_or(|ex| *m != ex))
         .cloned()
 }
 
@@ -26,11 +26,11 @@ fn select_valid_mint(
 pub fn CashuTransferModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut amount = use_signal(|| String::new());
+    let mut amount = use_signal(String::new);
     // Use memo for reactive mint list that updates when WALLET_STATE changes
-    let mints = use_memo(move || cashu::get_mints());
-    let mut source_mint = use_signal(|| String::new());
-    let mut target_mint = use_signal(|| String::new());
+    let mints = use_memo(cashu::get_mints);
+    let mut source_mint = use_signal(String::new);
+    let mut target_mint = use_signal(String::new);
     let mut is_transferring = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut fee_estimate = use_signal(|| Option::<u64>::None);

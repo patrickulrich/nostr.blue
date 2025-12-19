@@ -314,7 +314,7 @@ pub async fn fetch_citations_by_type(
         Ok(events) => {
             let citations: Vec<CachedCitation> = events
                 .iter()
-                .filter_map(|e| parse_citation_event(e))
+                .filter_map(parse_citation_event)
                 .collect();
 
             cache_citations(&citations);
@@ -566,7 +566,7 @@ pub async fn publish_internal_citation(
 
     // Generate d-tag from title or address
     let d_tag = title
-        .map(|t| crate::utils::nip54::normalize_wiki_dtag(t))
+        .map(crate::utils::nip54::normalize_wiki_dtag)
         .unwrap_or_else(|| format!("citation-{}", &cited_address[..8.min(cited_address.len())]));
 
     let mut tags: Vec<Tag> = vec![
@@ -615,7 +615,7 @@ pub async fn publish_external_citation(
     }
 
     let d_tag = title
-        .map(|t| crate::utils::nip54::normalize_wiki_dtag(t))
+        .map(crate::utils::nip54::normalize_wiki_dtag)
         .unwrap_or_else(|| format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-")));
 
     let mut tags: Vec<Tag> = vec![

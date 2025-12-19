@@ -27,16 +27,16 @@ impl Birthday {
         ];
 
         match (self.month, self.day, self.year) {
-            (Some(m), Some(d), Some(y)) if m >= 1 && m <= 12 => {
+            (Some(m), Some(d), Some(y)) if (1..=12).contains(&m) => {
                 Some(format!("{} {}, {}", months[(m - 1) as usize], d, y))
             }
-            (Some(m), Some(d), None) if m >= 1 && m <= 12 => {
+            (Some(m), Some(d), None) if (1..=12).contains(&m) => {
                 Some(format!("{} {}", months[(m - 1) as usize], d))
             }
-            (Some(m), None, Some(y)) if m >= 1 && m <= 12 => {
+            (Some(m), None, Some(y)) if (1..=12).contains(&m) => {
                 Some(format!("{} {}", months[(m - 1) as usize], y))
             }
-            (Some(m), None, None) if m >= 1 && m <= 12 => {
+            (Some(m), None, None) if (1..=12).contains(&m) => {
                 Some(months[(m - 1) as usize].to_string())
             }
             (None, None, Some(y)) => Some(y.to_string()),

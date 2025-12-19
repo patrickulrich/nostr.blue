@@ -76,23 +76,23 @@ pub fn CalendarView(props: CalendarViewProps) -> Element {
             DayView {
                 events: props.events.clone(),
                 date: props.selected_date.clone(),
-                on_event_click: props.on_event_click.clone()
+                on_event_click: props.on_event_click
             }
         },
         CalendarViewMode::Week => rsx! {
             WeekView {
                 events: props.events.clone(),
                 selected_date: props.selected_date.clone(),
-                on_date_select: props.on_date_select.clone(),
-                on_event_click: props.on_event_click.clone()
+                on_date_select: props.on_date_select,
+                on_event_click: props.on_event_click
             }
         },
         CalendarViewMode::Month => rsx! {
             MonthView {
                 events: props.events.clone(),
                 selected_date: props.selected_date.clone(),
-                on_date_select: props.on_date_select.clone(),
-                on_event_click: props.on_event_click.clone()
+                on_date_select: props.on_date_select,
+                on_event_click: props.on_event_click
             }
         },
     }
@@ -137,7 +137,7 @@ fn DayView(props: DayViewProps) -> Element {
             }
 
             // All-day events
-            {render_all_day_events(&day_events, props.on_event_click.clone())}
+            {render_all_day_events(&day_events, props.on_event_click)}
 
             // Time grid
             div {
@@ -258,7 +258,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                                                 style: "{style}",
                                                 onclick: {
                                                     let event = event.clone();
-                                                    let handler = props.on_event_click.clone();
+                                                    let handler = props.on_event_click;
                                                     move |_| {
                                                         if let Some(h) = &handler {
                                                             h.call(event.clone());
@@ -388,7 +388,7 @@ fn MonthView(props: MonthViewProps) -> Element {
                                 class: if is_other_month { "bg-muted/30" } else { "" },
                                 onclick: {
                                     let date = date.clone();
-                                    let handler = props.on_date_select.clone();
+                                    let handler = props.on_date_select;
                                     move |_| {
                                         if let Some(h) = &handler {
                                             h.call(date.clone());
@@ -415,7 +415,7 @@ fn MonthView(props: MonthViewProps) -> Element {
                                                 style: "{style}",
                                                 onclick: {
                                                     let event = event.clone();
-                                                    let handler = props.on_event_click.clone();
+                                                    let handler = props.on_event_click;
                                                     move |e| {
                                                         e.stop_propagation();
                                                         if let Some(h) = &handler {
@@ -736,7 +736,7 @@ fn render_all_day_events(events: &[UnifiedEvent], on_click: Option<EventHandler<
                                 style: "{style}",
                                 onclick: {
                                     let event = (*event).clone();
-                                    let handler = on_click.clone();
+                                    let handler = on_click;
                                     move |_| {
                                         if let Some(h) = &handler {
                                             h.call(event.clone());

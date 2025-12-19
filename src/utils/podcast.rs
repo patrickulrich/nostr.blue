@@ -430,7 +430,7 @@ pub fn parse_podcast_metadata(event: &Event) -> Result<PodcastMetadata, String> 
     // Parse value block from JSON or tags
     let value = content_json.as_ref()
         .and_then(|j| j.get("value"))
-        .and_then(|v| parse_value_block_from_json(v))
+        .and_then(parse_value_block_from_json)
         .or_else(|| parse_value_block(event));
 
     Ok(PodcastMetadata {
@@ -613,7 +613,7 @@ fn parse_value_block(event: &Event) -> Option<ValueBlock> {
         .filter_map(|t| {
             let slice = t.as_slice();
             // Format: ["valueRecipient", name, type, address, split, custom_key?, custom_value?, fee?]
-            let name = slice.get(1).map(|s| if s.is_empty() { None } else { Some(s.to_string()) }).flatten();
+            let name = slice.get(1).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) });
             let recipient_type = slice.get(2)?.to_string();
             let address = slice.get(3)?.to_string();
             let split: u32 = slice.get(4)?.parse().ok()?;

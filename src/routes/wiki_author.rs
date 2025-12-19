@@ -13,7 +13,7 @@ use crate::routes::Route;
 pub fn WikiAuthor(pubkey: String) -> Element {
     let nav = use_navigator();
     let mut loading = use_signal(|| true);
-    let mut pages = use_signal(|| Vec::<CachedWikiPage>::new());
+    let mut pages = use_signal(Vec::<CachedWikiPage>::new);
     let mut error = use_signal(|| None::<String>);
 
     // Get author profile

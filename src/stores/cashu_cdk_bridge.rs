@@ -40,7 +40,7 @@ pub struct WalletBalances {
 }
 
 /// Global signal for balance breakdown
-pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(|| WalletBalances::default());
+pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(WalletBalances::default);
 
 /// Initialize the MultiMintWallet with the given seed and localstore
 pub async fn init_multi_wallet(

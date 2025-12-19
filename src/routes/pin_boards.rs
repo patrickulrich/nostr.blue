@@ -20,11 +20,11 @@ const PAGE_SIZE: usize = 30;
 #[component]
 pub fn PinBoardsHome() -> Element {
     // User's own boards
-    let mut my_boards = use_signal(|| Vec::<Pinboard>::new());
+    let mut my_boards = use_signal(Vec::<Pinboard>::new);
     let mut my_boards_loading = use_signal(|| true);
 
     // Discover boards
-    let mut discover_boards = use_signal(|| Vec::<Pinboard>::new());
+    let mut discover_boards = use_signal(Vec::<Pinboard>::new);
     let mut discover_loading = use_signal(|| true);
 
     // Pagination state
@@ -160,7 +160,7 @@ pub fn PinBoardsHome() -> Element {
                 .into_iter()
                 .filter(|b| {
                     b.title.to_lowercase().contains(&query_lower) ||
-                    b.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&query_lower)) ||
+                    b.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&query_lower)) ||
                     b.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
                 })
                 .collect();

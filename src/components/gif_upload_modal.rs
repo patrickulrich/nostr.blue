@@ -31,7 +31,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     // State
     // Store: (filename, data, mime, preview_url) - preview_url is an Object URL for efficient preview
     let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
-    let mut caption = use_signal(|| String::new());
+    let mut caption = use_signal(String::new);
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -68,7 +68,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
     // File selection handler
     let handle_file_select = {
-        let input_id = input_id.clone();
+        let input_id = input_id;
         move |_evt: Event<FormData>| {
             let input_id = input_id.read().clone();
             spawn(async move {
@@ -112,12 +112,12 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
     // Upload handler
     let handle_upload = {
-        let on_upload = props.on_upload.clone();
+        let on_upload = props.on_upload;
         move |_| {
             let file_data = selected_file.read().clone();
             let caption_text = caption.read().clone();
             let server = upload_server.read().clone();
-            let on_upload = on_upload.clone();
+            let on_upload = on_upload;
 
             if file_data.is_none() {
                 error.set(Some("Please select a file first".to_string()));
@@ -170,7 +170,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         log::info!("File uploaded successfully: {}", url);
 
                         // Now publish the NIP-94 event
-                        let dims = dimensions.map(|(w, h)| (w, h));
+                        let dims = dimensions;
 
                         match gif_store::publish_gif_event(
                             url.clone(),
@@ -249,7 +249,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
     // Clear file selection
     let handle_clear = {
-        let input_id = input_id.clone();
+        let input_id = input_id;
         move |_| {
             // Revoke object URL to free memory
             if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {

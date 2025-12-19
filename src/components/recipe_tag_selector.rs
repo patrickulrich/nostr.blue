@@ -16,7 +16,7 @@ pub fn RecipeTagSelector(
     #[props(default = 5)]
     max_tags: usize,
 ) -> Element {
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     let mut show_suggestions = use_signal(|| false);
     let mut show_browse = use_signal(|| false);
 

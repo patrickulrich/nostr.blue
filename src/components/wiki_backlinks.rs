@@ -144,7 +144,7 @@ pub fn WikiBacklinksCompact(
     class: String,
 ) -> Element {
     let mut loading = use_signal(|| true);
-    let mut pages = use_signal(|| Vec::<CachedWikiPage>::new());
+    let mut pages = use_signal(Vec::<CachedWikiPage>::new);
     let mut total = use_signal(|| 0usize);
 
     use_effect(move || {

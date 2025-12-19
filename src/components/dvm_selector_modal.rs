@@ -15,7 +15,7 @@ pub fn DvmSelectorModal(
 ) -> Element {
     let providers = DVM_PROVIDERS.read().clone();
     let loading = *DVM_PROVIDERS_LOADING.read();
-    let selected = SELECTED_DVM_PROVIDER.read().clone();
+    let selected = *SELECTED_DVM_PROVIDER.read();
 
     rsx! {
         // Modal overlay

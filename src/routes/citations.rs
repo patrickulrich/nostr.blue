@@ -71,8 +71,8 @@ impl CitationsTab {
 #[component]
 pub fn CitationsHome() -> Element {
     let mut active_tab = use_signal(|| CitationsTab::All);
-    let mut search_query = use_signal(|| String::new());
-    let mut search_results = use_signal(|| Vec::<CachedCitation>::new());
+    let mut search_query = use_signal(String::new);
+    let mut search_results = use_signal(Vec::<CachedCitation>::new);
     let mut is_searching = use_signal(|| false);
 
     // Loading state

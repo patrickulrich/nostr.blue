@@ -18,7 +18,7 @@ pub fn Settings() -> Element {
         // Use peek() to avoid reactive tracking during initialization
         relay_metadata::USER_RELAY_METADATA.peek().as_ref()
             .map(|m| m.relays.clone())
-            .unwrap_or_else(|| relay_metadata::default_relays())
+            .unwrap_or_else(relay_metadata::default_relays)
     });
 
     let mut dm_relays = use_signal(|| {
@@ -39,19 +39,19 @@ pub fn Settings() -> Element {
         }
     });
 
-    let mut new_relay_url = use_signal(|| String::new());
-    let mut new_dm_relay_url = use_signal(|| String::new());
+    let mut new_relay_url = use_signal(String::new);
+    let mut new_dm_relay_url = use_signal(String::new);
     let mut relay_error = use_signal(|| None::<String>);
     let mut dm_relay_error = use_signal(|| None::<String>);
     let mut save_status = use_signal(|| None::<String>);
 
-    let mut new_server_input = use_signal(|| String::new());
+    let mut new_server_input = use_signal(String::new);
     let mut server_error = use_signal(|| None::<String>);
 
     // NWC state
     let mut show_nwc_modal = use_signal(|| false);
     let nwc_status = nwc_store::NWC_STATUS.read().clone();
-    let nwc_balance = nwc_store::NWC_BALANCE.read().clone();
+    let nwc_balance = *nwc_store::NWC_BALANCE.read();
 
     // Reactions modal state
     let mut show_reactions_modal = use_signal(|| false);

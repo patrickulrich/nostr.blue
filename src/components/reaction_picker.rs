@@ -83,7 +83,7 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
             }
 
             // Settings button (if callback provided)
-            if let Some(on_settings) = props.on_settings.clone() {
+            if let Some(on_settings) = props.on_settings {
                 div {
                     class: "ml-1 pl-1 border-l border-gray-200 dark:border-gray-600",
                     button {

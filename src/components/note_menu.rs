@@ -269,7 +269,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             is_open.set(false);
 
                             let event_id = event_id_copy.clone();
-                            let toast_api = toast.clone();
+                            let toast_api = toast;
 
                             // Convert event ID to nostr:note1... format (NIP-21 URI)
                             if let Ok(event_id_parsed) = EventId::from_hex(&event_id) {

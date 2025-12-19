@@ -130,7 +130,7 @@ fn format_timestamp(timestamp: u64) -> String {
 
     let datetime = Utc.timestamp_opt(timestamp as i64, 0)
         .single()
-        .unwrap_or_else(|| Utc::now());
+        .unwrap_or_else(Utc::now);
 
     let local_datetime: DateTime<Local> = datetime.into();
     let now = Local::now();
@@ -138,17 +138,17 @@ fn format_timestamp(timestamp: u64) -> String {
     let duration = now.signed_duration_since(local_datetime);
 
     if duration.num_seconds() < 60 {
-        return "Just now".to_string();
+        "Just now".to_string()
     } else if duration.num_minutes() < 60 {
         let mins = duration.num_minutes();
-        return format!("{}m ago", mins);
+        format!("{}m ago", mins)
     } else if duration.num_hours() < 24 {
         let hours = duration.num_hours();
-        return format!("{}h ago", hours);
+        format!("{}h ago", hours)
     } else if duration.num_days() < 7 {
         let days = duration.num_days();
-        return format!("{}d ago", days);
+        format!("{}d ago", days)
     } else {
-        return local_datetime.format("%b %d, %Y").to_string();
+        local_datetime.format("%b %d, %Y").to_string()
     }
 }

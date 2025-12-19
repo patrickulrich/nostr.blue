@@ -11,7 +11,7 @@ use crate::routes::Route;
 
 #[component]
 pub fn RecipeChef(npub: String) -> Element {
-    let mut recipes = use_signal(|| Vec::<CachedRecipe>::new());
+    let mut recipes = use_signal(Vec::<CachedRecipe>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 

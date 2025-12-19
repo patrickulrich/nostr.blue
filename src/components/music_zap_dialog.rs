@@ -61,14 +61,14 @@ pub fn MusicZapDialog() -> Element {
     let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. });
 
     let mut amount = use_signal(|| 100u64);
-    let mut comment = use_signal(|| String::new());
+    let mut comment = use_signal(String::new);
     let mut invoice = use_signal(|| None::<String>);
     let mut is_generating = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut qr_code_url = use_signal(|| None::<String>);
     let mut artist_profile = use_signal(|| None::<profiles::Profile>);
 
-    let preset_amounts = vec![21, 100, 500, 1000, 2100];
+    let preset_amounts = [21, 100, 500, 1000, 2100];
 
     // Fetch artist profile for nostr tracks
     let track_source_for_effect = track.source.clone();

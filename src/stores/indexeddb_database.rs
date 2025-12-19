@@ -39,9 +39,7 @@
 
 // This module is only fully implemented for wasm32 targets
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code, unused_imports, unused_variables))]
-
-// Allow dead_code for keyset counter methods not yet wired to UI
-#![allow(dead_code)]
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 // ============================================================================
 // Native stub (non-wasm32)
@@ -70,8 +68,7 @@ mod native_stub {
 
     impl IndexedDbDatabase {
         fn make_error(msg: String) -> database::Error {
-            database::Error::Database(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            database::Error::Database(Box::new(std::io::Error::other(
                 msg,
             )))
         }

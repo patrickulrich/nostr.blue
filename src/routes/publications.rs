@@ -20,7 +20,7 @@ enum ViewMode {
 pub fn PublicationsHome() -> Element {
     let mut loading = use_signal(|| true);
     let mut searching = use_signal(|| false);
-    let mut publications = use_signal(|| Vec::new());
+    let mut publications = use_signal(Vec::new);
     let mut search_results = use_signal(|| None::<Vec<PublicationIndex>>);
     let mut search_query = use_signal(String::new);
     let mut committed_query = use_signal(String::new);

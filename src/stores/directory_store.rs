@@ -566,7 +566,7 @@ pub async fn fetch_drives(limit: usize, until: Option<u64>) -> StdResult<Vec<Dri
         Ok(events) => {
             let drives: Vec<DriveEvent> = events
                 .iter()
-                .filter_map(|e| parse_drive_event(e))
+                .filter_map(parse_drive_event)
                 .collect();
 
             cache_drives(&drives);
@@ -680,7 +680,7 @@ pub async fn fetch_drives_by_author(pubkey_hex: &str, limit: usize) -> StdResult
         Ok(events) => {
             let drives: Vec<DriveEvent> = events
                 .iter()
-                .filter_map(|e| parse_drive_event(e))
+                .filter_map(parse_drive_event)
                 .collect();
 
             cache_drives(&drives);

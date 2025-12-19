@@ -7,7 +7,7 @@ pub fn CashuAddMintModal(
     on_close: EventHandler<()>,
     on_mint_added: EventHandler<String>,
 ) -> Element {
-    let mut mint_url = use_signal(|| String::new());
+    let mut mint_url = use_signal(String::new);
     let mut is_checking = use_signal(|| false);
     let mut is_adding = use_signal(|| false);
     let mut mint_info = use_signal(|| Option::<MintInfoDisplay>::None);

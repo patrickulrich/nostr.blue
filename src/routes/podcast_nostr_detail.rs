@@ -388,7 +388,7 @@ async fn fetch_nostr_podcast(naddr: &str) -> std::result::Result<(PodcastMetadat
     let metadata_events = nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(10))
         .await?;
 
-    let metadata_event = metadata_events.iter().next()
+    let metadata_event = metadata_events.first()
         .ok_or_else(|| "Podcast not found".to_string())?;
 
     let metadata = podcast::parse_podcast_metadata(metadata_event)?;

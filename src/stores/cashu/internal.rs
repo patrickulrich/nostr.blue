@@ -316,7 +316,7 @@ pub(crate) async fn validate_proofs_with_mint(
 
     // NUT-07: Check proof states with mint
     let states = wallet
-        .check_proofs_spent(proofs.clone().into())
+        .check_proofs_spent(proofs.clone())
         .await
         .map_err(|e| format!("Failed to check proof states: {}", e))?;
 
@@ -390,7 +390,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .collect();
 
         let cdk_proofs: Result<Vec<_>, _> =
-            all_proofs.iter().map(|p| proof_data_to_cdk_proof(p)).collect();
+            all_proofs.iter().map(proof_data_to_cdk_proof).collect();
 
         (cdk_proofs?, event_ids, all_proofs)
     };

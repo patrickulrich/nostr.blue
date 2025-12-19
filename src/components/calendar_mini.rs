@@ -32,7 +32,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     let selected_date_for_effect = props.selected_date.clone();
     let selected_date_for_highlight = props.selected_date.clone();
     let event_dates = props.event_dates.clone();
-    let on_date_select_handler = props.on_date_select.clone();
+    let on_date_select_handler = props.on_date_select;
 
     // Parse the selected date to get year/month for display
     let mut display_date = use_signal(|| props.selected_date.clone());
@@ -71,7 +71,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
 
     // Navigation handlers
     let go_prev_month = {
-        let on_month_change = props.on_month_change.clone();
+        let on_month_change = props.on_month_change;
         move |_| {
             let (y, m) = *month_info.read();
             let (new_year, new_month) = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
@@ -84,7 +84,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     };
 
     let go_next_month = {
-        let on_month_change = props.on_month_change.clone();
+        let on_month_change = props.on_month_change;
         move |_| {
             let (y, m) = *month_info.read();
             let (new_year, new_month) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
@@ -97,7 +97,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     };
 
     let go_today = {
-        let on_date_select = props.on_date_select.clone();
+        let on_date_select = props.on_date_select;
         move |_| {
             let today = get_today();
             display_date.set(today.clone());
@@ -193,7 +193,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                                        else { "hover:bg-accent" },
                                 onclick: {
                                     let date = date.clone();
-                                    let handler = on_date_select_handler.clone();
+                                    let handler = on_date_select_handler;
                                     move |_| {
                                         if let Some(h) = &handler {
                                             h.call(date.clone());

@@ -8,8 +8,8 @@ use nostr::secp256k1::schnorr::Signature;
 #[component]
 pub fn Trending() -> Element {
     // State for feed events
-    let mut trending_notes = use_signal(|| Vec::<TrendingNote>::new());
-    let mut events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut trending_notes = use_signal(Vec::<TrendingNote>::new);
+    let mut events = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);

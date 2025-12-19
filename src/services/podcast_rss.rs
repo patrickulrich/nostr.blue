@@ -402,11 +402,10 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                             ep.description = Some(text);
                         }
                     }
-                } else if in_channel {
-                    if current_element == "description" || current_element == "content:encoded" {
+                } else if in_channel
+                    && (current_element == "description" || current_element == "content:encoded") {
                         podcast.description = Some(text);
                     }
-                }
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(format!("XML parsing error: {}", e)),

@@ -22,7 +22,7 @@ use crate::utils::nip34::{Repository, DisplaySnippet};
 #[component]
 pub fn CodeHome() -> Element {
     let mut active_tab = use_signal(|| CodeTab::Repositories);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
 
     rsx! {
         div {

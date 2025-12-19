@@ -41,7 +41,7 @@ impl ContentMenuType {
     }
 
     /// Convert to PinContentType for pin board integration
-    pub fn to_pin_content_type(&self) -> PinContentType {
+    pub fn to_pin_content_type(self) -> PinContentType {
         match self {
             ContentMenuType::Wiki => PinContentType::Article,
             ContentMenuType::Recipe => PinContentType::Recipe,
@@ -248,7 +248,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                             is_open.set(false);
 
                             let naddr_to_copy = naddr_copy.clone();
-                            let toast_api = toast.clone();
+                            let toast_api = toast;
 
                             // Create nostr: URI
                             let nostr_uri = format!("nostr:{}", naddr_to_copy);

@@ -200,7 +200,7 @@ enum EmojiCategory {
 pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
     let mut selected_category = use_signal(|| EmojiCategory::Recent);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     #[allow(unused_mut)]
     let mut position_below = use_signal(|| false); // Whether to show popup below button
     let button_id = use_signal(|| format!("emoji-picker-{}", uuid::Uuid::new_v4()));

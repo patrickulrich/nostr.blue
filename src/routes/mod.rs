@@ -581,7 +581,7 @@ fn Layout() -> Element {
     use crate::stores::{auth_store, notifications as notif_store};
 
     let auth = auth_store::AUTH_STATE.read();
-    let notif_count = use_memo(move || notif_store::get_unread_count());
+    let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = use_signal(|| false);
     let mut more_menu_open = use_signal(|| false);
     let mut radial_menu_open = use_signal(|| false);
@@ -671,7 +671,7 @@ fn Layout() -> Element {
                                 if is_home_page {
                                     // Already on home page, scroll to top
                                     if let Some(window) = web_sys::window() {
-                                        let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                        window.scroll_to_with_x_and_y(0.0, 0.0);
                                     }
                                 } else {
                                     // Navigate to home
@@ -701,7 +701,7 @@ fn Layout() -> Element {
                                                 onclick: move |_| {
                                                     if is_home_page {
                                                         if let Some(window) = web_sys::window() {
-                                                            let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
                                                         }
                                                     } else {
                                                         navigator.push(Route::Home {});
@@ -899,7 +899,7 @@ fn Layout() -> Element {
                                         if is_home_page {
                                             // Already on home page, scroll to top
                                             if let Some(window) = web_sys::window() {
-                                                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                window.scroll_to_with_x_and_y(0.0, 0.0);
                                             }
                                         } else {
                                             // Navigate to home
@@ -933,7 +933,7 @@ fn Layout() -> Element {
                                                             sidebar_open.set(false);
                                                             if is_home_page {
                                                                 if let Some(window) = web_sys::window() {
-                                                                    let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
                                                                 }
                                                             } else {
                                                                 navigator.push(Route::Home {});

@@ -47,7 +47,7 @@ pub fn PublicationToc(
                             nodes: root_children,
                             tree: tree.clone(),
                             selected: selected.clone(),
-                            on_select: on_select.clone(),
+                            on_select: on_select,
                             depth: 0,
                         }
                     }
@@ -78,7 +78,7 @@ fn TocNodeList(
                         node: node.clone(),
                         tree: tree.clone(),
                         selected: selected.clone(),
-                        on_select: on_select.clone(),
+                        on_select: on_select,
                         depth: depth,
                     }
                 }
@@ -158,7 +158,7 @@ fn TocNode(
                     nodes: node.children.clone(),
                     tree: tree.clone(),
                     selected: selected.clone(),
-                    on_select: on_select.clone(),
+                    on_select: on_select,
                     depth: depth + 1,
                 }
             }

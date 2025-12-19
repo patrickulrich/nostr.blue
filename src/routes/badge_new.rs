@@ -16,11 +16,11 @@ pub fn BadgeNew() -> Element {
     let navigator = use_navigator();
 
     // Form state
-    let mut badge_id = use_signal(|| String::new());
-    let mut name = use_signal(|| String::new());
-    let mut description = use_signal(|| String::new());
-    let mut image_url = use_signal(|| String::new());
-    let mut thumb_url = use_signal(|| String::new());
+    let mut badge_id = use_signal(String::new);
+    let mut name = use_signal(String::new);
+    let mut description = use_signal(String::new);
+    let mut image_url = use_signal(String::new);
+    let mut thumb_url = use_signal(String::new);
 
     // Auto-generate badge ID from name
     let mut auto_id = use_signal(|| true);

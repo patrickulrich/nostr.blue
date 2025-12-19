@@ -17,7 +17,7 @@ pub struct CoinGeckoResponse {
 
 /// Cached BTC prices by currency (USD, EUR, GBP, etc.)
 pub static BTC_PRICES: GlobalSignal<HashMap<String, f64>> =
-    Signal::global(|| HashMap::new());
+    Signal::global(HashMap::new);
 
 /// Last fetch timestamp (unix seconds)
 pub static PRICE_LAST_FETCH: GlobalSignal<u64> = Signal::global(|| 0);

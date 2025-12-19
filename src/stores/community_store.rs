@@ -754,7 +754,7 @@ pub async fn fetch_communities(limit: usize) -> std::result::Result<Vec<Communit
         Ok(events) => {
             let communities: Vec<Community> = events
                 .iter()
-                .filter_map(|e| parse_community_event(e))
+                .filter_map(parse_community_event)
                 .collect();
 
             // Cache communities
@@ -860,7 +860,7 @@ pub async fn fetch_community_posts(
         let mut approvals_cache = APPROVALS_CACHE.write();
         for event in &approval_events {
             if let Some((post_id, approval)) = parse_approval_event(event) {
-                approvals_cache.entry(post_id).or_insert_with(Vec::new).push(approval);
+                approvals_cache.entry(post_id).or_default().push(approval);
             }
         }
     }
@@ -1193,11 +1193,10 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     for event in mod_events.into_iter() {
         if let Some(community) = parse_community_event(&event) {
             // Verify user is actually a moderator (has p-tag with "moderator" role)
-            if community.moderators.iter().any(|m| m.to_lowercase() == user_pk_str) {
-                if seen.insert(community.a_tag.clone()) {
+            if community.moderators.iter().any(|m| m.to_lowercase() == user_pk_str)
+                && seen.insert(community.a_tag.clone()) {
                     communities.push(community);
                 }
-            }
         }
     }
 

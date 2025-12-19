@@ -229,7 +229,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
 
     // Format duration
     let duration_str = episode.duration
-        .map(|d| format_duration(d))
+        .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
 
     // Track for playback
@@ -720,7 +720,7 @@ async fn fetch_nostr_episode(
     let episode_events = nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10))
         .await?;
 
-    let episode_event = episode_events.iter().next()
+    let episode_event = episode_events.first()
         .ok_or_else(|| "Episode not found".to_string())?;
 
     let episode = podcast::parse_podcast_episode(episode_event)?;
@@ -734,7 +734,7 @@ async fn fetch_nostr_episode(
     let metadata_events = nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5))
         .await?;
 
-    let metadata = if let Some(meta_event) = metadata_events.iter().next() {
+    let metadata = if let Some(meta_event) = metadata_events.first() {
         podcast::parse_podcast_metadata(meta_event).ok()
     } else {
         None

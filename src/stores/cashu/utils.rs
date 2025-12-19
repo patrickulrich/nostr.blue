@@ -98,7 +98,7 @@ pub async fn validate_proofs_batched(
         );
 
         // Check proof states with mint (NUT-07)
-        let states = match wallet.check_proofs_spent(batch.to_vec().into()).await {
+        let states = match wallet.check_proofs_spent(batch.to_vec()).await {
             Ok(s) => s,
             Err(e) => {
                 log::warn!("Failed to check proof states for batch {}: {}", batch_idx, e);

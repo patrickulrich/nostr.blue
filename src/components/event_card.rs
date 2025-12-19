@@ -464,7 +464,7 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
 
     // Use relative time for recent/upcoming events
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = if ts > now_secs { ts - now_secs } else { now_secs - ts };
+    let diff = ts.abs_diff(now_secs);
 
     // Within a week, use relative time
     if diff < 7 * 86400 {

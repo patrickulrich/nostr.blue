@@ -59,10 +59,10 @@ pub struct MlsMessage {
 static MDK_INSTANCE: RwLock<Option<MDK<MdkMemoryStorage>>> = RwLock::new(None);
 
 /// Active MLS groups cache
-pub static MLS_GROUPS: GlobalSignal<HashMap<String, MlsGroupInfo>> = Signal::global(|| HashMap::new());
+pub static MLS_GROUPS: GlobalSignal<HashMap<String, MlsGroupInfo>> = Signal::global(HashMap::new);
 
 /// MLS messages by group (nostr_group_id hex -> messages)
-pub static MLS_MESSAGES: GlobalSignal<HashMap<String, Vec<MlsMessage>>> = Signal::global(|| HashMap::new());
+pub static MLS_MESSAGES: GlobalSignal<HashMap<String, Vec<MlsMessage>>> = Signal::global(HashMap::new);
 
 /// Whether MDK has been initialized
 pub static MDK_INITIALIZED: GlobalSignal<bool> = Signal::global(|| false);
@@ -416,7 +416,7 @@ pub async fn create_mls_group(
     }
 
     // Update cache
-    let group_id_hex = hex::encode(&group_info.nostr_group_id);
+    let group_id_hex = hex::encode(group_info.nostr_group_id);
     MLS_GROUPS.write().insert(group_id_hex, group_info.clone());
 
     log::info!("Created MLS group: {}", name);
@@ -448,7 +448,7 @@ pub fn process_mls_message(event: &SdkEvent) -> Result<Option<MlsMessage>, Strin
             let group_id_hex = hex::encode(msg.mls_group_id.as_slice());
             MLS_MESSAGES.write()
                 .entry(group_id_hex)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(mls_msg.clone());
 
             Ok(Some(mls_msg))
@@ -519,7 +519,7 @@ pub async fn send_mls_message(
 
         MLS_MESSAGES.write()
             .entry(hex::encode(ngid))
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg);
     }
 
@@ -618,7 +618,7 @@ pub fn process_welcome(
     };
 
     // Add to cache
-    let group_id_hex = hex::encode(&group_info.nostr_group_id);
+    let group_id_hex = hex::encode(group_info.nostr_group_id);
     MLS_GROUPS.write().insert(group_id_hex, group_info.clone());
 
     log::info!("Joined MLS group via welcome: {}", welcome.group_name);

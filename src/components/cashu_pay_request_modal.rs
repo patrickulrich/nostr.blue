@@ -31,8 +31,8 @@ impl PartialEq for PayState {
 pub fn CashuPayRequestModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut request_input = use_signal(|| String::new());
-    let mut custom_amount = use_signal(|| String::new());
+    let mut request_input = use_signal(String::new);
+    let mut custom_amount = use_signal(String::new);
     let mut pay_state = use_signal(|| PayState::Input);
 
     // Use memo for reactive balance updates while modal is open

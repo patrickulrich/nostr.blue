@@ -6,8 +6,8 @@ use crate::stores::cashu::PaymentRequestProgress;
 pub fn CashuCreateRequestModal(
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut amount_input = use_signal(|| String::new());
-    let mut description_input = use_signal(|| String::new());
+    let mut amount_input = use_signal(String::new);
+    let mut description_input = use_signal(String::new);
     let mut use_nostr_transport = use_signal(|| true);
     let mut request_string = use_signal(|| Option::<String>::None);
     let mut current_request_id = use_signal(|| Option::<String>::None);

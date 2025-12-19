@@ -27,7 +27,7 @@ pub struct ReactionDefaultsModalProps {
 pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
     // Local state (copy of global for editing)
     let mut local_reactions = use_signal(|| PREFERRED_REACTIONS.read().clone());
-    let mut new_emoji_input = use_signal(|| String::new());
+    let mut new_emoji_input = use_signal(String::new);
     let mut saving = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 

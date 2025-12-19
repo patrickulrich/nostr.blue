@@ -14,7 +14,7 @@ const PAGE_SIZE: usize = 24;
 #[component]
 pub fn RecipesAll() -> Element {
     // State
-    let mut recipes = use_signal(|| Vec::<CachedRecipe>::new());
+    let mut recipes = use_signal(Vec::<CachedRecipe>::new);
     let mut loading = use_signal(|| true);
     let mut pagination_loading = use_signal(|| false);
     let mut has_more = use_signal(|| true);

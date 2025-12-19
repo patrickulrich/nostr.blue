@@ -502,7 +502,7 @@ pub fn parse_pinboard_event(
 
     // Determine ownership
     let pubkey_hex = event.pubkey.to_hex();
-    let is_owner = current_user_pubkey.map_or(false, |p| p == pubkey_hex);
+    let is_owner = current_user_pubkey.is_some_and(|p| p == pubkey_hex);
 
     Some(Pinboard {
         d_tag,
@@ -780,7 +780,7 @@ pub async fn fetch_pins_for_board(board_a_tag: &str) -> std::result::Result<Vec<
 
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
 
-    let mut pins: Vec<Pin> = events.iter().filter_map(|e| parse_pin_event(e)).collect();
+    let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
 
     // Sort by created_at descending (newest first)
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -801,7 +801,7 @@ pub async fn fetch_owner_pins_for_board(
 
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
 
-    let mut pins: Vec<Pin> = events.iter().filter_map(|e| parse_pin_event(e)).collect();
+    let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
 
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
@@ -848,7 +848,7 @@ pub async fn fetch_pins_for_board_filtered(
 
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
 
-    let mut pins: Vec<Pin> = events.iter().filter_map(|e| parse_pin_event(e)).collect();
+    let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
 
     // Sort by created_at descending (newest first)
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -926,7 +926,7 @@ pub async fn fetch_my_pins() -> std::result::Result<Vec<Pin>, String> {
 
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
 
-    let mut pins: Vec<Pin> = events.iter().filter_map(|e| parse_pin_event(e)).collect();
+    let mut pins: Vec<Pin> = events.iter().filter_map(parse_pin_event).collect();
 
     pins.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
@@ -947,7 +947,7 @@ pub fn search_pinboards_local(query: &str) -> Vec<Pinboard> {
                 || board
                     .description
                     .as_ref()
-                    .map_or(false, |d| d.to_lowercase().contains(&query_lower))
+                    .is_some_and(|d| d.to_lowercase().contains(&query_lower))
                 || board
                     .tags
                     .iter()
