@@ -8,6 +8,15 @@ use wasm_bindgen::JsCast;
 
 /// Language detection from file extension
 fn detect_language(filename: &str) -> &'static str {
+    // Special case: match full filename for extensionless special files
+    // These files don't have extensions, so we check the basename first
+    let basename = filename.rsplit('/').next().unwrap_or(filename);
+    match basename.to_lowercase().as_str() {
+        "dockerfile" => return "dockerfile",
+        "makefile" | "gnumakefile" => return "makefile",
+        _ => {}
+    }
+
     // Handle extensionless files properly (rsplit returns filename if no dot)
     let extension = filename
         .rsplit_once('.')
@@ -40,8 +49,6 @@ fn detect_language(filename: &str) -> &'static str {
         "toml" => "toml",
         "xml" => "xml",
         "md" | "mdx" => "markdown",
-        "dockerfile" | "Dockerfile" => "dockerfile",
-        "makefile" | "Makefile" => "makefile",
         "vue" => "vue",
         "svelte" => "svelte",
         _ => "plaintext",

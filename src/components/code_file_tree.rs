@@ -8,6 +8,7 @@ use crate::services::git_worker::FileEntry;
 use crate::routes::Route;
 
 /// Get static padding class for tree depth (Tailwind requires static classes)
+/// Clamps at depth 4 (pl-20) to prevent excessive indentation for deeply nested directories
 fn get_indent_class(depth: usize) -> &'static str {
     match depth {
         0 => "pl-0",
@@ -15,7 +16,7 @@ fn get_indent_class(depth: usize) -> &'static str {
         2 => "pl-8",
         3 => "pl-12",
         4 => "pl-16",
-        _ => "pl-20",
+        _ => "pl-20", // Clamped at pl-20 for depth > 4
     }
 }
 

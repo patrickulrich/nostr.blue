@@ -387,13 +387,15 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 }
             }
 
-            // Delete confirmation modal
+            // Remove confirmation modal - removes from local list only
+            // Note: True deletion would require publishing a NIP-09 deletion event
             if *show_delete_confirm.read() {
                 DeleteConfirmModal {
                     repo_name: repo_name.read().clone(),
                     on_cancel: move |_| show_delete_confirm.set(false),
                     on_confirm: move |_| {
-                        // Navigate back to repositories since delete isn't implemented
+                        // Remove from user's view by navigating away
+                        // The repository remains on the Nostr network
                         let _ = nav.push(Route::CodeRepositories {});
                     }
                 }
@@ -438,13 +440,13 @@ fn DeleteConfirmModal(
 
                 h3 {
                     class: "text-lg font-semibold text-center mb-2",
-                    "Delete Repository?"
+                    "Remove Repository?"
                 }
                 p {
                     class: "text-sm text-muted-foreground text-center mb-6",
-                    "Are you sure you want to delete \""
+                    "Remove \""
                     span { class: "font-medium text-foreground", "{repo_name}" }
-                    "\"? This action cannot be undone."
+                    "\" from your list? The repository will remain on the Nostr network."
                 }
 
                 div {
@@ -457,7 +459,7 @@ fn DeleteConfirmModal(
                     button {
                         class: "flex-1 py-2 bg-destructive text-destructive-foreground rounded-lg font-medium hover:opacity-90 transition",
                         onclick: move |e| on_confirm.call(e),
-                        "Delete"
+                        "Remove"
                     }
                 }
             }

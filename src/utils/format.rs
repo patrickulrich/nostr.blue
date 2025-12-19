@@ -46,25 +46,26 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
 
 /// Truncates text at a word boundary to avoid breaking words
 /// Returns text with "..." suffix if truncated
+/// Uses UTF-8 safe character-based indexing to avoid panic on multi-byte chars
 pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
     let char_count = text.chars().count();
     if char_count <= max_chars {
         return text.to_string();
     }
-    let truncated: String = text.chars().take(max_chars).collect();
+    // Find byte index at max_chars characters (safe UTF-8 boundary)
+    let byte_limit = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(text.len());
+    let truncated = &text[..byte_limit];
+    // rfind returns byte index, but since we're searching for ASCII space ' '
+    // and slicing from the original text, the boundary is safe
     if let Some(last_space) = truncated.rfind(' ') {
-        format!("{}...", &truncated[..last_space])
+        format!("{}...", &text[..last_space])
     } else {
         format!("{}...", truncated)
     }
-}
-
-/// Extracts the domain from a URL (e.g., "https://example.com/path" -> "example.com")
-pub fn extract_domain(url: &str) -> Option<String> {
-    url.strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .and_then(|s| s.split('/').next())
-        .map(|s| s.to_string())
 }
 
 /// Shortens a URL for display by stripping protocol and truncating

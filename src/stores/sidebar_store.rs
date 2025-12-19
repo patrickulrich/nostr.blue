@@ -116,8 +116,7 @@ impl SidebarItem {
 
     /// Returns the Route for this sidebar item
     /// Note: Profile requires pubkey parameter, returns None if not available
-    #[allow(clippy::wrong_self_convention)]
-    pub fn to_route(&self, pubkey: Option<&str>) -> Option<Route> {
+    pub fn as_route(&self, pubkey: Option<&str>) -> Option<Route> {
         match self {
             SidebarItem::Home => Some(Route::Home {}),
             SidebarItem::Explore => Some(Route::Explore {}),
