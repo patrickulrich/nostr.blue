@@ -66,7 +66,7 @@ pub fn CustomNipCard(
     #[props(default = None)] author_picture: Option<String>,
 ) -> Element {
     use nostr_sdk::prelude::*;
-    use crate::stores::nostr_client::get_client;
+    use crate::hooks::use_author_metadata;
 
     // Extract metadata from event tags
     let identifier = event.tags.identifier().unwrap_or_default().to_string();
@@ -82,48 +82,11 @@ pub fn CustomNipCard(
         .collect();
 
     let author_pubkey = event.pubkey.to_hex();
-    let author_pubkey_for_fetch = author_pubkey.clone();
 
-    // Clone author_name for use in effect and later
-    let author_name_for_effect = author_name.clone();
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<Metadata>);
-
-    // Fetch author's profile metadata if not provided
-    // Only re-run when author pubkey changes (not every render)
-    use_effect(use_reactive!(|(author_pubkey_for_fetch, author_name_for_effect)| {
-        if author_name_for_effect.is_some() {
-            return; // Skip fetch if already provided
-        }
-
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            // If not in database, fetch from relays
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, std::time::Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
-        });
-    }));
-
-    // Get display name from metadata or fallback (using UTF-8 safe truncation)
+    // Get display name from provided prop or fetched metadata (using UTF-8 safe truncation)
     let display_name = author_name.or_else(|| {
         author_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))

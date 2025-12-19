@@ -81,7 +81,9 @@ self.addEventListener('fetch', (event) => {
               });
             }
           })
-          .catch(() => {});
+          .catch((err) => {
+            console.warn('[SW] Background cache update failed:', err);
+          });
         return cached;
       }
 

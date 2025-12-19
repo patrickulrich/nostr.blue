@@ -2,10 +2,9 @@
 //! Displays a full recipe with all sections, engagement, and actions
 
 use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::auth_store;
 use crate::stores::recipe_store::CachedRecipe;
 use crate::components::recipe_tag_chip::RecipeTagChip;
@@ -23,7 +22,6 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
     let created_at_str = format_relative_time(created_at);
 
     let author_pubkey = recipe.event.pubkey.to_hex();
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let author_pubkey_for_link = author_pubkey.clone();
 
     // Check if current user owns this recipe
@@ -49,33 +47,8 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
     let mut checked_ingredients = use_signal(Vec::<usize>::new);
     let mut completed_steps = use_signal(Vec::<usize>::new);
 
-    // Author profile
-    let mut author_metadata = use_signal(|| None::<Metadata>);
-
-    use_effect(move || {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
-        });
-    });
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Extract parsed content
     let parsed = recipe.parsed.clone();

@@ -3,12 +3,9 @@
 //! Matches ~/frontend TrendingRecipeCard.svelte (w-56 h-72)
 
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
-use nostr_sdk::prelude::NostrDatabaseExt;
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
-use crate::stores::nostr_client::get_client;
 use crate::stores::recipe_store::CachedRecipe;
-use std::time::Duration;
 
 /// Discover recipe card for the explore page
 /// Similar to RecipeCardTrending but with author avatar in TOP-LEFT
@@ -19,38 +16,9 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
     let naddr = recipe.naddr.clone();
 
     let author_pubkey = recipe.event.pubkey.to_hex();
-    let author_pubkey_for_fetch = author_pubkey.clone();
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // Fetch author's profile metadata
-    use_effect(move || {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            // If not in database, fetch from relays
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
-        });
-    });
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))

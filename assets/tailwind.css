@@ -78,8 +78,8 @@
 }
 
 .scrollbar-styled::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 .scrollbar-styled::-webkit-scrollbar-track {
@@ -126,7 +126,7 @@
 
 /* Inline citations - clickable links */
 .citation-inline {
-  @apply text-primary cursor-pointer hover:underline;
+  @apply text-primary cursor-pointer hover:underline focus:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
 }
 
 /* Footnote/endnote superscripts */
@@ -137,12 +137,12 @@
 
 .citation-footnote a,
 .citation-endnote a {
-  @apply text-primary hover:underline no-underline;
+  @apply text-primary hover:underline focus:underline focus:outline-none focus:ring-1 focus:ring-ring no-underline;
 }
 
 /* Foot-end reference arrow */
 .citation-end-ref {
-  @apply text-[0.6rem] text-muted-foreground hover:text-primary ml-0.5;
+  @apply text-xs text-muted-foreground hover:text-primary focus:text-primary ml-0.5;
 }
 
 /* Block quotes with citations */
@@ -151,7 +151,7 @@
 }
 
 .citation-quote blockquote {
-  @apply border-l-4 border-primary pl-4 py-2 bg-muted/30 rounded-r italic;
+  @apply border-l-4 border-primary pl-3 sm:pl-4 py-2 bg-muted/30 rounded-r italic;
 }
 
 .citation-quote figcaption {
@@ -182,7 +182,7 @@
 }
 
 .citation-footnotes .citation-list {
-  @apply list-decimal pl-6 space-y-2 text-sm;
+  @apply list-decimal pl-4 sm:pl-6 space-y-2 text-sm;
 }
 
 /* Endnotes/References section */
@@ -196,7 +196,7 @@
 }
 
 .citation-endnotes .citation-list {
-  @apply list-decimal pl-6 space-y-3 text-sm;
+  @apply list-decimal pl-4 sm:pl-6 space-y-2 sm:space-y-3 text-sm;
 }
 
 /* Individual citation entries in footnotes/endnotes */

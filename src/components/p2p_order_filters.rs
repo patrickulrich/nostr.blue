@@ -9,6 +9,31 @@ use crate::stores::p2p_store::P2PFilterState;
 /// Common currencies for quick selection
 const COMMON_CURRENCIES: &[&str] = &["USD", "EUR", "GBP", "BRL", "MXN", "ARS", "CAD", "AUD"];
 
+// ============================================================================
+// Generic Filter Chip Component
+// ============================================================================
+
+/// Generic filter chip that renders a toggle button with active/inactive states.
+/// Reduces duplication across status, network, layer, and payment method chips.
+#[component]
+fn FilterChip(
+    label: String,
+    is_active: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
+    rsx! {
+        button {
+            class: if is_active {
+                "px-3 py-1 text-sm rounded-full bg-primary text-primary-foreground"
+            } else {
+                "px-3 py-1 text-sm rounded-full bg-muted hover:bg-accent transition"
+            },
+            onclick: move |_| on_toggle.call(()),
+            "{label}"
+        }
+    }
+}
+
 /// Common payment methods
 const COMMON_PAYMENT_METHODS: &[&str] = &[
     "Bank Transfer", "PayPal", "Revolut", "Wise", "Venmo",
@@ -278,7 +303,7 @@ pub fn P2POrderFilters(
     }
 }
 
-/// Status filter chip
+/// Status filter chip - uses generic FilterChip
 #[component]
 fn StatusFilterChip(
     status: OrderStatus,
@@ -288,26 +313,21 @@ fn StatusFilterChip(
     let is_active = filters.read().status.map(|s| s == status).unwrap_or(false);
 
     rsx! {
-        button {
-            class: if is_active {
-                "px-3 py-1 text-sm rounded-full bg-primary text-primary-foreground"
-            } else {
-                "px-3 py-1 text-sm rounded-full bg-muted hover:bg-accent transition"
-            },
-            onclick: move |_| {
-                let current = filters.read().status;
-                if current.map(|s| s == status).unwrap_or(false) {
+        FilterChip {
+            label: label.to_string(),
+            is_active,
+            on_toggle: move |_| {
+                if filters.read().status.map(|s| s == status).unwrap_or(false) {
                     filters.write().status = None;
                 } else {
                     filters.write().status = Some(status);
                 }
-            },
-            "{label}"
+            }
         }
     }
 }
 
-/// Network filter chip
+/// Network filter chip - uses generic FilterChip
 #[component]
 fn NetworkFilterChip(
     network: Network,
@@ -317,26 +337,21 @@ fn NetworkFilterChip(
     let is_active = filters.read().network.map(|n| n == network).unwrap_or(false);
 
     rsx! {
-        button {
-            class: if is_active {
-                "px-3 py-1 text-sm rounded-full bg-primary text-primary-foreground"
-            } else {
-                "px-3 py-1 text-sm rounded-full bg-muted hover:bg-accent transition"
-            },
-            onclick: move |_| {
-                let current = filters.read().network;
-                if current.map(|n| n == network).unwrap_or(false) {
+        FilterChip {
+            label: label.to_string(),
+            is_active,
+            on_toggle: move |_| {
+                if filters.read().network.map(|n| n == network).unwrap_or(false) {
                     filters.write().network = None;
                 } else {
                     filters.write().network = Some(network);
                 }
-            },
-            "{label}"
+            }
         }
     }
 }
 
-/// Layer filter chip
+/// Layer filter chip - uses generic FilterChip
 #[component]
 fn LayerFilterChip(
     layer: Layer,
@@ -346,52 +361,41 @@ fn LayerFilterChip(
     let is_active = filters.read().layer.map(|l| l == layer).unwrap_or(false);
 
     rsx! {
-        button {
-            class: if is_active {
-                "px-3 py-1 text-sm rounded-full bg-primary text-primary-foreground"
-            } else {
-                "px-3 py-1 text-sm rounded-full bg-muted hover:bg-accent transition"
-            },
-            onclick: move |_| {
-                let current = filters.read().layer;
-                if current.map(|l| l == layer).unwrap_or(false) {
+        FilterChip {
+            label: label.to_string(),
+            is_active,
+            on_toggle: move |_| {
+                if filters.read().layer.map(|l| l == layer).unwrap_or(false) {
                     filters.write().layer = None;
                 } else {
                     filters.write().layer = Some(layer);
                 }
-            },
-            "{label}"
+            }
         }
     }
 }
 
-/// Payment method filter chip
+/// Payment method filter chip - uses generic FilterChip
 #[component]
 fn PaymentMethodChip(
     method: String,
     filters: Signal<P2PFilterState>,
 ) -> Element {
     let is_active = filters.read().payment_method.as_ref().map(|m| m == &method).unwrap_or(false);
+    let method_for_toggle = method.clone();
 
     rsx! {
-        button {
-            class: if is_active {
-                "px-3 py-1 text-sm rounded-full bg-primary text-primary-foreground"
-            } else {
-                "px-3 py-1 text-sm rounded-full bg-muted hover:bg-accent transition"
-            },
-            onclick: {
-                let method = method.clone();
-                move |_| {
-                    let current = filters.read().payment_method.clone();
-                    if current.as_ref().map(|m| m == &method).unwrap_or(false) {
-                        filters.write().payment_method = None;
-                    } else {
-                        filters.write().payment_method = Some(method.clone());
-                    }
+        FilterChip {
+            label: method,
+            is_active,
+            on_toggle: move |_| {
+                let method = method_for_toggle.clone();
+                if filters.read().payment_method.as_ref().map(|m| m == &method).unwrap_or(false) {
+                    filters.write().payment_method = None;
+                } else {
+                    filters.write().payment_method = Some(method.clone());
                 }
-            },
-            "{method}"
+            }
         }
     }
 }

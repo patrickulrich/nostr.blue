@@ -1,13 +1,11 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, PublicKey};
-use nostr_sdk::prelude::NostrDatabaseExt;
+use nostr_sdk::Event as NostrEvent;
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
-use crate::stores::nostr_client::get_client;
 use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, get_identifier, calculate_read_time
 };
-use std::time::Duration;
 
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -21,38 +19,9 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     let read_time = calculate_read_time(&event.content);
 
     let author_pubkey = event.pubkey.to_string();
-    let author_pubkey_for_fetch = author_pubkey.clone();
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // Fetch author's profile metadata
-    use_effect(move || {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            // If not in database, fetch from relays (auto-caches to database)
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
-        });
-    });
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Format timestamp
     let timestamp = format_timestamp(published_at);

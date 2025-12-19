@@ -221,8 +221,15 @@ const methods = {
    * Delete a cached repo
    */
   async deleteRepo({ dir }) {
-    // Validate dir parameter to prevent path traversal
-    if (!dir || dir.includes('..') || dir.startsWith('/')) {
+    // Validate dir parameter to prevent path traversal attacks
+    // Check for null bytes, '..' sequences, and absolute paths
+    if (!dir || dir.includes('..') || dir.startsWith('/') || dir.includes('\0')) {
+      return { success: false, error: 'Invalid directory path' };
+    }
+
+    // Normalize the path and verify it doesn't escape the allowed directory
+    const normalized = dir.split('/').filter(p => p && p !== '.').join('/');
+    if (normalized !== dir || normalized.includes('..')) {
       return { success: false, error: 'Invalid directory path' };
     }
 

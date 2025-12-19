@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, TagKind, SingleLetterTag, Alphabet};
-use nostr_sdk::prelude::NostrDatabaseExt;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagKind, SingleLetterTag, Alphabet};
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::services::github_nips;
+use crate::hooks::use_author_metadata;
 use crate::components::{ClientInitializing, ThreadedComment, CommentComposer, ShareModal, ArticleContent};
 use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
@@ -21,8 +21,15 @@ pub fn NipDetail(nip_id: String) -> Element {
     // Custom NIP specific state
     let mut is_custom = use_signal(|| false);
     let mut custom_event = use_signal(|| None::<NostrEvent>);
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut related_kinds = use_signal(Vec::<String>::new);
+
+    // Fetch author metadata reactively using the hook
+    let author_pubkey = use_memo(move || {
+        custom_event.read().as_ref().map(|e| e.pubkey.to_hex())
+    });
+    let author_metadata = use_author_metadata(
+        author_pubkey.read().clone().unwrap_or_default()
+    );
 
     // Comments state
     let mut comments = use_signal(Vec::<NostrEvent>::new);
@@ -75,25 +82,6 @@ pub fn NipDetail(nip_id: String) -> Element {
                         nip_content.set(Some(event.content.clone()));
                         related_kinds.set(kinds);
                         custom_event.set(Some(event.clone()));
-
-                        // Fetch author metadata
-                        let author_pubkey = event.pubkey.to_hex();
-                        spawn(async move {
-                            if let Ok(pubkey) = PublicKey::from_hex(&author_pubkey) {
-                                if let Some(client) = nostr_client::get_client() {
-                                    // Check database first
-                                    if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                                        author_metadata.set(Some(metadata));
-                                        return;
-                                    }
-                                    // Fetch from relays
-                                    if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                                        author_metadata.set(Some(metadata));
-                                    }
-                                }
-                            }
-                        });
-
                         loading.set(false);
                     }
                     Ok(None) => {

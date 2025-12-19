@@ -3,12 +3,10 @@
 //! Pinterest-style card with cover image gradient, title, and author
 
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
-use nostr_sdk::prelude::NostrDatabaseExt;
-use std::time::Duration;
 
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{
     Pinboard,
     has_user_reacted_to_pinboard, toggle_pinboard_reaction, fetch_pinboard_reaction_count,
@@ -50,39 +48,9 @@ pub fn PinBoardCard(
     let tags = board.tags.clone();
     let naddr = board.naddr.clone();
     let author_pubkey = board.pubkey.clone();
-    let author_pubkey_for_fetch = author_pubkey.clone();
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // Fetch author's profile metadata
-    // Only re-run when author pubkey changes (not every render)
-    use_effect(use_reactive!(|author_pubkey_for_fetch| {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            // If not in database, fetch from relays (auto-caches to database)
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
-        });
-    }));
+    // Fetch author's profile metadata using reusable hook
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Get display name from metadata or fallback (using UTF-8 safe truncation)
     let display_name = author_metadata.read().as_ref()
@@ -248,68 +216,36 @@ pub fn PinBoardCardMosaic(
     let title = board.title.clone();
     let cover_image = board.image.clone();
     let author_pubkey = board.pubkey.clone();
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let board_for_click = board.clone();
     let board_for_zap = board.clone();
     let board_for_react = board.clone();
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    // Fetch author's profile metadata using reusable hook
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Reaction state
     let mut has_reacted = use_signal(|| false);
     let mut reaction_count = use_signal(|| 0usize);
     let mut reaction_loading = use_signal(|| false);
 
-    // Fetch author's profile metadata
-    // Only re-run when author pubkey changes (not every render)
-    use_effect(use_reactive!(|author_pubkey_for_fetch| {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
+    // Fetch reaction state for this board - re-run when a_tag changes
+    let a_tag_for_reactions = board.a_tag.clone();
+    use_effect(use_reactive!(|a_tag_for_reactions| {
+        let a_tag = a_tag_for_reactions.clone();
         spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
+            // Fetch reaction count
+            if let Ok(count) = fetch_pinboard_reaction_count(&a_tag).await {
+                reaction_count.set(count);
             }
 
-            // If not in database, fetch from relays (auto-caches to database)
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
+            // Check if current user has reacted (only if signed in)
+            if *HAS_SIGNER.read() {
+                if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag).await {
+                    has_reacted.set(reacted);
+                }
             }
         });
     }));
-
-    // Fetch reaction state for this board
-    {
-        let a_tag = board.a_tag.clone();
-        use_effect(move || {
-            let a_tag = a_tag.clone();
-            spawn(async move {
-                // Fetch reaction count
-                if let Ok(count) = fetch_pinboard_reaction_count(&a_tag).await {
-                    reaction_count.set(count);
-                }
-
-                // Check if current user has reacted (only if signed in)
-                if *HAS_SIGNER.read() {
-                    if let Ok(reacted) = has_user_reacted_to_pinboard(&a_tag).await {
-                        has_reacted.set(reacted);
-                    }
-                }
-            });
-        });
-    }
 
     // Get display name from metadata or fallback (using UTF-8 safe truncation)
     let display_name = author_metadata.read().as_ref()

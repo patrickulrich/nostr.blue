@@ -4,6 +4,10 @@
 //! supporting both Nostr and RSS podcast episodes.
 
 use dioxus::prelude::*;
+
+/// D-tag used for podcast metadata events (Kind 30078)
+/// This is a convention for Nostr podcast coordination
+const PODCAST_METADATA_D_TAG: &str = "podcast-metadata";
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::utils::podcast::{PodcastEpisode, ValueBlock, TranscriptRef, Soundbite, Person};
@@ -153,11 +157,10 @@ impl DisplayEpisode {
         match &self.source {
             TrackSource::NostrPodcast { pubkey, .. } => {
                 // For Nostr podcasts, we need to construct an naddr for the podcast metadata
-                // The podcast metadata uses d="podcast-metadata" by convention
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
                     let coord = Coordinate::new(Kind::from(30078), pk)
-                        .identifier("podcast-metadata");
+                        .identifier(PODCAST_METADATA_D_TAG);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrDetail { naddr });
@@ -504,28 +507,17 @@ pub fn PodcastEpisodeCardSkeleton() -> Element {
     }
 }
 
-/// Strip HTML tags from text (simple version)
+/// Strip HTML tags from text using ammonia for secure sanitization
 fn strip_html(html: &str) -> String {
-    let mut result = String::new();
-    let mut in_tag = false;
+    use ammonia::Builder;
+    use std::collections::HashSet;
 
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-
-    // Decode common HTML entities
-    result
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
+    // Use ammonia to strip all HTML tags securely
+    // This handles malformed HTML, XSS attempts, and properly decodes entities
+    Builder::new()
+        .tags(HashSet::new()) // Allow no tags - strip everything
+        .clean(html)
+        .to_string()
         .trim()
         .to_string()
 }

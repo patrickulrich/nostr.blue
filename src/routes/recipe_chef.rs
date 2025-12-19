@@ -3,9 +3,9 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use std::time::Duration;
+use crate::hooks::use_author_metadata;
 use crate::stores::recipe_store::{self, CachedRecipe};
-use crate::stores::nostr_client::{self, get_client};
+use crate::stores::nostr_client;
 use crate::components::{RecipeCard, RecipeCardSkeleton};
 use crate::routes::Route;
 
@@ -14,10 +14,6 @@ pub fn RecipeChef(npub: String) -> Element {
     let mut recipes = use_signal(Vec::<CachedRecipe>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-
-    // Chef profile
-    let mut chef_metadata = use_signal(|| None::<Metadata>);
-    let mut chef_loading = use_signal(|| true);
 
     // Pagination
     let mut has_more = use_signal(|| true);
@@ -39,51 +35,10 @@ pub fn RecipeChef(npub: String) -> Element {
         None
     });
 
-    // Fetch chef metadata on mount
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-
-        let Some(pubkey_str) = pubkey_hex.read().clone() else {
-            chef_loading.set(false);
-            return;
-        };
-
-        chef_loading.set(true);
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => {
-                    chef_loading.set(false);
-                    return;
-                }
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => {
-                    chef_loading.set(false);
-                    return;
-                }
-            };
-
-            // Check database first
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                chef_metadata.set(Some(metadata));
-                chef_loading.set(false);
-                return;
-            }
-
-            // Fetch from relays
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                chef_metadata.set(Some(metadata));
-            }
-            chef_loading.set(false);
-        });
-    });
+    // Fetch chef metadata using the reusable hook
+    let chef_metadata = use_author_metadata(
+        pubkey_hex.read().clone().unwrap_or_default()
+    );
 
     // Fetch recipes on mount
     use_effect(move || {
@@ -270,9 +225,7 @@ pub fn RecipeChef(npub: String) -> Element {
                         // Avatar
                         div {
                             class: "w-20 h-20 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
-                            if *chef_loading.read() {
-                                div { class: "w-full h-full bg-muted animate-pulse" }
-                            } else if let Some(ref pic_url) = profile_picture {
+                            if let Some(ref pic_url) = profile_picture {
                                 img {
                                     src: "{pic_url}",
                                     alt: "{display_name}",

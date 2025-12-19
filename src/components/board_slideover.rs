@@ -3,11 +3,9 @@
 //! Uses two-stage loading: board metadata first, then pins
 
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
-use nostr_sdk::prelude::NostrDatabaseExt;
-use std::time::Duration;
 
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::hooks::use_author_metadata;
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered, delete_pin};
 use crate::stores::auth_store;
 use crate::utils::truncate_pubkey;
@@ -35,7 +33,6 @@ pub fn BoardSlideover(
     let tags = board.tags.clone();
     let naddr = board.naddr.clone();
     let author_pubkey = board.pubkey.clone();
-    let author_pubkey_for_fetch = author_pubkey.clone();
     let board_for_delete = board.clone();
     let board_a_tag = board.a_tag.clone();
 
@@ -43,8 +40,8 @@ pub fn BoardSlideover(
     let mut pins = use_signal(Vec::<Pin>::new);
     let mut pins_loading = use_signal(|| true);
 
-    // State for author profile
-    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Modals
     let mut show_zap_modal = use_signal(|| false);
@@ -52,10 +49,13 @@ pub fn BoardSlideover(
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
 
-    // Check if current user owns this board
-    let is_owner = auth_store::get_pubkey()
-        .map(|pk| pk == author_pubkey)
-        .unwrap_or(false);
+    // Check if current user owns this board - reactive to auth state changes
+    let author_pubkey_for_owner = author_pubkey.clone();
+    let is_owner = use_memo(move || {
+        auth_store::get_pubkey()
+            .map(|pk| pk == author_pubkey_for_owner)
+            .unwrap_or(false)
+    });
 
     // Get collaborative status for pin fetching
     let is_collaborative = board.collaborative;
@@ -91,33 +91,6 @@ pub fn BoardSlideover(
                 }
             }
             pins_loading.set(false);
-        });
-    }));
-
-    // Fetch author's profile metadata
-    // Only re-run when author pubkey changes (not every render)
-    use_effect(use_reactive!(|author_pubkey_for_fetch| {
-        let pubkey_str = author_pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                author_metadata.set(Some(metadata));
-                return;
-            }
-
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                author_metadata.set(Some(metadata));
-            }
         });
     }));
 
@@ -258,7 +231,7 @@ pub fn BoardSlideover(
                             }
 
                             // Edit button (if owner)
-                            if is_owner {
+                            if *is_owner.read() {
                                 Link {
                                     to: Route::PinBoardEdit { naddr: naddr.clone() },
                                     class: "p-2 rounded-lg hover:bg-muted transition",
@@ -429,7 +402,7 @@ pub fn BoardSlideover(
                                 filled: false
                             }
                             p { "This board is empty." }
-                            if is_owner {
+                            if *is_owner.read() {
                                 p { class: "text-sm mt-2", "Add items from recipes, notes, communities, and more!" }
                             }
                         }
@@ -440,7 +413,7 @@ pub fn BoardSlideover(
                                 PinCard {
                                     key: "{pin.event_id}",
                                     pin: pin.clone(),
-                                    show_remove: is_owner,
+                                    show_remove: *is_owner.read(),
                                     on_remove: handle_pin_remove,
                                 }
                             }

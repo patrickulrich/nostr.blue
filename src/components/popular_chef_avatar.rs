@@ -4,47 +4,17 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
-use nostr_sdk::prelude::{ToBech32, NostrDatabaseExt};
+use nostr_sdk::prelude::ToBech32;
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
-use crate::stores::nostr_client::get_client;
-use std::time::Duration;
 
 /// Popular chef avatar for the explore page
 #[component]
 pub fn PopularChefAvatar(pubkey: String) -> Element {
-    let pubkey_for_fetch = pubkey.clone();
     let pubkey_for_nav = pubkey.clone();
 
-    // State for profile metadata
-    let mut profile_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-
-    // Fetch profile metadata
-    use_effect(move || {
-        let pubkey_str = pubkey_for_fetch.clone();
-
-        spawn(async move {
-            let pubkey = match PublicKey::from_hex(&pubkey_str) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            // Check database first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                profile_metadata.set(Some(metadata));
-                return;
-            }
-
-            // If not in database, fetch from relays
-            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                profile_metadata.set(Some(metadata));
-            }
-        });
-    });
+    // Profile metadata - uses shared hook for database-first, network-fallback pattern
+    let profile_metadata = use_author_metadata(pubkey.clone());
 
     // Get display name from metadata or fallback
     let display_name = profile_metadata.read().as_ref()

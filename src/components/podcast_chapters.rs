@@ -118,16 +118,19 @@ pub fn ChapterList(props: ChapterListProps) -> Element {
 
 /// Find the index of the currently playing chapter
 fn find_current_chapter(chapters: &[&Chapter], current_time: f64) -> Option<usize> {
-    // Find the last chapter whose start_time is <= current_time
-    let mut current_idx = None;
+    // Find the chapter with the greatest start_time that is <= current_time
+    // This handles unsorted chapter lists defensively (per Podlove spec recommendation)
+    let mut best_idx = None;
+    let mut best_start_time = -1.0;
+
     for (idx, chapter) in chapters.iter().enumerate() {
-        if chapter.start_time <= current_time {
-            current_idx = Some(idx);
-        } else {
-            break;
+        if chapter.start_time <= current_time && chapter.start_time > best_start_time {
+            best_idx = Some(idx);
+            best_start_time = chapter.start_time;
         }
     }
-    current_idx
+
+    best_idx
 }
 
 #[derive(Props, Clone, PartialEq)]

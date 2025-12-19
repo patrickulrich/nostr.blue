@@ -4,8 +4,10 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
 use crate::routes::Route;
+use crate::stores::nostr_client::get_client;
 use crate::stores::profiles;
 use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
@@ -39,6 +41,37 @@ pub fn BadgeDetailModal(
     use_effect(use_reactive!(|badge_pubkey| {
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
+        } else {
+            // Profile not in cache - fetch it asynchronously using Nostr client
+            let pubkey_str = badge_pubkey.clone();
+            spawn(async move {
+                let pubkey = match PublicKey::from_hex(&pubkey_str) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        log::warn!("Invalid issuer pubkey: {}", e);
+                        return;
+                    }
+                };
+
+                let client = match get_client() {
+                    Some(c) => c,
+                    None => {
+                        log::error!("Client not initialized, cannot fetch issuer metadata");
+                        return;
+                    }
+                };
+
+                // Try database first
+                if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
+                    issuer_profile.set(Some(metadata));
+                    return;
+                }
+
+                // Fallback to network
+                if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                    issuer_profile.set(Some(metadata));
+                }
+            });
         }
     }));
 
@@ -203,9 +236,14 @@ pub fn BadgeDetailModal(
                                     class: "flex-1 px-4 py-2 rounded-lg border border-border hover:bg-accent transition disabled:opacity-50",
                                     disabled: *processing.read(),
                                     onclick: move |_| {
+                                        processing.set(true);
                                         on_reject.call(());
                                     },
-                                    "Decline"
+                                    if *processing.read() {
+                                        "Declining..."
+                                    } else {
+                                        "Decline"
+                                    }
                                 }
 
                                 button {
