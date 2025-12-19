@@ -2,11 +2,11 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, mdk_store, nostr_client};
 use std::time::Duration;
 use std::collections::HashMap;
 
-/// Represents a message in a conversation, handling both NIP-04 and NIP-17
+/// Represents a message in a conversation, handling NIP-04, NIP-17, and MLS
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationMessage {
     /// NIP-04 legacy encrypted direct message
@@ -19,6 +19,19 @@ pub enum ConversationMessage {
         rumor: UnsignedEvent,
         sender: PublicKey,
     },
+    /// MLS E2EE message (Marmot protocol)
+    Mls {
+        /// Event ID (for uniqueness)
+        event_id: EventId,
+        /// Message timestamp
+        timestamp: Timestamp,
+        /// MLS group ID
+        group_id: Vec<u8>,
+        /// Decrypted content
+        content: String,
+        /// Sender public key
+        sender: PublicKey,
+    },
 }
 
 impl ConversationMessage {
@@ -27,6 +40,7 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { event } => event.id,
             Self::Nip17 { gift_wrap, .. } => gift_wrap.id,
+            Self::Mls { event_id, .. } => *event_id,
         }
     }
 
@@ -35,6 +49,7 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { event } => event.created_at,
             Self::Nip17 { rumor, .. } => rumor.created_at,
+            Self::Mls { timestamp, .. } => *timestamp,
         }
     }
 
@@ -43,6 +58,16 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { event } => event.pubkey,
             Self::Nip17 { sender, .. } => *sender,
+            Self::Mls { sender, .. } => *sender,
+        }
+    }
+
+    /// Get the encryption type for display
+    pub fn encryption_type(&self) -> &'static str {
+        match self {
+            Self::Nip04 { .. } => "NIP-04",
+            Self::Nip17 { .. } => "NIP-17",
+            Self::Mls { .. } => "MLS",
         }
     }
 }
@@ -212,6 +237,53 @@ pub async fn init_dms() -> Result<(), String> {
         }
     }
 
+    // Integrate MLS messages from 1:1 groups (2 members) into regular conversations
+    if mdk_store::is_initialized() {
+        let mls_groups = mdk_store::get_groups();
+
+        for group in mls_groups {
+            // Only integrate 1:1 DM groups (exactly 2 members) into regular conversation view
+            if group.members.len() == 2 {
+                // Find the other member (not us)
+                let other_pubkey = group.members.iter()
+                    .find(|pk| *pk != &pubkey_str)
+                    .cloned();
+
+                if let Some(other_pk) = other_pubkey {
+                    let group_id_hex = hex::encode(&group.nostr_group_id);
+                    let mls_messages = mdk_store::get_messages(&group_id_hex);
+
+                    log::info!("Integrating {} MLS messages from 1:1 group with {}",
+                        mls_messages.len(), &other_pk[..8]);
+
+                    for msg in mls_messages {
+                        // Parse sender pubkey and event ID
+                        if let (Ok(sender_pk), Ok(eid)) = (
+                            PublicKey::parse(&msg.sender),
+                            EventId::parse(&msg.event_id)
+                        ) {
+                            let conversation_msg = ConversationMessage::Mls {
+                                event_id: eid,
+                                timestamp: Timestamp::from_secs(msg.created_at),
+                                group_id: msg.group_id.clone(),
+                                content: msg.content.clone(),
+                                sender: sender_pk,
+                            };
+
+                            conversations.entry(other_pk.clone())
+                                .or_insert_with(|| Conversation {
+                                    pubkey: other_pk.clone(),
+                                    messages: Vec::new(),
+                                    unread_count: 0,
+                                })
+                                .messages.push(conversation_msg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Sort messages in each conversation by timestamp (uses actual rumor timestamp for NIP-17)
     for conversation in conversations.values_mut() {
         conversation.messages.sort_by(|a, b| a.created_at().cmp(&b.created_at()));
@@ -283,12 +355,18 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
     Ok(())
 }
 
-/// Decrypt a DM message (supports both NIP-04 and NIP-17)
+/// Decrypt a DM message (supports NIP-04, NIP-17, and MLS)
 pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
     // NIP-17: Content is already available from the unwrapped rumor
     if let ConversationMessage::Nip17 { rumor, .. } = msg {
         log::debug!("Returning NIP-17 message content from rumor");
         return Ok(rumor.content.clone());
+    }
+
+    // MLS: Content is already decrypted
+    if let ConversationMessage::Mls { content, .. } = msg {
+        log::debug!("Returning MLS message content");
+        return Ok(content.clone());
     }
 
     // NIP-04: Need to decrypt

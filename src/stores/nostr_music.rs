@@ -37,6 +37,26 @@ pub enum TrackSource {
         /// d-tag identifier
         d_tag: String,
     },
+    /// Podcast episode from Nostr Kind 30054 event
+    NostrPodcast {
+        /// Event coordinate: "30054:pubkey:d-tag"
+        coordinate: String,
+        /// Author pubkey (hex)
+        pubkey: String,
+        /// d-tag identifier
+        d_tag: String,
+        /// Podcast show title
+        podcast_title: String,
+    },
+    /// Podcast episode from RSS feed
+    RssPodcast {
+        /// RSS feed URL
+        feed_url: String,
+        /// Episode GUID
+        episode_guid: String,
+        /// Podcast show title
+        podcast_title: String,
+    },
 }
 
 impl Default for TrackSource {

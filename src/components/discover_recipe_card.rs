@@ -1,0 +1,142 @@
+//! Discover Recipe Card Component
+//! Recipe card for the Discover New section with author avatar in top-left
+//! Matches ~/frontend TrendingRecipeCard.svelte (w-56 h-72)
+
+use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+use nostr_sdk::prelude::NostrDatabaseExt;
+use crate::routes::Route;
+use crate::stores::nostr_client::get_client;
+use crate::stores::recipe_store::CachedRecipe;
+use std::time::Duration;
+
+/// Discover recipe card for the explore page
+/// Similar to RecipeCardTrending but with author avatar in TOP-LEFT
+#[component]
+pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
+    let title = recipe.metadata.title.clone();
+    let image_url = recipe.metadata.primary_image().cloned();
+    let naddr = recipe.naddr.clone();
+
+    let author_pubkey = recipe.event.pubkey.to_hex();
+    let author_pubkey_for_fetch = author_pubkey.clone();
+
+    // State for author profile
+    let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+
+    // Fetch author's profile metadata
+    use_effect(move || {
+        let pubkey_str = author_pubkey_for_fetch.clone();
+
+        spawn(async move {
+            let pubkey = match PublicKey::from_hex(&pubkey_str) {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
+
+            let client = match get_client() {
+                Some(c) => c,
+                None => return,
+            };
+
+            // Check database first (instant, no network)
+            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
+                author_metadata.set(Some(metadata));
+                return;
+            }
+
+            // If not in database, fetch from relays
+            if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                author_metadata.set(Some(metadata));
+            }
+        });
+    });
+
+    let display_name = author_metadata.read().as_ref()
+        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .unwrap_or_else(|| format!("{}...", &author_pubkey[..8]));
+
+    let profile_picture = author_metadata.read().as_ref()
+        .and_then(|m| m.picture.clone());
+
+    let avatar_letter = display_name.chars().next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
+
+    rsx! {
+        div {
+            class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 flex-shrink-0 cursor-pointer",
+
+            Link {
+                to: Route::RecipeDetail { naddr: naddr.clone() },
+                class: "block w-full h-full",
+
+                // Full-bleed background image
+                if let Some(ref img_url) = image_url {
+                    div {
+                        class: "absolute inset-0",
+                        style: "background-image: url('{img_url}'); background-size: cover; background-position: center;",
+
+                        // Dark overlay
+                        div {
+                            class: "absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors"
+                        }
+                    }
+                } else {
+                    div {
+                        class: "absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center",
+
+                        span {
+                            class: "text-5xl opacity-50",
+                            "🍳"
+                        }
+                    }
+                }
+
+                // Author avatar in TOP-LEFT
+                div {
+                    class: "absolute top-3 left-3",
+
+                    div {
+                        class: "w-8 h-8 rounded-full overflow-hidden ring-2 ring-white bg-muted flex items-center justify-center",
+
+                        if let Some(ref pic_url) = profile_picture {
+                            img {
+                                src: "{pic_url}",
+                                alt: "{display_name}",
+                                class: "w-full h-full object-cover",
+                                loading: "lazy",
+                            }
+                        } else {
+                            span {
+                                class: "text-xs font-semibold text-muted-foreground",
+                                "{avatar_letter}"
+                            }
+                        }
+                    }
+                }
+
+                // Title at bottom with gradient fade
+                div {
+                    class: "absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent",
+
+                    h3 {
+                        class: "text-white font-semibold text-sm line-clamp-2",
+                        "{title}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Skeleton loader for discover recipe cards
+#[component]
+pub fn DiscoverRecipeCardSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "flex-shrink-0 w-56 h-72 bg-muted rounded-xl animate-pulse"
+        }
+    }
+}

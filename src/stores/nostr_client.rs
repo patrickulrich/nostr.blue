@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
+use futures::future::join_all;
 use nostr_sdk::Client;
 use nostr_sdk::prelude::*;
 use nostr::Url;
@@ -12,6 +13,7 @@ use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;
 use crate::stores::relay_metadata;
+use crate::stores::pinned_notes;
 use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_tags};
 
 #[cfg(target_arch = "wasm32")]
@@ -54,6 +56,9 @@ pub fn invalidate_contacts_cache() {
 /// This is needed because connect() is non-blocking and spawns background tasks
 /// Ensure at least one relay is connected before fetching
 /// Call this before any direct client.fetch_events() calls
+///
+/// IMPORTANT: Uses a timeout to prevent blocking the WASM event loop indefinitely.
+/// In WASM, blocking connect() calls can freeze the entire UI.
 pub async fn ensure_relays_ready(client: &Client) {
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 
@@ -66,19 +71,46 @@ pub async fn ensure_relays_ready(client: &Client) {
         return;
     }
 
-    // No relays connected yet - call connect().await to actually establish connections
-    // This is the key fix: in WASM, polling doesn't yield control to background tasks,
-    // but connect().await properly drives the connection futures to completion
-    log::info!("No relays connected, calling connect().await to establish connections...");
-    client.connect().await;
+    // No relays connected yet - attempt connection with a timeout
+    // This prevents blocking the WASM event loop indefinitely
+    log::info!("No relays connected, attempting connection with timeout...");
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use futures::future::{select, Either};
+        use futures::pin_mut;
+        use gloo_timers::future::TimeoutFuture;
+
+        let timeout_fut = TimeoutFuture::new(2000); // 2 second timeout
+        let connect_fut = client.connect();
+        pin_mut!(timeout_fut);
+        pin_mut!(connect_fut);
+
+        match select(connect_fut, timeout_fut).await {
+            Either::Left(_) => {
+                log::info!("Relay connection completed within timeout");
+            }
+            Either::Right(_) => {
+                log::warn!("Relay connection timed out after 2s - proceeding anyway");
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.connect()
+        ).await;
+    }
 
     // Verify connection status after connect attempt
     let relays_after = client.relays().await;
     let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
     if connected_count == 0 {
-        log::warn!("connect().await completed but no relays are connected - fetches may fail");
+        log::warn!("After timeout: no relays connected - fetches may fail or use cached data");
     } else {
-        log::info!("connect().await completed, {} relay(s) connected", connected_count);
+        log::info!("After connection attempt: {} relay(s) connected", connected_count);
     }
 }
 
@@ -164,28 +196,38 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
     let client = Arc::new(client);
 
-    // Add default relays with options (will be replaced if user has kind 10002)
-    let mut relay_infos = Vec::new();
-    for relay_url in DEFAULT_RELAYS {
-        if let Ok(url) = Url::parse(relay_url) {
-            match client.pool().add_relay(url.clone(), relay_opts.clone()).await {
-                Ok(_) => {
-                    relay_infos.push(RelayInfo {
-                        url: relay_url.to_string(),
-                        status: RelayStatus::Connected,
-                    });
-                    log::debug!("Added relay with opts: {}", relay_url);
+    // Add default relays with options in PARALLEL (will be replaced if user has kind 10002)
+    // This significantly speeds up initialization by not waiting for each relay sequentially
+    let relay_futures: Vec<_> = DEFAULT_RELAYS
+        .iter()
+        .filter_map(|relay_url| {
+            Url::parse(relay_url).ok().map(|url| {
+                let opts = relay_opts.clone();
+                let pool = client.pool();
+                let url_str = relay_url.to_string();
+                async move {
+                    match pool.add_relay(url, opts).await {
+                        Ok(_) => {
+                            log::debug!("Added relay with opts: {}", url_str);
+                            RelayInfo {
+                                url: url_str,
+                                status: RelayStatus::Connected,
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to add relay {}: {}", url_str, e);
+                            RelayInfo {
+                                url: url_str,
+                                status: RelayStatus::Disconnected,
+                            }
+                        }
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to add relay {}: {}", relay_url, e);
-                    relay_infos.push(RelayInfo {
-                        url: relay_url.to_string(),
-                        status: RelayStatus::Disconnected,
-                    });
-                }
-            }
-        }
-    }
+            })
+        })
+        .collect();
+
+    let relay_infos: Vec<RelayInfo> = join_all(relay_futures).await;
 
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
@@ -258,6 +300,13 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
             if let Err(e) = apply_relay_lists_to_client(client_clone).await {
                 log::error!("Failed to apply relay lists: {}", e);
             }
+        }
+    });
+
+    // Load user's pinned notes (kind 10001) in background
+    spawn(async move {
+        if let Err(e) = pinned_notes::init_pinned_notes().await {
+            log::warn!("Failed to load user pinned notes: {}", e);
         }
     });
 
@@ -2423,4 +2472,126 @@ pub async fn publish_poll(
     let event_id = output.id().to_hex();
     log::info!("Poll published successfully: {}", event_id);
     Ok(event_id)
+}
+
+// =============================================================================
+// Custom NIPs (Kind 30817) - Addressable events for community NIP proposals
+// =============================================================================
+
+/// Kind 30817 - Custom NIP (addressable event)
+pub const KIND_CUSTOM_NIP: u16 = 30817;
+
+/// Fetch custom NIPs (kind 30817) from relays
+pub async fn fetch_custom_nips(
+    limit: usize,
+    until: Option<u64>,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let filter = {
+        let mut f = Filter::new()
+            .kind(Kind::Custom(KIND_CUSTOM_NIP))
+            .limit(limit);
+
+        if let Some(until_ts) = until {
+            f = f.until(Timestamp::from(until_ts));
+        }
+
+        f
+    };
+
+    fetch_events_aggregated(filter, Duration::from_secs(10)).await
+}
+
+/// Fetch a specific custom NIP by decoding an naddr identifier
+pub async fn fetch_custom_nip_by_naddr(
+    naddr: &str,
+) -> std::result::Result<Option<nostr::Event>, String> {
+    use nostr::nips::nip19::Nip19;
+
+    // Decode naddr to get coordinate
+    let nip19 = Nip19::from_bech32(naddr)
+        .map_err(|e| format!("Invalid naddr: {}", e))?;
+
+    match nip19 {
+        Nip19::Coordinate(nip19_coord) => {
+            let coord = nip19_coord.coordinate;
+
+            let filter = Filter::new()
+                .kind(coord.kind)
+                .author(coord.public_key)
+                .identifier(coord.identifier);
+
+            let events = fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+            Ok(events.into_iter().next())
+        }
+        _ => Err("Not a coordinate (naddr) identifier".to_string()),
+    }
+}
+
+/// Publish a custom NIP as a kind 30817 addressable event
+pub async fn publish_custom_nip(
+    title: String,
+    content: String,
+    identifier: String,
+    related_kinds: Vec<u32>,
+) -> std::result::Result<String, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    use nostr::{EventBuilder, Kind, Tag, SingleLetterTag, Alphabet};
+
+    // Build event with required d-tag and optional tags
+    let mut builder = EventBuilder::new(Kind::Custom(KIND_CUSTOM_NIP), &content)
+        .tag(Tag::identifier(&identifier))
+        .tag(Tag::title(&title));
+
+    // Add k tags for related event kinds
+    for kind in related_kinds {
+        builder = builder.tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
+            vec![kind.to_string()],
+        ));
+    }
+
+    let output = client.send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
+
+    let event_id = output.id().to_hex();
+    log::info!("Custom NIP published successfully: {}", event_id);
+    Ok(event_id)
+}
+
+/// Generate an naddr for a custom NIP event
+pub fn generate_custom_nip_naddr(
+    pubkey: &PublicKey,
+    identifier: &str,
+    relays: Vec<String>,
+) -> std::result::Result<String, String> {
+    use nostr::nips::nip01::Coordinate;
+    use nostr::nips::nip19::Nip19Coordinate;
+
+    let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey)
+        .identifier(identifier);
+
+    let relay_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .collect();
+
+    let nip19_coord = Nip19Coordinate::new(coordinate, relay_urls);
+
+    nip19_coord.to_bech32()
+        .map_err(|e| format!("Failed to generate naddr: {}", e))
+}
+
+/// Search custom NIPs using NIP-50 full-text search
+pub async fn search_custom_nips(
+    query: &str,
+    limit: usize,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_CUSTOM_NIP))
+        .search(query)
+        .limit(limit);
+
+    fetch_events_aggregated(filter, Duration::from_secs(10)).await
 }

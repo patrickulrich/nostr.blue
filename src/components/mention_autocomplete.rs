@@ -3,6 +3,7 @@ use dioxus_core::Task;
 use dioxus::prelude::Event as DioxusEvent;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
 use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
@@ -44,7 +45,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let is_searching = use_signal(|| false);
     let mention_query = use_signal(|| String::new());
     let mention_start_pos = use_signal(|| 0usize);
-    let mut cursor_position = use_signal(|| 0usize);
+    let mut internal_cursor_pos = use_signal(|| 0usize);
 
     // Dropdown positioning
     let mut dropdown_top = use_signal(|| 0.0);
@@ -70,7 +71,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         let cursor_pos = get_cursor_position(&**textarea_id.read());
-        cursor_position.set(cursor_pos);
+        internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
             signal.set(cursor_utf8);
@@ -146,7 +147,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     // Shared helper to update cursor position from DOM
     let mut sync_cursor_position = move || {
         let cursor_pos = get_cursor_position(&**textarea_id.read());
-        cursor_position.set(cursor_pos);
+        internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let text = props.content.read();
             let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);
@@ -313,13 +314,23 @@ fn insert_mention(
     on_input: EventHandler<String>,
     mention_start_pos: usize,
     query_len: usize,
+    #[allow(unused_variables)]
     textarea_id: String,
     mut show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) {
     spawn(async move {
-        // With gossip, relay hints are not needed - the client handles routing automatically
-        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, vec![]);
+        // Include popular relay hints for better cross-client compatibility
+        // Even with gossip-enabled clients, hints help other clients discover profiles
+        let relay_hints: Vec<nostr_sdk::RelayUrl> = [
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.nostr.band",
+        ]
+        .iter()
+        .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+        .collect();
+        let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
 
         // Encode to bech32
         let mention = match nprofile.to_bech32() {

@@ -31,9 +31,14 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
     let mut saving = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 
-    // Drag state
+    // Drag state (desktop)
     let mut dragging_index = use_signal(|| None::<usize>);
     let mut drag_over_index = use_signal(|| None::<usize>);
+
+    // Touch drag state (mobile)
+    let mut touch_dragging_index = use_signal(|| None::<usize>);
+    let mut touch_over_index = use_signal(|| None::<usize>);
+    let mut is_touch_dragging = use_signal(|| false);
 
     // Handle adding new emoji from text input
     let mut add_emoji_from_input = move |_| {
@@ -199,7 +204,7 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
 
                 p {
                     class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
-                    "Drag to reorder. First emoji is your default reaction when you click the heart."
+                    "Drag to reorder (touch and hold on mobile). First emoji is your default reaction."
                 }
 
                 // Draggable emoji list
@@ -210,10 +215,11 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                         // Each emoji item is both draggable AND a drop zone
                         div {
                             key: "{reaction.display()}",
+                            id: "reaction-item-{index}",
                             class: "relative group",
                             draggable: "true",
 
-                            // Drag events
+                            // Desktop drag events
                             ondragstart: move |e| {
                                 dragging_index.set(Some(index));
                                 let _ = e.data_transfer().set_data("text/plain", &index.to_string());
@@ -250,12 +256,89 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                                 drag_over_index.set(None);
                             },
 
-                            // Content wrapper with drag feedback
+                            // Touch events for mobile
+                            ontouchstart: move |_| {
+                                touch_dragging_index.set(Some(index));
+                                touch_over_index.set(Some(index));
+                                is_touch_dragging.set(true);
+                            },
+                            ontouchmove: move |e| {
+                                if !*is_touch_dragging.read() {
+                                    return;
+                                }
+                                e.prevent_default();
+
+                                // Find element under touch point
+                                #[cfg(target_family = "wasm")]
+                                if let Some(touch) = e.touches().first() {
+                                    let coords = touch.client_coordinates();
+                                    let x = coords.x;
+                                    let y = coords.y;
+
+                                    if let Some(window) = web_sys::window() {
+                                        if let Some(document) = window.document() {
+                                            // Find which reaction item we're over
+                                            if let Some(element) = document.element_from_point(x as f32, y as f32) {
+                                                // Walk up to find reaction-item element
+                                                let mut current = Some(element);
+                                                while let Some(el) = current {
+                                                    if let Some(id) = el.get_attribute("id") {
+                                                        if id.starts_with("reaction-item-") {
+                                                            if let Ok(target_idx) = id.replace("reaction-item-", "").parse::<usize>() {
+                                                                touch_over_index.set(Some(target_idx));
+                                                            }
+                                                            break;
+                                                        }
+                                                    }
+                                                    current = el.parent_element();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            ontouchend: move |_| {
+                                if !*is_touch_dragging.read() {
+                                    return;
+                                }
+
+                                // Perform the reorder
+                                if let (Some(from_idx), Some(to_idx)) = (*touch_dragging_index.read(), *touch_over_index.read()) {
+                                    if from_idx != to_idx {
+                                        local_reactions.with_mut(|list| {
+                                            if from_idx < list.len() && to_idx < list.len() {
+                                                let item = list.remove(from_idx);
+                                                let insert_idx = if from_idx < to_idx { to_idx - 1 } else { to_idx };
+                                                let insert_idx = insert_idx.min(list.len());
+                                                list.insert(insert_idx, item);
+                                            }
+                                        });
+                                    }
+                                }
+
+                                // Reset touch state
+                                touch_dragging_index.set(None);
+                                touch_over_index.set(None);
+                                is_touch_dragging.set(false);
+                            },
+                            ontouchcancel: move |_| {
+                                // Clean up on touch cancel (e.g., incoming call, gesture conflict)
+                                touch_dragging_index.set(None);
+                                touch_over_index.set(None);
+                                is_touch_dragging.set(false);
+                            },
+
+                            // Content wrapper with drag feedback (desktop and touch)
                             div {
                                 class: format!(
                                     "p-2 bg-white dark:bg-gray-600 rounded cursor-move transition-all {} {}",
-                                    if dragging_index() == Some(index) { "opacity-50 scale-95" } else { "opacity-100" },
-                                    if drag_over_index() == Some(index) && dragging_index() != Some(index) {
+                                    if dragging_index() == Some(index) || touch_dragging_index() == Some(index) {
+                                        "opacity-50 scale-95"
+                                    } else {
+                                        "opacity-100"
+                                    },
+                                    if (drag_over_index() == Some(index) && dragging_index() != Some(index)) ||
+                                       (touch_over_index() == Some(index) && touch_dragging_index() != Some(index) && *is_touch_dragging.read()) {
                                         "ring-2 ring-blue-500 ring-offset-2"
                                     } else { "" }
                                 ),
