@@ -8,7 +8,7 @@ use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
 use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
-use crate::components::live_stream_card::LiveStreamCard;
+use crate::components::live::stream_card::LiveStreamCard;
 use crate::components::{EventCardCompact, CodeRepoCardCompact, P2POrderCard};
 use crate::utils::nip52::parse_calendar_event;
 use crate::utils::nip53::{parse_meeting_space, parse_meeting_room_event, LiveActivityEvent};

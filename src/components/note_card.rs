@@ -9,7 +9,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
-use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url};
+use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or};
 use nostr::nips::nip48::Protocol;
 use std::time::Duration;
 
@@ -406,8 +406,8 @@ pub fn NoteCard(
         });
     });
 
-    // Format timestamp
-    let timestamp = format_timestamp(created_at.as_secs());
+    // Format timestamp using shared utility
+    let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata or fallback
     let display_name = author_metadata.read().as_ref()
@@ -457,7 +457,7 @@ pub fn NoteCard(
                 &reposter_pubkey_str[..8],
                 &reposter_pubkey_str[reposter_pubkey_str.len()-8..]
             ));
-        let repost_time = format_timestamp(repost_timestamp.as_secs());
+        let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
         (reposter_pubkey_str, reposter_display, repost_time)
     });
 
@@ -1003,22 +1003,6 @@ fn ProxyBadge(proxy_info: nip48::ProxyInfo) -> Element {
                 Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
             }
         }
-    }
-}
-
-// Helper function to format timestamp
-fn format_timestamp(unix_timestamp: u64) -> String {
-    // Use JavaScript's Date.now() for WASM compatibility
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-
-    let diff = now.saturating_sub(unix_timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m", diff / 60),
-        3600..=86399 => format!("{}h", diff / 3600),
-        86400..=604799 => format!("{}d", diff / 86400),
-        _ => format!("{}w", diff / 604800),
     }
 }
 

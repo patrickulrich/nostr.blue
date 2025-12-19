@@ -5,7 +5,7 @@
 use dioxus::prelude::*;
 use crate::utils::nip34::PullRequest;
 use crate::routes::Route;
-use crate::components::code_status_badge::{CodeStatusBadge, BadgeSize};
+use super::status_badge::{CodeStatusBadge, BadgeSize};
 
 /// Pull request card component for lists
 #[component]

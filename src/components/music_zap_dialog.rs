@@ -682,8 +682,8 @@ async fn generate_v4v_invoice(
 
     let lnaddress = &recipient.address;
 
-    // Calculate this recipient's share
-    let recipient_share = (amount_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64;
+    // Calculate this recipient's share (minimum 1 sat to avoid zero payments)
+    let recipient_share = ((amount_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64).max(1);
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
 
     // Use floating point for accurate percentage display

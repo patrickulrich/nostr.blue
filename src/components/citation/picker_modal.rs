@@ -9,7 +9,7 @@ use crate::stores::citation_store::{
 };
 use crate::stores::auth_store;
 use crate::utils::nkbip03::CitationStyle;
-use crate::components::citation_card::CitationCardCompact;
+use super::card::CitationCardCompact;
 use crate::components::icons::{XIcon, SearchIcon};
 
 /// Citation selection result

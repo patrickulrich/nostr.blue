@@ -10,7 +10,7 @@ use crate::stores::community_store::{
 use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
 use crate::stores::auth_store;
 use crate::routes::Route;
-use crate::components::community_post_card::UserRoleBadge;
+use super::post_card::UserRoleBadge;
 use crate::components::icons::PinIcon;
 
 // ============================================================================

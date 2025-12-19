@@ -283,7 +283,13 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
             let txid = txid.clone();
             let endpoint = endpoint.clone();
             expanded.set(true);
-            if tx_data.read().is_none() {
+            // Fetch if not loaded yet, or allow retry on previous error
+            let should_fetch = match &*tx_data.read() {
+                None => true,
+                Some(Err(_)) => true,
+                Some(Ok(_)) => false,
+            };
+            if should_fetch {
                 spawn(async move {
                     let result = mempool::get_transaction(&endpoint, &txid).await;
                     tx_data.set(Some(result));

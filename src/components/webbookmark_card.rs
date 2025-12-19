@@ -5,7 +5,7 @@ use crate::stores::webbookmarks::{
     get_domain, is_favorite, is_archived, toggle_favorite, delete_webbookmark
 };
 use crate::components::icons::BookmarkIcon;
-use chrono::{DateTime, Utc, Local};
+use crate::utils::format_relative_time_or;
 
 #[component]
 pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEvent>>) -> Element {
@@ -41,10 +41,10 @@ pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEven
         .or_else(|| url.clone())
         .unwrap_or_else(|| "Untitled Bookmark".to_string());
 
-    // Format timestamp
+    // Format timestamp using shared utility
     let timestamp_str = published_at
-        .map(|ts| format_timestamp(ts.as_secs()))
-        .unwrap_or_else(|| format_timestamp(event.created_at.as_secs()));
+        .map(|ts| format_relative_time_or(ts.as_secs(), "Unknown"))
+        .unwrap_or_else(|| format_relative_time_or(event.created_at.as_secs(), "Unknown"));
 
     // Handle delete
     let handle_delete = {
@@ -337,33 +337,5 @@ pub fn WebBookmarkCardSkeleton() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Format timestamp to relative time
-fn format_timestamp(timestamp: u64) -> String {
-    let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(Utc::now);
-    let local_dt = dt.with_timezone(&Local);
-    let now = Local::now();
-    let duration = now.signed_duration_since(local_dt);
-
-    if duration.num_seconds() < 60 {
-        "just now".to_string()
-    } else if duration.num_minutes() < 60 {
-        let mins = duration.num_minutes();
-        format!("{}m ago", mins)
-    } else if duration.num_hours() < 24 {
-        let hours = duration.num_hours();
-        format!("{}h ago", hours)
-    } else if duration.num_days() < 30 {
-        let days = duration.num_days();
-        format!("{}d ago", days)
-    } else if duration.num_days() < 365 {
-        let months = duration.num_days() / 30;
-        format!("{}mo ago", months)
-    } else {
-        let years = duration.num_days() / 365;
-        format!("{}y ago", years)
     }
 }

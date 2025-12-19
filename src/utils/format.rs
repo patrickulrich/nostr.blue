@@ -89,3 +89,60 @@ pub fn shorten_url(url: &str, max_len: usize) -> String {
         url.to_string()
     }
 }
+
+/// Format a Unix timestamp as a relative time string (e.g., "5m ago", "2d ago")
+///
+/// Returns `None` for invalid timestamps (0 or far in the future).
+/// Uses WASM-compatible `js_sys::Date::now()` for current time.
+///
+/// # Examples
+/// ```
+/// let ts = 1700000000; // Some past timestamp
+/// let relative = format_relative_time(ts);
+/// // Returns Some("5d ago") or similar based on current time
+/// ```
+pub fn format_relative_time(timestamp: u64) -> Option<String> {
+    // Invalid timestamp: zero
+    if timestamp == 0 {
+        return None;
+    }
+
+    // Use js_sys for WASM compatibility
+    let now = (js_sys::Date::now() / 1000.0) as u64;
+
+    // Invalid timestamp: more than 1 day in the future
+    if timestamp > now.saturating_add(86400) {
+        return None;
+    }
+
+    let diff = now.saturating_sub(timestamp);
+
+    Some(match diff {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", diff / 60),
+        3600..=86399 => format!("{}h ago", diff / 3600),
+        86400..=604799 => format!("{}d ago", diff / 86400),
+        604800..=2591999 => format!("{}w ago", diff / 604800),
+        2592000..=31535999 => format!("{}mo ago", diff / 2592000),
+        _ => format!("{}y ago", diff / 31536000),
+    })
+}
+
+/// Format a Unix timestamp as relative time, with a fallback for invalid timestamps
+///
+/// This is a convenience wrapper around `format_relative_time()` that provides
+/// a default string for invalid timestamps instead of returning `None`.
+///
+/// # Arguments
+/// * `timestamp` - Unix timestamp in seconds
+/// * `default` - Fallback string to use for invalid timestamps
+///
+/// # Examples
+/// ```
+/// let ts = 0; // Invalid
+/// let relative = format_relative_time_or(ts, "Unknown");
+/// // Returns "Unknown"
+/// ```
+pub fn format_relative_time_or(timestamp: u64, default: &str) -> String {
+    format_relative_time(timestamp).unwrap_or_else(|| default.to_string())
+}

@@ -5,8 +5,9 @@ use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pinned_notes;
+use crate::utils::clipboard::copy_to_clipboard;
 use nostr_sdk::prelude::*;
-use nostr_sdk::nips::nip19::ToBech32;
+use nostr_sdk::nips::nip19::{ToBech32, FromBech32};
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::time::Duration;
 
@@ -271,23 +272,45 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             let event_id = event_id_copy.clone();
                             let toast_api = toast;
 
-                            // Convert event ID to nostr:note1... format (NIP-21 URI)
-                            if let Ok(event_id_parsed) = EventId::from_hex(&event_id) {
-                                let note_uri = format!("nostr:{}", event_id_parsed.to_bech32().unwrap());
-                                // Copy to clipboard
-                                if let Some(window) = web_sys::window() {
-                                    let clipboard = window.navigator().clipboard();
-                                    let _ = clipboard.write_text(&note_uri);
+                            // Parse event ID flexibly (hex, bech32, or NIP-21 URI)
+                            let event_id_parsed = EventId::from_hex(&event_id)
+                                .or_else(|_| EventId::from_bech32(&event_id));
 
-                                    // Show toast notification
-                                    toast_api.success(
-                                        "Copied!".to_string(),
-                                        ToastOptions::new()
-                                            .description("Note ID copied to clipboard")
-                                            .duration(Duration::from_secs(2))
-                                            .permanent(false),
-                                    );
-                                }
+                            if let Ok(eid) = event_id_parsed {
+                                // Convert to nostr:note1... format (NIP-21 URI)
+                                let note_uri = format!("nostr:{}", eid.to_bech32().unwrap());
+
+                                // Copy to clipboard using async utility with proper error handling
+                                spawn(async move {
+                                    match copy_to_clipboard(&note_uri).await {
+                                        Ok(_) => {
+                                            toast_api.success(
+                                                "Copied!".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Note ID copied to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                        Err(_) => {
+                                            toast_api.error(
+                                                "Error".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Failed to copy to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                    }
+                                });
+                            } else {
+                                toast_api.error(
+                                    "Error".to_string(),
+                                    ToastOptions::new()
+                                        .description("Invalid note ID format")
+                                        .duration(Duration::from_secs(2))
+                                        .permanent(false),
+                                );
                             }
                         },
                         span {

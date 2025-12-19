@@ -6,6 +6,7 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, get_identifier, calculate_read_time
 };
+use crate::utils::format_relative_time_or;
 
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -23,8 +24,8 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
-    // Format timestamp
-    let timestamp = format_timestamp(published_at);
+    // Format timestamp using shared utility
+    let timestamp = format_relative_time_or(published_at, "Unknown date");
 
     // Get display name from metadata or fallback
     let display_name = author_metadata.read().as_ref()
@@ -45,9 +46,6 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
-
-    // Check if article has valid identifier (required for linking)
-    let _has_identifier = identifier.is_some();
 
     // Create naddr for linking to article detail using proper NIP-19 encoding
     let naddr_opt = identifier.clone().and_then(|id| {
@@ -261,35 +259,5 @@ pub fn ArticleCardSkeleton() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Format timestamp to relative time
-fn format_timestamp(timestamp: u64) -> String {
-    use chrono::{DateTime, Utc, Local};
-
-    let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(Utc::now);
-    let local_dt = dt.with_timezone(&Local);
-    let now = Local::now();
-    let duration = now.signed_duration_since(local_dt);
-
-    if duration.num_seconds() < 60 {
-        "just now".to_string()
-    } else if duration.num_minutes() < 60 {
-        let mins = duration.num_minutes();
-        format!("{}m ago", mins)
-    } else if duration.num_hours() < 24 {
-        let hours = duration.num_hours();
-        format!("{}h ago", hours)
-    } else if duration.num_days() < 30 {
-        let days = duration.num_days();
-        format!("{}d ago", days)
-    } else if duration.num_days() < 365 {
-        let months = duration.num_days() / 30;
-        format!("{}mo ago", months)
-    } else {
-        let years = duration.num_days() / 365;
-        format!("{}y ago", years)
     }
 }

@@ -5,7 +5,7 @@
 use dioxus::prelude::*;
 use crate::utils::nip34::Issue;
 use crate::routes::Route;
-use crate::components::code_status_badge::{CodeStatusBadge, BadgeSize};
+use super::status_badge::{CodeStatusBadge, BadgeSize};
 use crate::components::icons::CommentIcon;
 
 /// Issue card component for lists
@@ -13,10 +13,7 @@ use crate::components::icons::CommentIcon;
 pub fn CodeIssueCard(
     issue: Issue,
 ) -> Element {
-    let title = issue.subject.clone().unwrap_or_else(|| {
-        // Use first line of content as title if no subject
-        issue.content.lines().next().unwrap_or("Untitled issue").to_string()
-    });
+    let title = issue.display_title();
 
     rsx! {
         Link {
@@ -81,9 +78,7 @@ pub fn CodeIssueCard(
 /// Compact issue row for tables
 #[component]
 pub fn CodeIssueRow(issue: Issue) -> Element {
-    let title = issue.subject.clone().unwrap_or_else(|| {
-        issue.content.lines().next().unwrap_or("Untitled issue").to_string()
-    });
+    let title = issue.display_title();
 
     rsx! {
         Link {

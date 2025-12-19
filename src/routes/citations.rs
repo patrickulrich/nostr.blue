@@ -7,8 +7,8 @@ use dioxus::prelude::*;
 
 use crate::components::ClientInitializing;
 use crate::components::icons::{PenSquareIcon, SearchIcon};
-use crate::components::citation_card::{CitationCard, CitationCardSkeleton};
-use crate::components::citation_editor_modal::CitationEditorModal;
+use crate::components::citation::card::{CitationCard, CitationCardSkeleton};
+use crate::components::citation::editor_modal::CitationEditorModal;
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::citation_store::{
     CachedCitation, CitationGroup, USER_CITATIONS,

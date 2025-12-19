@@ -166,16 +166,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     Ok((url, hash, dimensions)) => {
                         log::info!("File uploaded successfully: {}", url);
 
-                        // Now publish the NIP-94 event
-                        let dims = dimensions;
-
+                        // Publish the NIP-94 event
                         match gif_store::publish_gif_event(
                             url.clone(),
                             "image/gif".to_string(),
                             hash,
                             caption_text.clone(),
                             Some(file_size),
-                            dims,
+                            dimensions,
                         ).await {
                             Ok(event_id) => {
                                 log::info!("GIF event published: {}", event_id);
@@ -186,7 +184,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 let gif_metadata = gif_store::GifMetadata {
                                     url: url.clone(),
                                     thumbnail: None,
-                                    dimensions: dims.map(|(w, h)| (w as u64, h as u64)),
+                                    dimensions: dimensions.map(|(w, h)| (w as u64, h as u64)),
                                     size: Some(file_size),
                                     blurhash: None,
                                     alt: Some(caption_text.clone()),

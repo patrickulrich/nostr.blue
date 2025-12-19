@@ -13,16 +13,16 @@ pub struct GifPickerProps {
 pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
     let mut show_upload_modal = use_signal(|| false);
-    #[allow(unused_mut)]
+    #[allow(unused_mut)] // Mutated only in WASM target
     let mut position_right = use_signal(|| true); // Whether to show popup to the right of button
     let button_id = use_signal(|| format!("gif-picker-{}", uuid::Uuid::new_v4()));
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(String::new);
-    #[allow(unused_mut)]
+    #[allow(unused_mut)] // Mutated only in WASM target
     let mut picker_top = use_signal(|| 0.0);
-    #[allow(unused_mut)]
+    #[allow(unused_mut)] // Mutated only in WASM target
     let mut picker_left = use_signal(|| 0.0);
-    #[allow(unused_mut)]
+    #[allow(unused_mut)] // Mutated only in WASM target
     let mut picker_right = use_signal(|| 0.0);
 
     // Read GIF state from global store

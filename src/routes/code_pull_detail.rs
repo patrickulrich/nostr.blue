@@ -7,6 +7,7 @@ use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_pull_request, fetch_pr_comments_by_id, publish_pr_comment_by_id, update_pr_status_by_id};
 use crate::utils::nip34::{PullRequest, GitComment, IssueStatus};
+use crate::utils::format_relative_time_or;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 
@@ -250,7 +251,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         }
                         span { class: "text-sm font-medium", "{author_name}" }
                     }
-                    span { class: "text-sm text-muted-foreground", "opened {format_timestamp(pr.created_at)}" }
+                    span { class: "text-sm text-muted-foreground", "opened " {format_relative_time_or(pr.created_at, "Unknown")} }
                 }
 
                 // Commit info
@@ -495,7 +496,7 @@ fn CommentCard(comment: GitComment) -> Element {
                     }
                     span { class: "text-sm font-medium", "{author_name}" }
                 }
-                span { class: "text-xs text-muted-foreground", "{format_timestamp(comment.created_at)}" }
+                span { class: "text-xs text-muted-foreground", {format_relative_time_or(comment.created_at, "Unknown")} }
             }
 
             // Comment content
@@ -579,31 +580,3 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
-/// Format a Unix timestamp as a relative time
-fn format_timestamp(timestamp: u64) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        let minutes = diff / 60;
-        format!("{}m ago", minutes)
-    } else if diff < 86400 {
-        let hours = diff / 3600;
-        format!("{}h ago", hours)
-    } else if diff < 604800 {
-        let days = diff / 86400;
-        format!("{}d ago", days)
-    } else {
-        let date = chrono::DateTime::from_timestamp(timestamp as i64, 0)
-            .unwrap_or_default();
-        date.format("%b %d, %Y").to_string()
-    }
-}

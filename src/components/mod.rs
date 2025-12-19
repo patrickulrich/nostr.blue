@@ -17,12 +17,8 @@ pub mod article_card;
 pub mod article_content;
 pub mod photo_card;
 pub mod video_card;
-pub mod live_stream_card;
-pub mod mini_live_stream_card;
-pub mod live_stream_share_modal;
-pub mod stream_status;
-pub mod live_stream_player;
-pub mod live_chat;
+// Live streaming components (NIP-53)
+pub mod live;
 pub mod voice_message_card;
 pub mod voice_recorder;
 pub mod voice_reply_composer;
@@ -58,19 +54,8 @@ pub mod poll_creator_modal;
 pub mod wallet_balance_card;
 pub mod token_list;
 pub mod transaction_history;
-pub mod cashu_setup_wizard;
-pub mod cashu_send_modal;
-pub mod cashu_receive_modal;
-pub mod cashu_receive_lightning_modal;
-pub mod cashu_send_lightning_modal;
-pub mod cashu_optimize_modal;
-pub mod cashu_add_mint_modal;
-pub mod cashu_mint_discovery_modal;
-pub mod cashu_transfer_modal;
-pub mod cashu_create_request_modal;
-pub mod cashu_pay_request_modal;
-pub mod cashu_terms_modal;
-pub mod cashu_token_card;
+// Cashu wallet components (eCash)
+pub mod cashu;
 pub mod nwc_setup_modal;
 pub mod report_modal;
 pub mod add_to_list_modal;
@@ -92,13 +77,7 @@ pub mod profile_badges;
 pub mod badge_detail_modal;
 
 // Code/Git hosting components (NIP-34 + NIP-C0)
-pub mod code_repo_card;
-pub mod code_status_badge;
-pub mod code_snippet_card;
-pub mod code_issue_card;
-pub mod code_pull_card;
-pub mod code_file_tree;
-pub mod code_file_viewer;
+pub mod code;
 
 // Publication components (NKBIP-01 Kind 30040/30041)
 pub mod asciidoc_content;
@@ -112,9 +91,7 @@ pub mod wiki_content;
 pub mod wiki_backlinks;
 
 // Citation components (NKBIP-03 Kinds 30-33)
-pub mod citation_card;
-pub mod citation_editor_modal;
-pub mod citation_picker_modal;
+pub mod citation;
 
 // Book reference picker (NKBIP-08)
 pub mod book_picker_modal;
@@ -134,11 +111,8 @@ pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use photo_card::PhotoCard;
 pub use video_card::VideoCard;
-pub use mini_live_stream_card::MiniLiveStreamCard;
-pub use live_stream_share_modal::LiveStreamShareModal;
-pub use stream_status::StreamStatus;
-pub use live_stream_player::LiveStreamPlayer;
-pub use live_chat::LiveChat;
+// Live streaming component re-exports
+pub use live::{MiniLiveStreamCard, LiveStreamShareModal, LiveStreamPlayer, LiveChat, StreamStatus};
 pub use voice_message_card::VoiceMessageCard;
 pub use voice_recorder::VoiceRecorder;
 pub use voice_reply_composer::VoiceReplyComposer;
@@ -174,19 +148,12 @@ pub use poll_option_list::{PollOptionList, PollOptionData};
 pub use wallet_balance_card::WalletBalanceCard;
 pub use token_list::TokenList;
 pub use transaction_history::TransactionHistory;
-pub use cashu_setup_wizard::CashuSetupWizard;
-pub use cashu_send_modal::CashuSendModal;
-pub use cashu_receive_modal::CashuReceiveModal;
-pub use cashu_receive_lightning_modal::CashuReceiveLightningModal;
-pub use cashu_send_lightning_modal::CashuSendLightningModal;
-pub use cashu_optimize_modal::CashuOptimizeModal;
-pub use cashu_add_mint_modal::CashuAddMintModal;
-pub use cashu_mint_discovery_modal::CashuMintDiscoveryModal;
-pub use cashu_transfer_modal::CashuTransferModal;
-pub use cashu_create_request_modal::CashuCreateRequestModal;
-pub use cashu_pay_request_modal::CashuPayRequestModal;
-pub use cashu_terms_modal::CashuTermsModal;
-pub use cashu_token_card::CashuTokenCard;
+// Cashu wallet component re-exports
+pub use cashu::{
+    CashuSetupWizard, CashuSendModal, CashuReceiveModal, CashuReceiveLightningModal,
+    CashuSendLightningModal, CashuOptimizeModal, CashuAddMintModal, CashuMintDiscoveryModal,
+    CashuTransferModal, CashuCreateRequestModal, CashuPayRequestModal, CashuTermsModal, CashuTokenCard,
+};
 pub use nwc_setup_modal::NwcSetupModal;
 pub use report_modal::ReportModal;
 pub use add_to_list_modal::AddToListModal;
@@ -207,20 +174,17 @@ pub use podcast_v4v::{V4VInfo, V4VBoostButton};
 pub use external_content_card::ExternalContentList;
 
 // Code/Git hosting component exports
-pub use code_repo_card::{CodeRepoCard, CodeRepoCardCompact};
-pub use code_status_badge::CodeStatusBadge;
-pub use code_snippet_card::CodeSnippetCard;
-pub use code_issue_card::CodeIssueRow;
-pub use code_pull_card::CodePullRow;
-pub use code_file_tree::{CodeFileTree, FileTreeSkeleton, FilePathBreadcrumb, BranchSelector};
-pub use code_file_viewer::{CodeFileViewer, CodeFileViewerSkeleton};
+pub use code::{
+    CodeRepoCard, CodeRepoCardCompact, CodeStatusBadge, CodeSnippetCard,
+    CodeIssueRow, CodePullRow, CodeFileTree, FileTreeSkeleton, FilePathBreadcrumb,
+    BranchSelector, CodeFileViewer, CodeFileViewerSkeleton,
+};
 
 // NIP components
 pub use nip_card::{OfficialNipCard, CustomNipCard, NipCardSkeleton};
 
-// Citation components (NKBIP-03 Kinds 30-33)
-// Access via crate::components::citation_card, citation_editor_modal, citation_picker_modal
-pub use citation_picker_modal::{CitationPickerModal, CitationSelection};
+// Citation component re-exports (NKBIP-03 Kinds 30-33)
+pub use citation::{CitationPickerModal, CitationSelection};
 
 // Book reference picker (NKBIP-08)
 pub use book_picker_modal::{BookPickerModal, BookSelection};
@@ -229,15 +193,11 @@ pub use book_picker_modal::{BookPickerModal, BookSelection};
 pub use profile_badges::ProfileBadgesSection;
 
 // P2P trading components (NIP-69)
-pub mod p2p_order_card;
-pub mod p2p_status_badge;
-pub mod p2p_order_filters;
-pub mod p2p_depth_chart;
-
-pub use p2p_order_card::{P2POrderCard, P2POrderCardSkeleton};
-pub use p2p_status_badge::{P2PStatusBadge, P2PTypeBadge, P2PLayerBadge, P2PNetworkBadge};
-pub use p2p_order_filters::P2POrderFilters;
-pub use p2p_depth_chart::{P2PDepthChart, P2PDepthChartSkeleton};
+pub mod p2p;
+pub use p2p::{
+    P2POrderCard, P2POrderCardSkeleton, P2PStatusBadge, P2PTypeBadge,
+    P2PLayerBadge, P2PNetworkBadge, P2POrderFilters, P2PDepthChart, P2PDepthChartSkeleton,
+};
 
 // Calendar/Events components (NIP-52 + NIP-53)
 pub mod event_card;
@@ -252,13 +212,12 @@ pub use calendar_view::{CalendarView, CalendarViewMode, CalendarViewSkeleton};
 pub use calendar_mini::MiniCalendar;
 
 // Community components (NIP-72)
-pub mod community_card;
-pub mod community_post_card;
-pub mod community_post_composer;
-
-pub use community_card::{CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, JoinButton};
-pub use community_post_card::{CommunityPostCard, CommunityPostCardSkeleton, UserRoleBadge};
-pub use community_post_composer::{CommunityPostComposer, CommunityPostComposerInline};
+pub mod community;
+pub use community::{
+    CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, JoinButton,
+    CommunityPostCard, CommunityPostCardSkeleton, UserRoleBadge,
+    CommunityPostComposer, CommunityPostComposerInline,
+};
 
 // Pin Board components (Kind 33889 Pinstr-compatible)
 pub mod pin_board_card;

@@ -48,6 +48,7 @@ pub fn BoardSlideover(
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
+    let mut pending_pin_removal = use_signal(|| None::<Pin>);
 
     // Check if current user owns this board - reactive to auth state changes
     let author_pubkey_for_owner = author_pubkey.clone();
@@ -55,6 +56,25 @@ pub fn BoardSlideover(
         auth_store::get_pubkey()
             .map(|pk| pk == author_pubkey_for_owner)
             .unwrap_or(false)
+    });
+
+    // Memoize derived display values to avoid recalculating on every render
+    let display_name = use_memo(move || {
+        author_metadata.read().as_ref()
+            .and_then(|m| m.display_name.clone().or(m.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
+    });
+
+    let profile_picture = use_memo(move || {
+        author_metadata.read().as_ref()
+            .and_then(|m| m.picture.clone())
+    });
+
+    let avatar_letter = use_memo(move || {
+        display_name().chars().next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string()
     });
 
     // Get collaborative status for pin fetching
@@ -94,19 +114,6 @@ pub fn BoardSlideover(
         });
     }));
 
-    // Get display name from metadata (using UTF-8 safe truncation)
-    let display_name = author_metadata.read().as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
-
-    let profile_picture = author_metadata.read().as_ref()
-        .and_then(|m| m.picture.clone());
-
-    let avatar_letter = display_name.chars().next()
-        .unwrap_or('?')
-        .to_uppercase()
-        .to_string();
-
     // Handle board delete
     let nav = navigator();
     let on_close_for_delete = on_close;
@@ -130,30 +137,27 @@ pub fn BoardSlideover(
         });
     };
 
-    // Handle pin removal with confirmation
+    // Handle pin removal - show confirmation modal
     let handle_pin_remove = move |pin: Pin| {
-        let event_id = pin.event_id.clone();
+        pending_pin_removal.set(Some(pin));
+    };
 
-        // Confirm before deleting
-        let confirmed = web_sys::window()
-            .and_then(|w| w.confirm_with_message("Remove this pin from the board?").ok())
-            .unwrap_or(false);
-
-        if !confirmed {
-            return;
+    // Handle confirmed pin removal
+    let handle_pin_remove_confirmed = move |_| {
+        if let Some(pin) = pending_pin_removal.take() {
+            let event_id = pin.event_id.clone();
+            spawn(async move {
+                match delete_pin(&event_id).await {
+                    Ok(_) => {
+                        // Remove from local state
+                        pins.write().retain(|p| p.event_id != event_id);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to delete pin: {}", e);
+                    }
+                }
+            });
         }
-
-        spawn(async move {
-            match delete_pin(&event_id).await {
-                Ok(_) => {
-                    // Remove from local state
-                    pins.write().retain(|p| p.event_id != event_id);
-                }
-                Err(e) => {
-                    log::error!("Failed to delete pin: {}", e);
-                }
-            }
-        });
     };
 
     let pin_count = pins.read().len();
@@ -319,17 +323,17 @@ pub fn BoardSlideover(
                         // Avatar
                         div {
                             class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
-                            if let Some(ref pic_url) = profile_picture {
+                            if let Some(ref pic_url) = profile_picture() {
                                 img {
                                     src: "{pic_url}",
-                                    alt: "{display_name}",
+                                    alt: "{display_name()}",
                                     class: "w-full h-full object-cover",
                                     loading: "lazy",
                                 }
                             } else {
                                 span {
                                     class: "text-lg font-semibold text-muted-foreground",
-                                    "{avatar_letter}"
+                                    "{avatar_letter()}"
                                 }
                             }
                         }
@@ -339,7 +343,7 @@ pub fn BoardSlideover(
                             class: "flex-1",
                             span {
                                 class: "font-medium",
-                                "{display_name}"
+                                "{display_name()}"
                             }
                             div {
                                 class: "flex items-center gap-2 text-sm text-muted-foreground",
@@ -434,7 +438,7 @@ pub fn BoardSlideover(
         if *show_zap_modal.read() {
             ZapModal {
                 recipient_pubkey: board.pubkey.clone(),
-                recipient_name: display_name.clone(),
+                recipient_name: display_name(),
                 lud16: None,
                 lud06: None,
                 event_id: Some(board.event_id.clone()),
@@ -450,6 +454,17 @@ pub fn BoardSlideover(
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
                 on_cancel: move |_| show_delete_confirm.set(false),
+            }
+        }
+
+        if pending_pin_removal.read().is_some() {
+            ConfirmModal {
+                title: "Remove Pin".to_string(),
+                message: "Remove this pin from the board?".to_string(),
+                confirm_text: Some("Remove".to_string()),
+                cancel_text: Some("Cancel".to_string()),
+                on_confirm: handle_pin_remove_confirmed,
+                on_cancel: move |_| pending_pin_removal.set(None),
             }
         }
     }

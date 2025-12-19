@@ -7,6 +7,7 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 
 use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
+use crate::utils::is_valid_http_url;
 
 /// Groups autocomplete-related signals to reduce parameter count in helper functions
 #[derive(Clone, Copy)]
@@ -355,6 +356,14 @@ fn insert_mention(
 
         // Calculate positions
         let current_content = content.read().to_string();
+
+        // Bounds check - content may have changed since autocomplete was triggered
+        if mention_start_pos > current_content.len() {
+            log::warn!("Mention start position {} exceeds content length {}", mention_start_pos, current_content.len());
+            show_autocomplete.set(false);
+            return;
+        }
+
         let query_end_pos = mention_start_pos + query_len + 1; // +1 for the @ symbol
 
         // Build new content
@@ -564,11 +573,18 @@ fn render_dropdown(
                                     div {
                                         class: "flex-shrink-0",
                                         if let Some(picture) = &profile.picture {
-                                            img {
-                                                src: "{picture}",
-                                                class: "w-8 h-8 rounded-full",
-                                                alt: "{profile.get_display_name()}",
-                                                loading: "lazy"
+                                            if is_valid_http_url(picture) {
+                                                img {
+                                                    src: "{picture}",
+                                                    class: "w-8 h-8 rounded-full",
+                                                    alt: "{profile.get_display_name()}",
+                                                    loading: "lazy"
+                                                }
+                                            } else {
+                                                div {
+                                                    class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-xs font-bold",
+                                                    {profile.get_display_name().chars().next().unwrap_or('?').to_string()}
+                                                }
                                             }
                                         } else {
                                             div {

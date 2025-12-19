@@ -7,6 +7,7 @@ use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_snippet_by_id;
 use crate::utils::nip34::DisplaySnippet;
+use crate::utils::format_relative_time_or;
 use crate::stores::{profiles::PROFILE_CACHE, nostr_client};
 
 /// Code snippet detail page component
@@ -188,7 +189,7 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                         }
                         div {
                             class: "text-sm text-muted-foreground",
-                            "{format_timestamp(snippet.created_at)}"
+                            {format_relative_time_or(snippet.created_at, "Unknown")}
                         }
                     }
                 }
@@ -426,28 +427,3 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
-/// Format a Unix timestamp as a relative or absolute time
-fn format_timestamp(timestamp: u64) -> String {
-    // Use js_sys::Date for WASM compatibility
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        let minutes = diff / 60;
-        format!("{}m ago", minutes)
-    } else if diff < 86400 {
-        let hours = diff / 3600;
-        format!("{}h ago", hours)
-    } else if diff < 604800 {
-        let days = diff / 86400;
-        format!("{}d ago", days)
-    } else {
-        // Format as date
-        let date = chrono::DateTime::from_timestamp(timestamp as i64, 0)
-            .unwrap_or_default();
-        date.format("%b %d, %Y").to_string()
-    }
-}

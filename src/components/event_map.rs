@@ -152,11 +152,14 @@ extern "C" {
     async fn loadLeaflet() -> Result<(), JsValue>;
 
     fn initMap(container_id: &str, lat: f64, lng: f64, zoom: u32) -> bool;
+    #[allow(dead_code)]
     fn addMarker(container_id: &str, lat: f64, lng: f64, title: &str, popup_html: &str, event_id: &str) -> Option<u32>;
     fn addMarkersAndFit(container_id: &str, markers_json: &str);
     fn clearMarkers(container_id: &str);
     fn destroyMap(container_id: &str);
+    #[allow(dead_code)]
     fn setMapView(container_id: &str, lat: f64, lng: f64, zoom: u32);
+    #[allow(dead_code)]
     fn invalidateSize(container_id: &str);
 }
 
