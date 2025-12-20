@@ -221,6 +221,7 @@ pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> =
 
 const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
+const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 
 /// Initialize music player from localStorage
 pub fn init_player() {
@@ -234,6 +235,11 @@ pub fn init_player() {
     // Load muted setting
     if let Ok(is_muted) = LocalStorage::get::<bool>(STORAGE_KEY_MUTED) {
         state.is_muted = is_muted;
+    }
+
+    // Load playback speed setting
+    if let Ok(speed) = LocalStorage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
+        state.playback_speed = speed.clamp(0.5, 3.0);
     }
 
     *MUSIC_PLAYER.write() = state;
@@ -708,7 +714,7 @@ pub fn set_playback_speed(speed: f64) {
     MUSIC_PLAYER.write().playback_speed = speed;
 
     // Persist to localStorage
-    let _ = LocalStorage::set("music_player_playback_speed", speed);
+    let _ = LocalStorage::set(STORAGE_KEY_PLAYBACK_SPEED, speed);
 
     log::debug!("Playback speed set to {}x", speed);
 }
