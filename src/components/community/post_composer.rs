@@ -86,6 +86,7 @@ pub fn CommunityPostComposer(
 
     let on_close_for_backdrop = on_close_backdrop;
     let on_close_for_button = on_close;
+    let on_close_for_cancel = on_close;
 
     rsx! {
         div {
@@ -220,7 +221,7 @@ pub fn CommunityPostComposer(
                     class: "mt-4 flex justify-end gap-2",
                     button {
                         class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| confirm_close(on_close_for_cancel),
                         "Cancel"
                     }
                     button {

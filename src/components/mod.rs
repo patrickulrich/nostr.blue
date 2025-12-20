@@ -141,7 +141,6 @@ pub use share_modal::ShareModal;
 pub use radial_menu::RadialMenu;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
-// ContentMenu and ContentMenuType are used internally by components
 pub use poll_timer::PollTimer;
 pub use poll_card::PollCard;
 pub use poll_option_list::{PollOptionList, PollOptionData};
@@ -205,7 +204,7 @@ pub mod event_map;
 pub mod calendar_view;
 pub mod calendar_mini;
 
-#[allow(unused_imports)]
+#[allow(unused_imports)] // Skeleton re-exported for public API consistency
 pub use event_card::{EventCard, EventCardCompact, EventCardSkeleton, EventCardCompactSkeleton};
 pub use event_map::EventMap;
 pub use calendar_view::{CalendarView, CalendarViewMode, CalendarViewSkeleton};

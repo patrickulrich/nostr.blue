@@ -75,12 +75,15 @@ pub fn BadgeDetailModal(
         }
     }));
 
-    // Get issuer display name with UTF-8 safe truncation
-    let issuer_name = issuer_profile
-        .read()
-        .as_ref()
-        .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| truncate_pubkey(&badge.pubkey));
+    // Get issuer display name with UTF-8 safe truncation (memoized)
+    let badge_pubkey_for_memo = badge.pubkey.clone();
+    let issuer_name = use_memo(move || {
+        issuer_profile
+            .read()
+            .as_ref()
+            .and_then(|p| p.display_name.clone().or(p.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(&badge_pubkey_for_memo))
+    });
 
     rsx! {
         // Modal overlay

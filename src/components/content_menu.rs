@@ -90,10 +90,9 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let author_pubkey_modal = author_pubkey.clone();
     let naddr = props.naddr.clone();
     let naddr_copy = naddr.clone();
-    let naddr_list = naddr.clone();
-    let naddr_report = naddr.clone();
     let naddr_pin_board = naddr.clone();
-    let event_id_for_list = props.event_id.clone().unwrap_or_default();
+    // event_id is hex format, used for ReportModal and AddToListModal which require EventId
+    let event_id_hex = props.event_id.clone().unwrap_or_default();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -208,8 +207,8 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                         }
                     }
 
-                    // Add to list (if we have an event_id)
-                    if !event_id_for_list.is_empty() {
+                    // Add to list (if we have a hex event_id)
+                    if !event_id_hex.is_empty() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                             onclick: move |e: MouseEvent| {
@@ -313,27 +312,29 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                         }
                     }
 
-                    // Report content
-                    button {
-                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-red-500 hover:text-red-600",
-                        onclick: move |e: MouseEvent| {
-                            e.stop_propagation();
-                            show_report_modal.set(true);
-                            is_open.set(false);
-                        },
-                        span {
-                            class: "text-sm",
-                            "Report {content_name}"
+                    // Report content (only if we have a hex event_id)
+                    if !event_id_hex.is_empty() {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-red-500 hover:text-red-600",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_report_modal.set(true);
+                                is_open.set(false);
+                            },
+                            span {
+                                class: "text-sm",
+                                "Report {content_name}"
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Report Modal (uses event_id or naddr as identifier)
+        // Report Modal (requires hex event_id for NIP-56 reporting)
         if *show_report_modal.read() {
             ReportModal {
-                event_id: naddr_report.clone(),
+                event_id: event_id_hex.clone(),
                 author_pubkey: author_pubkey_modal.clone(),
                 on_close: move |_| {
                     show_report_modal.set(false);
@@ -341,10 +342,10 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
             }
         }
 
-        // Add to List Modal
+        // Add to List Modal (requires hex event_id)
         if *show_add_to_list_modal.read() {
             AddToListModal {
-                event_id: naddr_list.clone(),
+                event_id: event_id_hex.clone(),
                 on_close: move |_| show_add_to_list_modal.set(false)
             }
         }

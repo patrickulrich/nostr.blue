@@ -175,12 +175,14 @@ pub fn AsciiDocContentCollapsible(
     // Estimate if content is long based on character count
     let is_long_content = content.chars().count() > 800;
 
-    // Render content with auto-detection for format
-    let rendered = if enable_wikilinks {
-        render_content_auto(&content)
-    } else {
-        render_asciidoc(&content)
-    };
+    // Memoize rendered content - only recompute when content or enable_wikilinks changes
+    let rendered = use_memo(move || {
+        if enable_wikilinks {
+            render_content_auto(&content)
+        } else {
+            render_asciidoc(&content)
+        }
+    });
 
     if is_long_content {
         rsx! {
@@ -233,14 +235,16 @@ pub fn AsciiDocPreview(
     #[props(default = String::new())]
     class: String,
 ) -> Element {
-    // Strip formatting with auto-detection and truncate
-    let plain = content_to_plain_text(&content);
-    let preview = if plain.chars().count() > max_chars {
-        let truncated: String = plain.chars().take(max_chars).collect();
-        format!("{}...", truncated.trim_end())
-    } else {
-        plain
-    };
+    // Memoize preview computation - only recompute when content or max_chars changes
+    let preview = use_memo(move || {
+        let plain = content_to_plain_text(&content);
+        if plain.chars().count() > max_chars {
+            let truncated: String = plain.chars().take(max_chars).collect();
+            format!("{}...", truncated.trim_end())
+        } else {
+            plain
+        }
+    });
 
     rsx! {
         p {

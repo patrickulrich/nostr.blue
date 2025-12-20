@@ -278,7 +278,8 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
 
                             if let Ok(eid) = event_id_parsed {
                                 // Convert to nostr:note1... format (NIP-21 URI)
-                                let note_uri = format!("nostr:{}", eid.to_bech32().unwrap());
+                                // to_bech32() is infallible for EventId (returns Result<String, Infallible>)
+                                let note_uri = format!("nostr:{}", eid.to_bech32().expect("infallible"));
 
                                 // Copy to clipboard using async utility with proper error handling
                                 spawn(async move {

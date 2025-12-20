@@ -78,12 +78,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) {
-        // Return cached version and update cache in background
+        // Return cached version and update cache in background (stale-while-revalidate)
         fetch(event.request)
           .then((response) => {
             if (response.ok) {
+              const clone = response.clone();
               caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, response);
+                cache.put(event.request, clone);
               });
             }
           })

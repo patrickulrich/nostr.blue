@@ -62,8 +62,8 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
         }
     });
 
-    let current_month = month_info.read().1;
     let (year, month) = *month_info.read();
+    let current_month = month;
 
     let month_names = ["January", "February", "March", "April", "May", "June",
                        "July", "August", "September", "October", "November", "December"];

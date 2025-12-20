@@ -23,8 +23,9 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
     let rsvp_count = get_rsvp_count(event.coordinate());
 
     // Limit hashtags shown
-    let hashtags: Vec<&str> = event.hashtags().into_iter().take(3).collect();
-    let extra_tags = event.hashtags().len().saturating_sub(3);
+    let all_hashtags = event.hashtags();
+    let hashtags: Vec<&str> = all_hashtags.iter().take(3).copied().collect();
+    let extra_tags = all_hashtags.len().saturating_sub(3);
 
     // Build route based on event type
     // - Livestreams (30311) go to /videos/live/:naddr

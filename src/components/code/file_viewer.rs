@@ -366,7 +366,12 @@ pub fn RawFileButton(
                                             }
                                             let _ = body.remove_child(&a);
                                         }
-                                        let _ = web_sys::Url::revoke_object_url(&url);
+                                        // Defer URL revocation to allow browser to start download
+                                        let url_to_revoke = url.clone();
+                                        spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(100).await;
+                                            let _ = web_sys::Url::revoke_object_url(&url_to_revoke);
+                                        });
                                     }
                                 }
                             }

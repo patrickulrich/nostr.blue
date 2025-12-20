@@ -2,13 +2,12 @@
 //!
 //! Displays status badges for issues and pull requests.
 
-#![allow(dead_code)]
-
 use dioxus::prelude::*;
 use crate::utils::nip34::IssueStatus;
 
 /// Size variants for the badge
 #[derive(Clone, Copy, PartialEq, Default)]
+#[allow(dead_code)] // Variants reserved for future use
 pub enum BadgeSize {
     Small,
     #[default]
@@ -125,6 +124,7 @@ pub fn CodeStatusBadge(
 }
 
 /// Simple text-only status indicator
+#[allow(dead_code)] // Reserved for future use
 #[component]
 pub fn CodeStatusText(status: IssueStatus) -> Element {
     let (color_class, text) = match status {

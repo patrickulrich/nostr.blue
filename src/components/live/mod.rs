@@ -11,6 +11,8 @@ pub mod chat;
 pub mod status;
 
 // Re-export main component types for convenience
+#[allow(unused_imports)] // Re-exported for public API consistency
+pub use stream_card::LiveStreamCard;
 pub use mini_stream_card::MiniLiveStreamCard;
 pub use share_modal::LiveStreamShareModal;
 pub use player::LiveStreamPlayer;
