@@ -16,7 +16,7 @@ pub struct AddToListModalProps {
 pub fn AddToListModal(props: AddToListModalProps) -> Element {
     let (lists_signal, lists_loading, lists_error, mut refresh_trigger) = use_lists::use_user_lists();
     let mut selected_list_id = use_signal(|| None::<String>);
-    let mut new_list_name = use_signal(|| String::new());
+    let mut new_list_name = use_signal(String::new);
     let mut create_new = use_signal(|| false);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
@@ -34,11 +34,11 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
 
     // Clone needed fields before creating the move closure
     let event_id = props.event_id.clone();
-    let on_close = props.on_close.clone();
+    let on_close = props.on_close;
 
     let handle_add_to_list = move |_| {
         let event_id = event_id.clone();
-        let on_close = on_close.clone();
+        let on_close = on_close;
 
         loading.set(true);
         error_msg.set(None);

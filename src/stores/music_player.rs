@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
+use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::nostr_music::{TrackSource, NostrTrack, KIND_MUSIC_TRACK};
@@ -12,12 +13,12 @@ use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 /// Kind number for Music Vote events (addressable, one per user)
 pub const KIND_MUSIC_VOTE: u16 = 33169;
 
-/// Music track for the player (unified for Wavlake and Nostr sources)
+/// Music track for the player (unified for Wavlake, Nostr music, and Podcasts)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MusicTrack {
     pub id: String,
     pub title: String,
-    pub artist: String,
+    pub artist: String,  // For podcasts: podcast show title
     pub album: Option<String>,
     pub media_url: String,
     pub album_art_url: Option<String>,
@@ -33,6 +34,20 @@ pub struct MusicTrack {
     pub msat_total: Option<u64>,
     /// Created timestamp (for chronological sorting)
     pub created_at: Option<u64>,
+
+    // Podcast-specific fields
+    /// Whether this is a podcast episode (affects player UI controls)
+    #[serde(default)]
+    pub is_podcast: bool,
+    /// V4V payment info (for RSS podcasts with podcast:value tag)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_block: Option<crate::utils::podcast::ValueBlock>,
+    /// Chapters URL (for RSS podcasts with podcast:chapters tag)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapters_url: Option<String>,
+    /// Transcripts (for accessibility)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transcripts: Vec<crate::utils::podcast::TranscriptRef>,
 }
 
 impl From<WavlakeTrack> for MusicTrack {
@@ -58,6 +73,11 @@ impl From<WavlakeTrack> for MusicTrack {
             },
             msat_total,
             created_at: None, // Wavlake tracks don't have created_at in rankings
+            // Not a podcast
+            is_podcast: false,
+            value_block: None,
+            chapters_url: None,
+            transcripts: Vec::new(),
         }
     }
 }
@@ -83,6 +103,68 @@ impl From<NostrTrack> for MusicTrack {
             },
             msat_total: None, // Will be filled in by zap totals fetch
             created_at: Some(track.created_at),
+            // Not a podcast
+            is_podcast: false,
+            value_block: None,
+            chapters_url: None,
+            transcripts: Vec::new(),
+        }
+    }
+}
+
+impl MusicTrack {
+    /// Get route to the podcast show page (for podcasts) or artist page (for music)
+    pub fn get_show_route(&self) -> Option<Route> {
+        match &self.source {
+            TrackSource::NostrPodcast { pubkey, .. } => {
+                // For Nostr podcasts, construct naddr for podcast metadata
+                use nostr::prelude::*;
+                if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30078), pk)
+                        .identifier("podcast-metadata");
+                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                    if let Ok(naddr) = nip19_coord.to_bech32() {
+                        return Some(Route::PodcastNostrDetail { naddr });
+                    }
+                }
+                None
+            }
+            TrackSource::RssPodcast { feed_url, .. } => {
+                Some(Route::PodcastRssFeedDetail {
+                    feed_url: urlencoding::encode(feed_url).to_string()
+                })
+            }
+            TrackSource::Wavlake { artist_id, .. } => {
+                Some(Route::MusicArtist { artist_id: artist_id.clone() })
+            }
+            _ => None,
+        }
+    }
+
+    /// Get route to the episode/track detail page
+    pub fn get_episode_route(&self) -> Option<Route> {
+        match &self.source {
+            TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
+                // Construct naddr for the episode (Kind 30054)
+                use nostr::prelude::*;
+                if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                    let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
+                        .identifier(d_tag);
+                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                    if let Ok(naddr) = nip19_coord.to_bech32() {
+                        return Some(Route::PodcastNostrEpisodeDetail { naddr });
+                    }
+                }
+                None
+            }
+            TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
+                Some(Route::PodcastRssEpisodeDetail {
+                    podcast_id: urlencoding::encode(feed_url).to_string(),
+                    episode_id: urlencoding::encode(episode_guid).to_string(),
+                })
+            }
+            // For music tracks, we could link to a track detail page in the future
+            _ => None,
         }
     }
 }
@@ -103,6 +185,15 @@ pub struct MusicPlayerState {
     pub show_zap_dialog: bool,
     #[serde(skip)]
     pub zap_track: Option<MusicTrack>,
+
+    // Podcast-specific playback controls
+    /// Playback speed for podcasts (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+    #[serde(default = "default_playback_speed")]
+    pub playback_speed: f64,
+}
+
+fn default_playback_speed() -> f64 {
+    1.0
 }
 
 impl Default for MusicPlayerState {
@@ -119,6 +210,7 @@ impl Default for MusicPlayerState {
             duration: 0.0,
             show_zap_dialog: false,
             zap_track: None,
+            playback_speed: 1.0,
         }
     }
 }
@@ -129,6 +221,7 @@ pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> =
 
 const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
+const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
 
 /// Initialize music player from localStorage
 pub fn init_player() {
@@ -142,6 +235,11 @@ pub fn init_player() {
     // Load muted setting
     if let Ok(is_muted) = LocalStorage::get::<bool>(STORAGE_KEY_MUTED) {
         state.is_muted = is_muted;
+    }
+
+    // Load playback speed setting
+    if let Ok(speed) = LocalStorage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
+        state.playback_speed = speed.clamp(0.5, 3.0);
     }
 
     *MUSIC_PLAYER.write() = state;
@@ -173,11 +271,45 @@ async fn publish_music_status(track: &MusicTrack) {
             format!("https://nostr.blue/music/track/{}", track.id)
         }
         TrackSource::Nostr { pubkey, d_tag, .. } => {
-            // Create naddr bech32 for nostr tracks (NIP-19)
-            // Format: nostr:naddr1... where naddr encodes kind:pubkey:d-tag
-            // For simplicity, we'll use the coordinate format which can be parsed
-            format!("https://nostr.blue/music/playlist/{}:{}:{}",
-                crate::stores::nostr_music::KIND_MUSIC_TRACK, pubkey, d_tag)
+            // Create nostr:naddr1... URI for nostr tracks (NIP-19/NIP-21)
+            use nostr::prelude::*;
+            if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                let coord = nostr::nips::nip01::Coordinate::new(
+                    nostr::Kind::from(crate::stores::nostr_music::KIND_MUSIC_TRACK),
+                    pk
+                ).identifier(d_tag);
+                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                if let Ok(naddr) = nip19_coord.to_bech32() {
+                    format!("nostr:{}", naddr)
+                } else {
+                    format!("https://nostr.blue/music/playlist/{}:{}:{}",
+                        crate::stores::nostr_music::KIND_MUSIC_TRACK, pubkey, d_tag)
+                }
+            } else {
+                format!("https://nostr.blue/music/playlist/{}:{}:{}",
+                    crate::stores::nostr_music::KIND_MUSIC_TRACK, pubkey, d_tag)
+            }
+        }
+        TrackSource::NostrPodcast { pubkey, d_tag, .. } => {
+            // Create nostr:naddr1... URI for Nostr podcast episodes (NIP-19/NIP-21)
+            use nostr::prelude::*;
+            if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                let coord = nostr::nips::nip01::Coordinate::new(nostr::Kind::from(30054), pk)
+                    .identifier(d_tag);
+                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                if let Ok(naddr) = nip19_coord.to_bech32() {
+                    format!("nostr:{}", naddr)
+                } else {
+                    format!("https://nostr.blue/podcast/nostr/episode/30054:{}:{}", pubkey, d_tag)
+                }
+            } else {
+                format!("https://nostr.blue/podcast/nostr/episode/30054:{}:{}", pubkey, d_tag)
+            }
+        }
+        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
+            // Link to RSS podcast episode (encode feed_url)
+            format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url), urlencoding::encode(episode_guid))
         }
     };
 
@@ -362,6 +494,27 @@ pub fn set_current_time(time: f64) {
     state.current_time = time;
 }
 
+/// Seek to a specific time in the track (in seconds)
+/// This sets the current time in state and triggers audio element seek via JS
+pub fn seek_to(time: f64) {
+    let mut state = MUSIC_PLAYER.write();
+    state.current_time = time;
+    drop(state);
+
+    // Trigger audio element seek via JavaScript
+    spawn(async move {
+        let script = format!(
+            r#"
+            let audio = document.getElementById("global-music-player-audio");
+            if (audio) {{
+                audio.currentTime = {time};
+            }}
+            "#
+        );
+        let _ = document::eval(&script);
+    });
+}
+
 /// Set duration
 pub fn set_duration(duration: f64) {
     let mut state = MUSIC_PLAYER.write();
@@ -507,6 +660,28 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 
             log::debug!("Voting for Wavlake track: {}", track.id);
         }
+        TrackSource::NostrPodcast { coordinate, pubkey, d_tag, .. } => {
+            // Parse pubkey for Coordinate
+            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+                .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+            // Create coordinate for the podcast episode (Kind 30054)
+            let coord = Coordinate::new(Kind::from(crate::utils::podcast::KIND_PODCAST_EPISODE), pk)
+                .identifier(d_tag);
+
+            tags.push(Tag::coordinate(coord, None));
+            tags.push(Tag::custom(TagKind::custom("k"), vec![crate::utils::podcast::KIND_PODCAST_EPISODE.to_string()]));
+
+            log::debug!("Voting for Nostr podcast: {}", coordinate);
+        }
+        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
+            // Use r-tag with podcast feed URL and episode GUID
+            tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
+            tags.push(Tag::custom(TagKind::custom("k"), vec!["podcast".to_string()]));
+            tags.push(Tag::custom(TagKind::custom("episode_guid"), vec![episode_guid.clone()]));
+
+            log::debug!("Voting for RSS podcast episode: {}", episode_guid);
+        }
     }
 
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
@@ -526,4 +701,36 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             Err(format!("Failed to publish vote: {}", e))
         }
     }
+}
+
+// ============================================================================
+// Podcast-specific playback controls
+// ============================================================================
+
+/// Set playback speed (for podcasts)
+pub fn set_playback_speed(speed: f64) {
+    // Clamp speed to valid values
+    let speed = speed.clamp(0.5, 3.0);
+    MUSIC_PLAYER.write().playback_speed = speed;
+
+    // Persist to localStorage
+    let _ = LocalStorage::set(STORAGE_KEY_PLAYBACK_SPEED, speed);
+
+    log::debug!("Playback speed set to {}x", speed);
+}
+
+/// Skip forward by specified seconds (for podcasts)
+pub fn skip_forward(seconds: f64) {
+    let mut state = MUSIC_PLAYER.write();
+    let new_time = (state.current_time + seconds).min(state.duration);
+    state.current_time = new_time;
+    log::debug!("Skipped forward {} seconds to {}", seconds, new_time);
+}
+
+/// Skip backward by specified seconds (for podcasts)
+pub fn skip_backward(seconds: f64) {
+    let mut state = MUSIC_PLAYER.write();
+    let new_time = (state.current_time - seconds).max(0.0);
+    state.current_time = new_time;
+    log::debug!("Skipped backward {} seconds to {}", seconds, new_time);
 }

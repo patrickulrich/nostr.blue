@@ -17,7 +17,7 @@ pub fn MusicPlaylistNew() -> Element {
     let mut image_url = use_signal(String::new);
     let mut is_public = use_signal(|| true);
     let mut is_collaborative = use_signal(|| false);
-    let mut categories = use_signal(|| Vec::<String>::new());
+    let mut categories = use_signal(Vec::<String>::new);
     let mut category_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);

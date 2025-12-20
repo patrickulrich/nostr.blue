@@ -40,7 +40,7 @@ pub fn Home() -> Element {
     let mut pagination_loading = use_signal(|| false);
 
     // Interaction counts cache (event_id -> counts) for batch optimization
-    let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+    let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
 
     // Track if this is the first interaction count load (for negentropy optimization)
     // First load: full fetch (no local data to reconcile)
@@ -48,7 +48,7 @@ pub fn Home() -> Element {
     let mut interactions_loaded = use_signal(|| false);
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
-    let mut pending_posts = use_signal(|| Vec::<FeedItem>::new());
+    let mut pending_posts = use_signal(Vec::<FeedItem>::new);
 
     // Derive pending count from pending_posts to avoid race conditions
     let pending_count = use_memo(move || pending_posts.read().len());
@@ -57,7 +57,7 @@ pub fn Home() -> Element {
     let mut realtime_started = use_signal(|| false);
 
     // Track active subscription IDs for cleanup
-    let mut subscription_ids = use_signal(|| Vec::<nostr_sdk::SubscriptionId>::new());
+    let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
 
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
@@ -340,7 +340,7 @@ pub fn Home() -> Element {
             const BATCH_DELAY_MS: u64 = 100; // 100ms delay between batches
 
             let total_authors = authors.len();
-            let num_batches = (total_authors + BATCH_SIZE - 1) / BATCH_SIZE;
+            let num_batches = total_authors.div_ceil(BATCH_SIZE);
 
             log::info!("Starting batched real-time subscription for {} followed users in {} batches using gossip",
                 contacts.len(), num_batches);
@@ -551,7 +551,7 @@ pub fn Home() -> Element {
             let pending_len = pending.len();
 
             // Sort pending posts by timestamp (newest first)
-            pending.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            pending.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             // Match feed_state by reference to avoid cloning entire state
             let current_items = match &*feed_state.read() {
@@ -1032,9 +1032,9 @@ fn LoginSection() -> Element {
     use nostr::ToBech32;
 
     // State management
-    let mut nsec_input = use_signal(|| String::new());
-    let mut npub_input = use_signal(|| String::new());
-    let mut bunker_uri_input = use_signal(|| String::new());
+    let mut nsec_input = use_signal(String::new);
+    let mut npub_input = use_signal(String::new);
+    let mut bunker_uri_input = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut show_advanced = use_signal(|| false);
     let mut show_help_modal = use_signal(|| false);
@@ -1469,7 +1469,7 @@ async fn append_paginated_items(
             });
 
             // Fetch interaction counts for new items and merge with existing
-            let mut counts_signal = interaction_counts.clone();
+            let mut counts_signal = *interaction_counts;
             spawn(async move {
                 let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                 if let Ok(new_counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
@@ -1588,7 +1588,7 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, usize
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             log::info!("After processing: {} feed items (raw: {})", feed_items.len(), raw_count);
 
@@ -1697,7 +1697,7 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<Vec<FeedItem>
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             // If no events found, fall back to global feed
             if feed_items.is_empty() {
@@ -1762,7 +1762,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
             }
 
             // Sort by timestamp (repost time for reposts, created_at for originals)
-            feed_items.sort_by(|a, b| b.sort_timestamp().cmp(&a.sort_timestamp()));
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
             Ok(feed_items)
         }

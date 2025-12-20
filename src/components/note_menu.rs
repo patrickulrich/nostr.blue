@@ -1,9 +1,13 @@
 use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{ReportModal, AddToListModal};
+use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pinned_notes;
+use crate::utils::clipboard::copy_to_clipboard;
 use nostr_sdk::prelude::*;
-use nostr_sdk::nips::nip19::ToBech32;
+use nostr_sdk::nips::nip19::{ToBech32, FromBech32};
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::time::Duration;
 
@@ -23,6 +27,11 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let mut is_updating_follow = use_signal(|| false);
     let mut show_report_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
+    let mut show_pin_to_board_modal = use_signal(|| false);
+
+    // Pin state
+    let mut is_pinned = use_signal(|| false);
+    let mut is_updating_pin = use_signal(|| false);
 
     // Get toast API at component level
     let toast = consume_toast();
@@ -40,6 +49,9 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let event_id_modal_report = event_id.clone();
     let event_id_modal_list = event_id.clone();
     let event_id_copy = event_id.clone();
+    let event_id_pin = event_id.clone();
+    let event_id_pin_check = event_id.clone();
+    let event_id_pin_board = event_id.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -55,6 +67,12 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                 }
             }
         });
+    }));
+
+    // Check pin status on mount (synchronous - reads from global signal)
+    use_effect(use_reactive(&event_id_pin_check, move |eid| {
+        let pinned = pinned_notes::is_pinned(&eid);
+        is_pinned.set(pinned);
     }));
 
     rsx! {
@@ -169,6 +187,81 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                         }
                     }
 
+                    // Pin to Board
+                    if *HAS_SIGNER.read() {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                show_pin_to_board_modal.set(true);
+                                is_open.set(false);
+                            },
+                            span {
+                                class: "text-sm",
+                                "Pin to Board"
+                            }
+                        }
+                    }
+
+                    // Pin/Unpin note
+                    button {
+                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                        disabled: !*HAS_SIGNER.read() || *is_updating_pin.read(),
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+
+                            // Early return if no signer is connected
+                            if !*HAS_SIGNER.read() {
+                                log::warn!("Cannot pin/unpin note: No signer connected");
+                                return;
+                            }
+
+                            let eid = event_id_pin.clone();
+                            let currently_pinned = *is_pinned.read();
+
+                            is_updating_pin.set(true);
+                            is_open.set(false);
+
+                            spawn(async move {
+                                let result = if currently_pinned {
+                                    pinned_notes::unpin_event(eid.clone()).await
+                                } else {
+                                    pinned_notes::pin_event(eid.clone()).await
+                                };
+
+                                match result {
+                                    Ok(_) => {
+                                        // Update local state
+                                        is_pinned.set(!currently_pinned);
+                                        log::info!("{} note: {}",
+                                            if currently_pinned { "Unpinned" } else { "Pinned" },
+                                            eid
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to {} note: {}",
+                                            if currently_pinned { "unpin" } else { "pin" },
+                                            e
+                                        );
+                                    }
+                                }
+                                is_updating_pin.set(false);
+                            });
+                        },
+                        span {
+                            class: "text-sm",
+                            {
+                                if *is_updating_pin.read() {
+                                    if *is_pinned.read() { "Unpinning..." } else { "Pinning..." }
+                                } else if *is_pinned.read() {
+                                    "Unpin note"
+                                } else {
+                                    "Pin to profile"
+                                }
+                            }
+                        }
+                    }
+
                     // Copy Note ID
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
@@ -177,25 +270,48 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                             is_open.set(false);
 
                             let event_id = event_id_copy.clone();
-                            let toast_api = toast.clone();
+                            let toast_api = toast;
 
-                            // Convert event ID to note1... format
-                            if let Ok(event_id_parsed) = EventId::from_hex(&event_id) {
-                                let note_bech32 = event_id_parsed.to_bech32().unwrap();
-                                // Copy to clipboard
-                                if let Some(window) = web_sys::window() {
-                                    let clipboard = window.navigator().clipboard();
-                                    let _ = clipboard.write_text(&note_bech32);
+                            // Parse event ID flexibly (hex, bech32, or NIP-21 URI)
+                            let event_id_parsed = EventId::from_hex(&event_id)
+                                .or_else(|_| EventId::from_bech32(&event_id));
 
-                                    // Show toast notification
-                                    toast_api.success(
-                                        "Copied!".to_string(),
-                                        ToastOptions::new()
-                                            .description("Note ID copied to clipboard")
-                                            .duration(Duration::from_secs(2))
-                                            .permanent(false),
-                                    );
-                                }
+                            if let Ok(eid) = event_id_parsed {
+                                // Convert to nostr:note1... format (NIP-21 URI)
+                                // to_bech32() is infallible for EventId (returns Result<String, Infallible>)
+                                let note_uri = format!("nostr:{}", eid.to_bech32().expect("infallible"));
+
+                                // Copy to clipboard using async utility with proper error handling
+                                spawn(async move {
+                                    match copy_to_clipboard(&note_uri).await {
+                                        Ok(_) => {
+                                            toast_api.success(
+                                                "Copied!".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Note ID copied to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                        Err(_) => {
+                                            toast_api.error(
+                                                "Error".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Failed to copy to clipboard")
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                    }
+                                });
+                            } else {
+                                toast_api.error(
+                                    "Error".to_string(),
+                                    ToastOptions::new()
+                                        .description("Invalid note ID format")
+                                        .duration(Duration::from_secs(2))
+                                        .permanent(false),
+                                );
                             }
                         },
                         span {
@@ -287,6 +403,15 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
             AddToListModal {
                 event_id: event_id_modal_list.clone(),
                 on_close: move |_| show_add_to_list_modal.set(false)
+            }
+        }
+
+        // Pin to Board Modal
+        if *show_pin_to_board_modal.read() {
+            PinToBoardModal {
+                reference: PinReference::Event { id: event_id_pin_board.clone(), relay_hint: None },
+                content_type: PinContentType::Note,
+                on_close: move |_| show_pin_to_board_modal.set(false),
             }
         }
     }

@@ -127,7 +127,7 @@ pub fn VideoDetail(video_id: String) -> Element {
 #[component]
 fn LandscapePlayer(event: Event) -> Element {
     let mut is_muted = use_signal(|| false);
-    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let event_id = event.id;
@@ -422,7 +422,7 @@ fn LandscapePlayer(event: Event) -> Element {
 
 #[component]
 fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Option<Event>) -> Element {
-    let mut events = use_signal(|| Vec::<Event>::new());
+    let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut current_video_index = use_signal(|| 0usize);
     let mut is_muted = use_signal(|| false);
@@ -625,7 +625,7 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Op
                 }
 
                 // Down button
-                if events.read().len() > 0 && (*current_video_index.read() < events.read().len() - 1 || *has_more.read()) {
+                if !events.read().is_empty() && (*current_video_index.read() < events.read().len() - 1 || *has_more.read()) {
                     button {
                         class: "w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white transition",
                         onclick: move |_| next_video(),
@@ -656,7 +656,7 @@ fn VerticalVideoPlayer(
     is_muted: bool,
     on_mute_toggle: EventHandler<()>,
 ) -> Element {
-    let video_id = format!("video-{}", event.id.to_hex()[..8].to_string());
+    let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
     let video_meta = parse_video_meta(&event);
 
@@ -741,7 +741,7 @@ fn VideoInfo(
     let mut is_liking = use_signal(|| false);
     let mut show_comments_modal = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
-    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
 

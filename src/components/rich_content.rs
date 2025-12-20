@@ -8,7 +8,14 @@ use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::components::icons;
 use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
-use crate::components::live_stream_card::LiveStreamCard;
+use crate::components::live::stream_card::LiveStreamCard;
+use crate::components::{EventCardCompact, CodeRepoCardCompact, P2POrderCard};
+use crate::utils::nip52::parse_calendar_event;
+use crate::utils::nip53::{parse_meeting_space, parse_meeting_room_event, LiveActivityEvent};
+use crate::utils::nip34::Repository;
+use crate::utils::nip69::parse_p2p_order;
+use crate::utils::podcast::parse_podcast_episode;
+use crate::stores::calendar_store::UnifiedEvent;
 
 #[component]
 pub fn RichContent(
@@ -237,6 +244,47 @@ fn render_token(token: &ContentToken) -> Element {
         ContentToken::CashuToken(token) => rsx! {
             CashuTokenCard { token: token.clone() }
         },
+
+        // NIP-73 External Content IDs
+        // ISBN - Book reference
+        ContentToken::Isbn(isbn) => rsx! {
+            IsbnRenderer { isbn: isbn.clone() }
+        },
+
+        // DOI - Paper reference
+        ContentToken::Doi(doi) => rsx! {
+            DoiRenderer { doi: doi.clone() }
+        },
+
+        // ISAN - Movie reference
+        ContentToken::Isan(isan) => rsx! {
+            IsanRenderer { isan: isan.clone() }
+        },
+
+        // Podcast feed GUID
+        ContentToken::PodcastFeed(guid) => rsx! {
+            PodcastFeedRenderer { guid: guid.clone() }
+        },
+
+        // Podcast episode GUID
+        ContentToken::PodcastEpisode(guid) => rsx! {
+            PodcastEpisodeRenderer { guid: guid.clone() }
+        },
+
+        // Bitcoin transaction
+        ContentToken::BitcoinTx(txid) => rsx! {
+            BitcoinTxRenderer { txid: txid.clone() }
+        },
+
+        // Bitcoin address
+        ContentToken::BitcoinAddress(address) => rsx! {
+            BitcoinAddressRenderer { address: address.clone() }
+        },
+
+        // Geohash location
+        ContentToken::Geohash(hash) => rsx! {
+            GeohashRenderer { hash: hash.clone() }
+        },
     }
 }
 
@@ -245,14 +293,14 @@ fn MentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:npub..." or just "npub..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
-    // Parse pubkey from either nprofile or npub
-    let pubkey_result: Option<PublicKey> = if identifier.starts_with("nprofile1") {
-        nostr_sdk::nips::nip19::Nip19Profile::from_bech32(identifier)
-            .ok()
-            .map(|nip19| nip19.public_key)
-    } else {
-        nostr_sdk::PublicKey::from_bech32(identifier).ok()
-    };
+    // Parse pubkey using Nip19 which handles type detection internally
+    let pubkey_result: Option<PublicKey> = Nip19::from_bech32(identifier)
+        .ok()
+        .and_then(|nip19| match nip19 {
+            Nip19::Pubkey(pk) => Some(pk),
+            Nip19::Profile(profile) => Some(profile.public_key),
+            _ => None, // Not a profile reference
+        });
 
     // Always call hooks unconditionally
     let mut metadata = use_signal(|| None::<Metadata>);
@@ -330,31 +378,30 @@ fn EventMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:note..." or just "note..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
-    // Parse event ID and relay hints from either nevent or note
-    let parsed_event: Option<(EventId, Vec<String>)> = if identifier.starts_with("nevent1") {
-        nostr_sdk::nips::nip19::Nip19Event::from_bech32(identifier)
-            .ok()
-            .map(|nip19| {
-                let relays: Vec<String> = nip19.relays.iter()
-                    .map(|r| r.to_string())
-                    .collect();
-                (nip19.event_id, relays)
-            })
-    } else if identifier.starts_with("note1") {
-        nostr_sdk::EventId::from_bech32(identifier).ok().map(|id| (id, Vec::new()))
-    } else {
-        None
-    };
+    // Parse using Nip19 which handles type detection internally
+    let nip19_result = Nip19::from_bech32(identifier).ok();
+
+    // Handle naddr (parameterized replaceable event coordinate) - all addressable event types
+    if matches!(&nip19_result, Some(Nip19::Coordinate(_))) {
+        return rsx! {
+            NaddrMentionRenderer { mention: mention.clone() }
+        };
+    }
+
+    // Extract event ID and relay hints from either nevent or note
+    let parsed_event: Option<(EventId, Vec<String>)> = nip19_result.and_then(|nip19| match nip19 {
+        Nip19::Event(nevent) => {
+            let relays: Vec<String> = nevent.relays.iter()
+                .map(|r| r.to_string())
+                .collect();
+            Some((nevent.event_id, relays))
+        }
+        Nip19::EventId(id) => Some((id, Vec::new())),
+        _ => None, // Not an event reference
+    });
 
     let event_id_result = parsed_event.as_ref().map(|(id, _)| *id);
     let relay_hints = parsed_event.map(|(_, relays)| relays).unwrap_or_default();
-
-    // Handle naddr (parameterized replaceable event coordinate) - typically articles
-    if identifier.starts_with("naddr1") {
-        return rsx! {
-            ArticleMentionRenderer { mention: mention.clone() }
-        };
-    }
 
     // Always call hooks unconditionally
     let mut embedded_event = use_signal(|| None::<Event>);
@@ -460,8 +507,12 @@ fn EventMentionRenderer(mention: String) -> Element {
                 }
                 1068 => {
                     // Poll (kind 1068)
+                    // Wrap with stop_propagation to prevent click bubbling to parent note
                     rsx! {
-                        PollCard { event: event }
+                        div {
+                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                            PollCard { event: event }
+                        }
                     }
                 }
                 _ => {
@@ -742,7 +793,7 @@ fn TwitchVodRenderer(vod_id: String) -> Element {
 }
 
 #[component]
-fn ArticleMentionRenderer(mention: String) -> Element {
+fn NaddrMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:naddr..." or just "naddr..."
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
@@ -825,10 +876,23 @@ fn ArticleMentionRenderer(mention: String) -> Element {
         if has_event {
             let event = event_clone.unwrap();
 
+            // Kind constants (using numeric literals since Kind::as_u16() is not const)
+            // nostr-sdk named variants: Kind::LiveEvent, Kind::LongFormTextNote, Kind::GitRepoAnnouncement, Kind::PeerToPeerOrder
+            const LIVE_EVENT: u16 = 30311;
+            const ARTICLE: u16 = 30023;
+            const GIT_REPO: u16 = 30617;
+            const P2P_ORDER: u16 = 38383;
+            // Custom kinds without nostr-sdk named variants
+            const DATE_CALENDAR: u16 = 31922;
+            const TIME_CALENDAR: u16 = 31923;
+            const MEETING_SPACE: u16 = 30312;
+            const MEETING_ROOM: u16 = 30313;
+            const PODCAST_EPISODE: u16 = 30054;
+
             // Route to appropriate card based on event kind
             match kind {
-                30311 => {
-                    // Live Stream (kind 30311) - wrap with stop_propagation for embedded use
+                // Live Stream (NIP-53)
+                LIVE_EVENT => {
                     rsx! {
                         div {
                             onclick: move |e: MouseEvent| e.stop_propagation(),
@@ -836,17 +900,116 @@ fn ArticleMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
-                30023 => {
-                    // Article (kind 30023)
+                // Article (NIP-23)
+                ARTICLE => {
                     rsx! {
                         {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
                     }
                 }
-                _ => {
-                    // Default: render as article
-                    rsx! {
-                        {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                // Calendar events (NIP-52)
+                DATE_CALENDAR | TIME_CALENDAR => {
+                    if let Ok(cal_event) = parse_calendar_event(&event) {
+                        let unified = UnifiedEvent::Calendar(cal_event);
+                        rsx! {
+                            div {
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                EventCardCompact { event: unified }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
                     }
+                }
+                // Meeting Space (NIP-53)
+                MEETING_SPACE => {
+                    if let Ok(space) = parse_meeting_space(&event) {
+                        let unified = UnifiedEvent::Live(LiveActivityEvent::Space(space));
+                        rsx! {
+                            div {
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                EventCardCompact { event: unified }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Meeting Room (NIP-53)
+                MEETING_ROOM => {
+                    if let Ok(room) = parse_meeting_room_event(&event) {
+                        let unified = UnifiedEvent::Live(LiveActivityEvent::Meeting(room));
+                        rsx! {
+                            div {
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                EventCardCompact { event: unified }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Git Repository (NIP-34)
+                GIT_REPO => {
+                    if let Some(repo) = Repository::from_event(&event) {
+                        rsx! {
+                            div {
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                CodeRepoCardCompact { repo: repo }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Podcast Episode - compact link (needs podcast context for full display)
+                PODCAST_EPISODE => {
+                    if let Ok(episode) = parse_podcast_episode(&event) {
+                        let episode_title = episode.title.clone();
+                        rsx! {
+                            Link {
+                                to: Route::PodcastNostrDetail { naddr: naddr_for_link.clone() },
+                                class: "flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-accent/50 transition",
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                svg {
+                                    class: "w-8 h-8 text-purple-500 flex-shrink-0",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                                    }
+                                }
+                                div {
+                                    class: "flex-1 min-w-0",
+                                    p { class: "font-medium truncate", "{episode_title}" }
+                                    p { class: "text-xs text-muted-foreground", "Podcast Episode" }
+                                }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // P2P Order (NIP-69)
+                P2P_ORDER => {
+                    if let Ok(order) = parse_p2p_order(&event) {
+                        rsx! {
+                            div {
+                                onclick: move |e: MouseEvent| e.stop_propagation(),
+                                P2POrderCard { order: order }
+                            }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Default: render as article/generic
+                _ => {
+                    rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
                 }
             }
         } else if *loading.read() {
@@ -1332,7 +1495,7 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                 class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
                 onclick: {
                     let artist_id_nav = artist.id.clone();
-                    let navigator = nav.clone();
+                    let navigator = nav;
                     move |e: MouseEvent| {
                         e.stop_propagation();
                         // Navigate to artist page
@@ -2082,6 +2245,167 @@ fn ZapStreamRenderer(naddr: String) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+// NIP-73 External Content Renderers
+
+/// Render ISBN book reference with OpenLibrary cover
+#[component]
+fn IsbnRenderer(isbn: String) -> Element {
+    use crate::services::openlibrary::CoverSize;
+    let clean_isbn = crate::services::openlibrary::clean_isbn(&isbn);
+    let cover_url = crate::services::openlibrary::get_cover_url(&clean_isbn, CoverSize::Small);
+    let openlibrary_url = format!("https://openlibrary.org/isbn/{}", clean_isbn);
+
+    rsx! {
+        a {
+            href: "{openlibrary_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-2 px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded hover:bg-amber-200 dark:hover:bg-amber-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            img {
+                src: "{cover_url}",
+                alt: "Book cover",
+                class: "w-5 h-7 object-cover rounded-sm",
+                onerror: move |_| {
+                    log::debug!("Failed to load book cover for ISBN: {}", isbn);
+                }
+            }
+            span { "ISBN: {clean_isbn}" }
+        }
+    }
+}
+
+/// Render DOI paper reference
+#[component]
+fn DoiRenderer(doi: String) -> Element {
+    let doi_url = format!("https://doi.org/{}", doi);
+
+    rsx! {
+        a {
+            href: "{doi_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { class: "font-mono text-xs", "DOI" }
+            span { "{doi}" }
+        }
+    }
+}
+
+/// Render ISAN movie reference
+#[component]
+fn IsanRenderer(isan: String) -> Element {
+    let isan_url = format!("https://web.isan.org/public/en/search?isan={}", isan);
+
+    rsx! {
+        a {
+            href: "{isan_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 rounded hover:bg-purple-200 dark:hover:bg-purple-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { class: "font-mono text-xs", "ISAN" }
+            span { "{isan}" }
+        }
+    }
+}
+
+/// Render podcast feed GUID reference
+#[component]
+fn PodcastFeedRenderer(guid: String) -> Element {
+    let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+
+    rsx! {
+        a {
+            href: "{podcast_index_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { "Podcast: " }
+            span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+        }
+    }
+}
+
+/// Render podcast episode GUID reference
+#[component]
+fn PodcastEpisodeRenderer(guid: String) -> Element {
+    let podcast_index_url = format!("https://podcastindex.org/search?q={}", guid);
+
+    rsx! {
+        a {
+            href: "{podcast_index_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { "Episode: " }
+            span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+        }
+    }
+}
+
+/// Render Bitcoin transaction reference
+#[component]
+fn BitcoinTxRenderer(txid: String) -> Element {
+    let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
+    // Remove /api suffix if present for display URL
+    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let tx_url = format!("{}/tx/{}", base_url, txid);
+    let truncated = crate::services::mempool::truncate_bitcoin_id(&txid);
+
+    rsx! {
+        a {
+            href: "{tx_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 rounded hover:bg-orange-200 dark:hover:bg-orange-800/40 transition text-sm font-mono",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { "TX: {truncated}" }
+        }
+    }
+}
+
+/// Render Bitcoin address reference
+#[component]
+fn BitcoinAddressRenderer(address: String) -> Element {
+    let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
+    // Remove /api suffix if present for display URL
+    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let addr_url = format!("{}/address/{}", base_url, address);
+    let truncated = crate::services::mempool::truncate_bitcoin_id(&address);
+
+    rsx! {
+        a {
+            href: "{addr_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 rounded hover:bg-orange-200 dark:hover:bg-orange-800/40 transition text-sm font-mono",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { "Addr: {truncated}" }
+        }
+    }
+}
+
+/// Render geohash location reference
+#[component]
+fn GeohashRenderer(hash: String) -> Element {
+    let geohash_url = format!("https://geohash.org/{}", hash);
+
+    rsx! {
+        a {
+            href: "{geohash_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-200 rounded hover:bg-teal-200 dark:hover:bg-teal-800/40 transition text-sm",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            span { "Location: {hash}" }
         }
     }
 }

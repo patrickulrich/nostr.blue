@@ -18,7 +18,7 @@ pub fn Settings() -> Element {
         // Use peek() to avoid reactive tracking during initialization
         relay_metadata::USER_RELAY_METADATA.peek().as_ref()
             .map(|m| m.relays.clone())
-            .unwrap_or_else(|| relay_metadata::default_relays())
+            .unwrap_or_else(relay_metadata::default_relays)
     });
 
     let mut dm_relays = use_signal(|| {
@@ -39,19 +39,19 @@ pub fn Settings() -> Element {
         }
     });
 
-    let mut new_relay_url = use_signal(|| String::new());
-    let mut new_dm_relay_url = use_signal(|| String::new());
+    let mut new_relay_url = use_signal(String::new);
+    let mut new_dm_relay_url = use_signal(String::new);
     let mut relay_error = use_signal(|| None::<String>);
     let mut dm_relay_error = use_signal(|| None::<String>);
     let mut save_status = use_signal(|| None::<String>);
 
-    let mut new_server_input = use_signal(|| String::new());
+    let mut new_server_input = use_signal(String::new);
     let mut server_error = use_signal(|| None::<String>);
 
     // NWC state
     let mut show_nwc_modal = use_signal(|| false);
     let nwc_status = nwc_store::NWC_STATUS.read().clone();
-    let nwc_balance = nwc_store::NWC_BALANCE.read().clone();
+    let nwc_balance = *nwc_store::NWC_BALANCE.read();
 
     // Reactions modal state
     let mut show_reactions_modal = use_signal(|| false);
@@ -1262,6 +1262,31 @@ pub fn Settings() -> Element {
                 }
             }
 
+            // Bitcoin Settings section
+            div {
+                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h3 {
+                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        "₿ Bitcoin Settings"
+                    }
+                    span {
+                        class: "text-xs text-gray-500 dark:text-gray-400",
+                        "NIP-73 Content"
+                    }
+                }
+
+                p {
+                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    "Configure how Bitcoin transactions and addresses are displayed. "
+                    "Uses mempool.space API for transaction data. You can use your own self-hosted instance for privacy."
+                }
+
+                // Mempool endpoint setting
+                BitcoinSettingsSection {}
+            }
+
             // About section
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
@@ -1538,6 +1563,136 @@ fn render_account_info() -> Element {
                     });
                 },
                 "🚪 Logout"
+            }
+        }
+    }
+}
+
+/// Bitcoin settings component for configuring mempool.space endpoint
+#[component]
+fn BitcoinSettingsSection() -> Element {
+    let auth = auth_store::AUTH_STATE.read();
+    let current_endpoint = settings_store::get_mempool_endpoint();
+    let mut endpoint_input = use_signal(|| current_endpoint.clone());
+    let mut save_status = use_signal(|| None::<String>);
+    let mut is_saving = use_signal(|| false);
+
+    // Check if endpoint has been modified
+    let is_modified = endpoint_input.read().as_str() != current_endpoint.as_str();
+    let is_default = current_endpoint == crate::services::mempool::DEFAULT_ENDPOINT;
+
+    let save_endpoint = move |_| {
+        let endpoint = endpoint_input.read().clone();
+        is_saving.set(true);
+        save_status.set(None);
+
+        spawn(async move {
+            settings_store::update_mempool_endpoint(endpoint).await;
+            is_saving.set(false);
+            save_status.set(Some("Mempool endpoint saved".to_string()));
+
+            // Clear status after 3 seconds
+            gloo_timers::future::TimeoutFuture::new(3000).await;
+            save_status.set(None);
+        });
+    };
+
+    let reset_to_default = move |_| {
+        endpoint_input.set(crate::services::mempool::DEFAULT_ENDPOINT.to_string());
+        is_saving.set(true);
+        save_status.set(None);
+
+        spawn(async move {
+            settings_store::reset_mempool_endpoint().await;
+            is_saving.set(false);
+            save_status.set(Some("Reset to default".to_string()));
+
+            // Clear status after 3 seconds
+            gloo_timers::future::TimeoutFuture::new(3000).await;
+            save_status.set(None);
+        });
+    };
+
+    rsx! {
+        div {
+            class: "space-y-4",
+
+            // Current endpoint display
+            div {
+                class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                div {
+                    class: "flex items-center justify-between mb-2",
+                    p {
+                        class: "text-sm font-medium text-gray-600 dark:text-gray-400",
+                        "Mempool API Endpoint"
+                    }
+                    if is_default {
+                        span {
+                            class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
+                            "Default"
+                        }
+                    } else {
+                        span {
+                            class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded",
+                            "Custom"
+                        }
+                    }
+                }
+
+                // Endpoint input
+                div {
+                    class: "flex gap-2",
+                    input {
+                        class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                        r#type: "url",
+                        placeholder: "https://mempool.space/api",
+                        value: "{endpoint_input}",
+                        oninput: move |evt| endpoint_input.set(evt.value())
+                    }
+                }
+
+                p {
+                    class: "mt-2 text-xs text-gray-500 dark:text-gray-400",
+                    "Enter the base URL for your mempool.space instance (e.g., https://mempool.space/api or https://your-server.com/api)"
+                }
+            }
+
+            // Action buttons
+            div {
+                class: "flex gap-2",
+                if is_modified {
+                    button {
+                        class: "flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition disabled:opacity-50",
+                        disabled: *is_saving.read(),
+                        onclick: save_endpoint,
+                        if *is_saving.read() { "Saving..." } else { "Save Endpoint" }
+                    }
+                }
+
+                if !is_default {
+                    button {
+                        class: "px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-800 dark:text-white rounded-lg font-medium transition disabled:opacity-50",
+                        disabled: *is_saving.read(),
+                        onclick: reset_to_default,
+                        "Reset to Default"
+                    }
+                }
+            }
+
+            // Save status
+            if let Some(status) = save_status.read().as_ref() {
+                div {
+                    class: "p-3 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-lg text-sm text-center",
+                    "✅ {status}"
+                }
+            }
+
+            // Note about privacy
+            if auth.is_authenticated {
+                p {
+                    class: "text-xs text-gray-500 dark:text-gray-400",
+                    "Your mempool endpoint setting is synced across devices via Nostr (NIP-78)."
+                }
             }
         }
     }

@@ -1,0 +1,143 @@
+//! Code Status Badge Component
+//!
+//! Displays status badges for issues and pull requests.
+
+use dioxus::prelude::*;
+use crate::utils::nip34::IssueStatus;
+
+/// Size variants for the badge
+#[derive(Clone, Copy, PartialEq, Default)]
+#[allow(dead_code)] // Variants reserved for future use
+pub enum BadgeSize {
+    Small,
+    #[default]
+    Default,
+    Large,
+}
+
+/// Status badge component
+#[component]
+pub fn CodeStatusBadge(
+    status: IssueStatus,
+    #[props(default)] size: BadgeSize,
+) -> Element {
+    let (bg_class, text, icon) = match status {
+        IssueStatus::Open => (
+            "bg-green-500/10 text-green-500 border-green-500/20",
+            "Open",
+            rsx! {
+                svg {
+                    class: "w-3.5 h-3.5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    // Circle open icon
+                    circle { cx: "12", cy: "12", r: "10" }
+                }
+            },
+        ),
+        IssueStatus::Applied => (
+            "bg-purple-500/10 text-purple-500 border-purple-500/20",
+            "Merged",
+            rsx! {
+                svg {
+                    class: "w-3.5 h-3.5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    // Merge icon
+                    circle { cx: "18", cy: "18", r: "3" }
+                    circle { cx: "6", cy: "6", r: "3" }
+                    path { d: "M6 21V9a9 9 0 0 0 9 9" }
+                }
+            },
+        ),
+        IssueStatus::Closed => (
+            "bg-red-500/10 text-red-500 border-red-500/20",
+            "Closed",
+            rsx! {
+                svg {
+                    class: "w-3.5 h-3.5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    // X circle icon
+                    circle { cx: "12", cy: "12", r: "10" }
+                    line { x1: "15", y1: "9", x2: "9", y2: "15" }
+                    line { x1: "9", y1: "9", x2: "15", y2: "15" }
+                }
+            },
+        ),
+        IssueStatus::Draft => (
+            "bg-gray-500/10 text-gray-500 border-gray-500/20",
+            "Draft",
+            rsx! {
+                svg {
+                    class: "w-3.5 h-3.5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    // Dashed circle icon
+                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z", stroke_dasharray: "4 4" }
+                }
+            },
+        ),
+    };
+
+    let size_class = match size {
+        BadgeSize::Small => "px-1.5 py-0.5 text-xs gap-1",
+        BadgeSize::Default => "px-2 py-1 text-sm gap-1.5",
+        BadgeSize::Large => "px-3 py-1.5 text-base gap-2",
+    };
+
+    rsx! {
+        span {
+            class: "inline-flex items-center rounded-full border font-medium {bg_class} {size_class}",
+            {icon}
+            span { "{text}" }
+        }
+    }
+}
+
+/// Simple text-only status indicator
+#[allow(dead_code)] // Reserved for future use
+#[component]
+pub fn CodeStatusText(status: IssueStatus) -> Element {
+    let (color_class, text) = match status {
+        IssueStatus::Open => ("text-green-500", "Open"),
+        IssueStatus::Applied => ("text-purple-500", "Merged"),
+        IssueStatus::Closed => ("text-red-500", "Closed"),
+        IssueStatus::Draft => ("text-gray-500", "Draft"),
+    };
+
+    rsx! {
+        span {
+            class: "font-medium {color_class}",
+            "{text}"
+        }
+    }
+}

@@ -46,6 +46,82 @@ pub mod terms;
 pub mod privacy;
 pub mod cookies;
 pub mod about;
+pub mod podcast;
+pub mod podcast_nostr_detail;
+pub mod podcast_rss_detail;
+pub mod podcast_episode_detail;
+pub mod nips;
+pub mod nip_detail;
+
+// Badges (NIP-58)
+pub mod badges;
+pub mod badge_detail;
+pub mod badge_new;
+
+// Citations (NKBIP-03 Kinds 30-33)
+pub mod citations;
+
+// Code/Git hosting (NIP-34 + NIP-C0)
+pub mod code;
+pub mod code_explore;
+
+// P2P Trading (NIP-69)
+pub mod p2p;
+pub mod p2p_order_detail;
+
+// Communities (NIP-72)
+pub mod communities;
+pub mod community;
+pub mod community_new;
+
+// Recipes
+pub mod recipes;
+pub mod recipes_all;
+pub mod recipe_detail;
+pub mod recipe_new;
+pub mod recipe_fork;
+pub mod recipes_by_tag;
+pub mod recipe_chef;
+
+// Pin Boards (Kind 33889 Pinstr-compatible)
+pub mod pin_boards;
+pub mod pin_board_detail;
+pub mod pin_board_new;
+
+// Wiki (NIP-54 Kind 30818)
+pub mod wiki;
+pub mod wiki_author;
+pub mod wiki_detail;
+pub mod wiki_new;
+
+// Publications (NKBIP-01 Kind 30040/30041)
+pub mod publications;
+pub mod publication_detail;
+pub mod publication_new;
+pub mod publication_search;
+
+// Calendar/Events (NIP-52 + NIP-53)
+pub mod events;
+pub mod event_detail;
+pub mod calendar;
+pub mod calendar_event_new;
+pub mod code_repositories;
+pub mod code_snippets;
+pub mod code_snippet_detail;
+pub mod code_snippet_new;
+pub mod code_import;
+pub mod code_search;
+pub mod code_repo;
+pub mod code_repo_commits;
+pub mod code_repo_issues;
+pub mod code_repo_pulls;
+pub mod code_issue_detail;
+pub mod code_issue_new;
+pub mod code_pull_detail;
+pub mod code_pull_new;
+pub mod code_repo_settings;
+pub mod code_repo_tree;
+pub mod code_repo_blob;
 
 use home::Home;
 use profile::Profile;
@@ -91,10 +167,67 @@ use privacy::Privacy;
 use cookies::Cookies;
 use about::About;
 use search::Search;
+use podcast::PodcastHome;
+use podcast_nostr_detail::PodcastNostrDetail;
+use podcast_rss_detail::PodcastRssFeedDetail;
+use podcast_episode_detail::{PodcastNostrEpisodeDetail, PodcastRssEpisodeDetail};
+use nips::{NipsHome, NipNew};
+use nip_detail::NipDetail;
+use badges::BadgesHome;
+use badge_detail::BadgeDetail;
+use badge_new::BadgeNew;
+use citations::{CitationsHome, CitationDetail};
+use code::CodeHome;
+use code_explore::CodeExplore;
+use code_repositories::CodeRepositories;
+use code_snippets::CodeSnippets;
+use code_snippet_detail::CodeSnippetDetail;
+use code_snippet_new::CodeSnippetNew;
+use code_import::CodeImport;
+use code_search::CodeSearch;
+use code_repo::CodeRepo;
+use code_repo_commits::CodeRepoCommits;
+use code_repo_issues::CodeRepoIssues;
+use code_repo_pulls::CodeRepoPulls;
+use code_issue_detail::CodeIssueDetail;
+use code_issue_new::CodeIssueNew;
+use code_pull_detail::CodePullDetail;
+use code_pull_new::CodePullNew;
+use code_repo_settings::CodeRepoSettings;
+use code_repo_tree::CodeRepoTree;
+use code_repo_blob::CodeRepoBlob;
+use p2p::P2PHome;
+use p2p_order_detail::P2POrderDetail;
+use communities::Communities;
+use community::CommunityPage;
+use community_new::CommunityNew;
+use recipes::RecipesHome;
+use recipes_all::RecipesAll;
+use recipe_detail::RecipeDetail;
+use recipe_new::RecipeNew;
+use recipe_fork::RecipeFork;
+use recipes_by_tag::RecipesByTag;
+use recipe_chef::RecipeChef;
+use pin_boards::PinBoardsHome;
+use pin_board_detail::PinBoardDetail;
+use pin_board_new::{PinBoardNew, PinBoardEdit};
+use wiki::WikiHome;
+use wiki_author::WikiAuthor;
+use wiki_detail::WikiDetail;
+use wiki_new::WikiNew;
+use publications::PublicationsHome;
+use publication_detail::PublicationDetail;
+use publication_new::PublicationNew;
+use publication_search::PublicationSearch;
+use events::Events;
+use event_detail::CalendarEventDetail;
+use calendar::Calendar;
+use calendar_event_new::CalendarEventNew;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Route {
     #[layout(Layout)]
         #[route("/")]
@@ -159,6 +292,196 @@ pub enum Route {
 
         #[route("/music/playlist/:naddr")]
         MusicPlaylistDetail { naddr: String },
+
+        #[route("/podcast")]
+        PodcastHome {},
+
+        #[route("/podcast/nostr/:naddr")]
+        PodcastNostrDetail { naddr: String },
+
+        #[route("/podcast/feed/:feed_url")]
+        PodcastRssFeedDetail { feed_url: String },
+
+        #[route("/podcast/nostr/episode/:naddr")]
+        PodcastNostrEpisodeDetail { naddr: String },
+
+        #[route("/podcast/rss/episode/:podcast_id/:episode_id")]
+        PodcastRssEpisodeDetail { podcast_id: String, episode_id: String },
+
+        #[route("/nips")]
+        NipsHome {},
+
+        #[route("/nips/new")]
+        NipNew {},
+
+        #[route("/nips/:nip_id")]
+        NipDetail { nip_id: String },
+
+        // Badges (NIP-58)
+        #[route("/badges")]
+        BadgesHome {},
+
+        #[route("/badges/new")]
+        BadgeNew {},
+
+        #[route("/badges/:naddr")]
+        BadgeDetail { naddr: String },
+
+        // Citations (NKBIP-03 Kinds 30-33)
+        #[route("/citations")]
+        CitationsHome {},
+
+        #[route("/citations/:naddr")]
+        CitationDetail { naddr: String },
+
+        // Code/Git hosting (NIP-34 + NIP-C0)
+        #[route("/code")]
+        CodeHome {},
+
+        #[route("/code/explore")]
+        CodeExplore {},
+
+        #[route("/code/repositories")]
+        CodeRepositories {},
+
+        #[route("/code/snippets")]
+        CodeSnippets {},
+
+        #[route("/code/snippets/new")]
+        CodeSnippetNew {},
+
+        #[route("/code/snippet/:note_id")]
+        CodeSnippetDetail { note_id: String },
+
+        #[route("/code/import")]
+        CodeImport {},
+
+        #[route("/code/search?:q")]
+        CodeSearch { q: String },
+
+        #[route("/code/repo/:naddr")]
+        CodeRepo { naddr: String },
+
+        #[route("/code/repo/:naddr/commits")]
+        CodeRepoCommits { naddr: String },
+
+        #[route("/code/repo/:naddr/issues")]
+        CodeRepoIssues { naddr: String },
+
+        #[route("/code/repo/:naddr/issues/new")]
+        CodeIssueNew { naddr: String },
+
+        #[route("/code/repo/:naddr/pulls")]
+        CodeRepoPulls { naddr: String },
+
+        #[route("/code/repo/:naddr/pulls/new")]
+        CodePullNew { naddr: String },
+
+        #[route("/code/repo/:naddr/settings")]
+        CodeRepoSettings { naddr: String },
+
+        #[route("/code/repo/:naddr/tree/:git_ref/*path")]
+        CodeRepoTree { naddr: String, git_ref: String, path: String },
+
+        #[route("/code/repo/:naddr/blob/:git_ref/*path")]
+        CodeRepoBlob { naddr: String, git_ref: String, path: String },
+
+        #[route("/code/issue/:note_id")]
+        CodeIssueDetail { note_id: String },
+
+        #[route("/code/pull/:note_id")]
+        CodePullDetail { note_id: String },
+
+        // P2P Trading (NIP-69)
+        #[route("/p2p")]
+        P2PHome {},
+
+        #[route("/p2p/order/:naddr")]
+        P2POrderDetail { naddr: String },
+
+        // Communities (NIP-72)
+        #[route("/communities")]
+        Communities {},
+
+        #[route("/communities/new")]
+        CommunityNew {},
+
+        #[route("/community/:a_tag")]
+        CommunityPage { a_tag: String },
+
+        // Recipes
+        #[route("/recipes")]
+        RecipesHome {},
+
+        #[route("/recipes/all")]
+        RecipesAll {},
+
+        #[route("/recipes/new")]
+        RecipeNew {},
+
+        #[route("/recipes/fork/:naddr")]
+        RecipeFork { naddr: String },
+
+        #[route("/recipes/tag/:tag")]
+        RecipesByTag { tag: String },
+
+        #[route("/recipes/chef/:npub")]
+        RecipeChef { npub: String },
+
+        #[route("/recipes/:naddr")]
+        RecipeDetail { naddr: String },
+
+        // Pin Boards (Kind 33889)
+        #[route("/pinboards")]
+        PinBoardsHome {},
+
+        #[route("/pinboards/new")]
+        PinBoardNew {},
+
+        #[route("/pinboards/:naddr")]
+        PinBoardDetail { naddr: String },
+
+        #[route("/pinboards/:naddr/edit")]
+        PinBoardEdit { naddr: String },
+
+        // Wiki (NIP-54)
+        #[route("/wiki")]
+        WikiHome {},
+
+        #[route("/wiki/new")]
+        WikiNew {},
+
+        #[route("/wiki/:identifier")]
+        WikiDetail { identifier: String },
+
+        #[route("/wiki/author/:pubkey")]
+        WikiAuthor { pubkey: String },
+
+        // Publications (NKBIP-01)
+        #[route("/publications")]
+        PublicationsHome {},
+
+        #[route("/publications/new")]
+        PublicationNew {},
+
+        #[route("/publications/search?:query")]
+        PublicationSearch { query: String },
+
+        #[route("/publications/:naddr")]
+        PublicationDetail { naddr: String },
+
+        // Calendar/Events (NIP-52 + NIP-53)
+        #[route("/events")]
+        Events {},
+
+        #[route("/calendar/:naddr?:from")]
+        CalendarEventDetail { naddr: String, from: Option<String> },
+
+        #[route("/calendar")]
+        Calendar {},
+
+        #[route("/calendar/new")]
+        CalendarEventNew {},
 
         #[route("/notifications")]
         Notifications {},
@@ -259,10 +582,11 @@ fn Layout() -> Element {
     use crate::stores::{auth_store, notifications as notif_store};
 
     let auth = auth_store::AUTH_STATE.read();
-    let notif_count = use_memo(move || notif_store::get_unread_count());
+    let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = use_signal(|| false);
     let mut more_menu_open = use_signal(|| false);
     let mut radial_menu_open = use_signal(|| false);
+    let mut sidebar_customizer_open = use_signal(|| false);
     let current_route = use_route::<Route>();
     let navigator = navigator();
 
@@ -271,6 +595,40 @@ fn Layout() -> Element {
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
     let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
+    let is_podcast_page = matches!(current_route, Route::PodcastHome {} | Route::PodcastNostrDetail { .. } | Route::PodcastRssFeedDetail { .. } | Route::PodcastNostrEpisodeDetail { .. } | Route::PodcastRssEpisodeDetail { .. });
+    let is_nips_page = matches!(current_route, Route::NipsHome {} | Route::NipDetail { .. } | Route::NipNew {});
+    let is_badges_page = matches!(current_route, Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {});
+    let is_code_page = matches!(current_route,
+        Route::CodeHome {} | Route::CodeExplore {} | Route::CodeRepositories {} |
+        Route::CodeSnippets {} | Route::CodeSnippetDetail { .. } | Route::CodeSnippetNew {} |
+        Route::CodeImport {} | Route::CodeSearch { .. } | Route::CodeRepo { .. } |
+        Route::CodeRepoCommits { .. } | Route::CodeRepoIssues { .. } | Route::CodeRepoPulls { .. } |
+        Route::CodeIssueNew { .. } | Route::CodePullNew { .. } | Route::CodeRepoSettings { .. } |
+        Route::CodeIssueDetail { .. } | Route::CodePullDetail { .. } |
+        Route::CodeRepoTree { .. } | Route::CodeRepoBlob { .. }
+    );
+    let is_p2p_page = matches!(current_route,
+        Route::P2PHome {} | Route::P2POrderDetail { .. }
+    );
+    let is_community_page = matches!(current_route,
+        Route::Communities {} | Route::CommunityPage { .. }
+    );
+    let is_events_page = matches!(current_route,
+        Route::Events {} | Route::CalendarEventDetail { .. } | Route::Calendar {}
+    );
+    let is_recipes_page = matches!(current_route,
+        Route::RecipesHome {} | Route::RecipesAll {} | Route::RecipeDetail { .. } | Route::RecipeNew {} |
+        Route::RecipeFork { .. } | Route::RecipesByTag { .. } | Route::RecipeChef { .. }
+    );
+    let is_pin_boards_page = matches!(current_route,
+        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. }
+    );
+    let is_wiki_page = matches!(current_route,
+        Route::WikiHome {} | Route::WikiDetail { .. } | Route::WikiNew {} | Route::WikiAuthor { .. }
+    );
+    let is_publications_page = matches!(current_route,
+        Route::PublicationsHome {} | Route::PublicationDetail { .. } | Route::PublicationNew {} | Route::PublicationSearch { .. }
+    );
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -314,7 +672,7 @@ fn Layout() -> Element {
                                 if is_home_page {
                                     // Already on home page, scroll to top
                                     if let Some(window) = web_sys::window() {
-                                        let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                        window.scroll_to_with_x_and_y(0.0, 0.0);
                                     }
                                 } else {
                                     // Navigate to home
@@ -327,123 +685,74 @@ fn Layout() -> Element {
                             }
                         }
 
-                        // Navigation Menu
+                        // Navigation Menu - Dynamic based on user preferences
                         nav {
                             class: "flex flex-col gap-1",
 
-                            // Home button with scroll-to-top functionality
-                            div {
-                                class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
-                                onclick: move |_| {
-                                    if is_home_page {
-                                        // Already on home page, scroll to top
-                                        if let Some(window) = web_sys::window() {
-                                            let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                            // Render main sidebar items dynamically
+                            for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
+                                {
+                                    use crate::stores::sidebar_store::SidebarItem;
+                                    match item {
+                                        // Home has special scroll-to-top functionality
+                                        SidebarItem::Home => rsx! {
+                                            div {
+                                                key: "{item:?}",
+                                                class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                                onclick: move |_| {
+                                                    if is_home_page {
+                                                        if let Some(window) = web_sys::window() {
+                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                        }
+                                                    } else {
+                                                        navigator.push(Route::Home {});
+                                                    }
+                                                },
+                                                {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
+                                                span { "Home" }
+                                            }
+                                        },
+                                        // Profile needs pubkey
+                                        SidebarItem::Profile => {
+                                            if let Some(pubkey) = &auth.pubkey {
+                                                rsx! {
+                                                    NavLink {
+                                                        key: "{item:?}",
+                                                        to: Route::Profile { pubkey: pubkey.clone() },
+                                                        icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
+                                                        label: "Profile"
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! {}
+                                            }
+                                        },
+                                        // Notifications has badge
+                                        SidebarItem::Notifications => rsx! {
+                                            NavLink {
+                                                key: "{item:?}",
+                                                to: Route::Notifications {},
+                                                icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
+                                                label: "Notifications",
+                                                badge: Some(*notif_count.read())
+                                            }
+                                        },
+                                        // All other items use standard NavLink
+                                        _ => {
+                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                rsx! {
+                                                    NavLink {
+                                                        key: "{item:?}",
+                                                        to: route,
+                                                        icon: render_sidebar_icon(&item, "w-7 h-7"),
+                                                        label: item.label()
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! {}
+                                            }
                                         }
-                                    } else {
-                                        // Navigate to home
-                                        navigator.push(Route::Home {});
                                     }
-                                },
-                                crate::components::icons::HomeIcon { class: "w-7 h-7" }
-                                span {
-                                    "Home"
-                                }
-                            }
-
-                            NavLink {
-                                to: Route::Explore {},
-                                icon: rsx! { crate::components::icons::CompassIcon { class: "w-7 h-7" } },
-                                label: "Explore"
-                            }
-
-                            NavLink {
-                                to: Route::Articles {},
-                                icon: rsx! { crate::components::icons::BookOpenIcon { class: "w-7 h-7" } },
-                                label: "Articles"
-                            }
-
-                            NavLink {
-                                to: Route::MusicHome {},
-                                icon: rsx! {
-                                    svg {
-                                        class: "w-7 h-7",
-                                        xmlns: "http://www.w3.org/2000/svg",
-                                        width: "24",
-                                        height: "24",
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        path { d: "M9 18V5l12-2v13" }
-                                        circle { cx: "6", cy: "18", r: "3" }
-                                        circle { cx: "18", cy: "16", r: "3" }
-                                    }
-                                },
-                                label: "Music"
-                            }
-
-                            // Show authenticated nav items
-                            if auth.is_authenticated {
-                                NavLink {
-                                    to: Route::Photos {},
-                                    icon: rsx! { crate::components::icons::CameraIcon { class: "w-7 h-7" } },
-                                    label: "Photos"
-                                }
-                                NavLink {
-                                    to: Route::Videos {},
-                                    icon: rsx! { crate::components::icons::VideoIcon { class: "w-7 h-7" } },
-                                    label: "Videos"
-                                }
-                                NavLink {
-                                    to: Route::VideosLive {},
-                                    icon: rsx! {
-                                        svg {
-                                            class: "w-7 h-7",
-                                            xmlns: "http://www.w3.org/2000/svg",
-                                            fill: "none",
-                                            view_box: "0 0 24 24",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
-                                        }
-                                    },
-                                    label: "Live"
-                                }
-                                NavLink {
-                                    to: Route::Notifications {},
-                                    icon: rsx! { crate::components::icons::BellIcon { class: "w-7 h-7" } },
-                                    label: "Notifications",
-                                    badge: Some(*notif_count.read())
-                                }
-                                NavLink {
-                                    to: Route::DMs {},
-                                    icon: rsx! { crate::components::icons::MailIcon { class: "w-7 h-7" } },
-                                    label: "Messages"
-                                }
-                                NavLink {
-                                    to: Route::Bookmarks {},
-                                    icon: rsx! { crate::components::icons::BookmarkIcon { class: "w-7 h-7" } },
-                                    label: "Bookmarks"
-                                }
-
-                                // Profile link with pubkey
-                                if let Some(pubkey) = &auth.pubkey {
-                                    NavLink {
-                                        to: Route::Profile { pubkey: pubkey.clone() },
-                                        icon: rsx! { crate::components::icons::UserIcon { class: "w-7 h-7" } },
-                                        label: "Profile"
-                                    }
-                                }
-
-                                NavLink {
-                                    to: Route::Settings {},
-                                    icon: rsx! { crate::components::icons::SettingsIcon { class: "w-7 h-7" } },
-                                    label: "Settings"
                                 }
                             }
 
@@ -463,112 +772,46 @@ fn Layout() -> Element {
                                     }
                                 }
 
-                                // Popup menu
+                                // Popup menu - Dynamic based on user preferences
                                 if *more_menu_open.read() {
                                     div {
                                         class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                         div {
                                             class: "flex flex-col",
-                                            Link {
-                                                to: Route::VoiceMessages {},
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                svg {
-                                                    class: "w-5 h-5",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    width: "24",
-                                                    height: "24",
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
-                                                    path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
-                                                    line { x1: "12", x2: "12", y1: "19", y2: "22" }
-                                                }
-                                                span {
-                                                    "Voice Messages"
+
+                                            // Render More menu items dynamically
+                                            for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
+                                                {
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                        rsx! {
+                                                            Link {
+                                                                key: "{item:?}-more",
+                                                                to: route,
+                                                                onclick: move |_| more_menu_open.set(false),
+                                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
+                                                                {render_sidebar_icon(&item, "w-5 h-5")}
+                                                                span { "{item.label()}" }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
+                                                    }
                                                 }
                                             }
-                                            Link {
-                                                to: Route::Polls {},
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                svg {
-                                                    class: "w-5 h-5",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    width: "24",
-                                                    height: "24",
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                                                    line { x1: "3", y1: "9", x2: "21", y2: "9" }
-                                                    line { x1: "9", y1: "21", x2: "9", y2: "9" }
-                                                }
+
+                                            // Divider before Edit Sidebar
+                                            div { class: "border-t border-border my-1" }
+
+                                            // Edit Sidebar button
+                                            button {
+                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base w-full text-left",
+                                                onclick: move |_| {
+                                                    more_menu_open.set(false);
+                                                    sidebar_customizer_open.set(true);
+                                                },
+                                                crate::components::icons::SettingsIcon { class: "w-5 h-5" }
                                                 span {
-                                                    "Polls"
-                                                }
-                                            }
-                                            Link {
-                                                to: Route::WebBookmarks {},
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                svg {
-                                                    class: "w-5 h-5",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    width: "24",
-                                                    height: "24",
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
-                                                }
-                                                span {
-                                                    "Web Bookmarks"
-                                                }
-                                            }
-                                            Link {
-                                                to: Route::CashuWallet {},
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                svg {
-                                                    class: "w-5 h-5",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    width: "24",
-                                                    height: "24",
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    // Wallet icon
-                                                    path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                                                    path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                                                    path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                                                }
-                                                span {
-                                                    "Wallet"
-                                                }
-                                            }
-                                            a {
-                                                href: "https://nostrcal.com",
-                                                target: "_blank",
-                                                rel: "noopener noreferrer",
-                                                onclick: move |_| more_menu_open.set(false),
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                crate::components::icons::CalendarIcon { class: "w-5 h-5" }
-                                                span {
-                                                    "nostrcal"
+                                                    "Edit Sidebar"
                                                 }
                                             }
                                         }
@@ -657,7 +900,7 @@ fn Layout() -> Element {
                                         if is_home_page {
                                             // Already on home page, scroll to top
                                             if let Some(window) = web_sys::window() {
-                                                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                window.scroll_to_with_x_and_y(0.0, 0.0);
                                             }
                                         } else {
                                             // Navigate to home
@@ -676,149 +919,80 @@ fn Layout() -> Element {
 
                                 nav {
                                     class: "flex flex-col gap-2",
-                                    // Home button with scroll-to-top functionality
-                                    div {
-                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
-                                        onclick: move |_| {
-                                            sidebar_open.set(false);
-                                            if is_home_page {
-                                                // Already on home page, scroll to top
-                                                if let Some(window) = web_sys::window() {
-                                                    let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                }
-                                            } else {
-                                                // Navigate to home
-                                                navigator.push(Route::Home {});
-                                            }
-                                        },
-                                        crate::components::icons::HomeIcon { class: "w-7 h-7" }
-                                        span {
-                                            "Home"
-                                        }
-                                    }
 
-                                    div {
-                                        onclick: move |_| sidebar_open.set(false),
-                                        NavLink {
-                                            to: Route::Explore {},
-                                            icon: rsx! { crate::components::icons::CompassIcon { class: "w-7 h-7" } },
-                                            label: "Explore"
-                                        }
-                                    }
-
-                                    div {
-                                        onclick: move |_| sidebar_open.set(false),
-                                        NavLink {
-                                            to: Route::Articles {},
-                                            icon: rsx! { crate::components::icons::BookOpenIcon { class: "w-7 h-7" } },
-                                            label: "Articles"
-                                        }
-                                    }
-
-                                    if auth.is_authenticated {
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::Photos {},
-                                                icon: rsx! { crate::components::icons::CameraIcon { class: "w-7 h-7" } },
-                                                label: "Photos"
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::Videos {},
-                                                icon: rsx! { crate::components::icons::VideoIcon { class: "w-7 h-7" } },
-                                                label: "Videos"
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::VideosLive {},
-                                                icon: rsx! {
-                                                    svg {
-                                                        class: "w-7 h-7",
-                                                        xmlns: "http://www.w3.org/2000/svg",
-                                                        fill: "none",
-                                                        view_box: "0 0 24 24",
-                                                        stroke: "currentColor",
-                                                        stroke_width: "2",
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+                                    // Render main sidebar items dynamically (mobile)
+                                    for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
+                                        {
+                                            use crate::stores::sidebar_store::SidebarItem;
+                                            match item {
+                                                // Home has special scroll-to-top functionality
+                                                SidebarItem::Home => rsx! {
+                                                    div {
+                                                        key: "{item:?}-mobile",
+                                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                                        onclick: move |_| {
+                                                            sidebar_open.set(false);
+                                                            if is_home_page {
+                                                                if let Some(window) = web_sys::window() {
+                                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                                }
+                                                            } else {
+                                                                navigator.push(Route::Home {});
+                                                            }
+                                                        },
+                                                        {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
+                                                        span { "Home" }
                                                     }
                                                 },
-                                                label: "Live"
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::Notifications {},
-                                                icon: rsx! { crate::components::icons::BellIcon { class: "w-7 h-7" } },
-                                                label: "Notifications",
-                                                badge: Some(*notif_count.read())
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::DMs {},
-                                                icon: rsx! { crate::components::icons::MailIcon { class: "w-7 h-7" } },
-                                                label: "Messages"
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::MusicHome {},
-                                                icon: rsx! {
-                                                    svg {
-                                                        class: "w-7 h-7",
-                                                        xmlns: "http://www.w3.org/2000/svg",
-                                                        width: "24",
-                                                        height: "24",
-                                                        view_box: "0 0 24 24",
-                                                        fill: "none",
-                                                        stroke: "currentColor",
-                                                        stroke_width: "2",
-                                                        stroke_linecap: "round",
-                                                        stroke_linejoin: "round",
-                                                        path { d: "M9 18V5l12-2v13" }
-                                                        circle { cx: "6", cy: "18", r: "3" }
-                                                        circle { cx: "18", cy: "16", r: "3" }
+                                                // Profile needs pubkey
+                                                SidebarItem::Profile => {
+                                                    if let Some(pubkey) = &auth.pubkey {
+                                                        rsx! {
+                                                            div {
+                                                                key: "{item:?}-mobile",
+                                                                onclick: move |_| sidebar_open.set(false),
+                                                                NavLink {
+                                                                    to: Route::Profile { pubkey: pubkey.clone() },
+                                                                    icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
+                                                                    label: "Profile"
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
                                                     }
                                                 },
-                                                label: "Music"
-                                            }
-                                        }
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::Bookmarks {},
-                                                icon: rsx! { crate::components::icons::BookmarkIcon { class: "w-7 h-7" } },
-                                                label: "Bookmarks"
-                                            }
-                                        }
-
-                                        if let Some(pubkey) = &auth.pubkey {
-                                            div {
-                                                onclick: move |_| sidebar_open.set(false),
-                                                NavLink {
-                                                    to: Route::Profile { pubkey: pubkey.clone() },
-                                                    icon: rsx! { crate::components::icons::UserIcon { class: "w-7 h-7" } },
-                                                    label: "Profile"
+                                                // Notifications has badge
+                                                SidebarItem::Notifications => rsx! {
+                                                    div {
+                                                        key: "{item:?}-mobile",
+                                                        onclick: move |_| sidebar_open.set(false),
+                                                        NavLink {
+                                                            to: Route::Notifications {},
+                                                            icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
+                                                            label: "Notifications",
+                                                            badge: Some(*notif_count.read())
+                                                        }
+                                                    }
+                                                },
+                                                // All other items use standard NavLink
+                                                _ => {
+                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                        rsx! {
+                                                            div {
+                                                                key: "{item:?}-mobile",
+                                                                onclick: move |_| sidebar_open.set(false),
+                                                                NavLink {
+                                                                    to: route,
+                                                                    icon: render_sidebar_icon(&item, "w-7 h-7"),
+                                                                    label: item.label()
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
+                                                    }
                                                 }
-                                            }
-                                        }
-
-                                        div {
-                                            onclick: move |_| sidebar_open.set(false),
-                                            NavLink {
-                                                to: Route::Settings {},
-                                                icon: rsx! { crate::components::icons::SettingsIcon { class: "w-7 h-7" } },
-                                                label: "Settings"
                                             }
                                         }
                                     }
@@ -841,131 +1015,49 @@ fn Layout() -> Element {
                                             }
                                         }
 
-                                        // Popup menu (mobile)
+                                        // Popup menu (mobile) - Dynamic based on user preferences
                                         if *more_menu_open.read() {
                                             div {
                                                 class: "absolute left-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
                                                 div {
                                                     class: "flex flex-col",
-                                                    if auth.is_authenticated {
-                                                        Link {
-                                                            to: Route::CashuWallet {},
-                                                            onclick: move |_| {
-                                                                more_menu_open.set(false);
-                                                                sidebar_open.set(false);
-                                                            },
-                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                            svg {
-                                                                class: "w-5 h-5",
-                                                                xmlns: "http://www.w3.org/2000/svg",
-                                                                width: "24",
-                                                                height: "24",
-                                                                view_box: "0 0 24 24",
-                                                                fill: "none",
-                                                                stroke: "currentColor",
-                                                                stroke_width: "2",
-                                                                stroke_linecap: "round",
-                                                                stroke_linejoin: "round",
-                                                                path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                                                                path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                                                                path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                                                            }
-                                                            span {
-                                                                "Wallet"
-                                                            }
-                                                        }
-                                                        Link {
-                                                            to: Route::VoiceMessages {},
-                                                            onclick: move |_| {
-                                                                more_menu_open.set(false);
-                                                                sidebar_open.set(false);
-                                                            },
-                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                            svg {
-                                                                class: "w-5 h-5",
-                                                                xmlns: "http://www.w3.org/2000/svg",
-                                                                width: "24",
-                                                                height: "24",
-                                                                view_box: "0 0 24 24",
-                                                                fill: "none",
-                                                                stroke: "currentColor",
-                                                                stroke_width: "2",
-                                                                stroke_linecap: "round",
-                                                                stroke_linejoin: "round",
-                                                                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
-                                                                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
-                                                                line { x1: "12", x2: "12", y1: "19", y2: "22" }
-                                                            }
-                                                            span {
-                                                                "Voice Messages"
-                                                            }
-                                                        }
-                                                        Link {
-                                                            to: Route::Polls {},
-                                                            onclick: move |_| {
-                                                                more_menu_open.set(false);
-                                                                sidebar_open.set(false);
-                                                            },
-                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                            svg {
-                                                                class: "w-5 h-5",
-                                                                xmlns: "http://www.w3.org/2000/svg",
-                                                                width: "24",
-                                                                height: "24",
-                                                                view_box: "0 0 24 24",
-                                                                fill: "none",
-                                                                stroke: "currentColor",
-                                                                stroke_width: "2",
-                                                                stroke_linecap: "round",
-                                                                stroke_linejoin: "round",
-                                                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                                                                line { x1: "3", y1: "9", x2: "21", y2: "9" }
-                                                                line { x1: "9", y1: "21", x2: "9", y2: "9" }
-                                                            }
-                                                            span {
-                                                                "Polls"
-                                                            }
-                                                        }
-                                                        Link {
-                                                            to: Route::WebBookmarks {},
-                                                            onclick: move |_| {
-                                                                more_menu_open.set(false);
-                                                                sidebar_open.set(false);
-                                                            },
-                                                            class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                            svg {
-                                                                class: "w-5 h-5",
-                                                                xmlns: "http://www.w3.org/2000/svg",
-                                                                width: "24",
-                                                                height: "24",
-                                                                view_box: "0 0 24 24",
-                                                                fill: "none",
-                                                                stroke: "currentColor",
-                                                                stroke_width: "2",
-                                                                stroke_linecap: "round",
-                                                                stroke_linejoin: "round",
-                                                                path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
-                                                            }
-                                                            span {
-                                                                "Web Bookmarks"
+
+                                                    // Render More menu items dynamically (mobile)
+                                                    for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
+                                                        {
+                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                                rsx! {
+                                                                    Link {
+                                                                        key: "{item:?}-mobile-more",
+                                                                        to: route,
+                                                                        onclick: move |_| {
+                                                                            more_menu_open.set(false);
+                                                                            sidebar_open.set(false);
+                                                                        },
+                                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
+                                                                        {render_sidebar_icon(&item, "w-5 h-5")}
+                                                                        span { "{item.label()}" }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                rsx! {}
                                                             }
                                                         }
                                                     }
-                                                    a {
-                                                        href: "https://nostrcal.com",
-                                                        target: "_blank",
-                                                        rel: "noopener noreferrer",
+
+                                                    // Divider before Edit Sidebar
+                                                    div { class: "border-t border-border my-1" }
+
+                                                    // Edit Sidebar button (mobile)
+                                                    button {
+                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition w-full text-left",
                                                         onclick: move |_| {
                                                             more_menu_open.set(false);
                                                             sidebar_open.set(false);
+                                                            sidebar_customizer_open.set(true);
                                                         },
-                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                        crate::components::icons::CalendarIcon {
-                                                            class: "w-5 h-5".to_string()
-                                                        }
-                                                        span {
-                                                            "nostrcal"
-                                                        }
+                                                        crate::components::icons::SettingsIcon { class: "w-5 h-5" }
+                                                        span { "Edit Sidebar" }
                                                     }
                                                 }
                                             }
@@ -979,7 +1071,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_creation_page {
+                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -1009,8 +1101,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, and Wallet pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Code, P2P, Communities, Events, Wiki, and Publications pages
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1069,6 +1161,16 @@ fn Layout() -> Element {
 
             // Global zap dialog (rendered at layout level to escape music player's stacking context)
             crate::components::MusicZapDialog {}
+
+            // PWA update notification banner
+            crate::components::PwaUpdateBanner {}
+
+            // Sidebar customization modal
+            if *sidebar_customizer_open.read() {
+                crate::components::SidebarCustomizerModal {
+                    on_close: move |_| sidebar_customizer_open.set(false)
+                }
+            }
         }
     }
 }
@@ -1135,5 +1237,385 @@ fn NavLink(
                 }
             }
         }
+    }
+}
+
+/// Helper function to render sidebar icons for dynamic sidebar
+fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: &str) -> Element {
+    use crate::stores::sidebar_store::SidebarItem;
+    match item {
+        SidebarItem::Home => rsx! { crate::components::icons::HomeIcon { class: class.to_string() } },
+        SidebarItem::Explore => rsx! { crate::components::icons::CompassIcon { class: class.to_string() } },
+        SidebarItem::Articles => rsx! { crate::components::icons::BookOpenIcon { class: class.to_string() } },
+        SidebarItem::Music => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M9 18V5l12-2v13" }
+                circle { cx: "6", cy: "18", r: "3" }
+                circle { cx: "18", cy: "16", r: "3" }
+            }
+        },
+        SidebarItem::Photos => rsx! { crate::components::icons::CameraIcon { class: class.to_string() } },
+        SidebarItem::Videos => rsx! { crate::components::icons::VideoIcon { class: class.to_string() } },
+        SidebarItem::Live => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                fill: "none",
+                view_box: "0 0 24 24",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
+            }
+        },
+        SidebarItem::Notifications => rsx! { crate::components::icons::BellIcon { class: class.to_string() } },
+        SidebarItem::Messages => rsx! { crate::components::icons::MailIcon { class: class.to_string() } },
+        SidebarItem::Bookmarks => rsx! { crate::components::icons::BookmarkIcon { class: class.to_string() } },
+        SidebarItem::Profile => rsx! { crate::components::icons::UserIcon { class: class.to_string() } },
+        SidebarItem::Settings => rsx! { crate::components::icons::SettingsIcon { class: class.to_string() } },
+        SidebarItem::VoiceMessages => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                line { x1: "12", x2: "12", y1: "19", y2: "22" }
+            }
+        },
+        SidebarItem::Polls => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                line { x1: "3", y1: "9", x2: "21", y2: "9" }
+                line { x1: "9", y1: "21", x2: "9", y2: "9" }
+            }
+        },
+        SidebarItem::WebBookmarks => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
+            }
+        },
+        SidebarItem::Podcasts => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
+                path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
+                line { x1: "12", x2: "12", y1: "19", y2: "22" }
+            }
+        },
+        SidebarItem::Wallet => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
+                path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
+                path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
+            }
+        },
+        SidebarItem::P2PTrading => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M16 3l4 4-4 4" }
+                path { d: "M20 7H4" }
+                path { d: "M8 21l-4-4 4-4" }
+                path { d: "M4 17h16" }
+            }
+        },
+        SidebarItem::Communities => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
+                circle { cx: "9", cy: "7", r: "4" }
+                path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
+                path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+            }
+        },
+        SidebarItem::Events => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" }
+                circle { cx: "12", cy: "10", r: "3" }
+            }
+        },
+        SidebarItem::Calendar => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "4", width: "18", height: "18", rx: "2", ry: "2" }
+                line { x1: "16", y1: "2", x2: "16", y2: "6" }
+                line { x1: "8", y1: "2", x2: "8", y2: "6" }
+                line { x1: "3", y1: "10", x2: "21", y2: "10" }
+            }
+        },
+        SidebarItem::Recipes => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z" }
+                line { x1: "6", y1: "17", x2: "18", y2: "17" }
+            }
+        },
+        SidebarItem::PinBoards => rsx! {
+            crate::components::icons::PinIcon { class: class.to_string(), filled: false }
+        },
+        SidebarItem::Trending => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                polyline { points: "23 6 13.5 15.5 8.5 10.5 1 18" }
+                polyline { points: "17 6 23 6 23 12" }
+            }
+        },
+        SidebarItem::Nips => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
+                polyline { points: "14 2 14 8 20 8" }
+                line { x1: "16", y1: "13", x2: "8", y2: "13" }
+                line { x1: "16", y1: "17", x2: "8", y2: "17" }
+                polyline { points: "10 9 9 9 8 9" }
+            }
+        },
+        SidebarItem::Badges => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                circle { cx: "12", cy: "8", r: "6" }
+                path { d: "M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" }
+            }
+        },
+        SidebarItem::Citations => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Quote/citation icon
+                path { d: "M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21" }
+                path { d: "M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3" }
+            }
+        },
+        SidebarItem::Code => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                polyline { points: "16 18 22 12 16 6" }
+                polyline { points: "8 6 2 12 8 18" }
+            }
+        },
+        SidebarItem::Lists => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                line { x1: "8", y1: "6", x2: "21", y2: "6" }
+                line { x1: "8", y1: "12", x2: "21", y2: "12" }
+                line { x1: "8", y1: "18", x2: "21", y2: "18" }
+                line { x1: "3", y1: "6", x2: "3.01", y2: "6" }
+                line { x1: "3", y1: "12", x2: "3.01", y2: "12" }
+                line { x1: "3", y1: "18", x2: "3.01", y2: "18" }
+            }
+        },
+        SidebarItem::Dvm => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "4", y: "4", width: "16", height: "16", rx: "2" }
+                rect { x: "9", y: "9", width: "6", height: "6" }
+                line { x1: "9", y1: "1", x2: "9", y2: "4" }
+                line { x1: "15", y1: "1", x2: "15", y2: "4" }
+                line { x1: "9", y1: "20", x2: "9", y2: "23" }
+                line { x1: "15", y1: "20", x2: "15", y2: "23" }
+                line { x1: "20", y1: "9", x2: "23", y2: "9" }
+                line { x1: "20", y1: "14", x2: "23", y2: "14" }
+                line { x1: "1", y1: "9", x2: "4", y2: "9" }
+                line { x1: "1", y1: "14", x2: "4", y2: "14" }
+            }
+        },
+        SidebarItem::Wiki => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
+                path { d: "M8 7h6" }
+                path { d: "M8 11h8" }
+            }
+        },
+        SidebarItem::Publications => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" }
+                path { d: "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" }
+            }
+        },
     }
 }
