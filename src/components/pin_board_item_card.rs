@@ -210,14 +210,22 @@ fn PinContent(
 
     rsx! {
         if is_image {
-            // Image display
+            // Image display - validate URL before rendering to prevent javascript:/data: schemes
             div {
                 class: "w-full",
-                img {
-                    src: "{reference}",
-                    alt: "{title}",
-                    class: "w-full h-auto max-h-80 object-contain bg-muted",
-                    loading: "lazy",
+                if is_valid_http_url(&reference) {
+                    img {
+                        src: "{reference}",
+                        alt: "{title}",
+                        class: "w-full h-auto max-h-80 object-contain bg-muted",
+                        loading: "lazy",
+                    }
+                } else {
+                    // Fallback placeholder for invalid/unsafe image URLs
+                    div {
+                        class: "w-full h-48 bg-muted flex items-center justify-center",
+                        span { class: "text-4xl", "🖼️" }
+                    }
                 }
                 div {
                     class: "p-2",

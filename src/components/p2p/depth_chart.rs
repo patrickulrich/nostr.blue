@@ -55,7 +55,8 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
         .copied()
         .collect();
 
-    // Sort sell orders by premium descending (best deals = lowest premium first for buyers)
+    // Sort sell orders by premium ascending (lowest premium first = best deals for buyers)
+    // Note: None premiums are treated as 0.0 via unwrap_or
     sell_orders.sort_by(|a, b| {
         a.premium.unwrap_or(0.0)
             .partial_cmp(&b.premium.unwrap_or(0.0))

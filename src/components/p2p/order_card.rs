@@ -17,22 +17,17 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
     // Format fiat amount using FiatAmount::display()
     let amount_display = order.fiat_amount.display(&order.currency);
 
-    // Format premium display
-    let premium_display = order.premium.map(|p| {
-        if p >= 0.0 {
-            format!("+{:.1}%", p)
-        } else {
-            format!("{:.1}%", p)
-        }
-    });
-
-    let premium_class = order.premium.map(|p| {
-        if p >= 0.0 {
-            "text-green-600 dark:text-green-400"
-        } else {
-            "text-red-600 dark:text-red-400"
-        }
-    }).unwrap_or("");
+    // Format premium display and CSS class together (avoid duplicated sign check)
+    let (premium_display, premium_class) = order.premium
+        .map(|p| {
+            if p >= 0.0 {
+                (format!("+{:.1}%", p), "text-green-600 dark:text-green-400")
+            } else {
+                (format!("{:.1}%", p), "text-red-600 dark:text-red-400")
+            }
+        })
+        .map(|(display, class)| (Some(display), class))
+        .unwrap_or((None, ""));
 
     // Format sats display - use calc_sats_at_rate with price service
     let sats_display = if order.amount_sats > 0 {
