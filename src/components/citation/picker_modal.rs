@@ -45,6 +45,8 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(Vec::<CachedCitation>::new);
     let mut is_searching = use_signal(|| false);
+    // Search version for debouncing - prevents race conditions from rapid typing
+    let mut search_version = use_signal(|| 0u64);
 
     // Selected citation
     let mut selected_citation = use_signal(|| None::<CachedCitation>);
@@ -79,23 +81,39 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         },
     ));
 
-    // Handle search
+    // Handle search with version-based debouncing to prevent race conditions
     let mut handle_search = move |query: String| {
         search_query.set(query.clone());
 
         if query.is_empty() {
             search_results.set(Vec::new());
+            is_searching.set(false);
             return;
         }
 
         if let Some(pk) = user_pubkey.clone() {
+            // Increment version and capture it for this request
+            let current_version = search_version() + 1;
+            search_version.set(current_version);
+
             is_searching.set(true);
             spawn(async move {
                 match search_citations(&query, &pk, 50).await {
-                    Ok(results) => search_results.set(results),
-                    Err(e) => log::warn!("Citation search failed: {}", e),
+                    Ok(results) => {
+                        // Only apply results if this is still the latest request
+                        if search_version() == current_version {
+                            search_results.set(results);
+                            is_searching.set(false);
+                        }
+                        // If version changed, a newer search is in progress - discard these results
+                    }
+                    Err(e) => {
+                        if search_version() == current_version {
+                            log::warn!("Citation search failed: {}", e);
+                            is_searching.set(false);
+                        }
+                    }
                 }
-                is_searching.set(false);
             });
         }
     };

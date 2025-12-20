@@ -9,6 +9,7 @@ use crate::stores::{nostr_client, p2p_store};
 use crate::utils::nip69::{P2POrder, FiatAmount};
 use crate::components::{ClientInitializing, P2PStatusBadge, P2PTypeBadge, P2PLayerBadge, P2PNetworkBadge};
 use crate::utils::time::format_relative_time;
+use crate::utils::format::format_sats_with_separator;
 
 #[component]
 pub fn P2POrderDetail(naddr: String) -> Element {
@@ -314,19 +315,6 @@ fn OrderDetailContent(order: P2POrder) -> Element {
 
         }
     }
-}
-
-/// Format satoshis with thousands separator
-fn format_sats_with_separator(sats: u64) -> String {
-    let s = sats.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.insert(0, ',');
-        }
-        result.insert(0, c);
-    }
-    result
 }
 
 /// Format duration in seconds

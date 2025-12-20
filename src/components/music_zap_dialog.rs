@@ -661,9 +661,13 @@ async fn generate_v4v_invoice(
 
     // Find the first recipient with a Lightning Address (lnaddress type)
     // In the future, we could support multiple invoices or use a service that handles splits
-    let primary_recipient = value_block.recipients.iter()
-        .find(|r| r.recipient_type == "lnaddress" || r.address.contains('@'))
-        .or_else(|| value_block.recipients.first());
+    let lnaddress_recipient = value_block.recipients.iter()
+        .find(|r| r.recipient_type == "lnaddress" || r.address.contains('@'));
+
+    let primary_recipient = lnaddress_recipient.or_else(|| {
+        log::debug!("[V4V] No lnaddress recipient found, falling back to first recipient");
+        value_block.recipients.first()
+    });
 
     let recipient = primary_recipient
         .ok_or_else(|| "No valid recipient found".to_string())?;

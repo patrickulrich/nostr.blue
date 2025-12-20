@@ -2,6 +2,8 @@
 //! Displays individual pins (Kind 39067) with content type-specific rendering
 
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip01::Coordinate;
+use nostr_sdk::FromBech32;
 
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinReference};
@@ -76,7 +78,12 @@ pub fn PinCard(
                 PinContentType::LiveStream => Some(Route::LiveStreamDetail { note_id: address.clone() }),
                 PinContentType::Badge => Some(Route::BadgeDetail { naddr: address.clone() }),
                 PinContentType::Pinboard => Some(Route::PinBoardDetail { naddr: address.clone() }),
-                PinContentType::Profile => Some(Route::Profile { pubkey: address.clone() }),
+                PinContentType::Profile => {
+                    // Parse the naddr to extract the actual pubkey
+                    Coordinate::from_bech32(address)
+                        .ok()
+                        .map(|coord| Route::Profile { pubkey: coord.public_key.to_hex() })
+                }
                 _ => None,
             };
             (address.clone(), route)

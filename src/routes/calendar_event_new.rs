@@ -5,6 +5,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, calendar_store};
 use crate::routes::Route;
+use crate::utils::date_helpers::get_today;
 
 /// Event type selection
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -477,16 +478,6 @@ pub fn CalendarEventNew() -> Element {
 }
 
 // Helper functions
-
-fn get_today() -> String {
-    let date = js_sys::Date::new_0();
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date()
-    )
-}
 
 fn get_local_timezone() -> String {
     // Try to get timezone from JS using a simpler approach

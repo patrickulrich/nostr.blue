@@ -1162,6 +1162,9 @@ fn Layout() -> Element {
             // Global zap dialog (rendered at layout level to escape music player's stacking context)
             crate::components::MusicZapDialog {}
 
+            // PWA update notification banner
+            crate::components::PwaUpdateBanner {}
+
             // Sidebar customization modal
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal {

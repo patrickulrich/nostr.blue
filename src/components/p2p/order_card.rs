@@ -9,6 +9,7 @@ use crate::utils::nip69::P2POrder;
 use crate::services::btc_price;
 use crate::components::{P2PStatusBadge, P2PTypeBadge, P2PLayerBadge};
 use crate::utils::time::format_relative_time;
+use crate::utils::format::format_sats_with_unit;
 
 /// P2P Order Card for list display
 #[component]
@@ -35,11 +36,11 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
 
     // Format sats display - use calc_sats_at_rate with price service
     let sats_display = if order.amount_sats > 0 {
-        format_sats(order.amount_sats)
+        format_sats_with_unit(order.amount_sats)
     } else if let Some(btc_price) = btc_price::get_btc_price(&order.currency) {
         // Calculate estimated sats at current market rate
         let sats = order.calc_sats_at_rate(btc_price);
-        format!("~{}", format_sats(sats))
+        format!("~{}", format_sats_with_unit(sats))
     } else {
         "Market rate".to_string()
     };
@@ -205,17 +206,6 @@ pub fn P2POrderCardSkeleton() -> Element {
                 div { class: "h-4 w-16 bg-muted rounded" }
             }
         }
-    }
-}
-
-/// Format satoshis with thousands separator
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{:.2}M sats", sats as f64 / 1_000_000.0)
-    } else if sats >= 1_000 {
-        format!("{:.1}K sats", sats as f64 / 1_000.0)
-    } else {
-        format!("{} sats", sats)
     }
 }
 

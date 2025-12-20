@@ -87,6 +87,65 @@ pub fn PersistentMusicPlayer() -> Element {
         });
     });
 
+    // Track last synced time to detect programmatic changes (skip buttons)
+    let mut last_synced_time = use_signal(|| 0.0f64);
+
+    // Sync current_time to audio element when changed programmatically (skip forward/backward)
+    use_effect(move || {
+        let state = MUSIC_PLAYER.read();
+        let current_time = state.current_time;
+        let last_time = last_synced_time();
+
+        // Only sync if the time changed significantly (more than 1 second jump indicates programmatic change)
+        // This prevents fighting with the ontimeupdate event that continuously syncs audio → state
+        if (current_time - last_time).abs() > 1.0 {
+            last_synced_time.set(current_time);
+
+            spawn(async move {
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
+                let script = format!(
+                    r#"
+                    (function() {{
+                        let audio = document.getElementById({audio_id});
+                        if (!audio) return;
+                        // Only seek if the difference is significant (avoids fighting with timeupdate)
+                        if (Math.abs(audio.currentTime - {current_time}) > 0.5) {{
+                            audio.currentTime = {current_time};
+                        }}
+                    }})();
+                    "#,
+                    audio_id = audio_id_json,
+                    current_time = current_time
+                );
+                let _ = eval(&script);
+            });
+        }
+    });
+
+    // Sync playback speed to audio element
+    use_effect(move || {
+        let state = MUSIC_PLAYER.read();
+        let playback_speed = state.playback_speed;
+
+        spawn(async move {
+            let audio_id_json = serde_json::to_string(&audio_id)
+                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
+            let script = format!(
+                r#"
+                (function() {{
+                    let audio = document.getElementById({audio_id});
+                    if (audio) audio.playbackRate = {playback_speed};
+                }})();
+                "#,
+                audio_id = audio_id_json,
+                playback_speed = playback_speed
+            );
+            let _ = eval(&script);
+        });
+    });
 
     // Don't render if player is not visible
     if !state.is_visible || state.current_track.is_none() {

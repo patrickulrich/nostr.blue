@@ -229,9 +229,9 @@ pub mod board_slideover;
 pub mod recipe_card;
 pub mod recipe_tag_chip;
 pub mod recipe_detail_view;
-pub mod recipe_ingredients_editor;
-pub mod recipe_directions_editor;
-pub mod recipe_tag_selector;
+pub(crate) mod recipe_ingredients_editor;
+pub(crate) mod recipe_directions_editor;
+pub(crate) mod recipe_tag_selector;
 pub mod recipe_form;
 pub mod collection_card;
 pub mod tag_section_card;
@@ -263,3 +263,7 @@ pub use publication_section::{PublicationSectionContent, SectionNavigation, Publ
 pub use wiki_card::{WikiCardSearchResult, WikiCardSkeleton, WikiGrid, WikiMetadataCard};
 pub use wiki_content::{WikiPageContent, WikiOutline, WikiForwardLinks, WikiPageNotFound, WikiPageSkeleton};
 pub use wiki_backlinks::WikiBacklinks;
+
+// PWA components
+pub mod pwa_update_banner;
+pub use pwa_update_banner::PwaUpdateBanner;

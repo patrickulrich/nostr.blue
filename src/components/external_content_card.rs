@@ -9,6 +9,7 @@ use crate::utils::nip73;
 use crate::components::icons;
 use crate::services::{mempool, openlibrary::{self, CoverSize}};
 use crate::stores::settings_store;
+use crate::utils::format::format_sats_with_unit;
 
 /// Generic external content card dispatcher
 /// Routes to the appropriate card based on content type
@@ -473,7 +474,13 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
             let address = address.clone();
             let endpoint = endpoint.clone();
             expanded.set(true);
-            if addr_data.read().is_none() {
+            // Fetch if not loaded yet, or allow retry on previous error
+            let should_fetch = match &*addr_data.read() {
+                None => true,
+                Some(Err(_)) => true,
+                Some(Ok(_)) => false,
+            };
+            if should_fetch {
                 spawn(async move {
                     let result = mempool::get_address(&endpoint, &address).await;
                     addr_data.set(Some(result));
@@ -553,7 +560,7 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
                                         span { class: "text-muted-foreground", "Balance" }
                                         span {
                                             class: "font-mono font-medium",
-                                            "{format_sats(balance)}"
+                                            "{format_sats_with_unit(balance)}"
                                         }
                                     }
 
@@ -561,14 +568,14 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
                                     div {
                                         class: "flex justify-between",
                                         span { class: "text-muted-foreground", "Received" }
-                                        span { class: "font-mono text-green-500", "{format_sats(total_received)}" }
+                                        span { class: "font-mono text-green-500", "{format_sats_with_unit(total_received)}" }
                                     }
 
                                     // Total sent
                                     div {
                                         class: "flex justify-between",
                                         span { class: "text-muted-foreground", "Sent" }
-                                        span { class: "font-mono text-red-500", "{format_sats(total_sent)}" }
+                                        span { class: "font-mono text-red-500", "{format_sats_with_unit(total_sent)}" }
                                     }
 
                                     // Transaction count
@@ -878,19 +885,3 @@ fn GenericContentCard(props: GenericContentCardProps) -> Element {
     }
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Format satoshis for display
-fn format_sats(sats: u64) -> String {
-    if sats >= 100_000_000 {
-        format!("{:.8} BTC", sats as f64 / 100_000_000.0)
-    } else if sats >= 1_000_000 {
-        format!("{:.2}M sats", sats as f64 / 1_000_000.0)
-    } else if sats >= 1_000 {
-        format!("{:.1}k sats", sats as f64 / 1_000.0)
-    } else {
-        format!("{} sats", sats)
-    }
-}

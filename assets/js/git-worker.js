@@ -15,6 +15,39 @@ const fs = new LightningFS('nostr-blue-git-cache');
 // CORS proxy for GitHub/GitLab/etc
 const CORS_PROXY = 'https://cors.isomorphic-git.org';
 
+/**
+ * Resolve a git ref with fallback to default branches
+ * First tries the requested ref, then falls back to main/master local branches,
+ * then tries remote branches if no local branches exist.
+ */
+async function resolveRefWithFallback(dir, ref) {
+  // Try direct resolution first
+  try {
+    return await git.resolveRef({ fs, dir, ref });
+  } catch (e) {
+    // If HEAD resolution fails, try to find any available branch
+    const branches = await git.listBranches({ fs, dir });
+    if (branches.length > 0) {
+      // Try common default branch names first
+      const defaultBranch = branches.find(b => b === 'main')
+        || branches.find(b => b === 'master')
+        || branches[0];
+      return await git.resolveRef({ fs, dir, ref: defaultBranch });
+    }
+
+    // No local branches, try remote branches
+    const remoteBranches = await git.listBranches({ fs, dir, remote: 'origin' });
+    if (remoteBranches.length > 0) {
+      const defaultBranch = remoteBranches.find(b => b === 'main')
+        || remoteBranches.find(b => b === 'master')
+        || remoteBranches[0];
+      return await git.resolveRef({ fs, dir, ref: `refs/remotes/origin/${defaultBranch}` });
+    }
+
+    throw new Error('No branches found in repository');
+  }
+}
+
 // Domains that need CORS proxy
 const NEEDS_PROXY = ['github.com', 'gitlab.com', 'codeberg.org', 'gitea.com'];
 
@@ -82,35 +115,12 @@ const methods = {
    * List files in a directory at a given ref
    */
   async listFiles({ dir, ref = 'HEAD', path = '' }) {
-    // Resolve ref to commit OID
+    // Resolve ref to commit OID with fallback
     let commitOid;
     try {
-      commitOid = await git.resolveRef({ fs, dir, ref });
+      commitOid = await resolveRefWithFallback(dir, ref);
     } catch (e) {
-      // If HEAD resolution fails, try to find any available branch
-      try {
-        const branches = await git.listBranches({ fs, dir });
-        if (branches.length > 0) {
-          // Try common default branch names first
-          const defaultBranch = branches.find(b => b === 'main')
-            || branches.find(b => b === 'master')
-            || branches[0];
-          commitOid = await git.resolveRef({ fs, dir, ref: defaultBranch });
-        } else {
-          // No local branches, try remote branches
-          const remoteBranches = await git.listBranches({ fs, dir, remote: 'origin' });
-          if (remoteBranches.length > 0) {
-            const defaultBranch = remoteBranches.find(b => b === 'main')
-              || remoteBranches.find(b => b === 'master')
-              || remoteBranches[0];
-            commitOid = await git.resolveRef({ fs, dir, ref: `refs/remotes/origin/${defaultBranch}` });
-          } else {
-            throw new Error('No branches found in repository');
-          }
-        }
-      } catch (e2) {
-        throw new Error(`Could not resolve ref: ${e2.message || e.message}`);
-      }
+      throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
     }
 
     // Get all files at the resolved commit
@@ -153,7 +163,7 @@ const methods = {
   async readFile({ dir, ref = 'HEAD', filepath }) {
     let commitOid;
     try {
-      commitOid = await git.resolveRef({ fs, dir, ref });
+      commitOid = await resolveRefWithFallback(dir, ref);
     } catch (e) {
       throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
     }

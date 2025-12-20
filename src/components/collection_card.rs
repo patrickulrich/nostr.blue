@@ -5,6 +5,14 @@
 use dioxus::prelude::*;
 use crate::utils::is_valid_http_url;
 
+/// Escape a URL for use in CSS url() function
+/// Escapes backslashes, single quotes, and closing parentheses
+fn escape_css_url(url: &str) -> String {
+    url.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace(')', "\\)")
+}
+
 /// Collection card for the explore page
 #[component]
 pub fn CollectionCard(
@@ -16,7 +24,8 @@ pub fn CollectionCard(
     // Validate URL before using in CSS to prevent injection
     let bg_style = match &image_url {
         Some(url) if is_valid_http_url(url) => {
-            format!("background-image: url('{}'); background-size: cover; background-position: center;", url)
+            let escaped = escape_css_url(url);
+            format!("background-image: url('{}'); background-size: cover; background-position: center;", escaped)
         }
         _ => String::new(),
     };

@@ -11,6 +11,7 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
 use crate::services::aggregation::InteractionCounts;
+use crate::utils::format::format_sats_human;
 use crate::hooks::{use_reaction, ReactionState};
 use crate::components::{RichContent, ZapModal, CommunityPostComposer};
 use crate::routes::Route;
@@ -321,7 +322,7 @@ pub fn CommunityPostCard(
                                 polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
                             }
                             if zap_amount > 0 {
-                                "{format_sats(zap_amount)}"
+                                "{format_sats_human(zap_amount)}"
                             }
                         }
                     } else if zap_amount > 0 {
@@ -341,7 +342,7 @@ pub fn CommunityPostCard(
                                 stroke_linejoin: "round",
                                 polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
                             }
-                            "{format_sats(zap_amount)}"
+                            "{format_sats_human(zap_amount)}"
                         }
                     }
                 }
@@ -832,16 +833,5 @@ fn format_time_ago(timestamp: u64) -> String {
     } else {
         let weeks = diff / 604800;
         format!("{}w ago", weeks)
-    }
-}
-
-/// Format sats for display
-fn format_sats(sats: u64) -> String {
-    if sats >= 1_000_000 {
-        format!("{:.1}M", sats as f64 / 1_000_000.0)
-    } else if sats >= 1_000 {
-        format!("{:.1}k", sats as f64 / 1_000.0)
-    } else {
-        sats.to_string()
     }
 }

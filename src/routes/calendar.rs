@@ -14,6 +14,7 @@ use crate::components::{
 use crate::routes::Route;
 use crate::utils::ics::{export_events_to_ics, download_ics};
 use crate::utils::nip52::CalendarEvent;
+use crate::utils::date_helpers::get_today;
 
 /// Calendar page component
 #[component]
@@ -575,17 +576,6 @@ pub fn Calendar() -> Element {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/// Get today's date as YYYY-MM-DD
-fn get_today() -> String {
-    let date = js_sys::Date::new_0();
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date()
-    )
-}
 
 /// Get event date as YYYY-MM-DD
 fn get_event_date(event: &UnifiedEvent) -> String {

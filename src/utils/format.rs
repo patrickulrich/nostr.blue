@@ -24,6 +24,34 @@ pub fn format_sats_compact(sats: u64) -> String {
     }
 }
 
+/// Format satoshi amount in human-readable compact form with decimals (e.g., "1.5M", "2.3k")
+/// No suffix - just the compact number representation
+pub fn format_sats_human(sats: u64) -> String {
+    if sats >= 1_000_000 {
+        format!("{:.1}M", sats as f64 / 1_000_000.0)
+    } else if sats >= 1_000 {
+        format!("{:.1}k", sats as f64 / 1_000.0)
+    } else {
+        sats.to_string()
+    }
+}
+
+/// Format satoshi amount with "sats" suffix in human-readable form
+/// For very large amounts (>=100M sats), displays as BTC instead
+/// Examples: "1.5M sats", "2.3K sats", "123 sats", "1.00000000 BTC"
+pub fn format_sats_with_unit(sats: u64) -> String {
+    if sats >= 100_000_000 {
+        // 1 BTC or more - show as BTC with 8 decimal places
+        format!("{:.8} BTC", sats as f64 / 100_000_000.0)
+    } else if sats >= 1_000_000 {
+        format!("{:.2}M sats", sats as f64 / 1_000_000.0)
+    } else if sats >= 1_000 {
+        format!("{:.1}K sats", sats as f64 / 1_000.0)
+    } else {
+        format!("{} sats", sats)
+    }
+}
+
 /// Truncates a pubkey/hex string to show first 8 and last 8 chars
 /// Returns "abcd1234...wxyz5678" format for long strings
 pub fn truncate_pubkey(pubkey: &str) -> String {

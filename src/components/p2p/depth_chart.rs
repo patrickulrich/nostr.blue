@@ -5,6 +5,7 @@
 
 use dioxus::prelude::*;
 use crate::utils::nip69::{P2POrder, OrderType, OrderStatus};
+use crate::utils::format::format_sats_with_unit;
 
 /// Depth data for charting
 #[derive(Clone, Debug)]
@@ -68,29 +69,24 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Compute cumulative sats for sells
+    // Compute cumulative sats for sells (skip orders without valid sats to avoid skewing the chart)
     let mut cumulative: u64 = 0;
     for order in &sell_orders {
-        let sats = if order.amount_sats > 0 {
-            order.amount_sats
-        } else {
-            // Estimate sats from fiat amount (rough estimate without exchange rate)
-            100_000 // Default placeholder
-        };
-        cumulative = cumulative.saturating_add(sats);
+        if order.amount_sats == 0 {
+            continue; // Skip orders without valid sats amount
+        }
+        cumulative = cumulative.saturating_add(order.amount_sats);
         data.sells.push((order.premium.unwrap_or(0.0), cumulative));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
 
-    // Compute cumulative sats for buys
+    // Compute cumulative sats for buys (skip orders without valid sats)
     cumulative = 0;
     for order in &buy_orders {
-        let sats = if order.amount_sats > 0 {
-            order.amount_sats
-        } else {
-            100_000 // Default placeholder
-        };
-        cumulative = cumulative.saturating_add(sats);
+        if order.amount_sats == 0 {
+            continue; // Skip orders without valid sats amount
+        }
+        cumulative = cumulative.saturating_add(order.amount_sats);
         data.buys.push((order.premium.unwrap_or(0.0), cumulative));
     }
     data.max_cumulative = data.max_cumulative.max(cumulative);
@@ -143,19 +139,6 @@ fn build_area_path(data: &[(f64, u64)], width: f64, height: f64, padding: f64, m
     path.push_str(&format!(" L {} {} Z", last_x, baseline));
 
     path
-}
-
-/// Format sats for display
-fn format_sats(sats: u64) -> String {
-    if sats >= 100_000_000 {
-        format!("{:.2} BTC", sats as f64 / 100_000_000.0)
-    } else if sats >= 1_000_000 {
-        format!("{:.2}M sats", sats as f64 / 1_000_000.0)
-    } else if sats >= 1_000 {
-        format!("{:.1}K sats", sats as f64 / 1_000.0)
-    } else {
-        format!("{} sats", sats)
-    }
 }
 
 /// P2P Depth Chart component
@@ -343,7 +326,7 @@ pub fn P2PDepthChart(orders: Vec<P2POrder>) -> Element {
                             for (i, sats) in y_ticks.iter().enumerate() {
                                 {
                                     let y = height - padding - (i as f64) * (height - 2.0 * padding) / 4.0;
-                                    let label = format_sats(*sats);
+                                    let label = format_sats_with_unit(*sats);
                                     rsx! {
                                         text {
                                             x: "{padding - 5.0}",
