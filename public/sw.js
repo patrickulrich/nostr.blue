@@ -62,7 +62,13 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => {
           // Offline - return cached index.html for SPA routing
-          return caches.match('/index.html');
+          // Defensive fallback in case index.html isn't cached
+          return caches.match('/index.html').then(response => {
+            return response || new Response('Offline - please check your connection', {
+              status: 503,
+              headers: { 'Content-Type': 'text/plain' }
+            });
+          });
         })
     );
     return;

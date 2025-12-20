@@ -100,10 +100,12 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
 }
 
 /// Convert premium percentage to X coordinate
+/// Clamps premiums outside the visible range to chart edges
 fn premium_to_x(premium: f64, width: f64, padding: f64) -> f64 {
     let min_premium = -10.0;
     let max_premium = 20.0;
-    padding + (premium - min_premium) / (max_premium - min_premium) * (width - 2.0 * padding)
+    let clamped = premium.clamp(min_premium, max_premium);
+    padding + (clamped - min_premium) / (max_premium - min_premium) * (width - 2.0 * padding)
 }
 
 /// Convert sats to Y coordinate

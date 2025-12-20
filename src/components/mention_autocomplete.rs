@@ -358,17 +358,29 @@ fn insert_mention(
         let current_content = content.read().to_string();
 
         // Bounds check - content may have changed since autocomplete was triggered
-        if mention_start_pos > current_content.len() {
-            log::warn!("Mention start position {} exceeds content length {}", mention_start_pos, current_content.len());
+        // Also validate UTF-8 char boundary to prevent panic on multi-byte characters
+        if mention_start_pos > current_content.len() || !current_content.is_char_boundary(mention_start_pos) {
+            log::warn!("Mention start position {} is invalid for content of length {}", mention_start_pos, current_content.len());
             show_autocomplete.set(false);
             return;
         }
 
         let query_end_pos = mention_start_pos + query_len + 1; // +1 for the @ symbol
+        let safe_query_end = query_end_pos.min(current_content.len());
+
+        // Ensure query_end_pos is also at a valid char boundary
+        let safe_query_end = if current_content.is_char_boundary(safe_query_end) {
+            safe_query_end
+        } else {
+            // Find next valid boundary
+            (safe_query_end..=current_content.len())
+                .find(|&i| current_content.is_char_boundary(i))
+                .unwrap_or(current_content.len())
+        };
 
         // Build new content
         let before = &current_content[..mention_start_pos];
-        let after = &current_content[query_end_pos.min(current_content.len())..];
+        let after = &current_content[safe_query_end..];
         let new_content = format!("{}{} {}", before, mention, after);
 
         // Calculate new cursor position (UTF-8 byte index)

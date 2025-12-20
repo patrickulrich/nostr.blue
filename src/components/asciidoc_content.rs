@@ -57,11 +57,11 @@ pub fn AsciiDocContent(
     let mut citations_loading = use_signal(|| false);
 
     // Check if content has citations on mount and fetch them
-    // Only re-run when content or enable_citations changes (not every render)
-    let content_clone = content.clone();
-    use_effect(use_reactive!(|(content_clone, enable_citations)| {
-        if enable_citations && content_has_citations(&content_clone) {
-            let identifiers = extract_citation_identifiers(&content_clone);
+    // Clone content for use in the effect - necessary because content is also used later in render logic
+    let content_for_effect = content.clone();
+    use_effect(use_reactive!(|(content_for_effect, enable_citations)| {
+        if enable_citations && content_has_citations(&content_for_effect) {
+            let identifiers = extract_citation_identifiers(&content_for_effect);
             if !identifiers.is_empty() {
                 citations_loading.set(true);
                 spawn(async move {

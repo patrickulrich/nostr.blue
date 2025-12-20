@@ -7,6 +7,7 @@ use nostr_sdk::FromBech32;
 
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinReference};
+use crate::utils::validation::is_valid_http_url;
 
 // ============================================================================
 // Content Type Icon Component
@@ -112,13 +113,25 @@ pub fn PinCard(
                         reference: display_ref.clone(),
                     }
                 }
-            } else {
-                // External link
+            } else if is_valid_http_url(&display_ref) {
+                // External link - validated as safe http/https URL
                 a {
                     href: "{display_ref}",
                     target: "_blank",
                     rel: "noopener noreferrer",
                     class: "block",
+                    PinContent {
+                        content_type: content_type.clone(),
+                        title: title.clone(),
+                        description: if content.is_empty() { None } else { Some(content.clone()) },
+                        reference: display_ref.clone(),
+                    }
+                }
+            } else {
+                // Invalid URL scheme (javascript:, data:, etc.) - render without link
+                div {
+                    class: "block cursor-not-allowed",
+                    title: "Invalid URL",
                     PinContent {
                         content_type: content_type.clone(),
                         title: title.clone(),

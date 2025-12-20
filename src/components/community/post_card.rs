@@ -29,6 +29,8 @@ pub fn CommunityPostCard(
     #[props(default = true)] show_actions: bool,
     #[props(default = false)] show_moderation: bool,
     #[props(default)] on_reply_success: Option<EventHandler<String>>,
+    /// Called when a moderation action (approve/remove) completes successfully
+    #[props(default)] on_moderation_complete: Option<EventHandler<()>>,
 ) -> Element {
     let mut approving = use_signal(|| false);
     let mut removing = use_signal(|| false);
@@ -96,6 +98,9 @@ pub fn CommunityPostCard(
             match approve_post(&community, &post).await {
                 Ok(_) => {
                     log::info!("Post approved: {}", post.id);
+                    if let Some(ref callback) = on_moderation_complete {
+                        callback.call(());
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to approve post: {}", e);
@@ -120,6 +125,9 @@ pub fn CommunityPostCard(
                 Ok(_) => {
                     log::info!("Post removed: {}", post.id);
                     show_remove_dialog.set(false);
+                    if let Some(ref callback) = on_moderation_complete {
+                        callback.call(());
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to remove post: {}", e);
