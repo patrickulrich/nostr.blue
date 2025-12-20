@@ -124,10 +124,12 @@ pub fn PersistentMusicPlayer() -> Element {
         }
     });
 
+    // Memoize playback speed to ensure effect only runs when it changes
+    let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
+
     // Sync playback speed to audio element
     use_effect(move || {
-        let state = MUSIC_PLAYER.read();
-        let playback_speed = state.playback_speed;
+        let speed = playback_speed();
 
         spawn(async move {
             let audio_id_json = serde_json::to_string(&audio_id)
@@ -137,11 +139,11 @@ pub fn PersistentMusicPlayer() -> Element {
                 r#"
                 (function() {{
                     let audio = document.getElementById({audio_id});
-                    if (audio) audio.playbackRate = {playback_speed};
+                    if (audio) audio.playbackRate = {speed};
                 }})();
                 "#,
                 audio_id = audio_id_json,
-                playback_speed = playback_speed
+                speed = speed
             );
             let _ = eval(&script);
         });

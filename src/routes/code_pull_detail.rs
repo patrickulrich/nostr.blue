@@ -8,6 +8,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::{fetch_pull_request, fetch_pr_comments_by_id, publish_pr_comment_by_id, update_pr_status_by_id};
 use crate::utils::nip34::{PullRequest, GitComment, IssueStatus};
 use crate::utils::format_relative_time_or;
+use crate::utils::format::truncate_commit;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 
@@ -261,7 +262,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         span { class: "text-muted-foreground", "Commit:" }
                         code {
                             class: "px-2 py-0.5 bg-muted rounded font-mono text-xs",
-                            "{commit.chars().take(7).collect::<String>()}"
+                            "{truncate_commit(commit)}"
                         }
                     }
                 }
@@ -272,7 +273,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         span { class: "text-muted-foreground", "Parent:" }
                         code {
                             class: "px-2 py-0.5 bg-muted rounded font-mono text-xs",
-                            "{parent.chars().take(7).collect::<String>()}"
+                            "{truncate_commit(parent)}"
                         }
                     }
                 }

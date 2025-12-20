@@ -4,6 +4,7 @@
 
 use dioxus::prelude::*;
 use crate::utils::nip34::PullRequest;
+use crate::utils::format::truncate_commit;
 use crate::routes::Route;
 use super::status_badge::{CodeStatusBadge, BadgeSize};
 
@@ -52,7 +53,7 @@ pub fn CodePullCard(
                             span { "·" }
                             span {
                                 class: "font-mono text-xs",
-                                "{commit.chars().take(7).collect::<String>()}"
+                                "{truncate_commit(commit)}"
                             }
                         }
                     }
@@ -133,7 +134,7 @@ pub fn CodePullRow(pr: PullRequest) -> Element {
             if let Some(ref commit) = pr.commit {
                 span {
                     class: "font-mono text-xs text-muted-foreground",
-                    "{commit.chars().take(7).collect::<String>()}"
+                    "{truncate_commit(commit)}"
                 }
             }
         }

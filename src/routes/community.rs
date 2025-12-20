@@ -184,8 +184,10 @@ pub fn CommunityPage(a_tag: String) -> Element {
         }
     });
 
-    // Fetch pending posts for moderators
+    // Fetch pending posts for moderators (re-fetches when refresh_trigger changes)
     use_effect(move || {
+        // Read refresh_trigger to subscribe to changes from moderation callbacks
+        let _ = refresh_trigger();
         if *is_moderator.read() && *active_tab.read() == CommunityTab::Pending {
             if let Some(comm) = community.read().as_ref() {
                 let community_clone = comm.clone();
@@ -658,7 +660,11 @@ pub fn CommunityPage(a_tag: String) -> Element {
                                         community: comm.clone(),
                                         depth: 0,
                                         show_actions: true,
-                                        show_moderation: true
+                                        show_moderation: true,
+                                        on_moderation_complete: move |_| {
+                                            // Trigger re-fetch of pending posts
+                                            refresh_trigger.set(refresh_trigger() + 1);
+                                        }
                                     }
                                 }
                             }

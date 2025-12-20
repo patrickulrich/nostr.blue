@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::routes::Route;
-use crate::utils::date_helpers::{get_today, get_month_from_date, get_day_number, get_month_dates};
+use crate::utils::date_helpers::{get_today, get_month_from_date, get_day_number, get_month_dates, get_event_date};
 
 // ============================================================================
 // Constants
@@ -449,22 +449,6 @@ fn MonthView(props: MonthViewProps) -> Element {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/// Get date string (YYYY-MM-DD) from event
-fn get_event_date(event: &UnifiedEvent) -> String {
-    let ts = event.start_timestamp();
-    if ts == 0 {
-        return String::new();
-    }
-
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date()
-    )
-}
 
 /// Get short weekday name
 fn get_weekday_short(date: &str) -> String {

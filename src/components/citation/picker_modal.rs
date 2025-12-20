@@ -2,6 +2,7 @@
 //! Select citations to insert into wiki pages and publications
 
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use nostr_sdk::ToBech32;
 use crate::stores::citation_store::{
     CachedCitation, USER_CITATIONS,
@@ -45,8 +46,8 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(Vec::<CachedCitation>::new);
     let mut is_searching = use_signal(|| false);
-    // Search version for debouncing - prevents race conditions from rapid typing
-    let mut search_version = use_signal(|| 0u64);
+    // Task for debounced search - cancels previous search when new input arrives
+    let mut search_task: Signal<Option<Task>> = use_signal(|| None);
 
     // Selected citation
     let mut selected_citation = use_signal(|| None::<CachedCitation>);
@@ -81,40 +82,58 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         },
     ));
 
-    // Handle search with version-based debouncing to prevent race conditions
-    let mut handle_search = move |query: String| {
-        search_query.set(query.clone());
+    // Handle search with debouncing and task cancellation
+    let mut handle_search = move |new_query: String| {
+        search_query.set(new_query.clone());
 
-        if query.is_empty() {
+        // Cancel any pending search task
+        if let Some(task) = search_task.take() {
+            task.cancel();
+        }
+
+        if new_query.is_empty() {
             search_results.set(Vec::new());
             is_searching.set(false);
             return;
         }
 
         if let Some(pk) = user_pubkey.clone() {
-            // Increment version and capture it for this request
-            let current_version = search_version() + 1;
-            search_version.set(current_version);
-
             is_searching.set(true);
-            spawn(async move {
-                match search_citations(&query, &pk, 50).await {
+
+            // Capture query for stale result verification
+            let query_snapshot = new_query.clone();
+
+            // Start new debounced search task
+            let new_task = spawn(async move {
+                // Debounce: wait 300ms before searching
+                #[cfg(target_family = "wasm")]
+                {
+                    gloo_timers::future::TimeoutFuture::new(300).await;
+                }
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    use std::time::Duration;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
+
+                match search_citations(&query_snapshot, &pk, 50).await {
                     Ok(results) => {
-                        // Only apply results if this is still the latest request
-                        if search_version() == current_version {
+                        // Only apply results if query hasn't changed
+                        if search_query.read().as_str() == query_snapshot.as_str() {
                             search_results.set(results);
                             is_searching.set(false);
                         }
-                        // If version changed, a newer search is in progress - discard these results
                     }
                     Err(e) => {
-                        if search_version() == current_version {
+                        if search_query.read().as_str() == query_snapshot.as_str() {
                             log::warn!("Citation search failed: {}", e);
                             is_searching.set(false);
                         }
                     }
                 }
             });
+
+            search_task.set(Some(new_task));
         }
     };
 

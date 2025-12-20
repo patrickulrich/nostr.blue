@@ -72,6 +72,16 @@ pub fn truncate_pubkey(pubkey: &str) -> String {
     format!("{}...{}", prefix, suffix)
 }
 
+/// Truncates a git commit hash to the first 7 characters
+/// Standard short-form for git commits (e.g., "abc1234")
+pub fn truncate_commit(hash: &str) -> String {
+    if hash.len() <= 7 {
+        return hash.to_string();
+    }
+    // Git hashes are always ASCII hex, so byte slicing is safe
+    hash[..7].to_string()
+}
+
 /// Truncates text at a word boundary to avoid breaking words
 /// Returns text with "..." suffix if truncated
 /// Fully char-aware implementation - no byte slicing for UTF-8 safety

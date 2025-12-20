@@ -3,6 +3,24 @@
 //! Shared date manipulation functions for calendar components.
 //! All functions work with YYYY-MM-DD format strings.
 
+use crate::stores::calendar_store::UnifiedEvent;
+
+/// Get date string (YYYY-MM-DD) from a UnifiedEvent
+pub fn get_event_date(event: &UnifiedEvent) -> String {
+    let ts = event.start_timestamp();
+    if ts == 0 {
+        return String::new();
+    }
+
+    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date()
+    )
+}
+
 /// Get today's date as YYYY-MM-DD string
 pub fn get_today() -> String {
     let date = js_sys::Date::new_0();

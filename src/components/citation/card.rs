@@ -8,21 +8,62 @@ use crate::utils::nkbip03::{Citation, CitationType};
 use crate::components::icons::ExternalLinkIcon;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
 
+/// Styling information for citation types
+pub struct CitationStyle {
+    pub emoji: &'static str,
+    pub label: &'static str,
+    pub bg_class: &'static str,
+    pub text_class: &'static str,
+}
+
+impl CitationStyle {
+    /// Combined class for badge display (bg + text)
+    pub fn badge_class(&self) -> String {
+        format!("{} {}", self.bg_class, self.text_class)
+    }
+}
+
+/// Get styling for a citation type
+pub fn get_citation_style(citation_type: &CitationType) -> CitationStyle {
+    match citation_type {
+        CitationType::Internal => CitationStyle {
+            emoji: "📌",
+            label: "Nostr",
+            bg_class: "bg-purple-500/20",
+            text_class: "text-purple-600 dark:text-purple-400",
+        },
+        CitationType::ExternalWeb => CitationStyle {
+            emoji: "🌐",
+            label: "Web",
+            bg_class: "bg-blue-500/20",
+            text_class: "text-blue-600 dark:text-blue-400",
+        },
+        CitationType::Hardcopy => CitationStyle {
+            emoji: "📖",
+            label: "Book",
+            bg_class: "bg-amber-500/20",
+            text_class: "text-amber-600 dark:text-amber-400",
+        },
+        CitationType::Prompt => CitationStyle {
+            emoji: "🤖",
+            label: "AI",
+            bg_class: "bg-emerald-500/20",
+            text_class: "text-emerald-600 dark:text-emerald-400",
+        },
+    }
+}
+
 /// Citation type badge component
 #[component]
 pub fn CitationTypeBadge(citation_type: CitationType) -> Element {
-    let (icon, label, color_class) = match citation_type {
-        CitationType::Internal => ("📌", "Nostr", "bg-purple-500/20 text-purple-600 dark:text-purple-400"),
-        CitationType::ExternalWeb => ("🌐", "Web", "bg-blue-500/20 text-blue-600 dark:text-blue-400"),
-        CitationType::Hardcopy => ("📖", "Book", "bg-amber-500/20 text-amber-600 dark:text-amber-400"),
-        CitationType::Prompt => ("🤖", "AI", "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"),
-    };
+    let style = get_citation_style(&citation_type);
+    let badge_class = style.badge_class();
 
     rsx! {
         span {
-            class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full {color_class}",
-            "{icon}"
-            "{label}"
+            class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full {badge_class}",
+            "{style.emoji}"
+            "{style.label}"
         }
     }
 }
@@ -186,24 +227,13 @@ pub fn CitationCardCompact(
 
             // Type icon
             {
-                let bg_class = match citation_type {
-                    CitationType::Internal => "bg-purple-500/20",
-                    CitationType::ExternalWeb => "bg-blue-500/20",
-                    CitationType::Hardcopy => "bg-amber-500/20",
-                    CitationType::Prompt => "bg-emerald-500/20",
-                };
-                let emoji = match citation_type {
-                    CitationType::Internal => "📌",
-                    CitationType::ExternalWeb => "🌐",
-                    CitationType::Hardcopy => "📖",
-                    CitationType::Prompt => "🤖",
-                };
+                let style = get_citation_style(&citation_type);
                 rsx! {
                     div {
-                        class: "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {bg_class}",
+                        class: "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {style.bg_class}",
                         span {
                             class: "text-sm",
-                            "{emoji}"
+                            "{style.emoji}"
                         }
                     }
                 }
@@ -265,12 +295,7 @@ pub fn CitationBadge(
             onclick: handle_click,
 
             span {
-                {match citation_type {
-                    CitationType::Internal => "📌",
-                    CitationType::ExternalWeb => "🌐",
-                    CitationType::Hardcopy => "📖",
-                    CitationType::Prompt => "🤖",
-                }}
+                {get_citation_style(&citation_type).emoji}
             }
 
             span {
