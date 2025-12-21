@@ -647,10 +647,10 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
     // Log x-only pubkeys for debugging P2PK matching
     for key in &keys {
         let xonly = key.public_key().x_only_public_key();
-        log::info!("P2PK signing key x-only pubkey: {}", hex::encode(xonly.serialize()));
+        log::debug!("P2PK signing key x-only pubkey: {}", hex::encode(xonly.serialize()));
     }
 
-    log::info!(
+    log::debug!(
         "Collected {} unique P2PK signing keys for token receive",
         keys.len()
     );

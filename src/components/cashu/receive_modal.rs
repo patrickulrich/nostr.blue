@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use crate::stores::cashu;
 use crate::stores::cashu::{ReceiveTokensOptions, TokenPreview};
 
@@ -13,8 +14,9 @@ pub fn CashuReceiveModal(
     let mut success_message = use_signal(|| Option::<String>::None);
     let mut preview = use_signal(|| Option::<TokenPreview>::None);
     let mut verify_dleq = use_signal(|| false); // NUT-12 DLEQ verification toggle
+    let mut preview_task = use_signal(|| None::<Task>);
 
-    // Auto-preview when token input changes
+    // Auto-preview when token input changes (with debouncing)
     let on_token_change = move |evt: FormEvent| {
         let value = evt.value();
         token_string.set(value.clone());
@@ -26,20 +28,36 @@ pub fn CashuReceiveModal(
         // Only preview if it looks like a cashu token
         let trimmed = value.trim().to_string();
         if trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB") {
+            // Cancel previous preview task to prevent race conditions
+            if let Some(task) = preview_task.read().as_ref() {
+                task.cancel();
+            }
+
             is_previewing.set(true);
-            spawn(async move {
-                match cashu::preview_token(trimmed).await {
+            let token_snapshot = trimmed.clone();
+
+            let new_task = spawn(async move {
+                // Debounce: wait 300ms before making network request
+                gloo_timers::future::TimeoutFuture::new(300).await;
+
+                match cashu::preview_token(token_snapshot.clone()).await {
                     Ok(p) => {
-                        preview.set(Some(p));
-                        error_message.set(None);
+                        // Only update if token hasn't changed during async operation
+                        if token_string.read().trim() == token_snapshot {
+                            preview.set(Some(p));
+                            error_message.set(None);
+                        }
                     }
                     Err(e) => {
-                        preview.set(None);
-                        error_message.set(Some(e));
+                        if token_string.read().trim() == token_snapshot {
+                            preview.set(None);
+                            error_message.set(Some(e));
+                        }
                     }
                 }
                 is_previewing.set(false);
             });
+            preview_task.set(Some(new_task));
         }
     };
 

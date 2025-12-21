@@ -13,7 +13,7 @@ use super::internal::{
 use super::proofs::{cdk_proof_to_proof_data, register_proofs_in_event_map};
 use super::signals::{try_acquire_mint_lock, WALLET_BALANCE, WALLET_TOKENS};
 use super::types::{ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt};
-use super::utils::normalize_mint_url;
+use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 
 // =============================================================================
@@ -62,23 +62,8 @@ pub async fn preview_token(token_string: String) -> Result<TokenPreview, String>
     use cdk::nuts::Token;
     use std::str::FromStr;
 
-    // Sanitize token string
-    let token_string: String = token_string
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-
-    if token_string.is_empty() {
-        return Err("Token string is empty".to_string());
-    }
-
-    // Validate token format
-    if !token_string.starts_with("cashuA") && !token_string.starts_with("cashuB") {
-        return Err(format!(
-            "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
-            token_string.chars().take(10).collect::<String>()
-        ));
-    }
+    // Sanitize and validate token string
+    let token_string = sanitize_and_validate_token(&token_string)?;
 
     // Parse token
     let token = Token::from_str(&token_string)
@@ -135,29 +120,14 @@ pub async fn receive_tokens_with_options(
 
     log::info!("Receiving token (verify_dleq: {})...", options.verify_dleq);
 
-    // Sanitize token string - remove ALL whitespace (spaces, tabs, newlines)
-    let token_string = token_string
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>();
-
-    if token_string.is_empty() {
-        return Err("Token string is empty".to_string());
-    }
+    // Sanitize and validate token string (removes whitespace, checks prefix)
+    let token_string = sanitize_and_validate_token(&token_string)?;
 
     log::info!(
         "Token string length: {}, starts with: {}",
         token_string.len(),
         token_string.chars().take(10).collect::<String>()
     );
-
-    // Validate token format
-    if !token_string.starts_with("cashuA") && !token_string.starts_with("cashuB") {
-        return Err(format!(
-            "Invalid token format. Cashu tokens must start with 'cashuA' or 'cashuB'. Your token starts with: '{}'",
-            token_string.chars().take(10).collect::<String>()
-        ));
-    }
 
     // Check for control characters that might indicate encoding issues
     if token_string.chars().any(|c| c.is_control()) {
@@ -319,20 +289,23 @@ pub async fn receive_tokens_with_options(
         p2pk_signing_keys.len()
     );
 
-    // Debug: Log what pubkeys the token is locked to
-    if let Ok(keysets) = wallet.get_mint_keysets().await {
-        if let Ok(proofs) = token.proofs(&keysets) {
-            for proof in &proofs {
-                // Use TryFrom to convert secret to SpendingConditions (CDK 0.14.2 pattern)
-                use cdk::nuts::SpendingConditions;
-                let spending_conditions: Option<SpendingConditions> = (&proof.secret).try_into().ok();
-                if let Some(conditions) = spending_conditions {
-                    if let Some(pubkeys) = conditions.pubkeys() {
-                        for pubkey in pubkeys {
-                            log::info!(
-                                "Token P2PK locked to pubkey: {}",
-                                hex::encode(pubkey.x_only_public_key().serialize())
-                            );
+    // Debug: Log what pubkeys the token is locked to (only when debug logging enabled)
+    if log::log_enabled!(log::Level::Debug) {
+        if let Ok(keysets) = wallet.get_mint_keysets().await {
+            if let Ok(proofs) = token.proofs(&keysets) {
+                for proof in &proofs {
+                    // Use TryFrom to convert secret to SpendingConditions (CDK 0.14.2 pattern)
+                    use cdk::nuts::SpendingConditions;
+                    let spending_conditions: Option<SpendingConditions> =
+                        (&proof.secret).try_into().ok();
+                    if let Some(conditions) = spending_conditions {
+                        if let Some(pubkeys) = conditions.pubkeys() {
+                            for pubkey in pubkeys {
+                                log::debug!(
+                                    "Token P2PK locked to pubkey: {}",
+                                    hex::encode(pubkey.x_only_public_key().serialize())
+                                );
+                            }
                         }
                     }
                 }
