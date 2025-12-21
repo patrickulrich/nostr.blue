@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu;
-use crate::stores::cashu::ReceiveTokensOptions;
+use crate::stores::cashu::{ReceiveTokensOptions, TokenPreview};
 
 #[component]
 pub fn CashuReceiveModal(
@@ -8,9 +8,40 @@ pub fn CashuReceiveModal(
 ) -> Element {
     let mut token_string = use_signal(String::new);
     let mut is_receiving = use_signal(|| false);
+    let mut is_previewing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut success_message = use_signal(|| Option::<String>::None);
+    let mut preview = use_signal(|| Option::<TokenPreview>::None);
     let mut verify_dleq = use_signal(|| false); // NUT-12 DLEQ verification toggle
+
+    // Auto-preview when token input changes
+    let on_token_change = move |evt: FormEvent| {
+        let value = evt.value();
+        token_string.set(value.clone());
+
+        // Clear previous preview/errors
+        preview.set(None);
+        error_message.set(None);
+
+        // Only preview if it looks like a cashu token
+        let trimmed = value.trim().to_string();
+        if trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB") {
+            is_previewing.set(true);
+            spawn(async move {
+                match cashu::preview_token(trimmed).await {
+                    Ok(p) => {
+                        preview.set(Some(p));
+                        error_message.set(None);
+                    }
+                    Err(e) => {
+                        preview.set(None);
+                        error_message.set(Some(e));
+                    }
+                }
+                is_previewing.set(false);
+            });
+        }
+    };
 
     let on_receive = move |_| {
         let token = token_string.read().trim().to_string();
@@ -39,8 +70,9 @@ pub fn CashuReceiveModal(
                     };
                     success_message.set(Some(msg));
                     is_receiving.set(false);
-                    // Clear token input
+                    // Clear token input and preview
                     token_string.set(String::new());
+                    preview.set(None);
                 }
                 Err(e) => {
                     error_message.set(Some(format!("Failed to receive: {}", e)));
@@ -89,11 +121,76 @@ pub fn CashuReceiveModal(
                             class: "w-full px-4 py-3 bg-background border border-border rounded-lg font-mono text-sm min-h-[120px]",
                             placeholder: "cashuA...",
                             value: token_string.read().clone(),
-                            oninput: move |evt| token_string.set(evt.value())
+                            oninput: on_token_change
                         }
                         p {
                             class: "text-xs text-muted-foreground mt-2",
                             "Paste a Cashu token string to receive ecash"
+                        }
+                    }
+
+                    // Token preview (shows when valid token is detected)
+                    if *is_previewing.read() {
+                        div {
+                            class: "bg-accent/50 border border-border rounded-lg p-4",
+                            div {
+                                class: "flex items-center gap-2 text-muted-foreground",
+                                div {
+                                    class: "animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+                                }
+                                span { class: "text-sm", "Analyzing token..." }
+                            }
+                        }
+                    }
+
+                    if let Some(p) = preview.read().as_ref() {
+                        div {
+                            class: "bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30 rounded-lg p-4 space-y-3",
+
+                            // Value header
+                            div {
+                                class: "flex items-center justify-between",
+                                span { class: "text-sm text-muted-foreground", "Token Value" }
+                                span {
+                                    class: "text-2xl font-bold text-blue-500",
+                                    "{p.value} {p.unit}"
+                                }
+                            }
+
+                            // Details
+                            div {
+                                class: "space-y-2 text-sm",
+
+                                // Mint
+                                div {
+                                    class: "flex items-center justify-between",
+                                    span { class: "text-muted-foreground", "Mint" }
+                                    span {
+                                        class: "font-mono text-xs truncate max-w-[200px]",
+                                        title: "{p.mint_url}",
+                                        "{p.mint_url}"
+                                    }
+                                }
+
+                                // Proofs
+                                div {
+                                    class: "flex items-center justify-between",
+                                    span { class: "text-muted-foreground", "Proofs" }
+                                    span { "{p.proof_count}" }
+                                }
+
+                                // Memo (if present)
+                                if let Some(memo) = &p.memo {
+                                    div {
+                                        class: "flex items-start justify-between",
+                                        span { class: "text-muted-foreground", "Memo" }
+                                        span {
+                                            class: "text-right max-w-[200px] italic",
+                                            "\"{memo}\""
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

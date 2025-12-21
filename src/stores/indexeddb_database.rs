@@ -228,6 +228,15 @@ mod native_stub {
         async fn remove_transaction(&self, _transaction_id: TransactionId) -> Result<(), Self::Err> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
+
+        async fn get_balance(
+            &self,
+            _mint_url: Option<MintUrl>,
+            _unit: Option<CurrencyUnit>,
+            _state: Option<Vec<State>>,
+        ) -> Result<u64, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
     }
 }
 
@@ -1184,7 +1193,17 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(filtered)
     }
 
-    // Note: get_balance was removed as it's not part of WalletDatabase trait in CDK 0.13.x
+    async fn get_balance(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+    ) -> Result<u64, Self::Err> {
+        // Get proofs with filters, then sum their amounts
+        let proofs = self.get_proofs(mint_url, unit, state, None).await?;
+        let total: u64 = proofs.iter().map(|p| u64::from(p.proof.amount)).sum();
+        Ok(total)
+    }
 
     async fn update_proofs_state(&self, ys: Vec<CashuPublicKey>, state: State) -> Result<(), Self::Err> {
         // Perform all operations in a single write transaction for atomicity

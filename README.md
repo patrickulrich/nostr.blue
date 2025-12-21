@@ -2,10 +2,10 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.6.7-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.77+-orange)
-![CDK](https://img.shields.io/badge/CDK-0.13.4-purple)
+![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
 
 ## 🌟 Overview
 
@@ -40,7 +40,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 ## 🛠 Technology Stack
 
 ### Core Framework
-- **[Dioxus 0.7.1](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
+- **[Dioxus 0.7.2](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
 - **dioxus-stores** - Advanced state management library for reactive global state
 - **WebAssembly** - Compiled to WASM for near-native browser performance
 - **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server and WASM bundler
@@ -289,8 +289,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Add WASM target
 rustup target add wasm32-unknown-unknown
 
-# Install Dioxus CLI
-cargo install dioxus-cli
+# Install Dioxus CLI (0.7.x required)
+cargo install dioxus-cli@0.7
 
 # Install Node dependencies
 npm install

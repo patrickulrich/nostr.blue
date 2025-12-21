@@ -24,8 +24,96 @@ use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 pub use super::types::ReceiveOptions as ReceiveTokensOptions;
 
 // =============================================================================
+// Types
+// =============================================================================
+
+/// Token preview data extracted using CDK's get_token_data()
+#[derive(Clone, Debug)]
+pub struct TokenPreview {
+    /// Mint URL
+    pub mint_url: String,
+    /// Total value in sats
+    pub value: u64,
+    /// Currency unit (usually "sat")
+    pub unit: String,
+    /// Optional memo from sender
+    pub memo: Option<String>,
+    /// Estimated fee to redeem (if known)
+    /// Note: CDK 0.14.2 doesn't expose this yet, reserved for future use
+    #[allow(dead_code)]
+    pub redeem_fee: Option<u64>,
+    /// Number of proofs in token
+    pub proof_count: usize,
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
+
+/// Preview a token without receiving it
+///
+/// Uses CDK's get_token_data() to extract token information including:
+/// - Mint URL and value
+/// - Memo from sender
+/// - Estimated redemption fee
+///
+/// This allows showing token details to the user before they decide to receive.
+pub async fn preview_token(token_string: String) -> Result<TokenPreview, String> {
+    use cdk::nuts::Token;
+    use std::str::FromStr;
+
+    // Sanitize token string
+    let token_string: String = token_string
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    if token_string.is_empty() {
+        return Err("Token string is empty".to_string());
+    }
+
+    // Validate token format
+    if !token_string.starts_with("cashuA") && !token_string.starts_with("cashuB") {
+        return Err(format!(
+            "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
+            token_string.chars().take(10).collect::<String>()
+        ));
+    }
+
+    // Parse token
+    let token = Token::from_str(&token_string)
+        .map_err(|e| format!("Failed to parse token: {}", e))?;
+
+    // Get MultiMintWallet
+    let multi_wallet = cashu_cdk_bridge::MULTI_WALLET
+        .read()
+        .as_ref()
+        .ok_or("Wallet not initialized")?
+        .clone();
+
+    // Use CDK's get_token_data for comprehensive token info
+    let token_data = multi_wallet
+        .get_token_data(&token)
+        .await
+        .map_err(|e| format!("Failed to get token data: {}", e))?;
+
+    // Calculate total value from proofs
+    let value: u64 = token_data.proofs.iter()
+        .map(|p| u64::from(p.amount))
+        .sum();
+
+    // Get unit from token (defaults to sat)
+    let unit = token.unit().map(|u| u.to_string()).unwrap_or_else(|| "sat".to_string());
+
+    Ok(TokenPreview {
+        mint_url: token_data.mint_url.to_string(),
+        value,
+        unit,
+        memo: token_data.memo,
+        redeem_fee: None, // Fee calculation requires keyset info, skip for now
+        proof_count: token_data.proofs.len(),
+    })
+}
 
 /// Receive ecash from a token string (default options - no DLEQ verification)
 #[allow(dead_code)]
@@ -230,6 +318,27 @@ pub async fn receive_tokens_with_options(
         "Using {} P2PK signing keys for receive",
         p2pk_signing_keys.len()
     );
+
+    // Debug: Log what pubkeys the token is locked to
+    if let Ok(keysets) = wallet.get_mint_keysets().await {
+        if let Ok(proofs) = token.proofs(&keysets) {
+            for proof in &proofs {
+                // Use TryFrom to convert secret to SpendingConditions (CDK 0.14.2 pattern)
+                use cdk::nuts::SpendingConditions;
+                let spending_conditions: Option<SpendingConditions> = (&proof.secret).try_into().ok();
+                if let Some(conditions) = spending_conditions {
+                    if let Some(pubkeys) = conditions.pubkeys() {
+                        for pubkey in pubkeys {
+                            log::info!(
+                                "Token P2PK locked to pubkey: {}",
+                                hex::encode(pubkey.x_only_public_key().serialize())
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Log HTLC preimages if provided (NUT-14)
     if !options.preimages.is_empty() {
