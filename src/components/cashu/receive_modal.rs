@@ -25,14 +25,16 @@ pub fn CashuReceiveModal(
         preview.set(None);
         error_message.set(None);
 
+        // Cancel any previous preview task (must be outside prefix check to handle
+        // the case where user clears input while a task is in-flight)
+        if let Some(task) = preview_task.read().as_ref() {
+            task.cancel();
+        }
+        preview_task.set(None);
+
         // Only preview if it looks like a cashu token
         let trimmed = value.trim().to_string();
         if trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB") {
-            // Cancel previous preview task to prevent race conditions
-            if let Some(task) = preview_task.read().as_ref() {
-                task.cancel();
-            }
-
             is_previewing.set(true);
             let token_snapshot = trimmed.clone();
 
@@ -58,6 +60,9 @@ pub fn CashuReceiveModal(
                 is_previewing.set(false);
             });
             preview_task.set(Some(new_task));
+        } else {
+            // Not a cashu token - ensure spinner is hidden
+            is_previewing.set(false);
         }
     };
 
