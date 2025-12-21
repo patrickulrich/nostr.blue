@@ -49,29 +49,35 @@ fn App() -> Element {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
                     log::info!("Nostr client initialized");
-                    // Restore signer from stored credentials
+                    // Restore signer from stored credentials (must run first to check auth state)
                     auth_store::restore_session_async().await;
 
-                    // Load MLS key package info (if authenticated)
-                    if let Some(pubkey) = auth_store::get_pubkey() {
-                        // Fetch user's key package relays (kind 10051)
-                        if let Err(e) = relay_store::fetch_key_package_relays(&pubkey).await {
-                            log::debug!("Failed to fetch key package relays: {}", e);
-                        }
-                        // Load existing key package info for rotation tracking
-                        if let Err(e) = mdk_store::load_key_package_info().await {
-                            log::debug!("Failed to load key package info: {}", e);
-                        }
-                    }
-
-                    // Load user's preferred reactions from Nostr (NIP-78)
-                    reactions_store::load_preferred_reactions().await;
-
-                    // Load user's sidebar preferences from Nostr (NIP-78)
-                    sidebar_store::load_sidebar_preferences().await;
-
-                    // Restore NWC connection from LocalStorage
-                    nwc_store::restore_connection().await;
+                    // Run all remaining operations in parallel for faster startup
+                    let pubkey = auth_store::get_pubkey();
+                    futures::join!(
+                        async {
+                            if let Some(pk) = &pubkey {
+                                // Fetch user's key package relays (kind 10051)
+                                if let Err(e) = relay_store::fetch_key_package_relays(pk).await {
+                                    log::debug!("Failed to fetch key package relays: {}", e);
+                                }
+                            }
+                        },
+                        async {
+                            if pubkey.is_some() {
+                                // Load existing key package info for rotation tracking
+                                if let Err(e) = mdk_store::load_key_package_info().await {
+                                    log::debug!("Failed to load key package info: {}", e);
+                                }
+                            }
+                        },
+                        // Load user's preferred reactions from Nostr (NIP-78)
+                        reactions_store::load_preferred_reactions(),
+                        // Load user's sidebar preferences from Nostr (NIP-78)
+                        sidebar_store::load_sidebar_preferences(),
+                        // Restore NWC connection from LocalStorage
+                        nwc_store::restore_connection(),
+                    );
                 }
                 Err(e) => {
                     log::error!("Failed to initialize client: {}", e);

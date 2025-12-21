@@ -81,7 +81,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
     let mint_url = mint_url.parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-    multi_wallet.add_mint(mint_url, None).await
+    multi_wallet.add_mint(mint_url).await
         .map_err(|e| format!("Failed to add mint: {}", e))?;
 
     // Sync state after adding mint

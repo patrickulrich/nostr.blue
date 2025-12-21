@@ -171,6 +171,36 @@ pub async fn validate_and_filter_proofs(
     Ok(result.valid_proofs)
 }
 
+// =============================================================================
+// Token Sanitization
+// =============================================================================
+
+/// Sanitize a Cashu token string by removing all whitespace
+/// and validating the format prefix.
+///
+/// Returns the sanitized token string if valid, or an error message if invalid.
+pub fn sanitize_and_validate_token(token_string: &str) -> Result<String, String> {
+    // Remove all whitespace (spaces, tabs, newlines)
+    let sanitized: String = token_string
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    if sanitized.is_empty() {
+        return Err("Token string is empty".to_string());
+    }
+
+    // Validate token format prefix
+    if !sanitized.starts_with("cashuA") && !sanitized.starts_with("cashuB") {
+        return Err(format!(
+            "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
+            sanitized.chars().take(10).collect::<String>()
+        ));
+    }
+
+    Ok(sanitized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +230,34 @@ mod tests {
         assert!(mint_matches("https://mint.example.com/", "https://mint.example.com"));
         assert!(mint_matches("mint.example.com", "https://mint.example.com"));
         assert!(!mint_matches("https://other.mint.com", "https://mint.example.com"));
+    }
+
+    #[test]
+    fn test_sanitize_and_validate_token() {
+        // Valid tokens
+        assert_eq!(
+            sanitize_and_validate_token("cashuAtoken123"),
+            Ok("cashuAtoken123".to_string())
+        );
+        assert_eq!(
+            sanitize_and_validate_token("cashuBtoken456"),
+            Ok("cashuBtoken456".to_string())
+        );
+
+        // Whitespace removal
+        assert_eq!(
+            sanitize_and_validate_token("  cashuA token 123  "),
+            Ok("cashuAtoken123".to_string())
+        );
+        assert_eq!(
+            sanitize_and_validate_token("cashuB\ntoken\t456"),
+            Ok("cashuBtoken456".to_string())
+        );
+
+        // Invalid tokens
+        assert!(sanitize_and_validate_token("").is_err());
+        assert!(sanitize_and_validate_token("   ").is_err());
+        assert!(sanitize_and_validate_token("invalidtoken").is_err());
+        assert!(sanitize_and_validate_token("cashu123").is_err()); // Wrong prefix
     }
 }

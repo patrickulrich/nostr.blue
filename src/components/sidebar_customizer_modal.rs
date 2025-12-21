@@ -230,24 +230,25 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
 
                         // Render active items with divider at slot count position
                         for (index, item) in local_active_items.read().iter().cloned().enumerate() {
-                            // Visual divider between main sidebar and More menu
-                            if index == *local_slot_count.read() {
-                                div {
-                                    key: "{index}-divider",
-                                    class: "w-full flex items-center gap-2 my-1",
-                                    div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
-                                    span {
-                                        class: "text-xs text-gray-500 dark:text-gray-400 px-2",
-                                        "More Menu"
-                                    }
-                                    div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
-                                }
-                            }
+                            Fragment {
+                                key: "{index}-{item:?}",
 
-                            // Sidebar item chip
-                            div {
-                                key: "{item:?}",
-                                id: "sidebar-item-{index}",
+                                // Visual divider between main sidebar and More menu
+                                if index == *local_slot_count.read() {
+                                    div {
+                                        class: "w-full flex items-center gap-2 my-1",
+                                        div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
+                                        span {
+                                            class: "text-xs text-gray-500 dark:text-gray-400 px-2",
+                                            "More Menu"
+                                        }
+                                        div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
+                                    }
+                                }
+
+                                // Sidebar item chip
+                                div {
+                                    id: "sidebar-item-{index}",
                                 class: "relative group",
                                 draggable: "true",
 
@@ -382,6 +383,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                         },
                                         "×"
                                     }
+                                }
                                 }
                             }
                         }
