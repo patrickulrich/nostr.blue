@@ -93,6 +93,9 @@ pub mod wiki_backlinks;
 // Citation components (NKBIP-03 Kinds 30-33)
 pub mod citation;
 
+// Shop/Marketplace components (NIP-99)
+pub mod shop;
+
 // Book reference picker (NKBIP-08)
 pub mod book_picker_modal;
 

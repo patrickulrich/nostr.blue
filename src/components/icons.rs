@@ -1127,3 +1127,131 @@ pub fn CommentIcon(props: IconProps) -> Element {
         }
     }
 }
+
+/// Shopping cart icon (for marketplace)
+#[component]
+pub fn ShoppingCartIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "9", cy: "21", r: "1" }
+            circle { cx: "20", cy: "21", r: "1" }
+            path { d: "M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" }
+        }
+    }
+}
+
+/// Shopping bag icon (for marketplace sidebar)
+#[component]
+pub fn ShoppingBagIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" }
+            path { d: "M3 6h18" }
+            path { d: "M16 10a4 4 0 0 1-8 0" }
+        }
+    }
+}
+
+#[component]
+pub fn FilterIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            polygon { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" }
+        }
+    }
+}
+
+#[component]
+pub fn EditIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }
+            path { d: "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" }
+        }
+    }
+}
+
+#[component]
+pub fn TrashIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            polyline { points: "3 6 5 6 21 6" }
+            path { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }
+            line { x1: "10", y1: "11", x2: "10", y2: "17" }
+            line { x1: "14", y1: "11", x2: "14", y2: "17" }
+        }
+    }
+}
+
+/// Nostr.blue mini logo - small "N" in blue circle for minicard previews
+#[component]
+pub fn NostrBlueMiniLogo(#[props(default = "w-3 h-3".to_string())] class: String) -> Element {
+    rsx! {
+        svg {
+            class: "{class} opacity-50 hover:opacity-100 cursor-pointer transition-opacity",
+            xmlns: "http://www.w3.org/2000/svg",
+            view_box: "0 0 100 100",
+            circle { cx: "50", cy: "50", r: "50", fill: "#3b82f6" }
+            text {
+                x: "50",
+                y: "70",
+                font_family: "Arial, sans-serif",
+                font_size: "60",
+                font_weight: "bold",
+                fill: "#fff",
+                text_anchor: "middle",
+                "N"
+            }
+        }
+    }
+}

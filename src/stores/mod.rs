@@ -30,6 +30,7 @@ pub mod nip96_store;  // NIP-96 HTTP File Storage
 pub mod pending_comments;  // Optimistic updates for comments
 pub mod code_store;  // NIP-34 Git hosting + NIP-C0 Code snippets
 pub mod p2p_store;  // NIP-69 P2P orders
+pub mod shop_store; // NIP-99 Marketplace (products, collections, orders)
 pub mod calendar_store;  // NIP-52 Calendar events + NIP-53 Live activities
 pub mod mdk_store;  // Marmot MLS E2EE messaging
 pub mod relay_store;  // NIP-65/NIP-17 relay type management

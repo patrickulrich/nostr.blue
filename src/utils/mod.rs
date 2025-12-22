@@ -24,6 +24,7 @@ pub mod nip73;
 pub mod podcast;
 pub mod nip34;
 pub mod nip69;
+pub mod nip99;  // NIP-99 Marketplace (products, collections, shipping, reviews)
 pub mod nip52;  // NIP-52 Calendar events
 pub mod nip53;  // NIP-53 Live activities
 pub mod nip54;  // NIP-54 Wiki (kind 30818)

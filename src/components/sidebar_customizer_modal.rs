@@ -9,6 +9,7 @@ use crate::stores::sidebar_store::{
 use crate::components::icons::{
     HomeIcon, CompassIcon, BookOpenIcon, BellIcon, MailIcon,
     BookmarkIcon, UserIcon, SettingsIcon, CameraIcon, VideoIcon, PinIcon,
+    ShoppingBagIcon,
 };
 
 #[derive(Props, Clone, PartialEq)]
@@ -913,6 +914,9 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 path { d: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" }
                 path { d: "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" }
             }
+        },
+        SidebarItem::Shop => rsx! {
+            ShoppingBagIcon { class: class.to_string() }
         },
     }
 }

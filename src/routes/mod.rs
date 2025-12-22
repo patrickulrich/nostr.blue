@@ -105,6 +105,19 @@ pub mod events;
 pub mod event_detail;
 pub mod calendar;
 pub mod calendar_event_new;
+
+// Shop/Marketplace (NIP-99)
+pub mod shop;
+pub mod shop_product;
+pub mod shop_product_new;
+pub mod shop_product_edit;
+pub mod shop_cart;
+pub mod shop_checkout;
+pub mod shop_orders;
+pub mod shop_merchant;
+pub mod shop_merchant_orders;
+pub mod shop_collection;
+pub mod shop_search;
 pub mod code_repositories;
 pub mod code_snippets;
 pub mod code_snippet_detail;
@@ -223,6 +236,17 @@ use events::Events;
 use event_detail::CalendarEventDetail;
 use calendar::Calendar;
 use calendar_event_new::CalendarEventNew;
+use shop::ShopHome;
+use shop_product::ShopProductDetail;
+use shop_product_new::ShopProductNew;
+use shop_product_edit::ShopProductEdit;
+use shop_cart::ShopCart;
+use shop_checkout::ShopCheckout;
+use shop_orders::ShopOrders;
+use shop_merchant::ShopMerchant;
+use shop_merchant_orders::ShopMerchantOrders;
+use shop_collection::ShopCollection;
+use shop_search::ShopSearch;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -483,6 +507,40 @@ pub enum Route {
         #[route("/calendar/new")]
         CalendarEventNew {},
 
+        // Shop/Marketplace (NIP-99)
+        #[route("/marketplace")]
+        ShopHome {},
+
+        #[route("/marketplace/product/:naddr")]
+        ShopProductDetail { naddr: String },
+
+        #[route("/marketplace/product/new")]
+        ShopProductNew {},
+
+        #[route("/marketplace/product/edit/:naddr")]
+        ShopProductEdit { naddr: String },
+
+        #[route("/marketplace/cart")]
+        ShopCart {},
+
+        #[route("/marketplace/checkout")]
+        ShopCheckout {},
+
+        #[route("/marketplace/orders")]
+        ShopOrders {},
+
+        #[route("/marketplace/merchant")]
+        ShopMerchant {},
+
+        #[route("/marketplace/merchant/orders")]
+        ShopMerchantOrders {},
+
+        #[route("/marketplace/collection/:naddr")]
+        ShopCollection { naddr: String },
+
+        #[route("/marketplace/search?:q")]
+        ShopSearch { q: String },
+
         #[route("/notifications")]
         Notifications {},
 
@@ -628,6 +686,12 @@ fn Layout() -> Element {
     );
     let is_publications_page = matches!(current_route,
         Route::PublicationsHome {} | Route::PublicationDetail { .. } | Route::PublicationNew {} | Route::PublicationSearch { .. }
+    );
+    let is_shop_page = matches!(current_route,
+        Route::ShopHome {} | Route::ShopProductDetail { .. } | Route::ShopProductNew {} |
+        Route::ShopProductEdit { .. } | Route::ShopCart {} | Route::ShopCheckout {} | Route::ShopOrders {} |
+        Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
+        Route::ShopSearch { .. }
     );
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
@@ -1071,7 +1135,7 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_creation_page {
+                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page {
                         "w-full flex-1 border-r border-border"
                     } else {
                         "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
@@ -1101,8 +1165,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Code, P2P, Communities, Events, Wiki, and Publications pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Code, P2P, Communities, Events, Wiki, Publications, and Shop pages
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1616,6 +1680,9 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 path { d: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" }
                 path { d: "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" }
             }
+        },
+        SidebarItem::Shop => rsx! {
+            crate::components::icons::ShoppingBagIcon { class: class.to_string() }
         },
     }
 }
