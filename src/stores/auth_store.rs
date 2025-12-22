@@ -491,6 +491,9 @@ pub async fn logout() {
     // Clear Cashu wallet state
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
 
+    // Clear shop store caches
+    crate::stores::shop_store::clear_caches();
+
     // Unset signer from client
     let _ = nostr_client::set_read_only().await;
 

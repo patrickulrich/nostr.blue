@@ -2,8 +2,11 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip99::Product;
-use crate::stores::shop_store::{search_products, CART_ITEMS};
+use crate::utils::nip99::{Product, ProductFormat};
+use crate::stores::shop_store::{
+    search_products, CART_ITEMS,
+    ShopFilterState, filter_products, sort_products, ProductSortBy,
+};
 use crate::components::shop::{ProductCard, ProductCardSkeleton};
 
 /// Product search page
@@ -21,6 +24,7 @@ pub fn ShopSearch(q: String) -> Element {
     let mut digital_only = use_signal(|| false);
     let mut physical_only = use_signal(|| false);
     let mut show_filters = use_signal(|| false);
+    let mut sort_by = use_signal(|| ProductSortBy::Newest);
 
     // Search on initial load if query provided
     let initial_query = q.clone();
@@ -38,47 +42,34 @@ pub fn ShopSearch(q: String) -> Element {
         }
     });
 
-    // Apply local filters to products
-    let filtered_products = {
-        let prods = products.read();
-        let min = *min_price.read();
-        let max = *max_price.read();
+    // Build filter state from UI inputs
+    let filter_state = {
         let cat = category_filter.read();
         let digital = *digital_only.read();
         let physical = *physical_only.read();
 
-        prods.iter().filter(|p| {
-            // Visibility filter - only show visible products (on-sale, pre-order)
-            if !p.is_visible() { return false; }
-
-            // Price filter (assuming sats)
-            let price_sats = if p.price.currency.eq_ignore_ascii_case("sats") || p.price.currency.eq_ignore_ascii_case("sat") {
-                p.price.amount as u64
+        ShopFilterState {
+            min_price_sats: *min_price.read(),
+            max_price_sats: *max_price.read(),
+            category: if cat.is_empty() { None } else { Some(cat.clone()) },
+            format: if digital {
+                Some(ProductFormat::Digital)
+            } else if physical {
+                Some(ProductFormat::Physical)
             } else {
-                0
-            };
+                None
+            },
+            ..Default::default()
+        }
+    };
 
-            if let Some(min_p) = min {
-                if price_sats < min_p { return false; }
-            }
-            if let Some(max_p) = max {
-                if price_sats > max_p { return false; }
-            }
-
-            // Category filter
-            if !cat.is_empty() {
-                let cat_lower = cat.to_lowercase();
-                if !p.categories.iter().any(|c| c.to_lowercase().contains(&cat_lower)) {
-                    return false;
-                }
-            }
-
-            // Product type filter
-            if digital && !p.format.is_digital() { return false; }
-            if physical && p.format.is_digital() { return false; }
-
-            true
-        }).cloned().collect::<Vec<_>>()
+    // Apply filters and sort using infrastructure
+    let filtered_products = {
+        let prods = products.read();
+        let sort = *sort_by.read();
+        let mut filtered = filter_products(&prods, &filter_state);
+        sort_products(&mut filtered, sort);
+        filtered
     };
 
     let cart_count = CART_ITEMS.read().len();
@@ -166,6 +157,32 @@ pub fn ShopSearch(q: String) -> Element {
                 // Filters panel
                 if *show_filters.read() {
                     div { class: "px-4 pb-4 border-t border-border pt-4 space-y-4",
+                        // Sort
+                        div {
+                            label { class: "block text-sm font-medium mb-2", "Sort By" }
+                            div { class: "flex gap-2 flex-wrap",
+                                for option in [
+                                    ProductSortBy::Newest,
+                                    ProductSortBy::Oldest,
+                                    ProductSortBy::PriceLow,
+                                    ProductSortBy::PriceHigh,
+                                    ProductSortBy::Rating,
+                                    ProductSortBy::Title,
+                                ] {
+                                    button {
+                                        key: "{option.label()}",
+                                        class: if *sort_by.read() == option {
+                                            "px-3 py-1 text-sm bg-blue-500 text-white rounded-full"
+                                        } else {
+                                            "px-3 py-1 text-sm bg-muted hover:bg-accent rounded-full transition"
+                                        },
+                                        onclick: move |_| sort_by.set(option),
+                                        "{option.label()}"
+                                    }
+                                }
+                            }
+                        }
+
                         // Price range
                         div {
                             label { class: "block text-sm font-medium mb-2", "Price Range (sats)" }

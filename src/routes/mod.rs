@@ -117,6 +117,7 @@ pub mod shop_orders;
 pub mod shop_merchant;
 pub mod shop_merchant_orders;
 pub mod shop_collection;
+pub mod shop_collection_new;
 pub mod shop_search;
 pub mod code_repositories;
 pub mod code_snippets;
@@ -246,6 +247,7 @@ use shop_orders::ShopOrders;
 use shop_merchant::ShopMerchant;
 use shop_merchant_orders::ShopMerchantOrders;
 use shop_collection::ShopCollection;
+use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
 
 /// App routes
@@ -538,6 +540,9 @@ pub enum Route {
         #[route("/marketplace/collection/:naddr")]
         ShopCollection { naddr: String },
 
+        #[route("/marketplace/collection/new")]
+        ShopCollectionNew {},
+
         #[route("/marketplace/search?:q")]
         ShopSearch { q: String },
 
@@ -691,7 +696,7 @@ fn Layout() -> Element {
         Route::ShopHome {} | Route::ShopProductDetail { .. } | Route::ShopProductNew {} |
         Route::ShopProductEdit { .. } | Route::ShopCart {} | Route::ShopCheckout {} | Route::ShopOrders {} |
         Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
-        Route::ShopSearch { .. }
+        Route::ShopCollectionNew {} | Route::ShopSearch { .. }
     );
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)

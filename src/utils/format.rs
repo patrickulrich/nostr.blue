@@ -184,3 +184,42 @@ pub fn format_relative_time(timestamp: u64) -> Option<String> {
 pub fn format_relative_time_or(timestamp: u64, default: &str) -> String {
     format_relative_time(timestamp).unwrap_or_else(|| default.to_string())
 }
+
+/// Truncates any identifier string to the first N characters safely
+/// Uses UTF-8 safe character-based slicing to avoid panic on multi-byte chars
+/// Returns the original string if it's already within the length limit
+///
+/// # Examples
+/// ```
+/// let short = truncate_id("abc123def456", 8);
+/// assert_eq!(short, "abc123de");
+///
+/// let already_short = truncate_id("abc", 8);
+/// assert_eq!(already_short, "abc");
+/// ```
+pub fn truncate_id(id: &str, len: usize) -> String {
+    if id.is_empty() || len == 0 {
+        return String::new();
+    }
+    // Fast path for ASCII (common case for hex IDs, order IDs, etc.)
+    if id.is_ascii() {
+        if id.len() <= len {
+            return id.to_string();
+        }
+        return id[..len].to_string();
+    }
+    // Safe path for non-ASCII to avoid panic on multi-byte UTF-8
+    id.chars().take(len).collect()
+}
+
+/// Generates a unique identifier using timestamp + random suffix
+/// Uses js_sys::Date::now() for WASM compatibility and adds random hex suffix
+/// to prevent collisions when multiple IDs are generated in the same millisecond
+///
+/// # Returns
+/// A hex string like "18abc123def456" (timestamp in hex + 4 random hex chars)
+pub fn generate_unique_id() -> String {
+    let timestamp = js_sys::Date::now() as u64;
+    let random_suffix = js_sys::Math::random() * 65536.0;
+    format!("{:x}{:04x}", timestamp, random_suffix as u16)
+}

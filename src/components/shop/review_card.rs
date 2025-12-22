@@ -27,12 +27,8 @@ pub fn ReviewCard(props: ReviewCardProps) -> Element {
             .unwrap_or_else(|| "Unknown".to_string())
     };
 
-    // Truncate reviewer pubkey for display
-    let reviewer_short = if review.reviewer_pubkey.len() > 8 {
-        format!("{}...", &review.reviewer_pubkey[..8])
-    } else {
-        review.reviewer_pubkey.clone()
-    };
+    // Truncate reviewer pubkey for display (safe UTF-8 handling)
+    let reviewer_short = crate::utils::format::truncate_pubkey(&review.reviewer_pubkey);
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",

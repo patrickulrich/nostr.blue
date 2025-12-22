@@ -303,12 +303,6 @@ impl OrderMessageType {
         }
     }
 
-    /// Convert to numeric type value (per market-spec protocol)
-    /// Used when sending messages with numeric type encoding
-    pub fn as_u8(&self) -> u8 {
-        *self as u8
-    }
-
     /// Parse from string representation
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -384,6 +378,23 @@ impl ProductPrice {
     pub fn is_subscription(&self) -> bool {
         self.frequency.is_some()
     }
+
+    /// Get price in satoshis
+    /// Returns the amount directly if currency is sats/sat
+    /// Converts from fiat using exchange rate if available
+    /// Returns None if conversion is not possible (no exchange rate)
+    pub fn to_sats(&self) -> Option<u64> {
+        if self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat") {
+            return Some(self.amount as u64);
+        }
+        // Try to convert from fiat using exchange rate
+        crate::services::btc_price::fiat_to_sats(self.amount, &self.currency)
+    }
+
+    /// Check if this price is in sats (no conversion needed)
+    pub fn is_sats(&self) -> bool {
+        self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat")
+    }
 }
 
 impl Default for ProductPrice {
@@ -402,18 +413,6 @@ pub struct ProductImage {
     pub url: String,
     pub dimensions: Option<String>,
     pub sort_order: Option<i32>,
-}
-
-impl ProductImage {
-    /// Create a simple product image with just a URL
-    /// Use when dimensions and sort order are not available
-    pub fn new(url: &str) -> Self {
-        Self {
-            url: url.to_string(),
-            dimensions: None,
-            sort_order: None,
-        }
-    }
 }
 
 /// Product specification (key-value pair)
@@ -481,6 +480,18 @@ pub struct Product {
     pub dimensions: Option<(String, String)>,
     /// Product condition (new, like_new, used, fair, refurbished)
     pub condition: Option<String>,
+
+    // Digital delivery fields
+    /// Download URL for digital products (sent after purchase)
+    pub download_url: Option<String>,
+    /// License key for software products
+    pub license_key: Option<String>,
+    /// Content hash for verification (sha256)
+    pub content_hash: Option<String>,
+    /// File size in bytes
+    pub file_size: Option<u64>,
+    /// MIME type (e.g., "application/pdf", "video/mp4")
+    pub file_type: Option<String>,
 }
 
 impl Product {
@@ -497,6 +508,41 @@ impl Product {
     /// Check if product requires shipping
     pub fn requires_shipping(&self) -> bool {
         self.format.is_physical()
+    }
+
+    /// Check if this is a digital product with delivery content
+    pub fn has_digital_delivery(&self) -> bool {
+        self.format == ProductFormat::Digital &&
+            (self.download_url.is_some() || self.license_key.is_some())
+    }
+
+    /// Get download info for display
+    pub fn get_download_info(&self) -> Option<String> {
+        if let Some(ref file_type) = self.file_type {
+            let size_str = self.file_size
+                .map(format_file_size)
+                .unwrap_or_default();
+            if size_str.is_empty() {
+                Some(file_type.clone())
+            } else {
+                Some(format!("{} - {}", file_type, size_str))
+            }
+        } else {
+            self.file_size.map(format_file_size)
+        }
+    }
+}
+
+/// Format file size in human-readable format
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 
@@ -701,6 +747,10 @@ pub struct ShopOrder {
 
     // Notes
     pub note: Option<String>,
+
+    // Digital delivery (populated when merchant sends delivery info)
+    pub download_url: Option<String>,
+    pub license_key: Option<String>,
 }
 
 // ============================================================================
@@ -784,6 +834,14 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
     // Optional: condition
     let condition = get_tag_value(event, "condition");
 
+    // Digital delivery fields
+    let download_url = get_tag_value(event, "download");
+    let license_key = get_tag_value(event, "license");
+    let content_hash = parse_hash_tag(event, "sha256");
+    let file_size = get_tag_value(event, "size").and_then(|s| s.parse().ok());
+    let file_type = get_tag_value(event, "type")
+        .or_else(|| get_tag_value(event, "mime"));
+
     Ok(Product {
         d_tag,
         event_id: event.id.to_hex(),
@@ -810,6 +868,11 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
         weight,
         dimensions,
         condition,
+        download_url,
+        license_key,
+        content_hash,
+        file_size,
+        file_type,
     })
 }
 
@@ -1134,6 +1197,19 @@ fn parse_dim_tag_named(event: &Event, tag_name: &str) -> Option<(String, String)
     let unit = slice.get(2)?.to_string();
 
     Some((dims, unit))
+}
+
+/// Parse hash tag: ["hash", algorithm, value] -> returns value if algorithm matches
+fn parse_hash_tag(event: &Event, algorithm: &str) -> Option<String> {
+    event
+        .tags
+        .iter()
+        .find(|t| {
+            let slice = t.as_slice();
+            slice.first().map(|s| s.as_str()) == Some("hash") &&
+                slice.get(1).map(|s| s.as_str()) == Some(algorithm)
+        })
+        .and_then(|t| t.as_slice().get(2).map(|s| s.to_string()))
 }
 
 /// Parse duration tag: ["duration", min, max, unit]

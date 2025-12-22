@@ -3,8 +3,8 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus};
-use crate::stores::shop_store::fetch_my_orders;
-use crate::components::shop::OrderStatusBadge;
+use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates};
+use crate::components::shop::{OrderStatusBadge, ReviewForm};
 
 /// Buyer orders page
 #[component]
@@ -14,11 +14,18 @@ pub fn ShopOrders() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_order = use_signal(|| None::<ShopOrder>);
 
-    // Fetch orders on mount
+    // Fetch orders and listen for updates on mount
     use_effect(move || {
         spawn(async move {
             loading.set(true);
             error.set(None);
+
+            // First, listen for any new order updates via NIP-17
+            if let Err(e) = listen_for_order_updates().await {
+                log::warn!("Failed to fetch order updates: {}", e);
+            }
+
+            // Then fetch all orders
             match fetch_my_orders().await {
                 Ok(o) => orders.set(o),
                 Err(e) => {
@@ -51,6 +58,29 @@ pub fn ShopOrders() -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "My Orders" }
+
+                    // Refresh button
+                    button {
+                        class: "p-2 hover:bg-accent rounded-full transition",
+                        disabled: *loading.read(),
+                        onclick: move |_| {
+                            spawn(async move {
+                                loading.set(true);
+                                // Listen for updates first
+                                let _ = listen_for_order_updates().await;
+                                // Then refresh orders
+                                if let Ok(o) = fetch_my_orders().await {
+                                    orders.set(o);
+                                }
+                                loading.set(false);
+                            });
+                        },
+                        if *loading.read() {
+                            div { class: "w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                        } else {
+                            crate::components::icons::RefreshIcon { class: "w-5 h-5" }
+                        }
+                    }
 
                     // Cart link
                     Link {
@@ -148,6 +178,8 @@ pub fn ShopOrders() -> Element {
                                     for (i, item) in order.items.iter().take(2).enumerate() {
                                         {
                                             // Parse product coordinate to get d-tag as product name
+                                            // Note: This heuristic expects NIP-99 format "30402:pubkey:d-tag"
+                                            // Edge cases with malformed coordinates will fallback to full string
                                             let parts: Vec<&str> = item.product_coordinate.split(':').collect();
                                             let product_name = if parts.len() >= 3 {
                                                 parts[2].to_string()
@@ -313,6 +345,57 @@ pub fn ShopOrders() -> Element {
                                 }
                             }
 
+                            // Digital delivery info
+                            if order.download_url.is_some() || order.license_key.is_some() {
+                                div { class: "border-t border-border pt-4",
+                                    h3 { class: "font-medium mb-3 flex items-center gap-2",
+                                        span { class: "text-lg", "📦" }
+                                        "Digital Delivery"
+                                    }
+                                    div { class: "space-y-3",
+                                        // Download URL
+                                        if let Some(ref url) = order.download_url {
+                                            div { class: "bg-muted/50 rounded-lg p-3",
+                                                p { class: "text-xs text-muted-foreground mb-1", "Download Link" }
+                                                a {
+                                                    href: "{url}",
+                                                    target: "_blank",
+                                                    rel: "noopener noreferrer",
+                                                    class: "text-blue-500 hover:underline text-sm break-all",
+                                                    "{url}"
+                                                }
+                                            }
+                                        }
+
+                                        // License key
+                                        if let Some(ref key) = order.license_key {
+                                            div { class: "bg-muted/50 rounded-lg p-3",
+                                                p { class: "text-xs text-muted-foreground mb-1", "License Key" }
+                                                div { class: "flex items-center gap-2",
+                                                    code { class: "text-sm font-mono bg-background px-2 py-1 rounded border border-border flex-1 break-all",
+                                                        "{key}"
+                                                    }
+                                                    button {
+                                                        class: "p-2 hover:bg-accent rounded transition flex-shrink-0",
+                                                        title: "Copy license key",
+                                                        onclick: {
+                                                            let key_clone = key.clone();
+                                                            move |_| {
+                                                                let key_to_copy = key_clone.clone();
+                                                                spawn(async move {
+                                                                    let _ = crate::utils::clipboard::copy_to_clipboard(&key_to_copy).await;
+                                                                });
+                                                            }
+                                                        },
+                                                        crate::components::icons::CopyIcon { class: "w-4 h-4" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // Merchant info
                             div { class: "border-t border-border pt-4",
                                 h3 { class: "font-medium mb-2", "Seller" }
@@ -339,9 +422,42 @@ pub fn ShopOrders() -> Element {
                                 }
                             }
 
-                            // Actions
+                            // Actions and Reviews for completed orders
                             if order.status == OrderStatus::Completed {
+                                // Review section - show form for each item
                                 div { class: "border-t border-border pt-4",
+                                    h3 { class: "font-medium mb-3 flex items-center gap-2",
+                                        span { class: "text-lg", "⭐" }
+                                        "Leave a Review"
+                                    }
+                                    p { class: "text-sm text-muted-foreground mb-4",
+                                        "Share your experience with these products"
+                                    }
+                                    div { class: "space-y-4",
+                                        for item in order.items.iter() {
+                                            {
+                                                let coord = item.product_coordinate.clone();
+                                                let parts: Vec<&str> = coord.split(':').collect();
+                                                let product_name = if parts.len() >= 3 {
+                                                    parts[2].to_string()
+                                                } else {
+                                                    coord.clone()
+                                                };
+                                                rsx! {
+                                                    div { class: "border border-border rounded-lg p-4",
+                                                        p { class: "font-medium text-sm mb-3", "{product_name}" }
+                                                        ReviewForm {
+                                                            product_coordinate: coord.clone()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Order again button
+                                div { class: "border-t border-border pt-4 mt-4",
                                     Link {
                                         to: Route::ShopHome {},
                                         class: "block w-full text-center py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",

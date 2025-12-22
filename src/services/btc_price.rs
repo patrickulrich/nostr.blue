@@ -68,3 +68,36 @@ pub fn get_btc_price(currency: &str) -> Option<f64> {
         .or_else(|| prices.get("USD"))  // Fallback to USD
         .copied()
 }
+
+/// Convert fiat amount to satoshis using cached BTC price
+/// Returns None if no price is available for the currency
+///
+/// # Arguments
+/// * `amount` - The fiat amount to convert
+/// * `currency` - The fiat currency code (e.g., "USD", "EUR")
+///
+/// # Examples
+/// ```
+/// // If BTC = $100,000 USD
+/// let sats = fiat_to_sats(100.0, "USD");
+/// // Returns Some(100_000) (100 USD = 0.001 BTC = 100,000 sats)
+/// ```
+pub fn fiat_to_sats(amount: f64, currency: &str) -> Option<u64> {
+    let btc_price = get_btc_price(currency)?;
+    if btc_price <= 0.0 {
+        return None;
+    }
+    // Convert: amount_fiat / btc_price_in_fiat * 100_000_000 sats_per_btc
+    let sats = (amount / btc_price) * 100_000_000.0;
+    Some(sats as u64)
+}
+
+/// Check if prices are stale (older than 5 minutes)
+pub fn prices_are_stale() -> bool {
+    let last_fetch = *PRICE_LAST_FETCH.read();
+    if last_fetch == 0 {
+        return true;
+    }
+    let now = js_sys::Date::now() as u64 / 1000;
+    now.saturating_sub(last_fetch) > 300 // 5 minutes
+}

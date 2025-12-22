@@ -2,6 +2,9 @@
 //!
 //! Components for displaying products, cart, checkout, and orders
 
+/// Default maximum quantity for items without explicit stock limit
+pub const DEFAULT_MAX_QUANTITY: u32 = 99;
+
 mod product_card;
 mod product_grid;
 mod price_display;

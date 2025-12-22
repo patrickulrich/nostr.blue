@@ -1,12 +1,16 @@
-//! Shop Cart - Shopping cart view
+//! Shop Cart - Shopping cart view with multi-merchant support
 
 use dioxus::prelude::*;
+use std::collections::HashMap;
 use crate::routes::Route;
 use crate::stores::shop_store::{
     CART_ITEMS, CART_TOTAL_SATS,
     remove_from_cart, update_cart_quantity, clear_cart, get_cart_count,
 };
+use crate::stores::profiles::{self, Profile};
 use crate::components::shop::{CartItemCard, CartSummary};
+use crate::utils::format::format_sats_with_separator;
+use crate::utils::nip99::CartItem;
 
 /// Shopping cart page
 #[component]
@@ -14,6 +18,36 @@ pub fn ShopCart() -> Element {
     let cart_items = CART_ITEMS.read();
     let total_sats = *CART_TOTAL_SATS.read();
     let item_count = get_cart_count();
+
+    // Group items by merchant pubkey
+    let merchant_groups: HashMap<String, Vec<CartItem>> = {
+        let mut groups: HashMap<String, Vec<CartItem>> = HashMap::new();
+        for item in cart_items.iter() {
+            groups.entry(item.product.pubkey.clone())
+                .or_default()
+                .push(item.clone());
+        }
+        groups
+    };
+
+    // State for merchant profiles
+    let mut merchant_profiles = use_signal(HashMap::<String, Profile>::new);
+
+    // Fetch merchant profiles
+    let pubkeys: Vec<String> = merchant_groups.keys().cloned().collect();
+    use_effect(move || {
+        let pks = pubkeys.clone();
+        spawn(async move {
+            for pk in pks {
+                if let Ok(profile) = profiles::fetch_profile(pk.clone()).await {
+                    merchant_profiles.write().insert(pk, profile);
+                }
+            }
+        });
+    });
+
+    // Check if multiple merchants (for display purposes)
+    let has_multiple_merchants = merchant_groups.len() > 1;
 
     rsx! {
         div { class: "min-h-screen",
@@ -59,19 +93,28 @@ pub fn ShopCart() -> Element {
                     }
                 } else {
                     div { class: "space-y-6",
-                        // Cart items
-                        div { class: "space-y-4",
-                            for item in cart_items.iter() {
-                                CartItemCard {
-                                    key: "{item.product.naddr}",
-                                    item: item.clone(),
-                                    on_quantity_change: move |(naddr, qty): (String, u32)| {
-                                        update_cart_quantity(&naddr, qty);
-                                    },
-                                    on_remove: move |naddr: String| {
-                                        remove_from_cart(&naddr);
+                        // Multi-merchant notice
+                        if has_multiple_merchants {
+                            div { class: "bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 text-sm",
+                                div { class: "flex items-center gap-2",
+                                    span { class: "text-blue-500", "ℹ️" }
+                                    span {
+                                        "Your cart contains items from "
+                                        strong { "{merchant_groups.len()} merchants" }
+                                        ". Separate orders will be placed with each."
                                     }
                                 }
+                            }
+                        }
+
+                        // Cart items grouped by merchant
+                        for (merchant_pk, items) in merchant_groups.iter() {
+                            MerchantCartGroup {
+                                key: "{merchant_pk}",
+                                merchant_pubkey: merchant_pk.clone(),
+                                items: items.clone(),
+                                profile: merchant_profiles.read().get(merchant_pk).cloned(),
+                                show_header: has_multiple_merchants
                             }
                         }
 
@@ -94,6 +137,115 @@ pub fn ShopCart() -> Element {
                                 to: Route::ShopHome {},
                                 class: "text-sm text-muted-foreground hover:text-foreground transition",
                                 "← Continue Shopping"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A group of cart items from a single merchant
+#[component]
+fn MerchantCartGroup(
+    merchant_pubkey: String,
+    items: Vec<CartItem>,
+    profile: Option<Profile>,
+    show_header: bool,
+) -> Element {
+    // Calculate subtotal for this merchant
+    let subtotal: u64 = items.iter()
+        .map(|item| {
+            let price = if item.product.price.currency.eq_ignore_ascii_case("sats") {
+                item.product.price.amount as u64
+            } else {
+                0
+            };
+            price * item.quantity as u64
+        })
+        .sum();
+
+    // Check if merchant has Lightning (lud16)
+    let has_lightning = profile.as_ref()
+        .and_then(|p| p.lud16.as_ref())
+        .is_some();
+
+    rsx! {
+        div { class: "bg-card border border-border rounded-lg overflow-hidden",
+            // Merchant header (only show if multiple merchants)
+            if show_header {
+                div { class: "bg-muted/50 p-4 border-b border-border",
+                    div { class: "flex items-center gap-3",
+                        // Avatar
+                        div { class: "w-10 h-10 rounded-full bg-muted overflow-hidden flex-shrink-0",
+                            if let Some(ref p) = profile {
+                                if let Some(ref picture) = p.picture {
+                                    img {
+                                        src: "{picture}",
+                                        class: "w-full h-full object-cover"
+                                    }
+                                } else {
+                                    div { class: "w-full h-full flex items-center justify-center text-xl",
+                                        "🏪"
+                                    }
+                                }
+                            } else {
+                                div { class: "w-full h-full flex items-center justify-center text-xl",
+                                    "🏪"
+                                }
+                            }
+                        }
+
+                        // Name
+                        div { class: "flex-1 min-w-0",
+                            p { class: "font-medium truncate",
+                                if let Some(ref p) = profile {
+                                    if let Some(ref name) = p.name {
+                                        "{name}"
+                                    } else {
+                                        "{&merchant_pubkey[..8]}..."
+                                    }
+                                } else {
+                                    "{&merchant_pubkey[..8]}..."
+                                }
+                            }
+                            p { class: "text-xs text-muted-foreground",
+                                {
+                                    let count = items.len();
+                                    if count > 1 { format!("{} items", count) } else { format!("{} item", count) }
+                                }
+                            }
+                        }
+
+                        // Subtotal
+                        div { class: "text-right",
+                            p { class: "font-medium text-amber-500",
+                                "⚡{format_sats_with_separator(subtotal)}"
+                            }
+                            // Lightning warning
+                            if !has_lightning {
+                                p { class: "text-xs text-amber-600 flex items-center gap-1",
+                                    "⚠️ No Lightning"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Items
+            div { class: "divide-y divide-border",
+                for item in items.iter() {
+                    div { class: "p-4",
+                        CartItemCard {
+                            key: "{item.product.naddr}",
+                            item: item.clone(),
+                            on_quantity_change: move |(naddr, qty): (String, u32)| {
+                                update_cart_quantity(&naddr, qty);
+                            },
+                            on_remove: move |naddr: String| {
+                                remove_from_cart(&naddr);
                             }
                         }
                     }

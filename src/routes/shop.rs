@@ -2,27 +2,13 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip99::Product;
-use crate::stores::shop_store::{fetch_products, get_cart_count};
+use crate::utils::nip99::{Product, ProductFormat};
+use crate::stores::shop_store::{
+    fetch_products, get_cart_count,
+    ShopFilterState, filter_products, sort_products, ProductSortBy,
+};
+use crate::stores::nostr_client::{fetch_contacts, get_user_pubkey};
 use crate::components::shop::{ProductCard, ProductCardSkeleton, CategorySelector};
-
-/// Sort options for products
-#[derive(Clone, Copy, PartialEq)]
-pub enum ProductSortBy {
-    Newest,
-    PriceLow,
-    PriceHigh,
-}
-
-impl ProductSortBy {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Newest => "Newest",
-            Self::PriceLow => "Price: Low to High",
-            Self::PriceHigh => "Price: High to Low",
-        }
-    }
-}
 
 /// Shop browse page - displays product grid with filters
 #[component]
@@ -40,6 +26,11 @@ pub fn ShopHome() -> Element {
     let mut physical_only = use_signal(|| false);
     let mut sort_by = use_signal(|| ProductSortBy::Newest);
 
+    // Web of Trust filter - only show products from followed users
+    let mut wot_enabled = use_signal(|| false);
+    let mut wot_contacts = use_signal(Vec::<String>::new);
+    let mut wot_loading = use_signal(|| false);
+
     // Fetch products on mount
     use_effect(move || {
         spawn(async move {
@@ -56,76 +47,47 @@ pub fn ShopHome() -> Element {
         });
     });
 
-    // Apply local filters to products
-    let filtered_products = {
-        let mut prods = products.read().clone();
-        let min = *min_price.read();
-        let max = *max_price.read();
+    // Build filter state from UI inputs
+    let filter_state = {
         let cats = category_filter.read();
         let digital = *digital_only.read();
         let physical = *physical_only.read();
+
+        ShopFilterState {
+            min_price_sats: *min_price.read(),
+            max_price_sats: *max_price.read(),
+            category: if cats.is_empty() { None } else { cats.first().cloned() },
+            format: if digital {
+                Some(ProductFormat::Digital)
+            } else if physical {
+                Some(ProductFormat::Physical)
+            } else {
+                None
+            },
+            ..Default::default()
+        }
+    };
+
+    // Apply filters and sort using infrastructure
+    let filtered_products = {
+        let prods = products.read();
         let sort = *sort_by.read();
 
-        prods.retain(|p| {
-            // Visibility filter - only show visible products (on-sale, pre-order)
-            if !p.is_visible() { return false; }
+        let mut filtered = filter_products(&prods, &filter_state);
 
-            // Price filter (assuming sats)
-            let price_sats = if p.price.currency.eq_ignore_ascii_case("sats") || p.price.currency.eq_ignore_ascii_case("sat") {
-                p.price.amount as u64
-            } else {
-                0
-            };
-
-            if let Some(min_p) = min {
-                if price_sats < min_p { return false; }
-            }
-            if let Some(max_p) = max {
-                if price_sats > max_p { return false; }
-            }
-
-            // Category filter - match any selected category
-            if !cats.is_empty() {
-                let has_match = cats.iter().any(|selected_cat| {
-                    let cat_lower = selected_cat.to_lowercase();
-                    p.categories.iter().any(|c| c.to_lowercase().contains(&cat_lower))
-                });
-                if !has_match { return false; }
-            }
-
-            // Product type filter
-            if digital && !p.format.is_digital() { return false; }
-            if physical && p.format.is_digital() { return false; }
-
-            true
-        });
-
-        // Sort
-        match sort {
-            ProductSortBy::Newest => {
-                prods.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            }
-            ProductSortBy::PriceLow => {
-                prods.sort_by(|a, b| {
-                    let price_a = if a.price.currency.eq_ignore_ascii_case("sats") { a.price.amount as u64 } else { 0 };
-                    let price_b = if b.price.currency.eq_ignore_ascii_case("sats") { b.price.amount as u64 } else { 0 };
-                    price_a.cmp(&price_b)
-                });
-            }
-            ProductSortBy::PriceHigh => {
-                prods.sort_by(|a, b| {
-                    let price_a = if a.price.currency.eq_ignore_ascii_case("sats") { a.price.amount as u64 } else { 0 };
-                    let price_b = if b.price.currency.eq_ignore_ascii_case("sats") { b.price.amount as u64 } else { 0 };
-                    price_b.cmp(&price_a)
-                });
+        // Apply Web of Trust filter if enabled
+        if *wot_enabled.read() {
+            let contacts = wot_contacts.read();
+            if !contacts.is_empty() {
+                filtered.retain(|p| contacts.contains(&p.pubkey));
             }
         }
 
-        prods
+        sort_products(&mut filtered, sort);
+        filtered
     };
 
-    let has_filters = min_price.read().is_some() || max_price.read().is_some()
-        || !category_filter.read().is_empty() || *digital_only.read() || *physical_only.read();
+    let has_filters = !filter_state.is_empty() || *wot_enabled.read();
     let cart_count = get_cart_count();
 
     rsx! {
@@ -191,7 +153,14 @@ pub fn ShopHome() -> Element {
                         div {
                             label { class: "block text-sm font-medium mb-2", "Sort By" }
                             div { class: "flex gap-2 flex-wrap",
-                                for option in [ProductSortBy::Newest, ProductSortBy::PriceLow, ProductSortBy::PriceHigh] {
+                                for option in [
+                                    ProductSortBy::Newest,
+                                    ProductSortBy::Oldest,
+                                    ProductSortBy::PriceLow,
+                                    ProductSortBy::PriceHigh,
+                                    ProductSortBy::Rating,
+                                    ProductSortBy::Title,
+                                ] {
                                     button {
                                         key: "{option.label()}",
                                         class: if *sort_by.read() == option {
@@ -273,6 +242,74 @@ pub fn ShopHome() -> Element {
                             }
                         }
 
+                        // Web of Trust filter
+                        div {
+                            label { class: "flex items-center justify-between cursor-pointer p-2 rounded-lg hover:bg-accent transition",
+                                div { class: "flex items-center gap-2",
+                                    // People icon
+                                    svg {
+                                        class: "w-5 h-5 text-blue-500",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        fill: "none",
+                                        view_box: "0 0 24 24",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+                                        }
+                                    }
+                                    div {
+                                        span { class: "text-sm font-medium", "Web of Trust" }
+                                        p { class: "text-xs text-muted-foreground", "Only show products from people you follow" }
+                                    }
+                                }
+                                // Toggle switch
+                                div { class: "relative",
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "sr-only peer",
+                                        checked: *wot_enabled.read(),
+                                        onchange: move |e| {
+                                            let enabled = e.checked();
+                                            wot_enabled.set(enabled);
+
+                                            if enabled {
+                                                // Fetch contacts when enabling WoT filter
+                                                wot_loading.set(true);
+                                                spawn(async move {
+                                                    if let Ok(pubkey) = get_user_pubkey().await {
+                                                        match fetch_contacts(pubkey.to_hex()).await {
+                                                            Ok(contacts) => {
+                                                                log::info!("WoT filter: loaded {} contacts", contacts.len());
+                                                                wot_contacts.set(contacts);
+                                                            }
+                                                            Err(e) => {
+                                                                log::error!("Failed to fetch contacts for WoT: {}", e);
+                                                            }
+                                                        }
+                                                    }
+                                                    wot_loading.set(false);
+                                                });
+                                            }
+                                        }
+                                    }
+                                    div { class: "w-11 h-6 bg-muted rounded-full peer peer-checked:bg-blue-500 transition-colors" }
+                                    div { class: "absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" }
+                                }
+                            }
+                            if *wot_loading.read() {
+                                p { class: "text-xs text-muted-foreground mt-1 ml-7", "Loading your follow list..." }
+                            } else if *wot_enabled.read() && wot_contacts.read().is_empty() {
+                                p { class: "text-xs text-yellow-600 dark:text-yellow-500 mt-1 ml-7", "You're not following anyone yet" }
+                            } else if *wot_enabled.read() {
+                                p { class: "text-xs text-muted-foreground mt-1 ml-7",
+                                    "Filtering by {wot_contacts.read().len()} followed users"
+                                }
+                            }
+                        }
+
                         // Clear filters button
                         if has_filters {
                             button {
@@ -283,6 +320,7 @@ pub fn ShopHome() -> Element {
                                     category_filter.set(Vec::new());
                                     digital_only.set(false);
                                     physical_only.set(false);
+                                    wot_enabled.set(false);
                                 },
                                 "Clear all filters"
                             }

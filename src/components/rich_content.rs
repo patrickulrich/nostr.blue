@@ -557,7 +557,7 @@ fn EventMentionRenderer(mention: String) -> Element {
                         {render_comment_minicard(&event, metadata_clone.as_ref())}
                     }
                 }
-                30 | 31 | 32 | 33 => {
+                30..=33 => {
                     // Citations (NKBIP-03)
                     if let Ok(citation) = parse_citation(&event) {
                         rsx! {
@@ -1926,6 +1926,10 @@ fn render_review_minicard(review: &ProductReview, _naddr: &str) -> Element {
     let rating = review.thumb_rating;
     let rating_display = if rating >= 0.5 { "👍" } else { "👎" };
 
+    // Pre-format float values for display (rsx! doesn't support format specifiers)
+    let quality_str = review.quality_rating.map(|q| format!("{:.1}", q));
+    let value_str = review.value_rating.map(|v| format!("{:.1}", v));
+
     rsx! {
         div {
             class: "relative my-2",
@@ -1964,11 +1968,11 @@ fn render_review_minicard(review: &ProductReview, _naddr: &str) -> Element {
                             p { class: "text-sm text-muted-foreground line-clamp-4", "{content}" }
                         }
                         // Show additional ratings if available
-                        if let Some(quality) = review.quality_rating {
-                            p { class: "text-xs text-muted-foreground mt-1", "Quality: {quality:.1}/5" }
+                        if let Some(ref q) = quality_str {
+                            p { class: "text-xs text-muted-foreground mt-1", "Quality: {q}/5" }
                         }
-                        if let Some(value) = review.value_rating {
-                            p { class: "text-xs text-muted-foreground", "Value: {value:.1}/5" }
+                        if let Some(ref v) = value_str {
+                            p { class: "text-xs text-muted-foreground", "Value: {v}/5" }
                         }
                     }
                 }
@@ -1980,7 +1984,7 @@ fn render_review_minicard(review: &ProductReview, _naddr: &str) -> Element {
 /// Render a Git Issue minicard with HoverCard preview
 fn render_issue_minicard(issue: &Issue) -> Element {
     let title = issue.display_title();
-    let status = issue.status.clone();
+    let status = issue.status;
     let status_class = match status {
         crate::utils::nip34::IssueStatus::Open => "bg-green-500/20 text-green-500",
         crate::utils::nip34::IssueStatus::Closed => "bg-red-500/20 text-red-500",
@@ -2060,7 +2064,7 @@ fn render_pr_minicard(pr: &PullRequest) -> Element {
     } else {
         format!("Patch: {}", pr.commit.as_deref().unwrap_or("").chars().take(8).collect::<String>())
     };
-    let status = pr.status.clone();
+    let status = pr.status;
     let status_class = match status {
         crate::utils::nip34::IssueStatus::Open => "bg-green-500/20 text-green-500",
         crate::utils::nip34::IssueStatus::Closed => "bg-red-500/20 text-red-500",

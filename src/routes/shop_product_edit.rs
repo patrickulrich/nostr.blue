@@ -287,10 +287,11 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         // Submit button
                         {
                             let d_tag = prod.d_tag.clone();
+                            let price_valid = price.read().parse::<f64>().map(|p| p > 0.0).unwrap_or(false);
                             rsx! {
                                 button {
                                     class: "w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition disabled:opacity-50",
-                                    disabled: *updating.read() || title.read().trim().is_empty() || price.read().trim().is_empty(),
+                                    disabled: *updating.read() || title.read().trim().is_empty() || !price_valid,
                                     onclick: move |_| {
                                         updating.set(true);
                                         update_error.set(None);

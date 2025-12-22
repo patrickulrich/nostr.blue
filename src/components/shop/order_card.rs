@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use crate::utils::nip99::ShopOrder;
-use crate::utils::format::format_sats_with_separator;
+use crate::utils::format::{format_sats_with_separator, truncate_id};
 use super::OrderStatusBadge;
 
 #[derive(Props, Clone, PartialEq)]
@@ -20,12 +20,8 @@ pub fn OrderCard(props: OrderCardProps) -> Element {
     let total_formatted = format_sats_with_separator(order.amount_sats);
     let item_count = order.items.len();
 
-    // Truncate order ID for display
-    let order_id_short = if order.order_id.len() > 8 {
-        order.order_id[..8].to_string()
-    } else {
-        order.order_id.clone()
-    };
+    // Truncate order ID for display (safe UTF-8 handling)
+    let order_id_short = truncate_id(&order.order_id, 8);
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4 hover:border-ring transition",
@@ -68,12 +64,12 @@ pub fn OrderCard(props: OrderCardProps) -> Element {
                 }
             }
 
-            // Counterparty (truncated pubkey)
+            // Counterparty (truncated pubkey - safe UTF-8 handling)
             {
                 let counterparty = if props.is_buyer {
-                    format!("Seller: {}...", &order.merchant_pubkey[..8.min(order.merchant_pubkey.len())])
+                    format!("Seller: {}...", truncate_id(&order.merchant_pubkey, 8))
                 } else {
-                    format!("Buyer: {}...", &order.buyer_pubkey[..8.min(order.buyer_pubkey.len())])
+                    format!("Buyer: {}...", truncate_id(&order.buyer_pubkey, 8))
                 };
                 rsx! {
                     p { class: "text-sm text-muted-foreground",

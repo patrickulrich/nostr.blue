@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
+use crate::utils::format::truncate_pubkey;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MerchantCardProps {
@@ -19,8 +20,9 @@ pub struct MerchantCardProps {
 /// Merchant info card
 #[component]
 pub fn MerchantCard(props: MerchantCardProps) -> Element {
+    // Use safe truncation to avoid panic on short/non-ASCII strings
     let display_name = props.name.clone()
-        .unwrap_or_else(|| format!("{}...", &props.pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&props.pubkey));
 
     rsx! {
         Link {

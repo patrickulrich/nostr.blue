@@ -3,8 +3,9 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus};
-use crate::stores::shop_store::{fetch_seller_orders, update_order_status};
+use crate::stores::shop_store::{fetch_seller_orders, update_order_status, listen_for_order_updates};
 use crate::components::shop::OrderStatusBadge;
+use crate::utils::format::truncate_id;
 
 /// Merchant orders page
 #[component]
@@ -20,11 +21,18 @@ pub fn ShopMerchantOrders() -> Element {
     let mut tracking_number = use_signal(String::new);
     let mut carrier = use_signal(String::new);
 
-    // Fetch orders on mount
+    // Fetch orders and listen for updates on mount
     use_effect(move || {
         spawn(async move {
             loading.set(true);
             error.set(None);
+
+            // First, listen for any new order messages via NIP-17
+            if let Err(e) = listen_for_order_updates().await {
+                log::warn!("Failed to fetch order updates: {}", e);
+            }
+
+            // Then fetch all seller orders
             match fetch_seller_orders().await {
                 Ok(o) => orders.set(o),
                 Err(e) => {
@@ -67,6 +75,29 @@ pub fn ShopMerchantOrders() -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "My Shop" }
+
+                    // Refresh button
+                    button {
+                        class: "p-2 hover:bg-accent rounded-full transition",
+                        disabled: *loading.read(),
+                        onclick: move |_| {
+                            spawn(async move {
+                                loading.set(true);
+                                // Listen for updates first
+                                let _ = listen_for_order_updates().await;
+                                // Then refresh orders
+                                if let Ok(o) = fetch_seller_orders().await {
+                                    orders.set(o);
+                                }
+                                loading.set(false);
+                            });
+                        },
+                        if *loading.read() {
+                            div { class: "w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                        } else {
+                            crate::components::icons::RefreshIcon { class: "w-5 h-5" }
+                        }
+                    }
                 }
 
                 // Tab navigation
@@ -175,7 +206,7 @@ pub fn ShopMerchantOrders() -> Element {
                                 div { class: "flex items-start justify-between mb-3",
                                     {
                                         let order_id_short = if order.order_id.len() > 8 {
-                                            format!("{}...", &order.order_id[..8])
+                                            format!("{}...", truncate_id(&order.order_id, 8))
                                         } else {
                                             order.order_id.clone()
                                         };
@@ -208,7 +239,7 @@ pub fn ShopMerchantOrders() -> Element {
                                     }
                                     {
                                         let buyer_short = if order.buyer_pubkey.len() > 8 {
-                                            format!("{}...", &order.buyer_pubkey[..8])
+                                            format!("{}...", truncate_id(&order.buyer_pubkey, 8))
                                         } else {
                                             order.buyer_pubkey.clone()
                                         };
@@ -419,34 +450,45 @@ pub fn ShopMerchantOrders() -> Element {
                                             }
                                         }
                                     }
-                                    if order.status != OrderStatus::Completed && order.status != OrderStatus::Cancelled {
-                                        button {
-                                            class: "px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-50",
-                                            disabled: *updating.read(),
-                                            onclick: {
-                                                let order_id = order.order_id.clone();
-                                                move |_| {
-                                                    updating.set(true);
-                                                    let oid = order_id.clone();
-                                                    spawn(async move {
-                                                        if let Err(e) = update_order_status(
-                                                            &oid,
-                                                            OrderStatus::Completed,
-                                                            Some(ShippingStatus::Delivered),
-                                                            None,
-                                                            None,
-                                                        ).await {
-                                                            log::error!("Failed to update order: {}", e);
+                                    // Complete Order: Only available after shipping for physical orders,
+                                    // or after processing for digital orders
+                                    {
+                                        let has_shipping = order.shipping_address.is_some();
+                                        let is_shipped = order.shipping_status == Some(ShippingStatus::Shipped);
+                                        let can_complete = order.status == OrderStatus::Processing
+                                            && (!has_shipping || is_shipped);
+
+                                        rsx! {
+                                            if can_complete {
+                                                button {
+                                                    class: "px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-50",
+                                                    disabled: *updating.read(),
+                                                    onclick: {
+                                                        let order_id = order.order_id.clone();
+                                                        move |_| {
+                                                            updating.set(true);
+                                                            let oid = order_id.clone();
+                                                            spawn(async move {
+                                                                if let Err(e) = update_order_status(
+                                                                    &oid,
+                                                                    OrderStatus::Completed,
+                                                                    Some(ShippingStatus::Delivered),
+                                                                    None,
+                                                                    None,
+                                                                ).await {
+                                                                    log::error!("Failed to update order: {}", e);
+                                                                }
+                                                                if let Ok(o) = fetch_seller_orders().await {
+                                                                    orders.set(o);
+                                                                }
+                                                                updating.set(false);
+                                                                selected_order.set(None);
+                                                            });
                                                         }
-                                                        if let Ok(o) = fetch_seller_orders().await {
-                                                            orders.set(o);
-                                                        }
-                                                        updating.set(false);
-                                                        selected_order.set(None);
-                                                    });
+                                                    },
+                                                    if has_shipping { "Mark Delivered" } else { "Complete Order" }
                                                 }
-                                            },
-                                            "Complete Order"
+                                            }
                                         }
                                     }
                                 }

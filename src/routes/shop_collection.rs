@@ -5,6 +5,7 @@ use crate::utils::nip99::{Product, ProductCollection};
 use crate::stores::shop_store::{fetch_collection_by_naddr, fetch_collection_products};
 use crate::components::shop::{ProductCard, ProductCardSkeleton};
 use crate::routes::Route;
+use crate::utils::format::truncate_pubkey;
 
 /// Collection detail page
 #[component]
@@ -13,6 +14,7 @@ pub fn ShopCollection(naddr: String) -> Element {
     let mut products = use_signal(Vec::<Product>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut products_error = use_signal(|| None::<String>);
 
     // Fetch collection on mount
     let naddr_clone = naddr.clone();
@@ -21,13 +23,17 @@ pub fn ShopCollection(naddr: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
+            products_error.set(None);
 
             match fetch_collection_by_naddr(&naddr).await {
                 Ok(Some(c)) => {
                     // Fetch products in collection
                     match fetch_collection_products(&c).await {
                         Ok(p) => products.set(p),
-                        Err(e) => log::error!("Failed to fetch collection products: {}", e),
+                        Err(e) => {
+                            log::error!("Failed to fetch collection products: {}", e);
+                            products_error.set(Some(e));
+                        }
                     }
                     collection.set(Some(c));
                 }
@@ -106,14 +112,7 @@ pub fn ShopCollection(naddr: String) -> Element {
                             // Metadata
                             div { class: "flex items-center gap-4 text-sm text-muted-foreground",
                                 span { "{products.read().len()} products" }
-                                {
-                                    let pubkey_short = if col.pubkey.len() > 8 {
-                                        format!("by {}...", &col.pubkey[..8])
-                                    } else {
-                                        format!("by {}", &col.pubkey)
-                                    };
-                                    rsx! { span { "{pubkey_short}" } }
-                                }
+                                span { "by {truncate_pubkey(&col.pubkey)}" }
                             }
                         }
 
@@ -128,8 +127,15 @@ pub fn ShopCollection(naddr: String) -> Element {
                             }
                         }
 
+                        // Products fetch error
+                        if let Some(err) = products_error.read().as_ref() {
+                            div { class: "bg-destructive/10 border border-destructive/50 text-destructive rounded-lg p-4 mb-4",
+                                "Failed to load products: {err}"
+                            }
+                        }
+
                         // Products grid
-                        if products.read().is_empty() {
+                        if products.read().is_empty() && products_error.read().is_none() {
                             div { class: "text-center py-12 bg-muted/50 rounded-lg",
                                 div { class: "text-6xl mb-4", "📦" }
                                 h2 { class: "text-lg font-semibold mb-2", "No products yet" }
@@ -137,7 +143,7 @@ pub fn ShopCollection(naddr: String) -> Element {
                                     "This collection doesn't have any products."
                                 }
                             }
-                        } else {
+                        } else if !products.read().is_empty() {
                             div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
                                 for product in products.read().iter() {
                                     ProductCard {

@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use crate::utils::nip99::{Product, ProductReview, ShippingOption};
 use crate::stores::shop_store::{fetch_product_by_naddr, add_to_cart, fetch_product_reviews, fetch_shipping_options, CART_ITEMS};
-use crate::components::shop::{QuantitySelector, ImageCarousel, ReviewCard, ReviewForm, MerchantCard, ConditionBadge};
+use crate::components::shop::{QuantitySelector, ImageCarousel, ReviewCard, MerchantCard, ConditionBadge};
 use crate::routes::Route;
 
 /// Product detail page
@@ -21,10 +21,8 @@ pub fn ShopProductDetail(naddr: String) -> Element {
 
     // Fetch product on mount
     let naddr_clone = naddr.clone();
-    let naddr_for_reviews = naddr.clone();
     use_effect(move || {
         let naddr = naddr_clone.clone();
-        let _naddr_reviews = naddr_for_reviews.clone();
         spawn(async move {
             loading.set(true);
             error.set(None);
@@ -55,14 +53,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
         });
     });
 
-    // Check if already in cart
-    let cart_items = CART_ITEMS.read();
-    let in_cart = cart_items.iter().any(|item| item.product.naddr == naddr);
-    let in_cart_qty = cart_items.iter()
-        .find(|item| item.product.naddr == naddr)
-        .map(|item| item.quantity)
-        .unwrap_or(0);
-
     rsx! {
         div { class: "min-h-screen",
             // Header
@@ -79,13 +69,19 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                     h1 { class: "text-xl font-bold flex-1", "Product" }
 
                     // Cart link with count
-                    Link {
-                        to: Route::ShopCart {},
-                        class: "relative p-2 hover:bg-accent rounded-full transition",
-                        crate::components::icons::ShoppingCartIcon { class: "w-5 h-5" }
-                        if !cart_items.is_empty() {
-                            span { class: "absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center",
-                                "{cart_items.len()}"
+                    {
+                        let cart_items = CART_ITEMS.read();
+                        let cart_count = cart_items.len();
+                        rsx! {
+                            Link {
+                                to: Route::ShopCart {},
+                                class: "relative p-2 hover:bg-accent rounded-full transition",
+                                crate::components::icons::ShoppingCartIcon { class: "w-5 h-5" }
+                                if cart_count > 0 {
+                                    span { class: "absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center",
+                                        "{cart_count}"
+                                    }
+                                }
                             }
                         }
                     }
@@ -139,7 +135,7 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                             // Price
                             div { class: "flex items-baseline gap-3",
                                 {
-                                    let price_sats = if prod.price.currency.eq_ignore_ascii_case("sats") || prod.price.currency.eq_ignore_ascii_case("sat") {
+                                    let price_sats = if prod.price.is_sats() {
                                         prod.price.amount as u64
                                     } else {
                                         0
@@ -201,10 +197,18 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                         }
                                     }
 
-                                    // Add to cart button
+                                    // Add to cart button (read cart inside render for reactivity)
                                     {
                                         let prod_clone = prod.clone();
                                         let qty = *quantity.read();
+                                        // Read cart state inside render to stay fresh
+                                        let cart_items = CART_ITEMS.read();
+                                        let in_cart = cart_items.iter().any(|item| item.product.naddr == prod.naddr);
+                                        let in_cart_qty = cart_items.iter()
+                                            .find(|item| item.product.naddr == prod.naddr)
+                                            .map(|item| item.quantity)
+                                            .unwrap_or(0);
+
                                         rsx! {
                                             button {
                                                 class: "w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition flex items-center justify-center gap-2",
@@ -219,13 +223,13 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                                     "Add to Cart"
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    // In cart indicator
-                                    if in_cart {
-                                        p { class: "text-sm text-center text-muted-foreground",
-                                            "You have {in_cart_qty} in your cart"
+                                            // In cart indicator
+                                            if in_cart {
+                                                p { class: "text-sm text-center text-muted-foreground",
+                                                    "You have {in_cart_qty} in your cart"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -300,6 +304,24 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                 }
                             }
 
+                            // Digital delivery info (for digital products)
+                            if prod.has_digital_delivery() {
+                                div { class: "pt-4 border-t border-border",
+                                    div { class: "bg-blue-500/10 border border-blue-500/30 rounded-lg p-4",
+                                        div { class: "flex items-center gap-2 mb-2",
+                                            span { class: "text-lg", "📥" }
+                                            h3 { class: "font-medium", "Digital Download" }
+                                        }
+                                        if let Some(info) = prod.get_download_info() {
+                                            p { class: "text-sm text-muted-foreground", "{info}" }
+                                        }
+                                        p { class: "text-xs text-muted-foreground mt-2",
+                                            "You'll receive download access after purchase"
+                                        }
+                                    }
+                                }
+                            }
+
                             // Categories/Tags
                             if !prod.categories.is_empty() {
                                 div { class: "pt-4 border-t border-border",
@@ -317,8 +339,23 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                             // Merchant info
                             div { class: "pt-4 border-t border-border",
                                 h2 { class: "text-lg font-semibold mb-3", "Seller" }
-                                MerchantCard {
-                                    pubkey: prod.pubkey.clone()
+                                {
+                                    // Calculate average rating and review count from loaded reviews
+                                    let reviews_list = reviews.read();
+                                    let review_count = reviews_list.len();
+                                    let avg_rating = if review_count > 0 {
+                                        let total: f64 = reviews_list.iter().map(|r| r.as_stars()).sum();
+                                        Some((total / review_count as f64) as f32)
+                                    } else {
+                                        None
+                                    };
+                                    rsx! {
+                                        MerchantCard {
+                                            pubkey: prod.pubkey.clone(),
+                                            review_count: Some(review_count),
+                                            avg_rating: avg_rating
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -332,31 +369,15 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                             }
                         }
 
-                        // Review form
-                        ReviewForm {
-                            product_coordinate: prod.coordinate.clone(),
-                            on_submitted: move |_| {
-                                // Refresh reviews after submission
-                                let coord = prod.coordinate.clone();
-                                spawn(async move {
-                                    reviews_loading.set(true);
-                                    if let Ok(r) = fetch_product_reviews(&coord).await {
-                                        reviews.set(r);
-                                    }
-                                    reviews_loading.set(false);
-                                });
-                            }
-                        }
-
                         // Reviews list
-                        div { class: "mt-6 space-y-4",
+                        div { class: "space-y-4",
                             if *reviews_loading.read() {
                                 div { class: "text-center py-8",
                                     p { class: "text-muted-foreground", "Loading reviews..." }
                                 }
                             } else if reviews.read().is_empty() {
                                 div { class: "text-center py-8 bg-muted/50 rounded-lg",
-                                    p { class: "text-muted-foreground", "No reviews yet. Be the first!" }
+                                    p { class: "text-muted-foreground", "No reviews yet" }
                                 }
                             } else {
                                 for review in reviews.read().iter().cloned() {

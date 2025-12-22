@@ -21,7 +21,7 @@ pub fn CartItemCard(props: CartItemCardProps) -> Element {
     let image_url = product.images.first().map(|img| img.url.clone());
 
     // Convert price to sats for display
-    let price_sats = if product.price.currency.eq_ignore_ascii_case("sats") || product.price.currency.eq_ignore_ascii_case("sat") {
+    let price_sats = if product.price.is_sats() {
         product.price.amount as u64
     } else {
         0
@@ -52,7 +52,7 @@ pub fn CartItemCard(props: CartItemCardProps) -> Element {
                     "{product.title}"
                 }
 
-                // Unit price
+                // Unit price and stock warning
                 div { class: "text-sm text-muted-foreground mb-2",
                     if price_sats > 0 {
                         PriceDisplay { price_sats }
@@ -60,13 +60,23 @@ pub fn CartItemCard(props: CartItemCardProps) -> Element {
                         span { "{product.price.display()}" }
                     }
                     " each"
+                    // Stock warning
+                    if let Some(stock) = product.stock {
+                        if stock == 0 {
+                            span { class: "ml-2 text-destructive font-medium", "• Out of stock" }
+                        } else if item.quantity >= stock {
+                            span { class: "ml-2 text-yellow-600 dark:text-yellow-500 font-medium", "• Max available" }
+                        } else if stock <= 5 {
+                            span { class: "ml-2 text-yellow-600 dark:text-yellow-500", "• {stock} left" }
+                        }
+                    }
                 }
 
                 // Quantity selector
                 div { class: "flex items-center justify-between",
                     QuantitySelector {
                         quantity: item.quantity,
-                        max: product.stock.unwrap_or(99),
+                        max: product.stock.unwrap_or(crate::components::shop::DEFAULT_MAX_QUANTITY),
                         on_change: {
                             let naddr = product.naddr.clone();
                             let on_change = props.on_quantity_change;

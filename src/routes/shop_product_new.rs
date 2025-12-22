@@ -61,6 +61,7 @@ pub fn ShopProductNew() -> Element {
                                     title.set(String::new());
                                     description.set(String::new());
                                     price.set(String::new());
+                                    currency.set("sats".to_string());
                                     image_url.set(String::new());
                                     is_digital.set(false);
                                     stock.set(String::new());
@@ -241,60 +242,64 @@ pub fn ShopProductNew() -> Element {
                             }
                         }
 
-                        // Submit button
-                        button {
-                            class: "w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition disabled:opacity-50",
-                            disabled: *publishing.read() || title.read().trim().is_empty() || price.read().trim().is_empty(),
-                            onclick: move |_| {
-                                publishing.set(true);
-                                error.set(None);
+                        // Action buttons
+                        div { class: "flex gap-3",
+                            // Publish button
+                            button {
+                                class: "flex-1 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition disabled:opacity-50",
+                                disabled: *publishing.read() || title.read().trim().is_empty() || price.read().trim().is_empty(),
+                                onclick: move |_| {
+                                    publishing.set(true);
+                                    error.set(None);
 
-                                let is_digital_val = *is_digital.read();
-                                let form_data = ProductFormData {
-                                    title: title.read().clone(),
-                                    description: description.read().clone(),
-                                    price_amount: price.read().parse().unwrap_or(0.0),
-                                    price_currency: currency.read().clone(),
-                                    images: if image_url.read().trim().is_empty() {
-                                        vec![]
-                                    } else {
-                                        vec![image_url.read().clone()]
-                                    },
-                                    categories: categories.read()
-                                        .split(',')
-                                        .map(|s| s.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect(),
-                                    is_digital: is_digital_val,
-                                    stock: stock.read().parse().ok(),
-                                    specs: vec![],
-                                    shipping_regions: shipping_regions.read()
-                                        .split(',')
-                                        .map(|s| s.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect(),
-                                    condition: if is_digital_val { None } else { Some(condition.read().clone()) },
-                                };
+                                    let is_digital_val = *is_digital.read();
+                                    let form_data = ProductFormData {
+                                        title: title.read().clone(),
+                                        description: description.read().clone(),
+                                        price_amount: price.read().parse().unwrap_or(0.0),
+                                        price_currency: currency.read().clone(),
+                                        images: if image_url.read().trim().is_empty() {
+                                            vec![]
+                                        } else {
+                                            vec![image_url.read().clone()]
+                                        },
+                                        categories: categories.read()
+                                            .split(',')
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty())
+                                            .collect(),
+                                        is_digital: is_digital_val,
+                                        stock: stock.read().parse().ok(),
+                                        specs: vec![],
+                                        shipping_regions: shipping_regions.read()
+                                            .split(',')
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty())
+                                            .collect(),
+                                        condition: if is_digital_val { None } else { Some(condition.read().clone()) },
+                                    };
 
-                                spawn(async move {
-                                    match publish_product(form_data).await {
-                                        Ok(d_tag) => {
-                                            log::info!("Product published: {}", d_tag);
-                                            success.set(true);
+                                    spawn(async move {
+                                        match publish_product(form_data).await {
+                                            Ok(d_tag) => {
+                                                log::info!("Product published: {}", d_tag);
+                                                success.set(true);
+                                            }
+                                            Err(e) => {
+                                                error.set(Some(e));
+                                            }
                                         }
-                                        Err(e) => {
-                                            error.set(Some(e));
-                                        }
-                                    }
-                                    publishing.set(false);
-                                });
-                            },
-                            if *publishing.read() {
-                                "Publishing..."
-                            } else {
-                                "Publish Product"
+                                        publishing.set(false);
+                                    });
+                                },
+                                if *publishing.read() {
+                                    "Publishing..."
+                                } else {
+                                    "Publish Product"
+                                }
                             }
                         }
+
                     }
                 }
             }

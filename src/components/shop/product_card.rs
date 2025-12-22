@@ -22,7 +22,7 @@ pub fn ProductCard(props: ProductCardProps) -> Element {
     let image_url = product.images.first().map(|img| img.url.clone());
 
     // Convert price to sats for display (assuming price is already in sats for now)
-    let price_sats = if product.price.currency.eq_ignore_ascii_case("sats") || product.price.currency.eq_ignore_ascii_case("sat") {
+    let price_sats = if product.price.is_sats() {
         product.price.amount as u64
     } else {
         // For non-sats currencies, we'd need conversion - for now show 0
@@ -54,6 +54,15 @@ pub fn ProductCard(props: ProductCardProps) -> Element {
                     div { class: "absolute inset-0 bg-black/50 flex items-center justify-center",
                         span { class: "bg-destructive text-destructive-foreground px-3 py-1 rounded-full text-sm font-medium",
                             "Out of Stock"
+                        }
+                    }
+                } else if let Some(stock) = product.stock {
+                    if stock > 0 && stock <= 5 {
+                        // Low stock warning badge
+                        div { class: "absolute top-2 right-2",
+                            span { class: "bg-yellow-500 text-yellow-950 px-2 py-0.5 rounded text-xs font-medium",
+                                "Only {stock} left"
+                            }
                         }
                     }
                 }

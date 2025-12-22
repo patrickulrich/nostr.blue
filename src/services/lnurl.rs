@@ -204,3 +204,69 @@ pub async fn prepare_zap(
 
     Ok((pay_info, amount_msats))
 }
+
+/// Fetch LNURL pay information without requiring Nostr zap support
+/// Used for simple Lightning payments (not zaps)
+pub async fn fetch_lnurl_pay_info_simple(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
+    let response = reqwest::get(url).await
+        .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+
+    let pay_info: LnUrlPayResponse = response.json().await
+        .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
+
+    // Don't require allows_nostr for simple payments
+    Ok(pay_info)
+}
+
+/// Request a simple invoice (non-zap) from LNURL callback
+/// Used for merchant payments where we don't need a zap receipt
+pub async fn request_simple_invoice(
+    callback_url: &str,
+    amount_msats: u64,
+    comment: Option<&str>,
+) -> Result<LnUrlInvoiceResponse, LnUrlError> {
+    // Build the request URL with query parameters
+    let mut url = format!("{}?amount={}", callback_url, amount_msats);
+
+    // Add optional comment
+    if let Some(c) = comment {
+        url.push_str(&format!("&comment={}", urlencoding::encode(c)));
+    }
+
+    // Make the request
+    let response = reqwest::get(&url).await
+        .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
+
+    let invoice: LnUrlInvoiceResponse = response.json().await
+        .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
+
+    Ok(invoice)
+}
+
+/// Get a Lightning invoice from a lud16 address for a specific amount
+/// Returns the bolt11 invoice string
+pub async fn get_invoice_from_lud16(lud16: &str, amount_sats: u64, comment: Option<&str>) -> Result<String, LnUrlError> {
+    // Validate amount
+    if amount_sats == 0 {
+        return Err(LnUrlError::InvalidAmount);
+    }
+
+    // Convert lud16 to LNURL endpoint
+    let url = lud16_to_url(lud16)?;
+
+    // Fetch pay info
+    let pay_info = fetch_lnurl_pay_info_simple(&url).await?;
+
+    // Convert sats to millisats
+    let amount_msats = amount_sats * 1000;
+
+    // Validate amount is within bounds
+    if amount_msats < pay_info.min_sendable || amount_msats > pay_info.max_sendable {
+        return Err(LnUrlError::InvalidAmount);
+    }
+
+    // Request invoice
+    let invoice_response = request_simple_invoice(&pay_info.callback, amount_msats, comment).await?;
+
+    Ok(invoice_response.pr)
+}
