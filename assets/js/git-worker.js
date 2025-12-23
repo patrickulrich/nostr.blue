@@ -52,7 +52,8 @@ async function resolveRefWithFallback(dir, ref) {
 const NEEDS_PROXY = ['github.com', 'gitlab.com', 'codeberg.org', 'gitea.com'];
 
 // Known GRASP servers (have CORS enabled per spec)
-const GRASP_SERVERS = [
+// Initialized with fallback servers, dynamically updated via updateGraspServers message
+let graspServers = new Set([
   'relay.ngit.dev',
   'gitnostr.com',
   'ngit.danconwaydev.com',
@@ -60,14 +61,19 @@ const GRASP_SERVERS = [
   'git-01.uid.ovh',
   'git-02.uid.ovh',
   'git.jb55.com',
-];
+]);
 
 /**
  * Check if a URL needs CORS proxy
  */
 function needsProxy(url) {
-  // GRASP servers don't need proxy
-  if (GRASP_SERVERS.some((s) => url.includes(s))) return false;
+  try {
+    const parsed = new URL(url);
+    // GRASP servers don't need proxy
+    if (graspServers.has(parsed.hostname)) return false;
+  } catch {
+    // Invalid URL, use proxy as fallback
+  }
   // Known blocked domains need proxy
   return NEEDS_PROXY.some((s) => url.includes(s));
 }
@@ -292,7 +298,17 @@ const methods = {
 
 // RPC message handler
 self.onmessage = async (e) => {
-  const { id, method, params } = e.data;
+  const data = e.data;
+
+  // Handle GRASP server updates (non-RPC message)
+  if (data.type === 'updateGraspServers' && Array.isArray(data.servers)) {
+    data.servers.forEach(server => graspServers.add(server));
+    console.log('[GitWorker] Updated GRASP servers:', [...graspServers]);
+    return;
+  }
+
+  // Standard RPC handling
+  const { id, method, params } = data;
 
   try {
     if (!methods[method]) {

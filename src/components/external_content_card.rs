@@ -209,6 +209,7 @@ fn PaperCard(props: PaperCardProps) -> Element {
             a {
                 href: "{doi_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-full hover:bg-blue-500/20 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -223,6 +224,7 @@ fn PaperCard(props: PaperCardProps) -> Element {
         a {
             href: "{doi_url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
@@ -461,11 +463,16 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
     let mempool_endpoint = settings_store::get_mempool_endpoint();
     let mempool_url = format!("{}/address/{}", mempool_endpoint.trim_end_matches("/api"), address);
 
-    // Truncated address for display
-    let short_addr = if address.len() > 20 {
-        format!("{}...{}", &address[0..10], &address[address.len() - 8..])
-    } else {
-        address.clone()
+    // Truncated address for display (UTF-8 safe)
+    let short_addr = {
+        let chars: Vec<char> = address.chars().collect();
+        if chars.len() > 20 {
+            let prefix: String = chars[..10].iter().collect();
+            let suffix: String = chars[chars.len() - 8..].iter().collect();
+            format!("{}...{}", prefix, suffix)
+        } else {
+            address.clone()
+        }
     };
 
     // Fetch data when expanded
@@ -649,11 +656,15 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
         format!("https://podcastindex.org/podcast/{}", props.guid)
     };
 
-    // Short GUID for display
-    let short_guid = if props.guid.len() > 20 {
-        format!("{}...", &props.guid[0..17])
-    } else {
-        props.guid.clone()
+    // Short GUID for display (UTF-8 safe)
+    let short_guid = {
+        let chars: Vec<char> = props.guid.chars().collect();
+        if chars.len() > 20 {
+            let prefix: String = chars[..17].iter().collect();
+            format!("{}...", prefix)
+        } else {
+            props.guid.clone()
+        }
     };
 
     let label = if props.is_episode { "Episode" } else { "Podcast" };

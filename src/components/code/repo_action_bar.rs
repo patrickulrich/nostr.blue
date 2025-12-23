@@ -121,7 +121,7 @@ pub fn RepoActionBar(
                             if currently_starred {
                                 star_count.set(current.saturating_sub(1));
                             } else {
-                                star_count.set(current + 1);
+                                star_count.set(current.saturating_add(1));
                             }
                         }
                         Err(e) => {

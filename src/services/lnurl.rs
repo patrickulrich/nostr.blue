@@ -16,6 +16,9 @@ pub struct LnUrlPayResponse {
     #[serde(rename = "nostrPubkey")]
     pub nostr_pubkey: Option<String>,
     pub tag: String,
+    /// Maximum comment length allowed by the endpoint (LUD-12)
+    #[serde(default)]
+    pub comment_allowed: Option<u64>,
 }
 
 /// LNURL Invoice Response

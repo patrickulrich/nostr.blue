@@ -480,7 +480,8 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
         let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         let month = date.get_month() as usize;
         let day = date.get_date();
-        format!("{} {}", month_names[month], day)
+        let month_str = month_names.get(month).unwrap_or(&"");
+        format!("{} {}", month_str, day)
     }
 }
 

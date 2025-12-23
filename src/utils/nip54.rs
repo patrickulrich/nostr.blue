@@ -142,11 +142,6 @@ pub fn extract_wikilinks(content: &str) -> Vec<WikiLink> {
         .collect()
 }
 
-/// Check if content contains any wikilinks
-pub fn has_wikilinks(content: &str) -> bool {
-    WIKILINK_REGEX.is_match(content)
-}
-
 /// Convert wikilinks to nostr tags for publishing
 ///
 /// Creates tags in the format: ["w", "<normalized-target>"]
@@ -522,13 +517,6 @@ mod tests {
         assert_eq!(links[0].display, None);
         assert_eq!(links[1].target, "nostr-protocol");
         assert_eq!(links[1].display, Some("Nostr".to_string()));
-    }
-
-    #[test]
-    fn test_has_wikilinks() {
-        assert!(has_wikilinks("This has [[wikilink]]"));
-        assert!(!has_wikilinks("This has no wikilinks"));
-        assert!(has_wikilinks("Multiple [[one]] and [[two]]"));
     }
 
     #[test]

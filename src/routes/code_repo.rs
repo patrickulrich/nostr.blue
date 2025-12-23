@@ -4,10 +4,10 @@
 //! Styled to match gittr's layout-client.tsx pattern.
 
 use dioxus::prelude::*;
-use crate::components::{icons, CodeIssueRow, CodePullRow};
+use crate::components::icons;
 use crate::components::code::{RepoHeader, RepoActionBar, RepoTabNav, ReadmeViewer};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, fetch_repo_issues, fetch_repo_prs, fetch_readme};
+use crate::services::git_hosting::{fetch_repository, fetch_readme};
 use crate::utils::nip34::Repository;
 use crate::utils::format_relative_time_or;
 use crate::stores::profiles::PROFILE_CACHE;
@@ -16,7 +16,6 @@ use crate::stores::nostr_client;
 /// Repository detail page component
 #[component]
 pub fn CodeRepo(naddr: String) -> Element {
-    let active_tab = use_signal(|| RepoTab::Overview);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
 
@@ -90,7 +89,6 @@ pub fn CodeRepo(naddr: String) -> Element {
                             RepoContent {
                                 repo: r.clone(),
                                 naddr: naddr_for_render.clone(),
-                                active_tab: active_tab,
                             }
                         },
                         Some(Err(e)) => rsx! {
@@ -106,15 +104,8 @@ pub fn CodeRepo(naddr: String) -> Element {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum RepoTab {
-    Overview,
-    Issues,
-    PullRequests,
-}
-
 #[component]
-fn RepoContent(repo: Repository, naddr: String, active_tab: Signal<RepoTab>) -> Element {
+fn RepoContent(repo: Repository, naddr: String) -> Element {
     rsx! {
         div {
             class: "space-y-4",
@@ -138,65 +129,18 @@ fn RepoContent(repo: Repository, naddr: String, active_tab: Signal<RepoTab>) -> 
                 }
             }
 
-            // Tab navigation
+            // Tab navigation (routes handle Issues/PRs, this is always Overview)
             RepoTabNav {
-                repo: repo.clone(),
                 naddr: naddr.clone(),
-                active_tab: match *active_tab.read() {
-                    RepoTab::Overview => "overview".to_string(),
-                    RepoTab::Issues => "issues".to_string(),
-                    RepoTab::PullRequests => "pulls".to_string(),
-                },
+                active_tab: "overview".to_string(),
                 issue_count: Some(repo.issue_count),
                 pr_count: Some(repo.pr_count),
             }
 
-            // Tab content
+            // Overview content
             div {
                 class: "pt-4",
-                match *active_tab.read() {
-                    RepoTab::Overview => rsx! {
-                        OverviewTab { repo: repo.clone(), naddr: naddr.clone() }
-                    },
-                    RepoTab::Issues => rsx! {
-                        IssuesTab { naddr: naddr.clone() }
-                    },
-                    RepoTab::PullRequests => rsx! {
-                        PullRequestsTab { naddr: naddr.clone() }
-                    },
-                }
-            }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-struct TabButtonProps {
-    label: &'static str,
-    #[props(default = 0)]
-    count: u32,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-}
-
-#[component]
-fn TabButton(props: TabButtonProps) -> Element {
-    let class = if props.active {
-        "px-4 py-2 text-sm font-medium text-primary border-b-2 border-primary flex items-center gap-2"
-    } else {
-        "px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground border-b-2 border-transparent flex items-center gap-2"
-    };
-
-    rsx! {
-        button {
-            class: "{class}",
-            onclick: move |e| props.onclick.call(e),
-            "{props.label}"
-            if props.count > 0 {
-                span {
-                    class: "px-1.5 py-0.5 text-xs rounded-full bg-muted",
-                    "{props.count}"
-                }
+                OverviewTab { repo: repo.clone(), naddr: naddr.clone() }
             }
         }
     }
@@ -358,221 +302,6 @@ fn MaintainerBadge(pubkey: String) -> Element {
             to: Route::Profile { pubkey: pubkey.clone() },
             class: "px-3 py-1 bg-muted rounded-full text-sm hover:bg-accent transition",
             "{name}"
-        }
-    }
-}
-
-#[component]
-fn IssuesTab(naddr: String) -> Element {
-    let naddr_clone = naddr.clone();
-    let issues = use_resource(move || {
-        let n = naddr_clone.clone();
-        async move {
-            fetch_repo_issues(&n).await
-        }
-    });
-
-    rsx! {
-        div {
-            class: "space-y-4",
-
-            // Create issue button
-            div {
-                class: "flex justify-end",
-                Link {
-                    to: Route::CodeIssueNew { naddr: naddr.clone() },
-                    class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
-                    svg {
-                        class: "w-4 h-4",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        line { x1: "12", y1: "5", x2: "12", y2: "19" }
-                        line { x1: "5", y1: "12", x2: "19", y2: "12" }
-                    }
-                    "New Issue"
-                }
-            }
-
-            // Issues list
-            match &*issues.read() {
-                Some(Ok(list)) if !list.is_empty() => rsx! {
-                    div {
-                        class: "border border-border rounded-lg divide-y divide-border",
-                        for issue in list.iter() {
-                            CodeIssueRow {
-                                key: "{issue.event_id}",
-                                issue: issue.clone()
-                            }
-                        }
-                    }
-                },
-                Some(Ok(_)) => rsx! {
-                    EmptyIssues {}
-                },
-                Some(Err(e)) => rsx! {
-                    div {
-                        class: "text-center py-8 text-destructive",
-                        "Failed to load issues: {e}"
-                    }
-                },
-                None => rsx! {
-                    div {
-                        class: "space-y-2",
-                        for i in 0..3 {
-                            div {
-                                key: "{i}",
-                                class: "p-3 border border-border rounded animate-pulse",
-                                div { class: "h-4 bg-muted rounded w-2/3 mb-2" }
-                                div { class: "h-3 bg-muted rounded w-1/3" }
-                            }
-                        }
-                    }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn EmptyIssues() -> Element {
-    rsx! {
-        div {
-            class: "text-center py-12",
-            div {
-                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                svg {
-                    class: "w-8 h-8 text-muted-foreground",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    circle { cx: "12", cy: "12", r: "10" }
-                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
-                }
-            }
-            h3 { class: "font-semibold text-lg mb-2", "No Issues" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open issues." }
-        }
-    }
-}
-
-#[component]
-fn PullRequestsTab(naddr: String) -> Element {
-    let naddr_clone = naddr.clone();
-    let prs = use_resource(move || {
-        let n = naddr_clone.clone();
-        async move {
-            fetch_repo_prs(&n).await
-        }
-    });
-
-    rsx! {
-        div {
-            class: "space-y-4",
-
-            // Create PR button
-            div {
-                class: "flex justify-end",
-                Link {
-                    to: Route::CodePullNew { naddr: naddr.clone() },
-                    class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
-                    svg {
-                        class: "w-4 h-4",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        line { x1: "12", y1: "5", x2: "12", y2: "19" }
-                        line { x1: "5", y1: "12", x2: "19", y2: "12" }
-                    }
-                    "New PR"
-                }
-            }
-
-            // PRs list
-            match &*prs.read() {
-                Some(Ok(list)) if !list.is_empty() => rsx! {
-                    div {
-                        class: "border border-border rounded-lg divide-y divide-border",
-                        for pr in list.iter() {
-                            CodePullRow {
-                                key: "{pr.event_id}",
-                                pr: pr.clone()
-                            }
-                        }
-                    }
-                },
-                Some(Ok(_)) => rsx! {
-                    EmptyPRs {}
-                },
-                Some(Err(e)) => rsx! {
-                    div {
-                        class: "text-center py-8 text-destructive",
-                        "Failed to load PRs: {e}"
-                    }
-                },
-                None => rsx! {
-                    div {
-                        class: "space-y-2",
-                        for i in 0..3 {
-                            div {
-                                key: "{i}",
-                                class: "p-3 border border-border rounded animate-pulse",
-                                div { class: "h-4 bg-muted rounded w-2/3 mb-2" }
-                                div { class: "h-3 bg-muted rounded w-1/3" }
-                            }
-                        }
-                    }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn EmptyPRs() -> Element {
-    rsx! {
-        div {
-            class: "text-center py-12",
-            div {
-                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                svg {
-                    class: "w-8 h-8 text-muted-foreground",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    circle { cx: "18", cy: "18", r: "3" }
-                    circle { cx: "6", cy: "6", r: "3" }
-                    path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
-                    line { x1: "6", y1: "9", x2: "6", y2: "21" }
-                }
-            }
-            h3 { class: "font-semibold text-lg mb-2", "No Pull Requests" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open pull requests." }
         }
     }
 }

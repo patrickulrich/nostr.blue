@@ -6,7 +6,6 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip34::Repository;
 
 /// Tab configuration
 #[derive(Clone, PartialEq)]
@@ -21,7 +20,6 @@ struct TabConfig {
 /// Repository tab navigation with responsive overflow
 #[component]
 pub fn RepoTabNav(
-    repo: Repository,
     naddr: String,
     active_tab: String,
     #[props(default = None)] issue_count: Option<u32>,
@@ -79,15 +77,19 @@ pub fn RepoTabNav(
         div {
             class: "flex items-center gap-1 border-b border-border",
 
-            // Primary tabs (always visible)
+            // Primary tabs (overflow tabs hidden on mobile, shown in dropdown instead)
             div {
                 class: "flex items-center",
 
-                for tab in tabs.iter() {
-                    TabItem {
+                for (index, tab) in tabs.iter().enumerate() {
+                    // Hide overflow tabs (index >= 3) on mobile - they appear in dropdown menu
+                    div {
                         key: "{tab.id}",
-                        config: tab.clone(),
-                        is_active: active_tab == tab.id,
+                        class: if index >= 3 { "hidden md:block" } else { "" },
+                        TabItem {
+                            config: tab.clone(),
+                            is_active: active_tab == tab.id,
+                        }
                     }
                 }
             }

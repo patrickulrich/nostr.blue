@@ -11,7 +11,7 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
 use crate::services::aggregation::InteractionCounts;
-use crate::utils::format::format_sats_human;
+use crate::utils::format::{format_sats_human, format_relative_time_or};
 use crate::hooks::{use_reaction, ReactionState};
 use crate::components::{RichContent, ZapModal, CommunityPostComposer};
 use crate::routes::Route;
@@ -59,7 +59,7 @@ pub fn CommunityPostCard(
     let author_pubkey = post.pubkey.clone();
 
     // Format timestamp
-    let time_ago = format_time_ago(post.created_at);
+    let time_ago = format_relative_time_or(post.created_at, "just now");
 
     // Calculate indentation class (capped at MAX_VISUAL_DEPTH)
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
@@ -820,26 +820,3 @@ pub fn CommunityPostCardSkeleton() -> Element {
     }
 }
 
-/// Format timestamp to relative time
-fn format_time_ago(timestamp: u64) -> String {
-    // Use js_sys::Date for WASM compatibility (std::time::SystemTime doesn't work in WASM)
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        let mins = diff / 60;
-        format!("{}m ago", mins)
-    } else if diff < 86400 {
-        let hours = diff / 3600;
-        format!("{}h ago", hours)
-    } else if diff < 604800 {
-        let days = diff / 86400;
-        format!("{}d ago", days)
-    } else {
-        let weeks = diff / 604800;
-        format!("{}w ago", weeks)
-    }
-}

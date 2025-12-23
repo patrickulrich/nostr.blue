@@ -93,6 +93,11 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         return;
                     }
 
+                    // Revoke previous object URL to prevent memory leak
+                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref() {
+                        let _ = web_sys::Url::revoke_object_url(old_url);
+                    }
+
                     // Create Object URL for efficient preview (avoids base64 memory overhead)
                     let preview_url = create_object_url(&data, &mime_type);
 

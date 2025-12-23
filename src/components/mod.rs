@@ -253,7 +253,7 @@ pub use discover_recipe_card::{DiscoverRecipeCard, DiscoverRecipeCardSkeleton};
 
 // Pinboard component exports
 pub use pin_board_card::{PinBoardMosaicGrid, HashtagBadge};
-pub use pin_board_item_card::{PinCard, PinCardSkeleton, PinGrid};
+pub use pin_board_item_card::{PinCardSkeleton, PinGrid};
 pub use board_slideover::BoardSlideover;
 
 // Publication component exports (NKBIP-01)

@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::utils::format::format_relative_time_or;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -581,7 +582,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 
                     p {
                         class: "text-xs text-muted-foreground",
-                        "{format_time_ago(event.created_at.as_secs())}"
+                        {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
             }
@@ -729,19 +730,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-// Format timestamp as "X ago"
-fn format_time_ago(timestamp: u64) -> String {
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", diff / 60),
-        3600..=86399 => format!("{}h ago", diff / 3600),
-        86400..=604799 => format!("{}d ago", diff / 86400),
-        _ => format!("{}w ago", diff / 604800),
-    }
-}
 
 // Load featured landscape videos (3 landscape videos from Following, fallback to Global)
 async fn load_featured_content() -> Result<Vec<Event>, String> {

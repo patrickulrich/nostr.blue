@@ -715,9 +715,20 @@ async fn generate_v4v_invoice(
     let separator = if callback_url.contains('?') { "&" } else { "?" };
     callback_url.push_str(&format!("{}amount={}", separator, amount_msats));
 
-    // Add comment (most LNURL endpoints allow comments up to ~500 chars)
-    if !full_comment.is_empty() && full_comment.len() <= 500 {
-        callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
+    // Add comment if allowed by endpoint (respects LUD-12 commentAllowed)
+    // Only send comment when comment_allowed is explicitly set (not defaulting to 500)
+    if !full_comment.is_empty() {
+        if let Some(max_comment) = pay_info.comment_allowed {
+            let max = max_comment as usize;
+            let char_count = full_comment.chars().count();
+            if char_count <= max {
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
+            } else {
+                // Truncate to endpoint's max length (UTF-8 safe by character count)
+                let truncated: String = full_comment.chars().take(max).collect();
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+            }
+        }
     }
 
     log::info!("Requesting invoice from: {}", callback_url);
