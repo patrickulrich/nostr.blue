@@ -542,34 +542,12 @@ pub fn Home() -> Element {
         pagination_loading
     );
 
-    // Handler to merge pending posts into feed (Twitter/X pattern)
-    let show_new_posts = move |_| {
-        // Move pending posts out to avoid allocation (mem::take swaps with empty Vec)
-        let mut pending = std::mem::take(&mut *pending_posts.write());
-
-        if !pending.is_empty() {
-            let pending_len = pending.len();
-
-            // Sort pending posts by timestamp (newest first)
-            pending.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-
-            // Match feed_state by reference to avoid cloning entire state
-            let current_items = match &*feed_state.read() {
-                DataState::Loaded(items) => Some(items.clone()),
-                _ => None,
-            };
-
-            if let Some(current_items) = current_items {
-                // Prepend pending posts to feed
-                let mut new_items = pending;
-                new_items.extend(current_items);
-
-                feed_state.set(DataState::Loaded(new_items));
-
-                log::info!("Merged {} new posts into feed", pending_len);
-            }
-            // Note: pending_posts is already cleared by mem::take
-        }
+    // Helper to refresh feed and scroll to top
+    // Used by both the refresh button and "Show N new posts" banner
+    let mut refresh_and_scroll_to_top = move || {
+        // Trigger feed refresh (clears pending posts, fetches fresh data from network)
+        let current = *refresh_trigger.read();
+        refresh_trigger.set(current + 1);
 
         // Scroll to top of page
         #[cfg(target_arch = "wasm32")]
@@ -700,10 +678,7 @@ pub fn Home() -> Element {
                         button {
                             class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
                             disabled: feed_state.read().is_loading(),
-                            onclick: move |_| {
-                                let current = *refresh_trigger.read();
-                                refresh_trigger.set(current + 1);
-                            },
+                            onclick: move |_| refresh_and_scroll_to_top(),
                             title: "Refresh feed",
                             if feed_state.read().is_loading() {
                                 span {
@@ -798,7 +773,7 @@ pub fn Home() -> Element {
                                 rsx! {
                                     div {
                                         class: "sticky top-[57px] z-10 border-b border-border bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer",
-                                        onclick: show_new_posts,
+                                        onclick: move |_| refresh_and_scroll_to_top(),
                                         div {
                                             class: "px-4 py-3 text-center",
                                             span {
@@ -864,7 +839,6 @@ pub fn Home() -> Element {
                     }
                 }
             }
-
         }
     }
 }
@@ -1040,11 +1014,31 @@ fn LoginSection() -> Element {
     let mut show_help_modal = use_signal(|| false);
     let mut connecting_bunker = use_signal(|| false);
 
+    // NIP-49 password fields for nsec encryption
+    let mut nsec_password = use_signal(String::new);
+    let mut nsec_confirm_password = use_signal(String::new);
+    let mut show_nsec_password = use_signal(|| false);
+
     // Login handlers
     let login_with_nsec = move |_| {
         let nsec = nsec_input.read().clone();
+        let password = nsec_password.read().clone();
+        let confirm = nsec_confirm_password.read().clone();
+
+        // Validate passwords match
+        if password != confirm {
+            error.set(Some("Passwords do not match".to_string()));
+            return;
+        }
+
+        // Validate password strength
+        if let Some(err) = crate::utils::nip49::validate_password(&password) {
+            error.set(Some(err));
+            return;
+        }
+
         spawn(async move {
-            match auth_store::login_with_nsec(&nsec).await {
+            match auth_store::login_with_nsec(&nsec, &password).await {
                 Ok(_) => error.set(None),
                 Err(e) => error.set(Some(e)),
             }
@@ -1275,7 +1269,7 @@ fn LoginSection() -> Element {
                             }
                         }
 
-                        // Private Key (nsec)
+                        // Private Key (nsec) with NIP-49 encryption
                         div {
                             h5 {
                                 class: "font-medium text-gray-900 dark:text-white mb-2 text-sm",
@@ -1290,11 +1284,47 @@ fn LoginSection() -> Element {
                                     value: "{nsec_input}",
                                     oninput: move |evt| nsec_input.set(evt.value())
                                 }
+
+                                // Password fields for NIP-49 encryption
+                                div {
+                                    class: "relative",
+                                    input {
+                                        class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white pr-10",
+                                        r#type: if *show_nsec_password.read() { "text" } else { "password" },
+                                        placeholder: "Set encryption password",
+                                        value: "{nsec_password}",
+                                        oninput: move |evt| nsec_password.set(evt.value())
+                                    }
+                                    button {
+                                        class: "absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+                                        r#type: "button",
+                                        onclick: move |_| {
+                                            let current = *show_nsec_password.read();
+                                            show_nsec_password.set(!current);
+                                        },
+                                        if *show_nsec_password.read() { "🙈" } else { "👁️" }
+                                    }
+                                }
+                                input {
+                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    r#type: if *show_nsec_password.read() { "text" } else { "password" },
+                                    placeholder: "Confirm password",
+                                    value: "{nsec_confirm_password}",
+                                    oninput: move |evt| nsec_confirm_password.set(evt.value())
+                                }
+
+                                // Password info
+                                p {
+                                    class: "text-xs text-amber-600 dark:text-amber-400",
+                                    "🔐 Your key will be encrypted with this password"
+                                }
+
                                 div {
                                     class: "flex gap-2",
                                     button {
-                                        class: "flex-1 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition",
+                                        class: "flex-1 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
                                         onclick: login_with_nsec,
+                                        disabled: nsec_input.read().is_empty() || nsec_password.read().is_empty() || nsec_confirm_password.read().is_empty(),
                                         "Login"
                                     }
                                     button {

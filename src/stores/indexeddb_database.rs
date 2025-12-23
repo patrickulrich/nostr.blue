@@ -104,6 +104,26 @@ mod native_stub {
         pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
+
+        pub async fn save_order(&self, _order: &crate::utils::nip99::ShopOrder) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_order(&self, _order_id: &str) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_all_orders(&self) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn update_order(&self, _order: &crate::utils::nip99::ShopOrder) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn delete_order(&self, _order_id: &str) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
     }
 
     #[async_trait::async_trait]
@@ -282,7 +302,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(target_arch = "wasm32")]
-const DB_VERSION: u32 = 2;
+const DB_VERSION: u32 = 3;
 
 // Object store names
 #[cfg(target_arch = "wasm32")]
@@ -307,6 +327,8 @@ const STORE_KEYSET_COUNTERS: &str = "keyset_counters";
 const STORE_PENDING_EVENTS: &str = "pending_events";
 #[cfg(target_arch = "wasm32")]
 const STORE_SYNC_STATE: &str = "sync_state";
+#[cfg(target_arch = "wasm32")]
+const STORE_SHOP_ORDERS: &str = "shop_orders";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(target_arch = "wasm32")]
@@ -379,6 +401,10 @@ impl IndexedDbDatabase {
             // V2: Add sync state store for incremental Nostr sync
             if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
                 db.create_object_store(STORE_SYNC_STATE)?;
+            }
+            // V3: Add shop orders store for marketplace order persistence
+            if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
+                db.create_object_store(STORE_SHOP_ORDERS)?;
             }
 
             Ok(())
@@ -638,6 +664,48 @@ impl IndexedDbDatabase {
     #[allow(dead_code)]
     pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
         self.delete_value(STORE_SYNC_STATE, "current").await
+    }
+
+    // =========================================================================
+    // Shop Orders (NIP-99 Marketplace)
+    // =========================================================================
+
+    /// Save a shop order to persistent storage
+    pub async fn save_order(
+        &self,
+        order: &crate::utils::nip99::ShopOrder,
+    ) -> Result<(), database::Error> {
+        let key = order.order_id.clone();
+        self.put_value(STORE_SHOP_ORDERS, &key, order).await
+    }
+
+    /// Get a shop order by ID
+    pub async fn get_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
+        self.get_value(STORE_SHOP_ORDERS, order_id).await
+    }
+
+    /// Get all shop orders
+    pub async fn get_all_orders(
+        &self,
+    ) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
+        self.get_all_values(STORE_SHOP_ORDERS).await
+    }
+
+    /// Update an existing shop order
+    pub async fn update_order(
+        &self,
+        order: &crate::utils::nip99::ShopOrder,
+    ) -> Result<(), database::Error> {
+        let key = order.order_id.clone();
+        self.put_value(STORE_SHOP_ORDERS, &key, order).await
+    }
+
+    /// Delete a shop order
+    pub async fn delete_order(&self, order_id: &str) -> Result<(), database::Error> {
+        self.delete_value(STORE_SHOP_ORDERS, order_id).await
     }
 }
 

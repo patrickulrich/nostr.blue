@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
+use dioxus_primitives::ContentSide;
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
@@ -6,15 +8,24 @@ use nostr_sdk::nips::nip19::Nip19;
 use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
-use crate::components::icons;
+use crate::components::icons::{self, NostrBlueMiniLogo};
 use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
 use crate::components::live::stream_card::LiveStreamCard;
 use crate::components::{EventCardCompact, CodeRepoCardCompact, P2POrderCard};
 use crate::utils::nip52::parse_calendar_event;
 use crate::utils::nip53::{parse_meeting_space, parse_meeting_room_event, LiveActivityEvent};
-use crate::utils::nip34::Repository;
+use crate::utils::nip34::{Repository, Issue, PullRequest};
 use crate::utils::nip69::parse_p2p_order;
 use crate::utils::podcast::parse_podcast_episode;
+use crate::utils::nip54::{parse_wiki_article, WikiArticle};
+use crate::utils::nip58::{parse_badge_definition, BadgeDefinition};
+use crate::utils::nip99::{parse_product, parse_collection, parse_review, Product, ProductCollection, ProductReview};
+use crate::utils::nkbip03::{parse_citation, Citation};
+use crate::components::citation::card::get_citation_style;
+use crate::utils::recipe::{is_recipe_event, extract_metadata as extract_recipe_metadata, RecipeMetadata};
+use crate::stores::nostr_music::{parse_track_event, parse_playlist_event, NostrTrack, NostrPlaylist};
+use crate::stores::publication_store::{parse_publication_index, PublicationIndex};
+use crate::stores::pin_boards_store::{parse_pinboard_event, Pinboard};
 use crate::stores::calendar_store::UnifiedEvent;
 
 #[component]
@@ -515,6 +526,48 @@ fn EventMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                1621 => {
+                    // Git Issue (NIP-34)
+                    if let Some(issue) = Issue::from_event(&event) {
+                        rsx! {
+                            {render_issue_minicard(&issue)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_note(&event, metadata_clone.as_ref())} }
+                    }
+                }
+                1622 => {
+                    // Git Patch/PR (NIP-34)
+                    if let Some(pr) = PullRequest::from_event(&event) {
+                        rsx! {
+                            {render_pr_minicard(&pr)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_note(&event, metadata_clone.as_ref())} }
+                    }
+                }
+                6 => {
+                    // Repost (kind 6)
+                    rsx! {
+                        {render_repost_minicard(&event)}
+                    }
+                }
+                1111 => {
+                    // Comment (NIP-22)
+                    rsx! {
+                        {render_comment_minicard(&event, metadata_clone.as_ref())}
+                    }
+                }
+                30..=33 => {
+                    // Citations (NKBIP-03)
+                    if let Ok(citation) = parse_citation(&event) {
+                        rsx! {
+                            {render_citation_minicard(&citation)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_note(&event, metadata_clone.as_ref())} }
+                    }
+                }
                 _ => {
                     // Default: render as embedded note
                     rsx! {
@@ -888,6 +941,16 @@ fn NaddrMentionRenderer(mention: String) -> Element {
             const MEETING_SPACE: u16 = 30312;
             const MEETING_ROOM: u16 = 30313;
             const PODCAST_EPISODE: u16 = 30054;
+            // Additional addressable event kinds
+            const WIKI_ARTICLE: u16 = 30818;
+            const PUBLICATION_INDEX: u16 = 30040;
+            const PINBOARD: u16 = 30067;
+            const BADGE_DEFINITION: u16 = 30009;
+            const PRODUCT: u16 = 30402;
+            const COLLECTION: u16 = 30405;
+            const REVIEW: u16 = 31555;
+            const MUSIC_TRACK: u16 = 36787;
+            const PLAYLIST: u16 = 34139;
 
             // Route to appropriate card based on event kind
             match kind {
@@ -900,10 +963,19 @@ fn NaddrMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
-                // Article (NIP-23)
+                // Article (NIP-23) or Recipe (nostrcooking)
                 ARTICLE => {
-                    rsx! {
-                        {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                    // Check if it's a recipe (has nostrcooking tag)
+                    if is_recipe_event(&event) {
+                        let recipe_meta = extract_recipe_metadata(&event);
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_recipe_minicard(&recipe_meta, &naddr_clone, &event)}
+                        }
+                    } else {
+                        rsx! {
+                            {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)}
+                        }
                     }
                 }
                 // Calendar events (NIP-52)
@@ -1002,6 +1074,105 @@ fn NaddrMentionRenderer(mention: String) -> Element {
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 P2POrderCard { order: order }
                             }
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Wiki Article (NIP-54)
+                WIKI_ARTICLE => {
+                    if let Ok(wiki) = parse_wiki_article(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_wiki_minicard(&wiki, &naddr_clone, &event)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Product (NIP-99)
+                PRODUCT => {
+                    if let Ok(product) = parse_product(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_product_minicard(&product, &naddr_clone, &event)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Badge Definition (NIP-58)
+                BADGE_DEFINITION => {
+                    if let Ok(badge) = parse_badge_definition(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_badge_minicard(&badge, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Music Track
+                MUSIC_TRACK => {
+                    if let Ok(track) = parse_track_event(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_track_minicard(&track, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Playlist
+                PLAYLIST => {
+                    if let Ok(playlist) = parse_playlist_event(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_playlist_minicard(&playlist, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Publication (NKBIP-01)
+                PUBLICATION_INDEX => {
+                    if let Some(pub_index) = parse_publication_index(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_publication_minicard(&pub_index, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Pinboard
+                PINBOARD => {
+                    if let Some(board) = parse_pinboard_event(&event, None) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_pinboard_minicard(&board, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Product Collection (NIP-99)
+                COLLECTION => {
+                    if let Ok(collection) = parse_collection(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_collection_minicard(&collection, &naddr_clone)}
+                        }
+                    } else {
+                        rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
+                    }
+                }
+                // Product Review (NIP-99)
+                REVIEW => {
+                    if let Ok(review) = parse_review(&event) {
+                        let naddr_clone = naddr_for_link.clone();
+                        rsx! {
+                            {render_review_minicard(&review, &naddr_clone)}
                         }
                     } else {
                         rsx! { {render_embedded_article(&event, metadata_clone.as_ref(), &naddr_for_link)} }
@@ -1143,6 +1314,963 @@ fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &s
                         span {
                             class: "text-xs text-muted-foreground",
                             "• Article"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a wiki article minicard with HoverCard preview
+fn render_wiki_minicard(wiki: &WikiArticle, _naddr: &str, _event: &Event) -> Element {
+    let title = wiki.title.clone();
+    let identifier = wiki.identifier.clone();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content
+            Link {
+                to: Route::WikiDetail { identifier: identifier.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center flex-shrink-0",
+                    icons::BookOpenIcon { class: "w-4 h-4 text-purple-500".to_string() }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    p { class: "text-xs text-muted-foreground", "Wiki Article" }
+                }
+            }
+
+            // HoverCard trigger (logo in bottom-right)
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-80 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        // Enhanced preview
+                        h4 { class: "font-bold mb-2", "{title}" }
+                        if let Some(summary) = &wiki.summary {
+                            p { class: "text-sm text-muted-foreground mb-2 line-clamp-3", "{summary}" }
+                        }
+                        p { class: "text-xs text-muted-foreground", "Click to view full article" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a product minicard with HoverCard preview
+fn render_product_minicard(product: &Product, naddr: &str, _event: &Event) -> Element {
+    let title = product.title.clone();
+    // Only show sats price if currency is sats
+    let price_display = if product.price.is_sats() {
+        Some(format!("{}", product.price.amount as u64))
+    } else {
+        None
+    };
+    let image_url = product.images.first().map(|i| i.url.clone());
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content
+            Link {
+                to: Route::ShopProductDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                // Tiny product image
+                div {
+                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = image_url {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center",
+                            icons::ShoppingBagIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    if let Some(ref price) = price_display {
+                        p { class: "text-xs text-primary font-semibold", "⚡ {price} sats" }
+                    }
+                }
+            }
+
+            // HoverCard trigger
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-80 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = image_url {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-square object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        if let Some(ref price) = price_display {
+                            p { class: "text-lg text-primary font-semibold", "⚡ {price} sats" }
+                        }
+                        if let Some(summary) = &product.summary {
+                            p { class: "text-sm text-muted-foreground mt-2 line-clamp-2", "{summary}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a badge definition minicard with HoverCard preview
+fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Element {
+    let name = badge.name.clone().unwrap_or_else(|| "Badge".to_string());
+    let image_url = badge.image.clone();
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content
+            Link {
+                to: Route::BadgeDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-8 h-8 rounded-full bg-amber-500/10 flex-shrink-0 overflow-hidden flex items-center justify-center",
+                    if let Some(ref img) = image_url {
+                        img {
+                            src: "{img}",
+                            alt: "{name}",
+                            class: "w-full h-full object-cover",
+                        }
+                    } else {
+                        // Use a star/disc icon as badge fallback
+                        icons::DiscIcon { class: "w-4 h-4 text-amber-500".to_string() }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{name}" }
+                    p { class: "text-xs text-muted-foreground", "Badge" }
+                }
+            }
+
+            // HoverCard trigger
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        div { class: "flex items-center gap-3 mb-2",
+                            if let Some(ref img) = image_url {
+                                img {
+                                    src: "{img}",
+                                    alt: "{name}",
+                                    class: "w-12 h-12 rounded-full",
+                                }
+                            }
+                            h4 { class: "font-bold", "{name}" }
+                        }
+                        if let Some(desc) = &badge.description {
+                            p { class: "text-sm text-muted-foreground line-clamp-3", "{desc}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a music track minicard with HoverCard preview
+fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element {
+    let title = track.title.clone();
+    let image = track.image.clone();
+    let duration = track.duration.map(|d| {
+        let mins = d / 60;
+        let secs = d % 60;
+        format!("{}:{:02}", mins, secs)
+    });
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content (no dedicated track page, so just display)
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                div {
+                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = image {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center",
+                            icons::MusicIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "🎵 {title}" }
+                    if let Some(ref dur) = duration {
+                        p { class: "text-xs text-muted-foreground", "{dur}" }
+                    }
+                }
+            }
+
+            // HoverCard trigger
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = image {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-square object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold", "{title}" }
+                        if let Some(ref dur) = duration {
+                            p { class: "text-sm text-muted-foreground", "Duration: {dur}" }
+                        }
+                        if !track.genres.is_empty() {
+                            p { class: "text-xs text-muted-foreground mt-1", "Genres: {track.genres.join(\", \")}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a playlist minicard with HoverCard preview
+fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) -> Element {
+    let title = playlist.title.clone();
+    let track_count = playlist.track_refs.len();
+    let image = playlist.image.clone();
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content
+            Link {
+                to: Route::MusicPlaylistDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = image {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-pink-500/20",
+                            icons::MusicIcon { class: "w-5 h-5 text-purple-500".to_string() }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    p { class: "text-xs text-muted-foreground", "{track_count} tracks" }
+                }
+            }
+
+            // HoverCard trigger
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = image {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-square object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold", "{title}" }
+                        p { class: "text-sm text-muted-foreground", "{track_count} tracks" }
+                        if let Some(desc) = &playlist.description {
+                            p { class: "text-xs text-muted-foreground mt-1 line-clamp-2", "{desc}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a recipe minicard with HoverCard preview
+fn render_recipe_minicard(meta: &RecipeMetadata, naddr: &str, _event: &Event) -> Element {
+    let title = meta.title.clone();
+    let image_url = meta.primary_image().cloned();
+    let summary = meta.summary.clone();
+    let tags = meta.tags.clone();
+    let naddr_owned = naddr.to_string();
+
+    // Display first 2 tags
+    let displayed_tags: Vec<String> = tags.iter().take(2).cloned().collect();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Minicard content
+            Link {
+                to: Route::RecipeDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                // Recipe image
+                div {
+                    class: "w-12 h-12 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = image_url {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-amber-500/20",
+                            span { class: "text-lg", "🍳" }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "🍽️ {title}" }
+                    if !displayed_tags.is_empty() {
+                        p { class: "text-xs text-muted-foreground truncate", "{displayed_tags.join(\", \")}" }
+                    }
+                }
+            }
+
+            // HoverCard trigger
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = image_url {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-video object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        if let Some(ref sum) = summary {
+                            p { class: "text-sm text-muted-foreground line-clamp-2", "{sum}" }
+                        }
+                        if !tags.is_empty() {
+                            div {
+                                class: "flex flex-wrap gap-1 mt-2",
+                                for tag in tags.iter().take(4) {
+                                    span {
+                                        class: "px-2 py-0.5 text-xs bg-primary/10 text-primary rounded-full",
+                                        "{tag}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a publication minicard with HoverCard preview
+fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &str) -> Element {
+    let title = pub_index.title.clone();
+    let summary = pub_index.summary.clone();
+    let cover_image = pub_index.cover_image.clone();
+    let section_count = pub_index.section_addresses.len();
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            Link {
+                to: Route::PublicationDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-12 h-16 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = cover_image {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-purple-500/20",
+                            icons::BookOpenIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "📚 {title}" }
+                    p { class: "text-xs text-muted-foreground", "{section_count} sections" }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = cover_image {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-[2/1] object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        if let Some(ref sum) = summary {
+                            p { class: "text-sm text-muted-foreground line-clamp-2", "{sum}" }
+                        }
+                        p { class: "text-xs text-muted-foreground mt-1", "{section_count} sections" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a pinboard minicard with HoverCard preview
+fn render_pinboard_minicard(board: &Pinboard, naddr: &str) -> Element {
+    let title = board.title.clone();
+    let description = board.description.clone();
+    let image = board.image.clone();
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            Link {
+                to: Route::PinBoardDetail { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    if let Some(ref img) = image {
+                        img {
+                            src: "{img}",
+                            alt: "{title}",
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                        }
+                    } else {
+                        div {
+                            class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-red-500/20",
+                            icons::GridIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                        }
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "📌 {title}" }
+                    if !board.tags.is_empty() {
+                        p { class: "text-xs text-muted-foreground truncate", "{board.tags.join(\", \")}" }
+                    }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        if let Some(ref img) = image {
+                            img {
+                                src: "{img}",
+                                alt: "{title}",
+                                class: "w-full aspect-square object-cover rounded mb-2",
+                            }
+                        }
+                        h4 { class: "font-bold", "{title}" }
+                        if let Some(ref desc) = description {
+                            p { class: "text-sm text-muted-foreground line-clamp-2", "{desc}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a product collection minicard with HoverCard preview
+fn render_collection_minicard(collection: &ProductCollection, naddr: &str) -> Element {
+    let title = collection.title.clone();
+    let description = collection.description.clone();
+    let product_count = collection.products.len();
+    let naddr_owned = naddr.to_string();
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            Link {
+                to: Route::ShopCollection { naddr: naddr_owned.clone() },
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                div {
+                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-emerald-500/20",
+                    icons::ShoppingBagIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "🛍️ {title}" }
+                    p { class: "text-xs text-muted-foreground", "{product_count} products" }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        p { class: "text-sm text-primary font-medium", "{product_count} products" }
+                        if let Some(ref desc) = description {
+                            p { class: "text-sm text-muted-foreground mt-1 line-clamp-2", "{desc}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a product review minicard with HoverCard preview
+fn render_review_minicard(review: &ProductReview, _naddr: &str) -> Element {
+    let content = review.content.clone();
+    let rating = review.thumb_rating;
+    let rating_display = if rating >= 0.5 { "👍" } else { "👎" };
+
+    // Pre-format float values for display (rsx! doesn't support format specifiers)
+    let quality_str = review.quality_rating.map(|q| format!("{:.1}", q));
+    let value_str = review.value_rating.map(|v| format!("{:.1}", v));
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Reviews don't have their own page, so just display
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                div {
+                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    span { class: "text-lg", "{rating_display}" }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm", "Product Review" }
+                    p { class: "text-xs text-muted-foreground truncate", "{content}" }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-64 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        div {
+                            class: "flex items-center gap-2 mb-2",
+                            span { class: "text-2xl", "{rating_display}" }
+                            span { class: "font-bold", "Product Review" }
+                        }
+                        if !content.is_empty() {
+                            p { class: "text-sm text-muted-foreground line-clamp-4", "{content}" }
+                        }
+                        // Show additional ratings if available
+                        if let Some(ref q) = quality_str {
+                            p { class: "text-xs text-muted-foreground mt-1", "Quality: {q}/5" }
+                        }
+                        if let Some(ref v) = value_str {
+                            p { class: "text-xs text-muted-foreground", "Value: {v}/5" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a Git Issue minicard with HoverCard preview
+fn render_issue_minicard(issue: &Issue) -> Element {
+    let title = issue.display_title();
+    let status = issue.status;
+    let status_class = match status {
+        crate::utils::nip34::IssueStatus::Open => "bg-green-500/20 text-green-500",
+        crate::utils::nip34::IssueStatus::Closed => "bg-red-500/20 text-red-500",
+        crate::utils::nip34::IssueStatus::Applied => "bg-purple-500/20 text-purple-500",
+        crate::utils::nip34::IssueStatus::Draft => "bg-yellow-500/20 text-yellow-500",
+    };
+    let status_text = format!("{:?}", status);
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                div {
+                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    icons::CommentIcon { class: "w-4 h-4 text-green-500".to_string() }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "🔧 {title}" }
+                    div {
+                        class: "flex items-center gap-2",
+                        span {
+                            class: "px-1.5 py-0.5 text-xs rounded {status_class}",
+                            "{status_text}"
+                        }
+                        if !issue.labels.is_empty() {
+                            span {
+                                class: "text-xs text-muted-foreground truncate",
+                                "{issue.labels.join(\", \")}"
+                            }
+                        }
+                    }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        span {
+                            class: "px-2 py-0.5 text-xs rounded {status_class}",
+                            "{status_text}"
+                        }
+                        if !issue.labels.is_empty() {
+                            div {
+                                class: "flex flex-wrap gap-1 mt-2",
+                                for label in issue.labels.iter().take(4) {
+                                    span {
+                                        class: "px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded-full",
+                                        "{label}"
+                                    }
+                                }
+                            }
+                        }
+                        p { class: "text-xs text-muted-foreground mt-2", "Git Issue" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a Git PR minicard with HoverCard preview
+fn render_pr_minicard(pr: &PullRequest) -> Element {
+    let title = if pr.is_cover_letter {
+        pr.content.lines().next().unwrap_or("Pull Request").to_string()
+    } else {
+        format!("Patch: {}", pr.commit.as_deref().unwrap_or("").chars().take(8).collect::<String>())
+    };
+    let status = pr.status;
+    let status_class = match status {
+        crate::utils::nip34::IssueStatus::Open => "bg-green-500/20 text-green-500",
+        crate::utils::nip34::IssueStatus::Closed => "bg-red-500/20 text-red-500",
+        crate::utils::nip34::IssueStatus::Applied => "bg-purple-500/20 text-purple-500",
+        crate::utils::nip34::IssueStatus::Draft => "bg-yellow-500/20 text-yellow-500",
+    };
+    let status_text = format!("{:?}", status);
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                div {
+                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    icons::GitMergeIcon { class: "w-4 h-4 text-purple-500".to_string() }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "🔀 {title}" }
+                    span {
+                        class: "px-1.5 py-0.5 text-xs rounded {status_class}",
+                        "{status_text}"
+                    }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        span {
+                            class: "px-2 py-0.5 text-xs rounded {status_class}",
+                            "{status_text}"
+                        }
+                        if let Some(ref commit) = pr.commit {
+                            p { class: "text-xs text-muted-foreground mt-2", "Commit: {commit}" }
+                        }
+                        p { class: "text-xs text-muted-foreground", "Git Patch/PR" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a repost minicard
+fn render_repost_minicard(event: &Event) -> Element {
+    // Repost events reference another event in the content or e tag
+    let reposted_id = event.tags.iter()
+        .find_map(|t| {
+            if t.kind() == nostr_sdk::TagKind::e() {
+                t.content().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if event.content.starts_with("nostr:") {
+                Some(event.content.strip_prefix("nostr:").unwrap_or(&event.content).to_string())
+            } else {
+                None
+            }
+        });
+
+    let short_id = reposted_id.as_ref()
+        .map(|id| if id.len() > 16 { format!("{}...{}", &id[..8], &id[id.len()-4..]) } else { id.clone() })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                icons::Repeat2Icon { class: "w-4 h-4 text-green-500".to_string() }
+                span { class: "text-sm text-muted-foreground", "Repost of " }
+                span { class: "text-sm font-medium text-primary", "{short_id}" }
+            }
+        }
+    }
+}
+
+/// Render a comment minicard (NIP-22)
+fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>) -> Element {
+    let content = &event.content;
+    let display_content = if content.chars().count() > 100 {
+        format!("{}...", content.chars().take(100).collect::<String>())
+    } else {
+        content.clone()
+    };
+
+    let author_name = metadata.and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .unwrap_or_else(|| {
+            let pk = event.pubkey.to_hex();
+            format!("{}...{}", &pk[..8], &pk[pk.len()-4..])
+        });
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            div {
+                class: "flex items-start gap-2 p-2 border border-border rounded-lg bg-card",
+                icons::MessageCircleIcon { class: "w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5".to_string() }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "text-xs text-muted-foreground", "Comment by {author_name}" }
+                    p { class: "text-sm line-clamp-2", "{display_content}" }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        p { class: "text-xs text-muted-foreground mb-1", "Comment by {author_name}" }
+                        p { class: "text-sm", "{content}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a citation minicard with HoverCard preview
+fn render_citation_minicard(citation: &Citation) -> Element {
+    let base = citation.base();
+    let title = base.title.clone();
+    let author = base.author.clone();
+    let citation_type = citation.citation_type();
+
+    // Use canonical citation styling from citation card component
+    let style = get_citation_style(&citation_type);
+    let type_icon = style.emoji;
+    let type_text = style.label;
+    let type_color = style.text_class;
+
+    rsx! {
+        div {
+            class: "relative my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            div {
+                class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
+                div {
+                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    span { class: "text-sm", "{type_icon}" }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    p { class: "font-medium text-sm truncate", "{title}" }
+                    if !author.is_empty() {
+                        p { class: "text-xs text-muted-foreground truncate", "by {author}" }
+                    }
+                }
+            }
+
+            div {
+                class: "absolute bottom-1 right-1",
+                HoverCard {
+                    open: Signal::new(None),
+                    HoverCardTrigger {
+                        NostrBlueMiniLogo {}
+                    }
+                    HoverCardContent {
+                        side: ContentSide::Top,
+                        class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                        div {
+                            class: "flex items-center gap-2 mb-2",
+                            span { class: "text-lg", "{type_icon}" }
+                            span { class: "text-xs font-medium {type_color}", "{type_text}" }
+                        }
+                        h4 { class: "font-bold mb-1", "{title}" }
+                        if !author.is_empty() {
+                            p { class: "text-sm text-muted-foreground", "by {author}" }
+                        }
+                        if let Some(ref summary) = base.summary {
+                            p { class: "text-xs text-muted-foreground mt-2 line-clamp-3", "{summary}" }
                         }
                     }
                 }

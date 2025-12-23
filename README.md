@@ -21,6 +21,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Wiki & Publications** - NIP-54 wiki pages with wikilinks, NKBIP-01 curated publications with AsciiDoc
 - **External Content** - NIP-73 support for books (ISBN), papers (DOI), Bitcoin transactions/addresses
 - **P2P Trading** - View NIP-69 peer-to-peer Bitcoin orders with depth charts and market data
+- **Marketplace** - NIP-99 classified listings with product browse, cart, and Cashu/Lightning checkout
 - **Code Collaboration** - Git repositories (NIP-34), code snippets (NIP-C0), issues, and pull requests
 - **Social Organization** - Communities (NIP-72), Lists (NIP-51), Data Vending Machines (NIP-90)
 - **Secure Authentication** - Browser extension (NIP-07) and remote signer (NIP-46) with Amber/nsecBunker
@@ -215,6 +216,7 @@ nostr.blue/
 │   │   ├── indexeddb_database.rs # IndexedDB persistent storage for CDK wallet
 │   │   ├── nwc_store.rs    # Nostr Wallet Connect state and operations (NIP-47)
 │   │   ├── p2p_store.rs    # P2P order cache and filtering (NIP-69)
+│   │   ├── shop_store.rs   # Marketplace state (NIP-99)
 │   │   ├── code_store.rs   # Git repository state (NIP-34)
 │   │   ├── wiki_store.rs   # Wiki state (NIP-54)
 │   │   ├── publication_store.rs # Publication state (NKBIP-01)
@@ -236,6 +238,7 @@ nostr.blue/
 │   │   ├── profile_prefetch.rs # Batch profile metadata prefetching
 │   │   ├── podcast.rs      # Podcast event parsing (Kind 30054/30055)
 │   │   ├── nip69.rs        # NIP-69 P2P order parsing
+│   │   ├── nip99.rs        # NIP-99 marketplace parsing
 │   │   ├── nip34.rs        # NIP-34 Git repository helpers
 │   │   ├── nip73.rs        # NIP-73 external content helpers
 │   │   ├── nip54.rs        # NIP-54 wiki d-tag normalization and wikilinks
@@ -381,7 +384,7 @@ Production builds are optimized with:
 | [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) | Remote Signing | ✅ |
 | [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Wallet Connect | ✅ |
 | [NIP-48](https://github.com/nostr-protocol/nips/blob/master/48.md) | Proxy Tags | ✅ |
-| [NIP-49](https://github.com/nostr-protocol/nips/blob/master/49.md) | Private Key Encryption | ❌ |
+| [NIP-49](https://github.com/nostr-protocol/nips/blob/master/49.md) | Private Key Encryption | ✅ |
 | [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) | Search Capability | ✅ |
 | [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) | Lists | ✅ |
 | [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md) | Calendar Events | ✅ |
@@ -417,7 +420,7 @@ Production builds are optimized with:
 | [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata | ✅ |
 | [NIP-96](https://github.com/nostr-protocol/nips/blob/master/96.md) | HTTP File Storage | ✅ |
 | [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | HTTP Auth | ✅ |
-| [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md) | Classified Listings | ❌ |
+| [NIP-99](https://github.com/nostr-protocol/nips/blob/master/99.md) | Classified Listings | ✅ |
 | [NIP-A0](https://github.com/nostr-protocol/nips/blob/master/A0.md) | Voice Messages | ✅ |
 | [NIP-B0](https://github.com/nostr-protocol/nips/blob/master/B0.md) | Web Bookmarks | ✅ |
 | [NIP-B7](https://github.com/nostr-protocol/nips/blob/master/B7.md) | Blossom | ✅ |

@@ -57,6 +57,7 @@ pub mod transaction_history;
 // Cashu wallet components (eCash)
 pub mod cashu;
 pub mod nwc_setup_modal;
+pub mod password_modal;  // NIP-49 password entry for encrypted keys
 pub mod report_modal;
 pub mod add_to_list_modal;
 pub mod dvm_selector_modal;
@@ -92,6 +93,9 @@ pub mod wiki_backlinks;
 
 // Citation components (NKBIP-03 Kinds 30-33)
 pub mod citation;
+
+// Shop/Marketplace components (NIP-99)
+pub mod shop;
 
 // Book reference picker (NKBIP-08)
 pub mod book_picker_modal;

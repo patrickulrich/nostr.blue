@@ -58,11 +58,15 @@ pub fn P2PHome() -> Element {
         });
     });
 
-    // Periodic BTC price refresh (every 30 seconds)
+    // BTC price refresh - fetch immediately if stale, then every 30 seconds
     use_future(move || async move {
-        loop {
+        // Fetch immediately if prices are stale
+        if btc_price::prices_are_stale() {
             let _ = btc_price::fetch_btc_prices().await;
+        }
+        loop {
             gloo_timers::future::sleep(Duration::from_secs(30)).await;
+            let _ = btc_price::fetch_btc_prices().await;
         }
     });
 

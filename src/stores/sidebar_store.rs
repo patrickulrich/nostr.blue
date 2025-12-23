@@ -51,6 +51,7 @@ pub enum SidebarItem {
     Dvm,
     Wiki,
     Publications,
+    Shop,
 }
 
 impl SidebarItem {
@@ -111,6 +112,7 @@ impl SidebarItem {
             SidebarItem::Dvm => "DVM",
             SidebarItem::Wiki => "Wiki",
             SidebarItem::Publications => "Publications",
+            SidebarItem::Shop => "Marketplace",
         }
     }
 
@@ -150,6 +152,7 @@ impl SidebarItem {
             SidebarItem::Dvm => Some(Route::DVM {}),
             SidebarItem::Wiki => Some(Route::WikiHome {}),
             SidebarItem::Publications => Some(Route::PublicationsHome {}),
+            SidebarItem::Shop => Some(Route::ShopHome {}),
         }
     }
 }

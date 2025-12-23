@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, mdk_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay_store, sidebar_store};
+use stores::{auth_store, mdk_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay_store, shop_store, sidebar_store};
 
 // Modules
 mod components;
@@ -77,6 +77,12 @@ fn App() -> Element {
                         sidebar_store::load_sidebar_preferences(),
                         // Restore NWC connection from LocalStorage
                         nwc_store::restore_connection(),
+                        // Initialize shop store and restore persisted orders
+                        async {
+                            if let Err(e) = shop_store::init_shop_store().await {
+                                log::warn!("Failed to initialize shop store: {}", e);
+                            }
+                        },
                     );
                 }
                 Err(e) => {
@@ -93,6 +99,8 @@ fn App() -> Element {
         ToastProvider {
             Router::<routes::Route> {}
         }
+        // NIP-49 password modal for encrypted key unlock/migration
+        components::password_modal::PasswordModal {}
     }
 }
 

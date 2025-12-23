@@ -87,3 +87,55 @@ pub fn try_get_current_user_pubkey() -> Option<PublicKey> {
         _ => None,
     }
 }
+
+// ============================================================================
+// Lightning Invoice Validation
+// ============================================================================
+
+/// Sanitize and validate a Lightning invoice for safe embedding in HTML/JS.
+///
+/// Lightning invoices (BOLT11) should only contain bech32 characters:
+/// alphanumeric (excluding 1, b, i, o) but in practice invoices use
+/// a broader alphanumeric set. This function ensures the invoice is safe
+/// to embed in JavaScript strings to prevent XSS attacks.
+///
+/// # Arguments
+/// * `invoice` - The Lightning invoice string to validate
+///
+/// # Returns
+/// * `Some(String)` - Sanitized invoice (uppercase) if valid
+/// * `None` - If invoice contains invalid characters or format
+///
+/// # Examples
+/// ```
+/// // Valid invoice
+/// assert!(sanitize_lightning_invoice("lnbc100...").is_some());
+///
+/// // XSS attempt rejected
+/// assert!(sanitize_lightning_invoice("lnbc'; alert('xss')").is_none());
+/// ```
+pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
+    // Lightning invoices must start with ln prefix
+    let lower = invoice.to_lowercase();
+    if !lower.starts_with("lnbc")  // Mainnet
+        && !lower.starts_with("lntb")  // Testnet
+        && !lower.starts_with("lnbcrt") // Regtest
+        && !lower.starts_with("lnsb")  // Signet
+    {
+        return None;
+    }
+
+    // Only allow alphanumeric characters (bech32 charset)
+    // This prevents injection of quotes, brackets, or script tags
+    let valid = invoice.chars().all(|c| c.is_ascii_alphanumeric());
+    if !valid {
+        return None;
+    }
+
+    // Minimum reasonable length for a Lightning invoice
+    if invoice.len() < 50 {
+        return None;
+    }
+
+    Some(invoice.to_uppercase())
+}

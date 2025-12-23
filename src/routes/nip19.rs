@@ -205,6 +205,10 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                 // Should be caught earlier, but just in case
                 Err("🔒 This is a private key (nsec)! Never share your private key with anyone.".to_string())
             }
+            Nip19::EncryptedSecret(_) => {
+                // Encrypted private key (ncryptsec)
+                Err("🔐 This is an encrypted private key (ncryptsec). While encrypted, avoid pasting it into untrusted websites. Import it safely via Settings.".to_string())
+            }
         },
         Err(e) => Err(format!(
             "Failed to decode NIP-19 identifier '{}...': {}",
