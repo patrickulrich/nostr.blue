@@ -170,7 +170,7 @@ pub fn BadgeDetailModal(
                             class: "w-32 h-32 rounded-lg bg-primary/30 flex items-center justify-center",
                             span {
                                 class: "text-4xl font-bold text-primary",
-                                "{badge.id.chars().next().unwrap_or('?').to_uppercase()}"
+                                "{badge.id.chars().next().unwrap_or('?').to_ascii_uppercase()}"
                             }
                         }
                     }
