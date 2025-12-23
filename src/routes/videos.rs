@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::utils::format::format_relative_time_or;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -23,15 +24,15 @@ impl FeedType {
 #[component]
 pub fn Videos() -> Element {
     // State for featured landscape videos
-    let mut featured_landscape = use_signal(|| Vec::<Event>::new());
+    let mut featured_landscape = use_signal(Vec::<Event>::new);
     let mut loading_featured = use_signal(|| false);
 
     // State for recent verts section
-    let mut recent_verts = use_signal(|| Vec::<Event>::new());
+    let mut recent_verts = use_signal(Vec::<Event>::new);
     let mut loading_recent_verts = use_signal(|| false);
 
     // State for combined feed
-    let mut feed_events = use_signal(|| Vec::<Event>::new());
+    let mut feed_events = use_signal(Vec::<Event>::new);
     let mut loading_feed = use_signal(|| false);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
@@ -459,7 +460,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let author_pubkey = event.pubkey.to_string();
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Fetch author metadata
@@ -581,7 +582,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 
                     p {
                         class: "text-xs text-muted-foreground",
-                        "{format_time_ago(event.created_at.as_secs())}"
+                        {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
             }
@@ -593,7 +594,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Play/pause video on hover (only if no thumbnail)
@@ -729,26 +730,13 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-// Format timestamp as "X ago"
-fn format_time_ago(timestamp: u64) -> String {
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", diff / 60),
-        3600..=86399 => format!("{}h ago", diff / 3600),
-        86400..=604799 => format!("{}d ago", diff / 86400),
-        _ => format!("{}w ago", diff / 604800),
-    }
-}
 
 // Load featured landscape videos (3 landscape videos from Following, fallback to Global)
 async fn load_featured_content() -> Result<Vec<Event>, String> {
     log::info!("Loading featured landscape videos...");
 
     // Try Following feed first
-    let _result = if let Some(pubkey_str) = auth_store::get_pubkey() {
+    if let Some(pubkey_str) = auth_store::get_pubkey() {
         match nostr_client::fetch_contacts(pubkey_str).await {
             Ok(contacts) if !contacts.is_empty() => {
                 let mut authors = Vec::new();

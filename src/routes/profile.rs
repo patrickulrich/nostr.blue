@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use crate::stores::{nostr_client, auth_store, dms};
-use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard};
+use crate::stores::{nostr_client, auth_store, dms, pinned_notes};
+use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, PinnedNotesCarousel, ProfileBadgesSection};
 use crate::components::icons::{InfoIcon, MailIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
@@ -101,12 +101,16 @@ pub fn Profile(pubkey: String) -> Element {
 
     // DM dialog state
     let mut show_dm_dialog = use_signal(|| false);
-    let mut dm_message = use_signal(|| String::new());
+    let mut dm_message = use_signal(String::new);
     let mut dm_sending = use_signal(|| false);
     let mut dm_error = use_signal(|| None::<String>);
 
     // Info dialog state (npub/lightning)
     let mut show_info_dialog = use_signal(|| false);
+
+    // Pinned notes state
+    let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
+    let mut pinned_loading = use_signal(|| true);
 
     // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
@@ -114,6 +118,7 @@ pub fn Profile(pubkey: String) -> Element {
     let pubkey_for_load_more = pubkey.clone();
     let pubkey_for_dm = pubkey.clone();
     let pubkey_for_info = pubkey.clone();
+    let pubkey_for_pinned = pubkey.clone();
 
     // Parse pubkey once for comparisons
     let parsed_pubkey = PublicKey::from_bech32(&pubkey)
@@ -141,6 +146,37 @@ pub fn Profile(pubkey: String) -> Element {
         following_count.set(0);
         followers_count.set(0);
         post_count.set(0);
+        pinned_events.set(Vec::new());
+        pinned_loading.set(true);
+    }));
+
+    // Fetch pinned notes for this profile
+    use_effect(use_reactive((&pubkey_for_pinned, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
+        if !client_initialized {
+            return;
+        }
+
+        pinned_loading.set(true);
+
+        spawn(async move {
+            match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
+                Ok((pin_ids, events)) => {
+                    // Sort events to match pin order (preserve the order user set)
+                    let mut sorted_events = Vec::new();
+                    for pin_id in pin_ids {
+                        if let Some(event) = events.iter().find(|e| e.id.to_hex() == pin_id) {
+                            sorted_events.push(event.clone());
+                        }
+                    }
+                    pinned_events.set(sorted_events);
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch pinned notes: {}", e);
+                    pinned_events.set(Vec::new());
+                }
+            }
+            pinned_loading.set(false);
+        });
     }));
 
     // Fetch profile metadata
@@ -470,7 +506,7 @@ pub fn Profile(pubkey: String) -> Element {
         }
 
         let pubkey_str = pubkey_for_load_more.clone();
-        let mut post_count_clone = post_count.clone();
+        let mut post_count_clone = post_count;
 
         loading_events.set(true);
 
@@ -731,9 +767,50 @@ pub fn Profile(pubkey: String) -> Element {
 
                 // Display name and username
                 if let Some(metadata) = profile_data.read().as_ref() {
-                    h1 {
-                        class: "text-2xl font-bold",
-                        "{get_display_name(metadata, &pubkey_for_display)}"
+                    // Check for bot field in custom metadata (NIP-24)
+                    {
+                        let is_bot_account = metadata.custom.get("bot")
+                            .and_then(|v| {
+                                if let Some(b) = v.as_bool() {
+                                    Some(b)
+                                } else if let Some(s) = v.as_str() {
+                                    match s.to_lowercase().as_str() {
+                                        "true" | "1" | "yes" => Some(true),
+                                        _ => Some(false),
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(false);
+
+                        rsx! {
+                            h1 {
+                                class: "text-2xl font-bold flex items-center gap-2",
+                                "{get_display_name(metadata, &pubkey_for_display)}"
+                                // Bot badge (NIP-24)
+                                if is_bot_account {
+                                    span {
+                                        class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full",
+                                        title: "This account is a bot",
+                                        svg {
+                                            class: "w-3 h-3",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            fill: "none",
+                                            view_box: "0 0 24 24",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            path {
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                d: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                                            }
+                                        }
+                                        "Bot"
+                                    }
+                                }
+                            }
+                        }
                     }
                     p {
                         class: "text-muted-foreground",
@@ -750,7 +827,7 @@ pub fn Profile(pubkey: String) -> Element {
                         }
                     }
 
-                    // Website and joined date
+                    // Website, birthday, and joined date
                     div {
                         class: "flex flex-wrap gap-4 mt-3 text-sm text-muted-foreground",
 
@@ -766,10 +843,44 @@ pub fn Profile(pubkey: String) -> Element {
                             }
                         }
 
-                        // Joined date placeholder
-                        span {
-                            class: "flex items-center gap-1",
-                            "📅 Joined recently"
+                        // Birthday (NIP-24)
+                        {
+                            let birthday_str = metadata.custom.get("birthday")
+                                .and_then(|v| {
+                                    if v.is_object() {
+                                        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                                        let month = v.get("month").and_then(|m| m.as_u64()).map(|m| m as usize);
+                                        let day = v.get("day").and_then(|d| d.as_u64());
+                                        let year = v.get("year").and_then(|y| y.as_u64());
+
+                                        match (month, day, year) {
+                                            (Some(m), Some(d), Some(y)) if (1..=12).contains(&m) => {
+                                                Some(format!("{} {}, {}", months[m - 1], d, y))
+                                            }
+                                            (Some(m), Some(d), None) if (1..=12).contains(&m) => {
+                                                Some(format!("{} {}", months[m - 1], d))
+                                            }
+                                            (Some(m), None, None) if (1..=12).contains(&m) => {
+                                                Some(months[m - 1].to_string())
+                                            }
+                                            _ => None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                            if let Some(bday) = birthday_str {
+                                rsx! {
+                                    span {
+                                        class: "flex items-center gap-1",
+                                        "🎂 {bday}"
+                                    }
+                                }
+                            } else {
+                                rsx! {}
+                            }
                         }
                     }
 
@@ -865,6 +976,9 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
 
+            // Profile badges section (NIP-58)
+            ProfileBadgesSection { pubkey: pubkey.clone() }
+
             // Content tabs
             div {
                 class: "border-b border-border sticky top-[57px] bg-background z-10",
@@ -945,6 +1059,23 @@ pub fn Profile(pubkey: String) -> Element {
                         tab, current_events.len(), current_has_more, *current_tab_has_more.read());
 
                     rsx! {
+                        // Pinned notes carousel (only shown on Posts tab when there are pins)
+                        if matches!(tab, ProfileTab::Posts) && !pinned_events.read().is_empty() {
+                            div {
+                                class: "border-b border-border",
+                                div {
+                                    class: "py-3",
+                                    h3 {
+                                        class: "px-4 text-sm font-semibold text-muted-foreground mb-2",
+                                        "Pinned"
+                                    }
+                                    PinnedNotesCarousel {
+                                        events: pinned_events.read().clone()
+                                    }
+                                }
+                            }
+                        }
+
                         if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading_events.read() && current_events.is_empty()) {
                             // Show client initializing animation during:
                             // 1. Client initialization
@@ -1244,9 +1375,10 @@ pub fn Profile(pubkey: String) -> Element {
                                     onclick: move |_| {
                                         if let Ok(pk) = PublicKey::from_bech32(&pubkey_for_info)
                                             .or_else(|_| PublicKey::from_hex(&pubkey_for_info)) {
-                                            let npub = pk.to_bech32().unwrap();
+                                            // Copy nostr:npub1... URI (NIP-21) for sharing
+                                            let npub_uri = format!("nostr:{}", pk.to_bech32().unwrap());
                                             if let Some(window) = web_sys::window() {
-                                                let _ = window.navigator().clipboard().write_text(&npub);
+                                                let _ = window.navigator().clipboard().write_text(&npub_uri);
                                             }
                                         }
                                     },
@@ -1409,7 +1541,7 @@ fn parse_video_meta(event: &NostrEvent) -> VideoMeta {
 fn VertsVideoCard(event: NostrEvent) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Play/pause video on hover (only if no thumbnail)
@@ -1597,7 +1729,7 @@ async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) 
 
     let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
 
-    log::info!("DB Phase: loaded {} {} events", processed.len(), format!("{:?}", tab));
+    log::info!("DB Phase: loaded {} {:?} events", processed.len(), tab);
 
     Ok(LoadOutcome {
         events: processed,
@@ -1630,7 +1762,7 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
 
     let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
 
-    log::info!("Relay Phase: fetched {} {} events (raw: {})", processed.len(), format!("{:?}", tab), relay_count);
+    log::info!("Relay Phase: fetched {} {:?} events (raw: {})", processed.len(), tab, relay_count);
 
     Ok(LoadOutcome {
         events: processed,
@@ -1733,7 +1865,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             while all_posts.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
-                    .author(public_key.clone())
+                    .author(public_key)
                     .kinds(vec![Kind::TextNote, Kind::Repost])
                     .limit(100); // Fetch more at once to reduce round trips
 
@@ -1801,7 +1933,7 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             while all_replies.len() < TARGET_COUNT && total_fetched < MAX_FETCH_LIMIT {
                 let mut filter = Filter::new()
-                    .author(public_key.clone())
+                    .author(public_key)
                     .kind(Kind::TextNote)
                     .limit(100);
 

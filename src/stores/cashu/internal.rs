@@ -316,7 +316,7 @@ pub(crate) async fn validate_proofs_with_mint(
 
     // NUT-07: Check proof states with mint
     let states = wallet
-        .check_proofs_spent(proofs.clone().into())
+        .check_proofs_spent(proofs.clone())
         .await
         .map_err(|e| format!("Failed to check proof states: {}", e))?;
 
@@ -390,7 +390,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             .collect();
 
         let cdk_proofs: Result<Vec<_>, _> =
-            all_proofs.iter().map(|p| proof_data_to_cdk_proof(p)).collect();
+            all_proofs.iter().map(proof_data_to_cdk_proof).collect();
 
         (cdk_proofs?, event_ids, all_proofs)
     };
@@ -644,7 +644,13 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
         seen_keys.insert(key_hex)
     });
 
-    log::info!(
+    // Log x-only pubkeys for debugging P2PK matching
+    for key in &keys {
+        let xonly = key.public_key().x_only_public_key();
+        log::debug!("P2PK signing key x-only pubkey: {}", hex::encode(xonly.serialize()));
+    }
+
+    log::debug!(
         "Collected {} unique P2PK signing keys for token receive",
         keys.len()
     );

@@ -87,6 +87,67 @@ pub fn PersistentMusicPlayer() -> Element {
         });
     });
 
+    // Track last synced time to detect programmatic changes (skip buttons)
+    let mut last_synced_time = use_signal(|| 0.0f64);
+
+    // Sync current_time to audio element when changed programmatically (skip forward/backward)
+    use_effect(move || {
+        let state = MUSIC_PLAYER.read();
+        let current_time = state.current_time;
+        let last_time = last_synced_time();
+
+        // Only sync if the time changed significantly (more than 1 second jump indicates programmatic change)
+        // This prevents fighting with the ontimeupdate event that continuously syncs audio → state
+        if (current_time - last_time).abs() > 1.0 {
+            last_synced_time.set(current_time);
+
+            spawn(async move {
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
+                let script = format!(
+                    r#"
+                    (function() {{
+                        let audio = document.getElementById({audio_id});
+                        if (!audio) return;
+                        // Only seek if the difference is significant (avoids fighting with timeupdate)
+                        if (Math.abs(audio.currentTime - {current_time}) > 0.5) {{
+                            audio.currentTime = {current_time};
+                        }}
+                    }})();
+                    "#,
+                    audio_id = audio_id_json,
+                    current_time = current_time
+                );
+                let _ = eval(&script);
+            });
+        }
+    });
+
+    // Memoize playback speed to ensure effect only runs when it changes
+    let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
+
+    // Sync playback speed to audio element
+    use_effect(move || {
+        let speed = playback_speed();
+
+        spawn(async move {
+            let audio_id_json = serde_json::to_string(&audio_id)
+                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+
+            let script = format!(
+                r#"
+                (function() {{
+                    let audio = document.getElementById({audio_id});
+                    if (audio) audio.playbackRate = {speed};
+                }})();
+                "#,
+                audio_id = audio_id_json,
+                speed = speed
+            );
+            let _ = eval(&script);
+        });
+    });
 
     // Don't render if player is not visible
     if !state.is_visible || state.current_track.is_none() {
@@ -189,13 +250,29 @@ pub fn PersistentMusicPlayer() -> Element {
 
                     div {
                         class: "flex flex-col min-w-0",
-                        div {
-                            class: "font-semibold text-sm truncate",
-                            "{track.title}"
+                        // Episode/track title - clickable to episode detail page
+                        if let Some(episode_route) = track.get_episode_route() {
+                            Link {
+                                to: episode_route,
+                                class: "font-semibold text-sm truncate hover:text-primary hover:underline",
+                                "{track.title}"
+                            }
+                        } else {
+                            div {
+                                class: "font-semibold text-sm truncate",
+                                "{track.title}"
+                            }
                         }
                         div {
                             class: "text-xs text-muted-foreground truncate",
-                            if let Some(artist_id) = &track.artist_id {
+                            // Link to show page (podcast) or artist page (music)
+                            if let Some(show_route) = track.get_show_route() {
+                                Link {
+                                    to: show_route,
+                                    class: "hover:text-foreground hover:underline",
+                                    "{track.artist}"
+                                }
+                            } else if let Some(artist_id) = &track.artist_id {
                                 Link {
                                     to: Route::MusicArtist { artist_id: artist_id.clone() },
                                     class: "hover:text-foreground hover:underline",
@@ -212,33 +289,62 @@ pub fn PersistentMusicPlayer() -> Element {
                 div {
                     class: "flex items-center gap-3 flex-1 justify-center max-w-2xl",
 
-                    // Playback controls
+                    // Playback controls - different for podcasts vs music
                     div {
                         class: "flex items-center gap-1",
 
-                        // Previous button
-                        button {
-                            class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::previous_track(),
-                            dangerous_inner_html: icons::SKIP_BACK
-                        }
-
-                        // Play/Pause button
-                        button {
-                            class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
-                            onclick: move |_| music_player::toggle_play(),
-                            dangerous_inner_html: if state.is_playing {
-                                icons::PAUSE
-                            } else {
-                                icons::PLAY
+                        if track.is_podcast {
+                            // Podcast controls: skip back 15s
+                            button {
+                                class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
+                                title: "Rewind 15 seconds",
+                                onclick: move |_| music_player::skip_backward(15.0),
+                                dangerous_inner_html: icons::REWIND_15
                             }
-                        }
 
-                        // Next button
-                        button {
-                            class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                            onclick: move |_| music_player::next_track(),
-                            dangerous_inner_html: icons::SKIP_FORWARD
+                            // Play/Pause button
+                            button {
+                                class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
+                                onclick: move |_| music_player::toggle_play(),
+                                dangerous_inner_html: if state.is_playing {
+                                    icons::PAUSE
+                                } else {
+                                    icons::PLAY
+                                }
+                            }
+
+                            // Podcast controls: skip forward 15s
+                            button {
+                                class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
+                                title: "Forward 15 seconds",
+                                onclick: move |_| music_player::skip_forward(15.0),
+                                dangerous_inner_html: icons::FORWARD_15
+                            }
+                        } else {
+                            // Music controls: previous/next track
+                            button {
+                                class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
+                                onclick: move |_| music_player::previous_track(),
+                                dangerous_inner_html: icons::SKIP_BACK
+                            }
+
+                            // Play/Pause button
+                            button {
+                                class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-md bg-primary hover:bg-primary/90 text-primary-foreground transition-colors",
+                                onclick: move |_| music_player::toggle_play(),
+                                dangerous_inner_html: if state.is_playing {
+                                    icons::PAUSE
+                                } else {
+                                    icons::PLAY
+                                }
+                            }
+
+                            // Next button
+                            button {
+                                class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
+                                onclick: move |_| music_player::next_track(),
+                                dangerous_inner_html: icons::SKIP_FORWARD
+                            }
                         }
                     }
 
@@ -334,6 +440,37 @@ pub fn PersistentMusicPlayer() -> Element {
                                         music_player::set_volume(value / 100.0);
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // Playback speed control (for podcasts only)
+                    if track.is_podcast {
+                        div {
+                            class: "flex items-center gap-1 hidden md:flex",
+                            title: "Playback speed",
+
+                            span {
+                                class: "w-4 h-4 text-muted-foreground",
+                                dangerous_inner_html: icons::GAUGE
+                            }
+
+                            select {
+                                class: "bg-transparent text-xs text-muted-foreground cursor-pointer hover:text-foreground border-none focus:outline-none appearance-none pr-4",
+                                value: "{state.playback_speed}",
+                                onchange: move |evt| {
+                                    if let Ok(speed) = evt.value().parse::<f64>() {
+                                        music_player::set_playback_speed(speed);
+                                    }
+                                },
+
+                                option { value: "0.5", "0.5x" }
+                                option { value: "0.75", "0.75x" }
+                                option { value: "1", "1x" }
+                                option { value: "1.25", "1.25x" }
+                                option { value: "1.5", "1.5x" }
+                                option { value: "1.75", "1.75x" }
+                                option { value: "2", "2x" }
                             }
                         }
                     }
