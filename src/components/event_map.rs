@@ -475,16 +475,17 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
 
     let month = date.get_month() as usize;
     let day = date.get_date();
+    let month_str = month_names.get(month).unwrap_or(&"");
 
     if event.is_all_day() {
-        format!("{} {}", month_names[month], day)
+        format!("{} {}", month_str, day)
     } else {
         let hours = date.get_hours();
         let minutes = date.get_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
 
-        format!("{} {} at {}:{:02} {}", month_names[month], day, hour_12, minutes, am_pm)
+        format!("{} {} at {}:{:02} {}", month_str, day, hour_12, minutes, am_pm)
     }
 }
 

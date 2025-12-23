@@ -738,9 +738,11 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
     let month = date.get_month() as usize;
     let day = date.get_date();
     let year = date.get_full_year();
+    let weekday_str = weekday_names.get(weekday).unwrap_or(&"");
+    let month_str = month_names.get(month).unwrap_or(&"");
 
     if event.is_all_day() {
-        format!("{}, {} {}, {}", weekday_names[weekday], month_names[month], day, year)
+        format!("{}, {} {}, {}", weekday_str, month_str, day, year)
     } else {
         let hours = date.get_hours();
         let minutes = date.get_minutes();
@@ -748,7 +750,7 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
 
         format!("{}, {} {}, {} at {}:{:02} {}",
-                weekday_names[weekday], month_names[month], day, year, hour_12, minutes, am_pm)
+                weekday_str, month_str, day, year, hour_12, minutes, am_pm)
     }
 }
 

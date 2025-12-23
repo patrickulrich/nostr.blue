@@ -716,14 +716,18 @@ async fn generate_v4v_invoice(
     callback_url.push_str(&format!("{}amount={}", separator, amount_msats));
 
     // Add comment if allowed by endpoint (respects LUD-12 commentAllowed)
+    // Only send comment when comment_allowed is explicitly set (not defaulting to 500)
     if !full_comment.is_empty() {
-        let max_len = pay_info.comment_allowed.unwrap_or(500) as usize;
-        if full_comment.len() <= max_len {
-            callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
-        } else {
-            // Truncate to endpoint's max length (UTF-8 safe)
-            let truncated: String = full_comment.chars().take(max_len).collect();
-            callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+        if let Some(max_comment) = pay_info.comment_allowed {
+            let max = max_comment as usize;
+            let char_count = full_comment.chars().count();
+            if char_count <= max {
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
+            } else {
+                // Truncate to endpoint's max length (UTF-8 safe by character count)
+                let truncated: String = full_comment.chars().take(max).collect();
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+            }
         }
     }
 

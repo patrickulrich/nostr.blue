@@ -41,12 +41,18 @@ pub fn BadgeDetailModal(
     // Store task handle for cancellation to prevent race conditions
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
 
+    // Track the current target pubkey so async code can detect if it changed
+    let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
+
     // Only re-run when badge pubkey changes (not every render)
     use_effect(use_reactive!(|badge_pubkey| {
         // Cancel any existing fetch task before spawning new one
         if let Some(existing_task) = fetch_task.write().take() {
             existing_task.cancel();
         }
+
+        // Update target pubkey for race condition detection
+        target_pubkey.set(badge_pubkey.clone());
 
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
@@ -71,14 +77,34 @@ pub fn BadgeDetailModal(
                 };
 
                 // Try database first
-                if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                    issuer_profile.set(Some(metadata));
-                    return;
+                match client.database().metadata(pubkey).await {
+                    Ok(Some(metadata)) => {
+                        // Check pubkey hasn't changed before updating
+                        if *target_pubkey.read() == pubkey_str {
+                            issuer_profile.set(Some(metadata));
+                        }
+                        return;
+                    }
+                    Ok(None) => {} // No cached data, try network
+                    Err(e) => {
+                        log::warn!("Database fetch failed for {}: {}", pubkey_str, e);
+                    }
                 }
 
                 // Fallback to network
-                if let Ok(Some(metadata)) = client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
-                    issuer_profile.set(Some(metadata));
+                match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                    Ok(Some(metadata)) => {
+                        // Check pubkey hasn't changed before updating
+                        if *target_pubkey.read() == pubkey_str {
+                            issuer_profile.set(Some(metadata));
+                        }
+                    }
+                    Ok(None) => {
+                        log::debug!("No metadata found for {}", pubkey_str);
+                    }
+                    Err(e) => {
+                        log::warn!("Network fetch failed for {}: {}", pubkey_str, e);
+                    }
                 }
             });
             fetch_task.set(Some(new_task));
