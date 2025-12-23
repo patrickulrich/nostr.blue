@@ -12,7 +12,7 @@ dioxus = { version = "0.7.2", default-features = false, features = ["web", "rout
 dioxus-stores = "0.7.2"
 
 # Nostr protocol
-nostr = { version = "0.44.1", default-features = false, features = ["nip47", "nip57", "nip60", "nip98"] }
+nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip60", "nip98"] }
 nostr-sdk = { version = "0.44.1", default-features = false, features = ["nip44", "nip59", "nip57"] }
 nostr-database = { version = "0.44.0", default-features = false }
 nostr-indexeddb = { version = "0.44.0" }

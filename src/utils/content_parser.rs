@@ -196,7 +196,7 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             let content_token = match nip19 {
                 Nip19::Pubkey(_) | Nip19::Profile(_) => Some(ContentToken::Mention(uri.to_string())),
                 Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => Some(ContentToken::EventMention(uri.to_string())),
-                Nip19::Secret(_) => None, // Don't render secret keys as mentions
+                Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None, // Don't render secret keys as mentions
             };
             if let Some(token) = content_token {
                 matches.push((mat.start(), mat.end(), token));

@@ -99,6 +99,8 @@ fn App() -> Element {
         ToastProvider {
             Router::<routes::Route> {}
         }
+        // NIP-49 password modal for encrypted key unlock/migration
+        components::password_modal::PasswordModal {}
     }
 }
 

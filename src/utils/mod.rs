@@ -2,6 +2,7 @@
 // Helper functions for common operations
 
 pub mod nip19;
+pub mod nip49;  // NIP-49 Private key encryption
 pub mod time;
 pub mod validation;
 pub mod error;
