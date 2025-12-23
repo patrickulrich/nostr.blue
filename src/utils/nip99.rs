@@ -641,6 +641,17 @@ impl ShippingOption {
         format!("{:.2} {}", self.base_price, self.currency)
     }
 
+    /// Convert shipping price to satoshis
+    /// Returns None if currency is not supported or conversion fails
+    pub fn to_sats(&self) -> Option<u64> {
+        let currency_upper = self.currency.to_uppercase();
+        if currency_upper == "SATS" || currency_upper == "SAT" {
+            return Some(self.base_price as u64);
+        }
+        // Convert fiat to sats using exchange rate
+        crate::services::btc_price::fiat_to_sats(self.base_price, &self.currency)
+    }
+
     /// Display delivery estimate
     pub fn display_duration(&self) -> Option<String> {
         match (self.duration_min, self.duration_max, &self.duration_unit) {

@@ -15,17 +15,21 @@ pub fn ImageCarousel(props: ImageCarouselProps) -> Element {
     let mut current_index = use_signal(|| 0usize);
     let images = props.images.clone();
     let alt_text = props.alt.clone().unwrap_or_default();
-    let image_count = images.len();
 
     // Reset index when images prop changes to avoid stale index
-    use_effect(move || {
-        let current = *current_index.peek();
-        if image_count == 0 {
-            current_index.set(0);
-        } else if current >= image_count {
-            current_index.set(image_count - 1);
-        }
-    });
+    // Capture images by move so the closure recomputes when props change
+    {
+        let images_for_effect = images.clone();
+        use_effect(move || {
+            let image_count = images_for_effect.len();
+            let current = *current_index.peek();
+            if image_count == 0 {
+                current_index.set(0);
+            } else if current >= image_count {
+                current_index.set(image_count - 1);
+            }
+        });
+    }
 
     if images.is_empty() {
         return rsx! {

@@ -317,10 +317,19 @@ fn recalculate_cart_total() {
             );
         }
 
-        // Add shipping cost if selected
+        // Add shipping cost if selected (convert currency if needed)
         if let Some(shipping_naddr) = &item.selected_shipping {
             if let Some(shipping) = get_cached_shipping(shipping_naddr) {
-                total += shipping.base_price as u64;
+                if let Some(shipping_sats) = shipping.to_sats() {
+                    total += shipping_sats;
+                } else {
+                    log::warn!(
+                        "Unable to convert shipping cost {} {} to sats for {}",
+                        shipping.base_price,
+                        shipping.currency,
+                        shipping.title
+                    );
+                }
             }
         }
     }
