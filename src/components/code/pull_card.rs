@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use crate::utils::nip34::PullRequest;
 use crate::utils::format::truncate_commit;
 use crate::routes::Route;
-use super::status_badge::{CodeStatusBadge, BadgeSize};
+use super::status_badge::{CodeStatusBadge, BadgeSize, status_color_class};
 
 /// Pull request card component for lists
 #[component]
@@ -94,12 +94,7 @@ pub fn CodePullRow(pr: PullRequest) -> Element {
 
             // Status indicator (use merge icon for PRs)
             svg {
-                class: match pr.status {
-                    crate::utils::nip34::IssueStatus::Open => "w-4 h-4 text-green-500",
-                    crate::utils::nip34::IssueStatus::Applied => "w-4 h-4 text-purple-500",
-                    crate::utils::nip34::IssueStatus::Closed => "w-4 h-4 text-red-500",
-                    crate::utils::nip34::IssueStatus::Draft => "w-4 h-4 text-gray-500",
-                },
+                class: format!("w-4 h-4 {}", status_color_class(pr.status)),
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",

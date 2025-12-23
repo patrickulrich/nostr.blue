@@ -269,9 +269,11 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
     let mempool_endpoint = settings_store::get_mempool_endpoint();
     let mempool_url = format!("{}/tx/{}", mempool_endpoint.trim_end_matches("/api"), txid);
 
-    // Truncated txid for display
-    let short_txid = if txid.len() > 16 {
-        format!("{}...{}", &txid[0..8], &txid[txid.len() - 8..])
+    // Truncated txid for display (using char-safe slicing)
+    let short_txid = if txid.chars().count() > 16 {
+        let start: String = txid.chars().take(8).collect();
+        let end: String = txid.chars().skip(txid.chars().count().saturating_sub(8)).collect();
+        format!("{}...{}", start, end)
     } else {
         txid.clone()
     };

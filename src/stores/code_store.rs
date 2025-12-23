@@ -306,6 +306,148 @@ pub fn get_starred_repos() -> Vec<Repository> {
 }
 
 // ============================================================================
+// Watch Functions (localStorage-based, like gittr)
+// ============================================================================
+
+/// Watched repository coordinates (localStorage-persisted)
+pub static WATCHED_REPOS: GlobalSignal<HashSet<String>> = GlobalSignal::new(HashSet::new);
+
+/// Check if a repo is watched
+pub fn is_repo_watched(coordinate: &str) -> bool {
+    WATCHED_REPOS.read().contains(coordinate)
+}
+
+/// Watch a repository (adds to local set and persists to localStorage)
+pub fn watch_repo(coordinate: &str) {
+    WATCHED_REPOS.write().insert(coordinate.to_string());
+    persist_watched_repos();
+}
+
+/// Unwatch a repository
+pub fn unwatch_repo(coordinate: &str) {
+    WATCHED_REPOS.write().remove(coordinate);
+    persist_watched_repos();
+}
+
+/// Get watched repos
+pub fn get_watched_repos() -> Vec<Repository> {
+    let watched = WATCHED_REPOS.read();
+    let cache = CODE_REPOS_CACHE.read();
+    watched
+        .iter()
+        .filter_map(|c| cache.peek(c).cloned())
+        .collect()
+}
+
+/// Load watched repos from localStorage
+pub fn load_watched_repos() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                if let Ok(Some(watched_json)) = storage.get_item("nostr_blue_watched_repos") {
+                    if let Ok(watched) = serde_json::from_str::<Vec<String>>(&watched_json) {
+                        let mut signal = WATCHED_REPOS.write();
+                        signal.clear();
+                        for coord in watched {
+                            signal.insert(coord);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Persist watched repos to localStorage
+fn persist_watched_repos() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                let watched: Vec<String> = WATCHED_REPOS.read().iter().cloned().collect();
+                if let Ok(json) = serde_json::to_string(&watched) {
+                    let _ = storage.set_item("nostr_blue_watched_repos", &json);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Fork Tracking (localStorage-based, placeholder)
+// ============================================================================
+
+/// Forked repository coordinates (localStorage-persisted)
+pub static FORKED_REPOS: GlobalSignal<HashSet<String>> = GlobalSignal::new(HashSet::new);
+
+/// Check if user has forked a repo
+pub fn is_repo_forked(coordinate: &str) -> bool {
+    FORKED_REPOS.read().contains(coordinate)
+}
+
+/// Track a fork (when user forks a repo)
+pub fn track_fork(coordinate: &str) {
+    FORKED_REPOS.write().insert(coordinate.to_string());
+    persist_forked_repos();
+}
+
+/// Load forked repos from localStorage
+pub fn load_forked_repos() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                if let Ok(Some(forked_json)) = storage.get_item("nostr_blue_forked_repos") {
+                    if let Ok(forked) = serde_json::from_str::<Vec<String>>(&forked_json) {
+                        let mut signal = FORKED_REPOS.write();
+                        signal.clear();
+                        for coord in forked {
+                            signal.insert(coord);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Persist forked repos to localStorage
+fn persist_forked_repos() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                let forked: Vec<String> = FORKED_REPOS.read().iter().cloned().collect();
+                if let Ok(json) = serde_json::to_string(&forked) {
+                    let _ = storage.set_item("nostr_blue_forked_repos", &json);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// README Cache
+// ============================================================================
+
+const README_CACHE_SIZE: usize = 50;
+
+/// README content cache (keyed by coordinate string)
+pub static README_CACHE: GlobalSignal<LruCache<String, String>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(README_CACHE_SIZE).unwrap()));
+
+/// Get cached README content
+pub fn get_cached_readme(coordinate: &str) -> Option<String> {
+    README_CACHE.read().peek(coordinate).cloned()
+}
+
+/// Cache README content
+pub fn cache_readme(coordinate: &str, content: String) {
+    README_CACHE.write().put(coordinate.to_string(), content);
+}
+
+// ============================================================================
 // Filter Builders
 // ============================================================================
 
@@ -445,5 +587,8 @@ pub fn clear_caches() {
     USER_REPOS.write().clear();
     USER_SNIPPETS.write().clear();
     STARRED_REPOS.write().clear();
+    WATCHED_REPOS.write().clear();
+    FORKED_REPOS.write().clear();
+    README_CACHE.write().clear();
     *CODE_INITIALIZED.write() = false;
 }

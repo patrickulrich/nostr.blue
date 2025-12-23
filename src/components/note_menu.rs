@@ -218,6 +218,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
 
                             let eid = event_id_pin.clone();
                             let currently_pinned = *is_pinned.read();
+                            let toast_api = toast;
 
                             is_updating_pin.set(true);
                             is_open.set(false);
@@ -239,9 +240,13 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
                                         );
                                     }
                                     Err(e) => {
-                                        log::error!("Failed to {} note: {}",
-                                            if currently_pinned { "unpin" } else { "pin" },
-                                            e
+                                        let action = if currently_pinned { "unpin" } else { "pin" };
+                                        log::error!("Failed to {} note: {}", action, e);
+                                        toast_api.error(
+                                            format!("Failed to {} note", action),
+                                            ToastOptions::new()
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
                                         );
                                     }
                                 }

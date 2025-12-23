@@ -127,17 +127,30 @@ pub fn CodeStatusBadge(
 #[allow(dead_code)] // Reserved for future use
 #[component]
 pub fn CodeStatusText(status: IssueStatus) -> Element {
-    let (color_class, text) = match status {
-        IssueStatus::Open => ("text-green-500", "Open"),
-        IssueStatus::Applied => ("text-purple-500", "Merged"),
-        IssueStatus::Closed => ("text-red-500", "Closed"),
-        IssueStatus::Draft => ("text-gray-500", "Draft"),
-    };
-
     rsx! {
         span {
-            class: "font-medium {color_class}",
-            "{text}"
+            class: "font-medium {status_color_class(status)}",
+            "{status_text(status)}"
         }
+    }
+}
+
+/// Get the color class for a status (for use in custom styling)
+pub fn status_color_class(status: IssueStatus) -> &'static str {
+    match status {
+        IssueStatus::Open => "text-green-500",
+        IssueStatus::Applied => "text-purple-500",
+        IssueStatus::Closed => "text-red-500",
+        IssueStatus::Draft => "text-gray-500",
+    }
+}
+
+/// Get the display text for a status
+pub fn status_text(status: IssueStatus) -> &'static str {
+    match status {
+        IssueStatus::Open => "Open",
+        IssueStatus::Applied => "Merged",
+        IssueStatus::Closed => "Closed",
+        IssueStatus::Draft => "Draft",
     }
 }

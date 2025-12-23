@@ -18,4 +18,5 @@ pub use issues::*;
 pub use pull_requests::*;
 pub use snippets::*;
 pub use git_service::git_service;
+pub use file_fetcher::fetch_readme;
 // file_fetcher and stars are available but not re-exported (use git_hosting::file_fetcher::* if needed)

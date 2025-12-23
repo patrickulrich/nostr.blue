@@ -92,6 +92,12 @@
                         });
                     })
                     .catch(err => console.error('[PWA] Service Worker registration failed:', err));
+
+                // Auto-reload when new service worker takes control
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    console.log('[PWA] Controller changed, reloading for update...');
+                    window.location.reload();
+                });
             });
         }
     </script>

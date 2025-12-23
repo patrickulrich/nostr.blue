@@ -16,24 +16,39 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
     let mut content = use_signal(String::new);
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
+    let mut is_directory = use_signal(|| false);
 
     // Extract filename from path
     let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
 
-    // Load file content
+    // Create a load key that changes when route params change - this ensures the effect re-runs
+    let load_key = use_memo({
+        let naddr = naddr.clone();
+        let git_ref = git_ref.clone();
+        let path = path.clone();
+        move || format!("{}:{}:{}", naddr, git_ref, path)
+    });
+
+    // Load file content when key changes
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || {
-            let naddr = naddr.clone();
-            let git_ref = git_ref.clone();
-            let path = path.clone();
+            // Read the key to register as dependency
+            let _key = load_key.read();
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
             if !client_initialized {
                 return;
             }
+
+            // Reset state for new load
+            is_directory.set(false);
+
+            let naddr = naddr.clone();
+            let git_ref = git_ref.clone();
+            let path = path.clone();
 
             spawn(async move {
                 loading.set(true);
@@ -65,7 +80,13 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                         content.set(file_content);
                     }
                     Err(e) => {
-                        error.set(Some(format!("Failed to load file: {}", e)));
+                        // Check if the error indicates this is a directory (tree instead of blob)
+                        if e.contains("tree") || e.contains("is a tree") {
+                            // Signal to redirect to tree view
+                            is_directory.set(true);
+                        } else {
+                            error.set(Some(format!("Failed to load file: {}", e)));
+                        }
                     }
                 }
 
@@ -76,6 +97,23 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
 
                 loading.set(false);
             });
+        }
+    });
+
+    // Redirect to tree view if path is a directory
+    use_effect({
+        let naddr = naddr.clone();
+        let git_ref = git_ref.clone();
+        let path = path.clone();
+        move || {
+            if *is_directory.read() {
+                let nav = navigator();
+                nav.replace(Route::CodeRepoTree {
+                    naddr: naddr.clone(),
+                    git_ref: git_ref.clone(),
+                    path: path.clone(),
+                });
+            }
         }
     });
 

@@ -17,20 +17,31 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
 
-    // Load file tree
+    // Create a load key that changes when route params change - this ensures the effect re-runs
+    let load_key = use_memo({
+        let naddr = naddr.clone();
+        let git_ref = git_ref.clone();
+        let path = path.clone();
+        move || format!("{}:{}:{}", naddr, git_ref, path)
+    });
+
+    // Load file tree when key changes
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || {
-            let naddr = naddr.clone();
-            let git_ref = git_ref.clone();
-            let path = path.clone();
+            // Read the key to register as dependency
+            let _key = load_key.read();
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
             if !client_initialized {
                 return;
             }
+
+            let naddr = naddr.clone();
+            let git_ref = git_ref.clone();
+            let path = path.clone();
 
             spawn(async move {
                 loading.set(true);

@@ -23,6 +23,7 @@ use crate::utils::nip34::{Repository, DisplaySnippet};
 pub fn CodeHome() -> Element {
     let mut active_tab = use_signal(|| CodeTab::Repositories);
     let mut search_query = use_signal(String::new);
+    let nav = use_navigator();
 
     rsx! {
         div {
@@ -79,7 +80,7 @@ pub fn CodeHome() -> Element {
                     }
                 }
 
-                // Search bar
+                // Search bar - navigates to CodeSearch on Enter
                 div {
                     class: "px-4 pb-4",
                     div {
@@ -89,7 +90,15 @@ pub fn CodeHome() -> Element {
                             r#type: "text",
                             placeholder: "Search repositories and snippets...",
                             value: "{search_query}",
-                            oninput: move |e| search_query.set(e.value())
+                            oninput: move |e| search_query.set(e.value()),
+                            onkeypress: move |e: KeyboardEvent| {
+                                if e.key() == Key::Enter {
+                                    let q = search_query.read().clone();
+                                    if !q.is_empty() {
+                                        nav.push(Route::CodeSearch { q });
+                                    }
+                                }
+                            }
                         }
                         div {
                             class: "absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground",
@@ -123,24 +132,17 @@ pub fn CodeHome() -> Element {
             div {
                 class: "p-4",
 
-                // Search results if query is not empty
-                if !search_query.read().is_empty() {
-                    SearchResults {
-                        query: search_query.read().clone()
-                    }
-                } else {
-                    // Tab content
-                    match *active_tab.read() {
-                        CodeTab::Repositories => rsx! {
-                            RepositoriesTab {}
-                        },
-                        CodeTab::Snippets => rsx! {
-                            SnippetsTab {}
-                        },
-                        CodeTab::MyRepos => rsx! {
-                            MyReposTab {}
-                        },
-                    }
+                // Tab content
+                match *active_tab.read() {
+                    CodeTab::Repositories => rsx! {
+                        RepositoriesTab {}
+                    },
+                    CodeTab::Snippets => rsx! {
+                        SnippetsTab {}
+                    },
+                    CodeTab::MyRepos => rsx! {
+                        MyReposTab {}
+                    },
                 }
             }
         }
@@ -525,24 +527,6 @@ fn MyReposTab() -> Element {
             EmptyState {
                 title: "No repositories yet",
                 description: "Import a repository from GitHub, GitLab, or Codeberg to get started."
-            }
-        }
-    }
-}
-
-/// Search results component
-#[component]
-fn SearchResults(query: String) -> Element {
-    rsx! {
-        div {
-            class: "space-y-4",
-            h3 {
-                class: "font-semibold",
-                "Search results for \"{query}\""
-            }
-            p {
-                class: "text-muted-foreground text-sm",
-                "Search functionality coming soon..."
             }
         }
     }

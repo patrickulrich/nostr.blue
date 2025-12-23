@@ -1,11 +1,13 @@
 //! Repository Detail Page
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
+//! Styled to match gittr's layout-client.tsx pattern.
 
 use dioxus::prelude::*;
 use crate::components::{icons, CodeIssueRow, CodePullRow};
+use crate::components::code::{RepoHeader, RepoActionBar, RepoTabNav, ReadmeViewer};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, fetch_repo_issues, fetch_repo_prs};
+use crate::services::git_hosting::{fetch_repository, fetch_repo_issues, fetch_repo_prs, fetch_readme};
 use crate::utils::nip34::Repository;
 use crate::utils::format_relative_time_or;
 use crate::stores::profiles::PROFILE_CACHE;
@@ -113,183 +115,40 @@ enum RepoTab {
 
 #[component]
 fn RepoContent(repo: Repository, naddr: String, active_tab: Signal<RepoTab>) -> Element {
-    // Get owner profile
-    let owner_profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
-    let owner_name = owner_profile
-        .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| repo.pubkey_display());
-
-    let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
-
     rsx! {
         div {
-            class: "space-y-6",
+            class: "space-y-4",
 
-            // Repository header
+            // Row 1: Header + Action Bar
             div {
-                class: "space-y-3",
+                class: "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
 
-                // Owner and name
-                div {
-                    class: "flex items-center gap-2",
-                    Link {
-                        to: Route::Profile { pubkey: repo.pubkey.clone() },
-                        class: "text-muted-foreground hover:text-foreground",
-                        "{owner_name}"
-                    }
-                    span { class: "text-muted-foreground", "/" }
-                    h1 {
-                        class: "text-xl font-semibold",
-                        "{display_name}"
-                    }
-                }
+                // Repository header (owner/repo breadcrumb + Public badge)
+                RepoHeader { repo: repo.clone() }
 
-                // Description
-                if let Some(desc) = &repo.description {
-                    p {
-                        class: "text-muted-foreground",
-                        "{desc}"
-                    }
-                }
+                // Action bar (Watch/Star/Fork/Zap/Share)
+                RepoActionBar { repo: repo.clone(), naddr: naddr.clone() }
+            }
 
-                // Stats row
-                div {
-                    class: "flex flex-wrap gap-4 text-sm",
-                    // Stars
-                    div {
-                        class: "flex items-center gap-1 text-muted-foreground",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            polygon { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" }
-                        }
-                        span { "{repo.star_count}" }
-                    }
-
-                    // Issues
-                    div {
-                        class: "flex items-center gap-1 text-muted-foreground",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            circle { cx: "12", cy: "12", r: "10" }
-                            line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                            line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
-                        }
-                        span { "{repo.issue_count} issues" }
-                    }
-
-                    // PRs
-                    div {
-                        class: "flex items-center gap-1 text-muted-foreground",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            circle { cx: "18", cy: "18", r: "3" }
-                            circle { cx: "6", cy: "6", r: "3" }
-                            path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
-                            line { x1: "6", y1: "9", x2: "6", y2: "21" }
-                        }
-                        span { "{repo.pr_count} PRs" }
-                    }
-                }
-
-                // Clone URLs
-                if !repo.clone.is_empty() {
-                    div {
-                        class: "p-3 bg-muted rounded-lg space-y-2",
-                        p { class: "text-xs text-muted-foreground mb-2", "Clone" }
-                        for url in repo.clone.iter() {
-                            div {
-                                key: "{url}",
-                                class: "flex items-center gap-2",
-                                code {
-                                    class: "flex-1 text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto",
-                                    "{url}"
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Web URLs
-                if !repo.web.is_empty() {
-                    div {
-                        class: "flex flex-wrap gap-2",
-                        for url in repo.web.iter() {
-                            a {
-                                key: "{url}",
-                                href: "{url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                class: "text-sm text-primary hover:underline flex items-center gap-1",
-                                svg {
-                                    class: "w-3 h-3",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
-                                    polyline { points: "15 3 21 3 21 9" }
-                                    line { x1: "10", y1: "14", x2: "21", y2: "3" }
-                                }
-                                "View on web"
-                            }
-                        }
-                    }
+            // Description
+            if let Some(desc) = &repo.description {
+                p {
+                    class: "text-muted-foreground",
+                    "{desc}"
                 }
             }
 
             // Tab navigation
-            div {
-                class: "flex border-b border-border",
-                TabButton {
-                    label: "Overview",
-                    active: *active_tab.read() == RepoTab::Overview,
-                    onclick: move |_| active_tab.set(RepoTab::Overview)
-                }
-                TabButton {
-                    label: "Issues",
-                    count: repo.issue_count,
-                    active: *active_tab.read() == RepoTab::Issues,
-                    onclick: move |_| active_tab.set(RepoTab::Issues)
-                }
-                TabButton {
-                    label: "Pull Requests",
-                    count: repo.pr_count,
-                    active: *active_tab.read() == RepoTab::PullRequests,
-                    onclick: move |_| active_tab.set(RepoTab::PullRequests)
-                }
+            RepoTabNav {
+                repo: repo.clone(),
+                naddr: naddr.clone(),
+                active_tab: match *active_tab.read() {
+                    RepoTab::Overview => "overview".to_string(),
+                    RepoTab::Issues => "issues".to_string(),
+                    RepoTab::PullRequests => "pulls".to_string(),
+                },
+                issue_count: Some(repo.issue_count),
+                pr_count: Some(repo.pr_count),
             }
 
             // Tab content
@@ -345,93 +204,84 @@ fn TabButton(props: TabButtonProps) -> Element {
 
 #[component]
 fn OverviewTab(repo: Repository, naddr: String) -> Element {
+    // Fetch README content
+    let repo_for_fetch = repo.clone();
+    let readme_resource: Resource<Result<String, String>> = use_resource(move || {
+        let r = repo_for_fetch.clone();
+        async move {
+            fetch_readme(&r, None).await
+        }
+    });
+
     rsx! {
         div {
             class: "space-y-6",
 
-            // Browse Files button
-            if !repo.clone.is_empty() {
-                div {
-                    class: "flex gap-3",
-                    Link {
-                        to: Route::CodeRepoTree {
-                            naddr: naddr.clone(),
-                            git_ref: "HEAD".to_string(),
-                            path: "".to_string(),
-                        },
-                        class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+            // Browse Files and Clone URL section
+            div {
+                class: "flex flex-col lg:flex-row gap-4",
+
+                // Left side: Browse Files button
+                if !repo.clone.is_empty() {
+                    div {
+                        class: "flex gap-3",
+                        Link {
+                            to: Route::CodeRepoTree {
+                                naddr: naddr.clone(),
+                                git_ref: "HEAD".to_string(),
+                                path: "".to_string(),
+                            },
+                            class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+                            }
+                            "Browse Files"
                         }
-                        "Browse Files"
                     }
-                    Link {
-                        to: Route::CodeRepoCommits { naddr: naddr.clone() },
-                        class: "flex items-center gap-2 px-4 py-2 bg-muted rounded-lg hover:bg-accent transition",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            circle { cx: "12", cy: "12", r: "3" }
-                            line { x1: "3", y1: "12", x2: "9", y2: "12" }
-                            line { x1: "15", y1: "12", x2: "21", y2: "12" }
+                }
+
+                // Right side: Clone URL
+                if !repo.clone.is_empty() {
+                    div {
+                        class: "flex-1 p-3 bg-muted rounded-lg",
+                        p { class: "text-xs text-muted-foreground mb-2", "Clone" }
+                        code {
+                            class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
+                            "{repo.clone.first().unwrap_or(&String::new())}"
                         }
-                        "Commits"
                     }
                 }
             }
 
-            // README placeholder
-            div {
-                class: "p-6 border border-border rounded-lg",
-                h3 {
-                    class: "font-semibold mb-4 flex items-center gap-2",
-                    svg {
-                        class: "w-4 h-4",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20" }
-                        path { d: "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" }
+            // README section
+            match &*readme_resource.read() {
+                Some(Ok(content)) => rsx! {
+                    ReadmeViewer {
+                        content: Some(content.clone()),
+                        loading: false,
                     }
-                    "README"
-                }
-                p {
-                    class: "text-muted-foreground text-sm",
-                    "Click \"Browse Files\" above to explore the repository and view the README."
-                }
-
-                // Show clone URL hint
-                if !repo.clone.is_empty() {
-                    div {
-                        class: "mt-4 p-3 bg-muted rounded-lg text-sm",
-                        p { class: "font-medium mb-1", "To clone the repository:" }
-                        code { class: "font-mono text-xs", "git clone {repo.clone.first().unwrap_or(&String::new())}" }
+                },
+                Some(Err(_)) => rsx! {
+                    ReadmeViewer {
+                        content: None,
+                        loading: false,
                     }
-                }
+                },
+                None => rsx! {
+                    ReadmeViewer {
+                        loading: true,
+                    }
+                },
             }
 
             // Maintainers
@@ -448,6 +298,38 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                                 key: "{pubkey}",
                                 pubkey: pubkey.clone()
                             }
+                        }
+                    }
+                }
+            }
+
+            // Web URLs
+            if !repo.web.is_empty() {
+                div {
+                    class: "flex flex-wrap gap-2",
+                    for url in repo.web.iter() {
+                        a {
+                            key: "{url}",
+                            href: "{url}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "text-sm text-primary hover:underline flex items-center gap-1",
+                            svg {
+                                class: "w-3 h-3",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
+                                polyline { points: "15 3 21 3 21 9" }
+                                line { x1: "10", y1: "14", x2: "21", y2: "3" }
+                            }
+                            "{url}"
                         }
                     }
                 }

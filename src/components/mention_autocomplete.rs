@@ -62,7 +62,6 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         is_searching: use_signal(|| false),
         relay_search_task: use_signal(|| None::<Task>),
     };
-    let mut internal_cursor_pos = use_signal(|| 0usize);
 
     // Dropdown positioning
     let mut dropdown_top = use_signal(|| 0.0);
@@ -85,7 +84,6 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         let cursor_pos = get_cursor_position(&textarea_id.read());
-        internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
             signal.set(cursor_utf8);
@@ -159,9 +157,8 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     };
 
     // Shared helper to update cursor position from DOM
-    let mut sync_cursor_position = move || {
+    let sync_cursor_position = move || {
         let cursor_pos = get_cursor_position(&textarea_id.read());
-        internal_cursor_pos.set(cursor_pos);
         if let Some(mut signal) = props.cursor_position {
             let text = props.content.read();
             let cursor_utf8 = utf16_to_utf8_index(&text, cursor_pos);

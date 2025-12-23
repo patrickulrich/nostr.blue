@@ -85,30 +85,52 @@ function getCorsProxy(url) {
 const methods = {
   /**
    * Clone a repository (shallow by default for browsing)
+   * @param {Object} options - Clone options
+   * @param {string} options.url - Repository URL
+   * @param {string} options.dir - Local directory path
+   * @param {number} [options.depth=1] - Clone depth (shallow clone)
+   * @param {number} [options.timeout=60000] - Timeout in milliseconds (default 60s)
    */
-  async clone({ url, dir, depth = 1 }) {
-    console.log(`[GitWorker] Cloning ${url} to ${dir} (depth: ${depth})`);
+  async clone({ url, dir, depth = 1, timeout = 60000 }) {
+    console.log(`[GitWorker] Cloning ${url} to ${dir} (depth: ${depth}, timeout: ${timeout}ms)`);
 
-    await git.clone({
-      fs,
-      http,
-      dir,
-      url,
-      corsProxy: getCorsProxy(url),
-      depth,
-      singleBranch: true,
-      onProgress: (progress) => {
-        self.postMessage({
-          type: 'progress',
-          phase: progress.phase,
-          loaded: progress.loaded,
-          total: progress.total,
-        });
-      },
-    });
+    // Set up abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.warn(`[GitWorker] Clone timed out after ${timeout}ms`);
+      controller.abort();
+    }, timeout);
 
-    console.log(`[GitWorker] Clone complete: ${dir}`);
-    return { success: true };
+    try {
+      await git.clone({
+        fs,
+        http,
+        dir,
+        url,
+        corsProxy: getCorsProxy(url),
+        depth,
+        singleBranch: true,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          self.postMessage({
+            type: 'progress',
+            phase: progress.phase,
+            loaded: progress.loaded,
+            total: progress.total,
+          });
+        },
+      });
+
+      console.log(`[GitWorker] Clone complete: ${dir}`);
+      return { success: true };
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        throw new Error(`Clone operation timed out after ${timeout / 1000}s`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   /**

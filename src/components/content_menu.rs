@@ -291,24 +291,26 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                         class: "h-px bg-border my-1"
                     }
 
-                    // Block user
-                    button {
-                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
-                        onclick: move |e: MouseEvent| {
-                            e.stop_propagation();
-                            is_open.set(false);
+                    // Block user (requires signer)
+                    if *HAS_SIGNER.read() {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                is_open.set(false);
 
-                            let pubkey = author_pubkey_block.clone();
-                            spawn(async move {
-                                match nostr_client::block_user(pubkey).await {
-                                    Ok(_) => log::info!("User blocked successfully"),
-                                    Err(e) => log::error!("Failed to block user: {}", e),
-                                }
-                            });
-                        },
-                        span {
-                            class: "text-sm",
-                            "Block author"
+                                let pubkey = author_pubkey_block.clone();
+                                spawn(async move {
+                                    match nostr_client::block_user(pubkey).await {
+                                        Ok(_) => log::info!("User blocked successfully"),
+                                        Err(e) => log::error!("Failed to block user: {}", e),
+                                    }
+                                });
+                            },
+                            span {
+                                class: "text-sm",
+                                "Block author"
+                            }
                         }
                     }
 
