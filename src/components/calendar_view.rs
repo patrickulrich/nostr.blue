@@ -493,11 +493,15 @@ fn format_day_header(date: &str) -> String {
     let js_date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
     let weekday = js_date.get_day() as usize;
 
-    let weekday_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    let month_names = ["January", "February", "March", "April", "May", "June",
+    const WEEKDAY_NAMES: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const MONTH_NAMES: [&str; 12] = ["January", "February", "March", "April", "May", "June",
                        "July", "August", "September", "October", "November", "December"];
 
-    format!("{}, {} {}, {}", weekday_names[weekday], month_names[(month - 1) as usize], day, year)
+    let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
+    let month_idx = (month - 1) as usize;
+    let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
+
+    format!("{}, {} {}, {}", weekday_name, month_name, day, year)
 }
 
 /// Get week dates for a given date

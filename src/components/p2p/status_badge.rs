@@ -3,7 +3,7 @@
 //! Color-coded status indicator for NIP-69 P2P orders
 
 use dioxus::prelude::*;
-use crate::utils::nip69::OrderStatus;
+use crate::utils::nip69::{OrderStatus, OrderType, Layer, Network};
 
 /// Status badge with color-coded styling
 #[component]
@@ -41,13 +41,13 @@ pub fn P2PStatusBadge(status: OrderStatus) -> Element {
 
 /// Order type badge (Buy/Sell)
 #[component]
-pub fn P2PTypeBadge(order_type: crate::utils::nip69::OrderType) -> Element {
+pub fn P2PTypeBadge(order_type: OrderType) -> Element {
     let (class, label) = match order_type {
-        crate::utils::nip69::OrderType::Buy => (
+        OrderType::Buy => (
             "bg-green-500/20 text-green-600 dark:text-green-400",
             "BUY"
         ),
-        crate::utils::nip69::OrderType::Sell => (
+        OrderType::Sell => (
             "bg-red-500/20 text-red-600 dark:text-red-400",
             "SELL"
         ),
@@ -63,11 +63,11 @@ pub fn P2PTypeBadge(order_type: crate::utils::nip69::OrderType) -> Element {
 
 /// Layer badge (Lightning/Onchain/Liquid)
 #[component]
-pub fn P2PLayerBadge(layer: crate::utils::nip69::Layer) -> Element {
+pub fn P2PLayerBadge(layer: Layer) -> Element {
     let (icon, label) = match layer {
-        crate::utils::nip69::Layer::Lightning => ("⚡", "Lightning"),
-        crate::utils::nip69::Layer::Onchain => ("🔗", "On-chain"),
-        crate::utils::nip69::Layer::Liquid => ("💧", "Liquid"),
+        Layer::Lightning => ("⚡", "Lightning"),
+        Layer::Onchain => ("🔗", "On-chain"),
+        Layer::Liquid => ("💧", "Liquid"),
     };
 
     rsx! {
@@ -81,17 +81,17 @@ pub fn P2PLayerBadge(layer: crate::utils::nip69::Layer) -> Element {
 
 /// Network badge (Mainnet/Testnet/Signet)
 #[component]
-pub fn P2PNetworkBadge(network: crate::utils::nip69::Network) -> Element {
+pub fn P2PNetworkBadge(network: Network) -> Element {
     let (class, label) = match network {
-        crate::utils::nip69::Network::Mainnet => (
+        Network::Mainnet => (
             "bg-orange-500/20 text-orange-600 dark:text-orange-400",
             "Mainnet"
         ),
-        crate::utils::nip69::Network::Testnet => (
+        Network::Testnet => (
             "bg-purple-500/20 text-purple-600 dark:text-purple-400",
             "Testnet"
         ),
-        crate::utils::nip69::Network::Signet => (
+        Network::Signet => (
             "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
             "Signet"
         ),

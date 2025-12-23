@@ -139,3 +139,40 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
 
     Some(invoice.to_uppercase())
 }
+
+// ============================================================================
+// CSS URL Validation
+// ============================================================================
+
+/// Validate a URL for safe embedding in CSS `url()` context.
+///
+/// This function checks that:
+/// 1. The URL is a valid HTTP/HTTPS URL (prevents javascript: etc.)
+/// 2. The URL doesn't contain characters that could break out of CSS context
+///
+/// Use this when embedding user-provided URLs in inline styles.
+///
+/// # Arguments
+/// * `url` - The URL string to validate
+///
+/// # Returns
+/// * `Some(&str)` - The original URL if safe for CSS embedding
+/// * `None` - If URL is invalid or contains dangerous characters
+///
+/// # Examples
+/// ```
+/// assert!(css_safe_url("https://example.com/image.jpg").is_some());
+/// assert!(css_safe_url("'); background: url(javascript:").is_none());
+/// ```
+pub fn css_safe_url(url: &str) -> Option<&str> {
+    // Must be valid HTTP/HTTPS URL
+    if !is_valid_http_url(url) {
+        return None;
+    }
+    // Reject characters that could break out of CSS url() context
+    // Single/double quotes, parentheses, and backslash are dangerous
+    if url.contains(['\'', '"', ')', '(', '\\']) {
+        return None;
+    }
+    Some(url)
+}

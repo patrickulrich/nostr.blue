@@ -432,17 +432,20 @@ fn format_event_time(event: &UnifiedEvent) -> String {
 
     if event.is_all_day() {
         // All-day event - just show date
-        let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        let weekday_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
         let month = date.get_month() as usize;
         let day = date.get_date();
         let weekday = date.get_day() as usize;
 
-        format!("{}, {} {}", weekday_names[weekday], month_names[month], day)
+        let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
+        let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
+
+        format!("{}, {} {}", weekday_name, month_name, day)
     } else {
         // Time-based event - show date and time
-        let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
         let month = date.get_month() as usize;
         let day = date.get_date();
@@ -452,7 +455,8 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
 
-        format!("{} {} at {}:{:02} {}", month_names[month], day, hour_12, minutes, am_pm)
+        let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
+        format!("{} {} at {}:{:02} {}", month_name, day, hour_12, minutes, am_pm)
     }
 }
 

@@ -222,15 +222,15 @@
 }
 
 .citation-type-external {
-  @apply text-blue-500;
+  @apply text-blue-700 dark:text-blue-400;
 }
 
 .citation-type-hardcopy {
-  @apply text-amber-600 dark:text-amber-400;
+  @apply text-amber-700 dark:text-amber-400;
 }
 
 .citation-type-prompt {
-  @apply text-purple-500;
+  @apply text-purple-700 dark:text-purple-400;
 }
 
 /* Loading state for citations being fetched */

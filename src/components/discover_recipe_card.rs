@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
+use crate::utils::validation::css_safe_url;
 
 /// Discover recipe card for the explore page
 /// Similar to RecipeCardTrending but with author avatar in TOP-LEFT
@@ -29,8 +30,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 
     let avatar_letter = display_name.chars().next()
         .unwrap_or('?')
-        .to_uppercase()
-        .to_string();
+        .to_ascii_uppercase();
 
     rsx! {
         div {
@@ -40,15 +40,27 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
                 to: Route::RecipeDetail { naddr: naddr.clone() },
                 class: "block w-full h-full",
 
-                // Full-bleed background image
+                // Full-bleed background image (only render if URL is safe for CSS)
                 if let Some(ref img_url) = image_url {
-                    div {
-                        class: "absolute inset-0",
-                        style: "background-image: url('{img_url}'); background-size: cover; background-position: center;",
-
-                        // Dark overlay
+                    if let Some(safe_url) = css_safe_url(img_url) {
                         div {
-                            class: "absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors"
+                            class: "absolute inset-0",
+                            style: "background-image: url('{safe_url}'); background-size: cover; background-position: center;",
+
+                            // Dark overlay
+                            div {
+                                class: "absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors"
+                            }
+                        }
+                    } else {
+                        // URL failed validation - show fallback
+                        div {
+                            class: "absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center",
+
+                            span {
+                                class: "text-5xl opacity-50",
+                                "🍳"
+                            }
                         }
                     }
                 } else {
