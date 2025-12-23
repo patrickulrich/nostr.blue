@@ -485,7 +485,7 @@ pub fn ShopCheckout() -> Element {
                                                             let proof = all_preimages.join(",");
 
                                                             spawn(async move {
-                                                                match create_shop_order(items, shipping, "lightning", &proof).await {
+                                                                match create_shop_order(items, shipping, None, "lightning", &proof).await {
                                                                     Ok(id) => {
                                                                         order_id.set(Some(id));
                                                                         clear_cart();
@@ -556,7 +556,7 @@ pub fn ShopCheckout() -> Element {
                                                         let shipping = if address.is_empty() { None } else { Some(address.clone()) };
 
                                                         spawn(async move {
-                                                            match create_shop_order(items, shipping, "lightning", &preimage).await {
+                                                            match create_shop_order(items, shipping, None, "lightning", &preimage).await {
                                                                 Ok(id) => {
                                                                     order_id.set(Some(id));
                                                                     clear_cart();
@@ -642,7 +642,7 @@ pub fn ShopCheckout() -> Element {
                                                                                 Ok(token) => {
                                                                                     log::info!("Payment successful: {}", token);
                                                                                     let shipping = if address.is_empty() { None } else { Some(address.clone()) };
-                                                                                    match create_shop_order(items, shipping, "cashu", &token).await {
+                                                                                    match create_shop_order(items, shipping, None, "cashu", &token).await {
                                                                                         Ok(id) => {
                                                                                             order_id.set(Some(id));
                                                                                             clear_cart();
@@ -747,7 +747,7 @@ pub fn ShopCheckout() -> Element {
                                                                                                                             .collect();
                                                                                                                         let proof = all_preimages.join(",");
 
-                                                                                                                        match create_shop_order(items, shipping, "lightning", &proof).await {
+                                                                                                                        match create_shop_order(items, shipping, None, "lightning", &proof).await {
                                                                                                                             Ok(id) => {
                                                                                                                                 order_id.set(Some(id));
                                                                                                                                 clear_cart();
@@ -801,7 +801,7 @@ pub fn ShopCheckout() -> Element {
                                                                                                 .collect();
                                                                                             let proof = all_preimages.join(",");
                                                                                             let shipping = if address.is_empty() { None } else { Some(address.clone()) };
-                                                                                            match create_shop_order(items, shipping, "lightning", &proof).await {
+                                                                                            match create_shop_order(items, shipping, None, "lightning", &proof).await {
                                                                                                 Ok(id) => {
                                                                                                     order_id.set(Some(id));
                                                                                                     clear_cart();
@@ -859,7 +859,7 @@ pub fn ShopCheckout() -> Element {
                                                                                         log::info!("Payment successful!");
                                                                                         let preimage = response.preimage;
                                                                                         let shipping = if address.is_empty() { None } else { Some(address.clone()) };
-                                                                                        match create_shop_order(items, shipping, "lightning", &preimage).await {
+                                                                                        match create_shop_order(items, shipping, None, "lightning", &preimage).await {
                                                                                             Ok(id) => {
                                                                                                 order_id.set(Some(id));
                                                                                                 clear_cart();

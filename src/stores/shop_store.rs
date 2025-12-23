@@ -865,13 +865,21 @@ impl OrderMessageContent {
         None
     }
 
-    pub fn new_order(order_id: &str, items: Vec<OrderItem>, shipping_address: Option<String>) -> Self {
+    pub fn new_order(
+        order_id: &str,
+        items: Vec<OrderItem>,
+        shipping_address: Option<String>,
+        amount_sats: u64,
+        shipping_option: Option<String>,
+    ) -> Self {
         Self {
             message_type: OrderMessageType::OrderCreation.as_str().to_string(),
             order_id: order_id.to_string(),
             payload: serde_json::json!({
                 "items": items,
                 "shipping_address": shipping_address,
+                "amount_sats": amount_sats,
+                "shipping_option": shipping_option,
             }),
             timestamp: now_secs(),
         }
@@ -1111,6 +1119,7 @@ fn validate_payment_proof(payment_method: &str, payment_proof: &str) -> Result<(
 pub async fn create_shop_order(
     items: Vec<CartItem>,
     shipping_address: Option<String>,
+    shipping_option: Option<String>,
     payment_method: &str,
     payment_proof: &str,
 ) -> Result<String> {
@@ -1124,8 +1133,9 @@ pub async fn create_shop_order(
     // Generate unique order ID with timestamp + random suffix for collision resistance
     let order_id = crate::utils::format::generate_unique_id();
 
-    // Group items by merchant
-    let mut merchants: HashMap<String, Vec<OrderItem>> = HashMap::new();
+    // Group items by merchant with subtotals
+    // Each entry is (Vec<OrderItem>, subtotal_sats)
+    let mut merchants: HashMap<String, (Vec<OrderItem>, u64)> = HashMap::new();
 
     for item in &items {
         let merchant_pubkey = item.product.pubkey.clone();
@@ -1134,29 +1144,41 @@ pub async fn create_shop_order(
             quantity: item.quantity,
         };
 
-        merchants.entry(merchant_pubkey)
-            .or_default()
-            .push(order_item);
+        // Calculate item total with checked arithmetic
+        let price_sats = if item.product.price.currency.eq_ignore_ascii_case("sats")
+            || item.product.price.currency.eq_ignore_ascii_case("sat")
+        {
+            item.product.price.amount as u64
+        } else {
+            // Non-sats currency - reject checkout until conversion is implemented
+            return Err(format!(
+                "Cannot checkout: \"{}\" has unsupported currency '{}'. Only sats pricing is currently supported.",
+                item.product.title,
+                item.product.price.currency
+            ));
+        };
+
+        let item_total = price_sats
+            .checked_mul(item.quantity as u64)
+            .ok_or_else(|| format!(
+                "Arithmetic overflow calculating total for '{}' (price {} x quantity {})",
+                item.product.title, price_sats, item.quantity
+            ))?;
+
+        let entry = merchants.entry(merchant_pubkey).or_insert((Vec::new(), 0u64));
+        entry.0.push(order_item);
+        entry.1 = entry.1
+            .checked_add(item_total)
+            .ok_or_else(|| "Arithmetic overflow calculating merchant subtotal".to_string())?;
     }
 
-    // Calculate total first (needed for payment receipt)
-    // Validate all items have sats-convertible prices before proceeding
+    // Calculate total from merchant subtotals with checked arithmetic
     let total_sats: u64 = {
         let mut total = 0u64;
-        for item in &items {
-            let price_sats = if item.product.price.currency.eq_ignore_ascii_case("sats")
-                || item.product.price.currency.eq_ignore_ascii_case("sat")
-            {
-                item.product.price.amount as u64
-            } else {
-                // Non-sats currency - reject checkout until conversion is implemented
-                return Err(format!(
-                    "Cannot checkout: \"{}\" has unsupported currency '{}'. Only sats pricing is currently supported.",
-                    item.product.title,
-                    item.product.price.currency
-                ));
-            };
-            total = total.saturating_add(price_sats.saturating_mul(item.quantity as u64));
+        for (_, subtotal) in merchants.values() {
+            total = total
+                .checked_add(*subtotal)
+                .ok_or_else(|| "Arithmetic overflow calculating order total".to_string())?;
         }
         total
     };
@@ -1171,12 +1193,14 @@ pub async fn create_shop_order(
     };
 
     // Send order message to each merchant
-    for (merchant_pubkey, merchant_items) in &merchants {
+    for (merchant_pubkey, (merchant_items, subtotal)) in &merchants {
         // Send order creation message (Kind 16)
         let order_msg = OrderMessageContent::new_order(
             &order_id,
             merchant_items.clone(),
             shipping_address.clone(),
+            *subtotal,
+            shipping_option.clone(),
         );
         send_order_message(merchant_pubkey, order_msg).await?;
 
@@ -1214,21 +1238,7 @@ pub async fn create_shop_order(
     // Create separate orders for each merchant (multi-merchant support)
     // This ensures each merchant can track their portion of the order
     let merchant_count = merchants.len();
-    for (merchant_pubkey, merchant_items) in &merchants {
-        // Calculate this merchant's subtotal
-        let merchant_total: u64 = items.iter()
-            .filter(|item| &item.product.pubkey == merchant_pubkey)
-            .map(|item| {
-                let price = if item.product.price.currency.eq_ignore_ascii_case("sats")
-                    || item.product.price.currency.eq_ignore_ascii_case("sat")
-                {
-                    item.product.price.amount as u64
-                } else {
-                    0 // Non-sats already rejected earlier
-                };
-                price.saturating_mul(item.quantity as u64)
-            })
-            .sum();
+    for (merchant_pubkey, (merchant_items, merchant_total)) in &merchants {
 
         // Generate unique order ID for this merchant's portion
         // For single merchant, use base order_id; for multi-merchant, append merchant suffix
@@ -1253,7 +1263,7 @@ pub async fn create_shop_order(
             buyer_pubkey: buyer_pubkey.clone(),
             merchant_pubkey: merchant_pubkey.clone(),
             items: merchant_items.clone(),
-            amount_sats: merchant_total,
+            amount_sats: *merchant_total,
             status: OrderStatus::Pending,
             shipping_status: None,
             shipping_option: merchant_shipping,

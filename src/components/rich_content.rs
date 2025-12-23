@@ -20,7 +20,8 @@ use crate::utils::podcast::parse_podcast_episode;
 use crate::utils::nip54::{parse_wiki_article, WikiArticle};
 use crate::utils::nip58::{parse_badge_definition, BadgeDefinition};
 use crate::utils::nip99::{parse_product, parse_collection, parse_review, Product, ProductCollection, ProductReview};
-use crate::utils::nkbip03::{parse_citation, Citation, CitationType};
+use crate::utils::nkbip03::{parse_citation, Citation};
+use crate::components::citation::card::get_citation_style;
 use crate::utils::recipe::{is_recipe_event, extract_metadata as extract_recipe_metadata, RecipeMetadata};
 use crate::stores::nostr_music::{parse_track_event, parse_playlist_event, NostrTrack, NostrPlaylist};
 use crate::stores::publication_store::{parse_publication_index, PublicationIndex};
@@ -2223,12 +2224,11 @@ fn render_citation_minicard(citation: &Citation) -> Element {
     let author = base.author.clone();
     let citation_type = citation.citation_type();
 
-    let (type_icon, type_text, type_color) = match citation_type {
-        CitationType::Internal => ("📌", "Internal Reference", "text-blue-500"),
-        CitationType::ExternalWeb => ("🌐", "Web Reference", "text-green-500"),
-        CitationType::Hardcopy => ("📚", "Hardcopy Reference", "text-amber-500"),
-        CitationType::Prompt => ("🤖", "AI Prompt", "text-purple-500"),
-    };
+    // Use canonical citation styling from citation card component
+    let style = get_citation_style(&citation_type);
+    let type_icon = style.emoji;
+    let type_text = style.label;
+    let type_color = style.text_class;
 
     rsx! {
         div {
