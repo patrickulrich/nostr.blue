@@ -9,7 +9,7 @@ use crate::stores::shop_store::{
 };
 use crate::stores::profiles::{self, Profile};
 use crate::components::shop::{CartItemCard, CartSummary};
-use crate::utils::format::format_sats_with_separator;
+use crate::utils::format::{format_sats_with_separator, truncate_id};
 use crate::utils::nip99::CartItem;
 
 /// Shopping cart page
@@ -32,16 +32,31 @@ pub fn ShopCart() -> Element {
 
     // State for merchant profiles
     let mut merchant_profiles = use_signal(HashMap::<String, Profile>::new);
+    let mut profiles_fetched = use_signal(|| false);
 
-    // Fetch merchant profiles
+    // Fetch merchant profiles (in parallel, only once)
     let pubkeys: Vec<String> = merchant_groups.keys().cloned().collect();
     use_effect(move || {
+        // Skip if already fetched or no merchants
+        if *profiles_fetched.peek() || pubkeys.is_empty() {
+            return;
+        }
+        profiles_fetched.set(true);
+
         let pks = pubkeys.clone();
         spawn(async move {
-            for pk in pks {
-                if let Ok(profile) = profiles::fetch_profile(pk.clone()).await {
-                    merchant_profiles.write().insert(pk, profile);
+            // Fetch all profiles in parallel
+            let fetch_futures = pks.iter().map(|pk| {
+                let pk = pk.clone();
+                async move {
+                    profiles::fetch_profile(pk.clone()).await.ok().map(|p| (pk, p))
                 }
+            });
+
+            let results = futures::future::join_all(fetch_futures).await;
+
+            for result in results.into_iter().flatten() {
+                merchant_profiles.write().insert(result.0, result.1);
             }
         });
     });
@@ -204,10 +219,10 @@ fn MerchantCartGroup(
                                     if let Some(ref name) = p.name {
                                         "{name}"
                                     } else {
-                                        "{&merchant_pubkey[..8]}..."
+                                        "{truncate_id(&merchant_pubkey, 8)}..."
                                     }
                                 } else {
-                                    "{&merchant_pubkey[..8]}..."
+                                    "{truncate_id(&merchant_pubkey, 8)}..."
                                 }
                             }
                             p { class: "text-xs text-muted-foreground",

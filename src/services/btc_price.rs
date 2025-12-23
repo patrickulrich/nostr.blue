@@ -70,10 +70,10 @@ pub fn get_btc_price(currency: &str) -> Option<f64> {
 }
 
 /// Convert fiat amount to satoshis using cached BTC price
-/// Returns None if no price is available for the currency
+/// Returns None if no price is available, amount is invalid, or result would overflow
 ///
 /// # Arguments
-/// * `amount` - The fiat amount to convert
+/// * `amount` - The fiat amount to convert (must be non-negative and finite)
 /// * `currency` - The fiat currency code (e.g., "USD", "EUR")
 ///
 /// # Examples
@@ -83,12 +83,25 @@ pub fn get_btc_price(currency: &str) -> Option<f64> {
 /// // Returns Some(100_000) (100 USD = 0.001 BTC = 100,000 sats)
 /// ```
 pub fn fiat_to_sats(amount: f64, currency: &str) -> Option<u64> {
-    let btc_price = get_btc_price(currency)?;
-    if btc_price <= 0.0 {
+    // Validate input amount
+    if amount < 0.0 || !amount.is_finite() {
         return None;
     }
+
+    let btc_price = get_btc_price(currency)?;
+    if btc_price <= 0.0 || !btc_price.is_finite() {
+        return None;
+    }
+
     // Convert: amount_fiat / btc_price_in_fiat * 100_000_000 sats_per_btc
     let sats = (amount / btc_price) * 100_000_000.0;
+
+    // Check for overflow before casting to u64
+    // u64::MAX is approximately 1.84e19, so we check against that
+    if sats < 0.0 || !sats.is_finite() || sats > u64::MAX as f64 {
+        return None;
+    }
+
     Some(sats as u64)
 }
 

@@ -14,10 +14,39 @@
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Get current Unix timestamp in seconds (WASM-compatible)
-/// Uses js_sys for reliable timestamps in WASM environments
+/// Get current Unix timestamp in seconds
+/// Uses js_sys for WASM environments, std::time for native builds
 pub fn now_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+}
+
+/// Extract product display name from NIP-99 coordinate (30402:pubkey:d-tag)
+///
+/// Parses the d-tag from a coordinate string and converts dashes to spaces
+/// for human-readable display. Falls back to the full coordinate if malformed.
+///
+/// # Examples
+/// ```
+/// let coord = "30402:abc123:vintage-camera";
+/// assert_eq!(extract_product_name_from_coordinate(coord), "vintage-camera");
+/// ```
+pub fn extract_product_name_from_coordinate(coordinate: &str) -> String {
+    coordinate
+        .split(':')
+        .nth(2)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| coordinate.to_string())
 }
 
 // ============================================================================

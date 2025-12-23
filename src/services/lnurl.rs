@@ -42,6 +42,7 @@ pub enum SuccessAction {
 pub enum LnUrlError {
     InvalidLud16(String),
     InvalidLud06(String),
+    InvalidUrl(String),
     FetchError(String),
     ParseError(String),
     NostrNotSupported,
@@ -53,12 +54,32 @@ impl std::fmt::Display for LnUrlError {
         match self {
             LnUrlError::InvalidLud16(e) => write!(f, "Invalid lud16: {}", e),
             LnUrlError::InvalidLud06(e) => write!(f, "Invalid lud06: {}", e),
+            LnUrlError::InvalidUrl(e) => write!(f, "Invalid URL: {}", e),
             LnUrlError::FetchError(e) => write!(f, "Fetch error: {}", e),
             LnUrlError::ParseError(e) => write!(f, "Parse error: {}", e),
             LnUrlError::NostrNotSupported => write!(f, "LNURL endpoint does not support Nostr zaps"),
             LnUrlError::InvalidAmount => write!(f, "Invalid zap amount"),
         }
     }
+}
+
+/// Create an HTTP client
+/// Note: Timeout is handled by the browser's fetch API in WASM environments
+fn create_http_client() -> Result<reqwest::Client, LnUrlError> {
+    reqwest::Client::builder()
+        .build()
+        .map_err(|e| LnUrlError::FetchError(e.to_string()))
+}
+
+/// Validate that a URL is a safe HTTP/HTTPS URL
+fn validate_url(url: &str) -> Result<(), LnUrlError> {
+    if !crate::utils::validation::is_valid_http_url(url) {
+        return Err(LnUrlError::InvalidUrl(format!(
+            "URL must be a valid HTTP/HTTPS URL: {}",
+            url
+        )));
+    }
+    Ok(())
 }
 
 impl std::error::Error for LnUrlError {}
@@ -96,7 +117,10 @@ pub fn decode_lud06(lud06: &str) -> Result<String, LnUrlError> {
 
 /// Fetch LNURL pay information
 pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
-    let response = reqwest::get(url).await
+    validate_url(url)?;
+
+    let client = create_http_client()?;
+    let response = client.get(url).send().await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
     let pay_info: LnUrlPayResponse = response.json().await
@@ -159,6 +183,8 @@ pub async fn request_zap_invoice(
     zap_request_event: &Event,
     lnurl: Option<&str>,
 ) -> Result<LnUrlInvoiceResponse, LnUrlError> {
+    validate_url(callback_url)?;
+
     // Encode zap request event as JSON and URL-encode it
     let zap_request_json = zap_request_event.as_json();
     let nostr_param = urlencoding::encode(&zap_request_json);
@@ -170,8 +196,9 @@ pub async fn request_zap_invoice(
         url.push_str(&format!("&lnurl={}", urlencoding::encode(lnurl_value)));
     }
 
-    // Make the request
-    let response = reqwest::get(&url).await
+    // Make the request with timeout
+    let client = create_http_client()?;
+    let response = client.get(&url).send().await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
     let invoice: LnUrlInvoiceResponse = response.json().await
@@ -208,7 +235,10 @@ pub async fn prepare_zap(
 /// Fetch LNURL pay information without requiring Nostr zap support
 /// Used for simple Lightning payments (not zaps)
 pub async fn fetch_lnurl_pay_info_simple(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
-    let response = reqwest::get(url).await
+    validate_url(url)?;
+
+    let client = create_http_client()?;
+    let response = client.get(url).send().await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
     let pay_info: LnUrlPayResponse = response.json().await
@@ -225,6 +255,8 @@ pub async fn request_simple_invoice(
     amount_msats: u64,
     comment: Option<&str>,
 ) -> Result<LnUrlInvoiceResponse, LnUrlError> {
+    validate_url(callback_url)?;
+
     // Build the request URL with query parameters
     let mut url = format!("{}?amount={}", callback_url, amount_msats);
 
@@ -233,8 +265,9 @@ pub async fn request_simple_invoice(
         url.push_str(&format!("&comment={}", urlencoding::encode(c)));
     }
 
-    // Make the request
-    let response = reqwest::get(&url).await
+    // Make the request with timeout
+    let client = create_http_client()?;
+    let response = client.get(&url).send().await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
     let invoice: LnUrlInvoiceResponse = response.json().await

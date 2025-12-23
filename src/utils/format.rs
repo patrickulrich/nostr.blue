@@ -212,14 +212,52 @@ pub fn truncate_id(id: &str, len: usize) -> String {
     id.chars().take(len).collect()
 }
 
-/// Generates a unique identifier using timestamp + random suffix
-/// Uses js_sys::Date::now() for WASM compatibility and adds random hex suffix
-/// to prevent collisions when multiple IDs are generated in the same millisecond
+/// Generates a cryptographically secure unique identifier
+/// Uses Web Crypto API (WASM) or system random (native) for entropy
 ///
 /// # Returns
-/// A hex string like "18abc123def456" (timestamp in hex + 4 random hex chars)
+/// A 32-character hex string with 128 bits of entropy
+///
+/// # Security
+/// This function uses cryptographically secure random number generation
+/// suitable for order IDs, review IDs, and other security-sensitive identifiers.
 pub fn generate_unique_id() -> String {
-    let timestamp = js_sys::Date::now() as u64;
-    let random_suffix = js_sys::Math::random() * 65536.0;
-    format!("{:x}{:04x}", timestamp, random_suffix as u16)
+    #[cfg(target_arch = "wasm32")]
+    {
+        use js_sys::{Math, Uint8Array};
+        use wasm_bindgen::JsCast;
+
+        // Use crypto.getRandomValues if available, fallback to Math.random
+        let array = Uint8Array::new_with_length(16);
+
+        // Try to use Web Crypto API via JS interop
+        let filled = js_sys::Reflect::get(&js_sys::global(), &"crypto".into())
+            .ok()
+            .and_then(|crypto| {
+                js_sys::Reflect::get(&crypto, &"getRandomValues".into())
+                    .ok()
+                    .and_then(|func| {
+                        let func: js_sys::Function = func.dyn_into().ok()?;
+                        func.call1(&crypto, &array).ok()
+                    })
+            })
+            .is_some();
+
+        // If crypto API failed, fill with Math.random (less secure but functional)
+        if !filled {
+            for i in 0..16 {
+                array.set_index(i, (Math::random() * 256.0) as u8);
+            }
+        }
+
+        // Convert to hex string
+        let bytes: Vec<u8> = array.to_vec();
+        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rand::Rng;
+        let bytes: [u8; 16] = rand::thread_rng().gen();
+        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
 }

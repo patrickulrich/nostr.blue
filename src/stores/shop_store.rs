@@ -8,7 +8,7 @@ use nostr::Event as NostrEvent;
 
 // Use std::result::Result to avoid ambiguity between dioxus and nostr_sdk
 type Result<T> = std::result::Result<T, String>;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -83,6 +83,11 @@ pub static SELLER_ORDERS: GlobalSignal<Vec<ShopOrder>> = GlobalSignal::new(Vec::
 
 /// IndexedDB database handle for order persistence
 pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal::new(|| None);
+
+/// Processed gift wrap event IDs to prevent duplicate order message processing
+/// This prevents the same order update from being applied multiple times
+pub static PROCESSED_ORDER_EVENTS: GlobalSignal<HashSet<String>> =
+    GlobalSignal::new(HashSet::new);
 
 // ============================================================================
 // Global Signals - Merchant
@@ -1069,16 +1074,26 @@ pub async fn create_shop_order(
     }
 
     // Calculate total first (needed for payment receipt)
-    let total_sats: u64 = items.iter()
-        .map(|item| {
-            let price = if item.product.price.currency.eq_ignore_ascii_case("sats") {
+    // Validate all items have sats-convertible prices before proceeding
+    let total_sats: u64 = {
+        let mut total = 0u64;
+        for item in &items {
+            let price_sats = if item.product.price.currency.eq_ignore_ascii_case("sats")
+                || item.product.price.currency.eq_ignore_ascii_case("sat")
+            {
                 item.product.price.amount as u64
             } else {
-                0
+                // Non-sats currency - reject checkout until conversion is implemented
+                return Err(format!(
+                    "Cannot checkout: \"{}\" has unsupported currency '{}'. Only sats pricing is currently supported.",
+                    item.product.title,
+                    item.product.price.currency
+                ));
             };
-            price * item.quantity as u64
-        })
-        .sum();
+            total = total.saturating_add(price_sats.saturating_mul(item.quantity as u64));
+        }
+        total
+    };
 
     // Determine medium reference based on payment method
     // For cashu, the token itself contains mint info; for lightning, use invoice if available
@@ -1090,14 +1105,14 @@ pub async fn create_shop_order(
     };
 
     // Send order message to each merchant
-    for (merchant_pubkey, merchant_items) in merchants {
+    for (merchant_pubkey, merchant_items) in &merchants {
         // Send order creation message (Kind 16)
         let order_msg = OrderMessageContent::new_order(
             &order_id,
             merchant_items.clone(),
             shipping_address.clone(),
         );
-        send_order_message(&merchant_pubkey, order_msg).await?;
+        send_order_message(merchant_pubkey, order_msg).await?;
 
         // Send payment confirmation (Kind 16)
         let payment_msg = OrderMessageContent::new_payment(
@@ -1105,11 +1120,11 @@ pub async fn create_shop_order(
             payment_method,
             payment_proof,
         );
-        send_order_message(&merchant_pubkey, payment_msg).await?;
+        send_order_message(merchant_pubkey, payment_msg).await?;
 
         // Send payment receipt (Kind 17) per market-spec
         if let Err(e) = send_payment_receipt(
-            &merchant_pubkey,
+            merchant_pubkey,
             &order_id,
             total_sats,
             payment_method,
@@ -1130,38 +1145,70 @@ pub async fn create_shop_order(
 
     let now = now_secs();
 
-    // Store order locally
-    let order = ShopOrder {
-        order_id: order_id.clone(),
-        buyer_pubkey,
-        merchant_pubkey: items.first()
-            .map(|i| i.product.pubkey.clone())
-            .unwrap_or_default(),
-        items: items.iter().map(|item| OrderItem {
-            product_coordinate: item.product.coordinate.clone(),
-            quantity: item.quantity,
-        }).collect(),
-        amount_sats: total_sats,
-        status: OrderStatus::Pending,
-        shipping_status: None,
-        shipping_option: items.first().and_then(|i| i.selected_shipping.clone()),
-        shipping_address: shipping_address.clone(),
-        tracking_number: None,
-        carrier: None,
-        email: None,
-        phone: None,
-        created_at: now,
-        updated_at: now,
-        paid_at: Some(now), // Paid at creation since we already processed payment
-        shipped_at: None,
-        delivered_at: None,
-        note: None,
-        download_url: None,
-        license_key: None,
-    };
+    // Create separate orders for each merchant (multi-merchant support)
+    // This ensures each merchant can track their portion of the order
+    let merchant_count = merchants.len();
+    for (merchant_pubkey, merchant_items) in &merchants {
+        // Calculate this merchant's subtotal
+        let merchant_total: u64 = items.iter()
+            .filter(|item| &item.product.pubkey == merchant_pubkey)
+            .map(|item| {
+                let price = if item.product.price.currency.eq_ignore_ascii_case("sats")
+                    || item.product.price.currency.eq_ignore_ascii_case("sat")
+                {
+                    item.product.price.amount as u64
+                } else {
+                    0 // Non-sats already rejected earlier
+                };
+                price.saturating_mul(item.quantity as u64)
+            })
+            .sum();
 
-    // Add to buyer orders (persists to IndexedDB and updates state)
-    add_buyer_order(order).await;
+        // Generate unique order ID for this merchant's portion
+        // For single merchant, use base order_id; for multi-merchant, append merchant suffix
+        let merchant_order_id = if merchant_count > 1 {
+            let short_pk = if merchant_pubkey.len() >= 8 {
+                &merchant_pubkey[..8]
+            } else {
+                merchant_pubkey.as_str()
+            };
+            format!("{}-{}", order_id, short_pk)
+        } else {
+            order_id.clone()
+        };
+
+        // Get shipping info for this merchant's items
+        let merchant_shipping = items.iter()
+            .find(|item| &item.product.pubkey == merchant_pubkey)
+            .and_then(|item| item.selected_shipping.clone());
+
+        let order = ShopOrder {
+            order_id: merchant_order_id,
+            buyer_pubkey: buyer_pubkey.clone(),
+            merchant_pubkey: merchant_pubkey.clone(),
+            items: merchant_items.clone(),
+            amount_sats: merchant_total,
+            status: OrderStatus::Pending,
+            shipping_status: None,
+            shipping_option: merchant_shipping,
+            shipping_address: shipping_address.clone(),
+            tracking_number: None,
+            carrier: None,
+            email: None,
+            phone: None,
+            created_at: now,
+            updated_at: now,
+            paid_at: Some(now), // Paid at creation since we already processed payment
+            shipped_at: None,
+            delivered_at: None,
+            note: None,
+            download_url: None,
+            license_key: None,
+        };
+
+        // Add to buyer orders (persists to IndexedDB and updates state)
+        add_buyer_order(order).await;
+    }
 
     log::info!("Created order: {} with {} items, total: {} sats",
         order_id, items.len(), total_sats);
@@ -1833,6 +1880,13 @@ pub async fn listen_for_order_updates() -> Result<()> {
     log::info!("Found {} gift wrap events", events.len());
 
     for event in events.iter() {
+        // Check if we've already processed this event to prevent duplicates
+        let event_id = event.id.to_hex();
+        if PROCESSED_ORDER_EVENTS.read().contains(&event_id) {
+            log::debug!("Skipping already processed order event: {}", event_id);
+            continue;
+        }
+
         // Decrypt the gift wrap to get the sealed message
         match client.unwrap_gift_wrap(event).await {
             Ok(unwrapped) => {
@@ -1857,6 +1911,9 @@ pub async fn listen_for_order_updates() -> Result<()> {
                         }
                     }
                 }
+
+                // Mark event as processed after successful unwrap
+                PROCESSED_ORDER_EVENTS.write().insert(event_id);
             }
             Err(e) => {
                 log::debug!("Failed to unwrap gift wrap: {}", e);

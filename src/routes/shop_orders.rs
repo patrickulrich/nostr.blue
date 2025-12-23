@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus};
+use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
 use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates};
 use crate::components::shop::{OrderStatusBadge, ReviewForm};
 
@@ -177,15 +177,7 @@ pub fn ShopOrders() -> Element {
                                 div { class: "space-y-1 mb-3",
                                     for (i, item) in order.items.iter().take(2).enumerate() {
                                         {
-                                            // Parse product coordinate to get d-tag as product name
-                                            // Note: This heuristic expects NIP-99 format "30402:pubkey:d-tag"
-                                            // Edge cases with malformed coordinates will fallback to full string
-                                            let parts: Vec<&str> = item.product_coordinate.split(':').collect();
-                                            let product_name = if parts.len() >= 3 {
-                                                parts[2].to_string()
-                                            } else {
-                                                item.product_coordinate.clone()
-                                            };
+                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
                                             rsx! {
                                                 p {
                                                     key: "{i}",
@@ -285,13 +277,7 @@ pub fn ShopOrders() -> Element {
                                 div { class: "space-y-3",
                                     for item in order.items.iter() {
                                         {
-                                            // Parse product coordinate to get d-tag as product name
-                                            let parts: Vec<&str> = item.product_coordinate.split(':').collect();
-                                            let product_name = if parts.len() >= 3 {
-                                                parts[2].to_string()
-                                            } else {
-                                                item.product_coordinate.clone()
-                                            };
+                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
                                             rsx! {
                                                 div { class: "flex items-center gap-3",
                                                     // Product image placeholder

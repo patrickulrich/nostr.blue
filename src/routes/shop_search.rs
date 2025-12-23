@@ -16,6 +16,7 @@ pub fn ShopSearch(q: String) -> Element {
     let mut products = use_signal(Vec::<Product>::new);
     let mut loading = use_signal(|| false);
     let mut has_searched = use_signal(|| !q.is_empty());
+    let mut search_error = use_signal(|| None::<String>);
 
     // Filter states
     let mut min_price = use_signal(|| None::<u64>);
@@ -33,9 +34,13 @@ pub fn ShopSearch(q: String) -> Element {
             let q = initial_query.clone();
             spawn(async move {
                 loading.set(true);
+                search_error.set(None);
                 match search_products(&q, 50).await {
                     Ok(p) => products.set(p),
-                    Err(e) => log::error!("Search failed: {}", e),
+                    Err(e) => {
+                        log::error!("Search failed: {}", e);
+                        search_error.set(Some(format!("Search failed: {}", e)));
+                    }
                 }
                 loading.set(false);
             });
@@ -277,6 +282,35 @@ pub fn ShopSearch(q: String) -> Element {
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
                         for i in 0..8 {
                             ProductCardSkeleton { key: "{i}" }
+                        }
+                    }
+                } else if let Some(ref err) = *search_error.read() {
+                    // Error state
+                    div { class: "text-center py-12",
+                        div { class: "text-6xl mb-4", "⚠️" }
+                        h2 { class: "text-xl font-semibold mb-2 text-destructive", "Search Failed" }
+                        p { class: "text-muted-foreground mb-4", "{err}" }
+                        button {
+                            class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
+                            onclick: {
+                                let q = query.read().clone();
+                                move |_| {
+                                    let q = q.clone();
+                                    spawn(async move {
+                                        loading.set(true);
+                                        search_error.set(None);
+                                        match search_products(&q, 50).await {
+                                            Ok(p) => products.set(p),
+                                            Err(e) => {
+                                                log::error!("Search failed: {}", e);
+                                                search_error.set(Some(format!("Search failed: {}", e)));
+                                            }
+                                        }
+                                        loading.set(false);
+                                    });
+                                }
+                            },
+                            "Try Again"
                         }
                     }
                 } else if !*has_searched.read() {

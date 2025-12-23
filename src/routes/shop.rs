@@ -31,8 +31,17 @@ pub fn ShopHome() -> Element {
     let mut wot_contacts = use_signal(Vec::<String>::new);
     let mut wot_loading = use_signal(|| false);
 
-    // Fetch products on mount
+    // Fetch guard to prevent redundant fetches on re-renders
+    let mut has_fetched = use_signal(|| false);
+
+    // Fetch products on mount (only once)
     use_effect(move || {
+        // Skip if already fetched to prevent redundant requests
+        if *has_fetched.peek() {
+            return;
+        }
+        has_fetched.set(true);
+
         spawn(async move {
             loading.set(true);
             error.set(None);

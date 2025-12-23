@@ -68,7 +68,7 @@ fn group_items_by_merchant(items: &[CartItem]) -> Vec<(String, Vec<CartItem>, u6
 #[component]
 pub fn ShopCheckout() -> Element {
     let mut step = use_signal(|| CheckoutStep::Review);
-    let mut payment_method = use_signal(|| PaymentMethod::Cashu);
+    let mut payment_method = use_signal(|| PaymentMethod::Lightning);
     let mut shipping_address = use_signal(String::new);
     let mut payment_processing = use_signal(|| false);
     let mut payment_error = use_signal(|| None::<String>);
@@ -338,32 +338,9 @@ pub fn ShopCheckout() -> Element {
 
                                 // Payment options
                                 div { class: "space-y-3",
-                                    // Cashu option
-                                    button {
-                                        class: if *payment_method.read() == PaymentMethod::Cashu {
-                                            "w-full p-4 bg-card border-2 border-blue-500 rounded-lg text-left"
-                                        } else {
-                                            "w-full p-4 bg-card border border-border rounded-lg text-left hover:border-ring transition"
-                                        },
-                                        onclick: move |_| payment_method.set(PaymentMethod::Cashu),
-                                        div { class: "flex items-center gap-3",
-                                            span { class: "text-2xl", "🥜" }
-                                            div { class: "flex-1",
-                                                p { class: "font-medium", "Pay with Cashu" }
-                                                p { class: "text-sm text-muted-foreground",
-                                                    "Balance: ⚡{format_sats_with_separator(cashu_balance)} sats"
-                                                }
-                                            }
-                                            if *payment_method.read() == PaymentMethod::Cashu {
-                                                span { class: "text-blue-500", "✓" }
-                                            }
-                                        }
-                                        if cashu_balance < total_sats {
-                                            p { class: "text-sm text-destructive mt-2",
-                                                "Insufficient balance"
-                                            }
-                                        }
-                                    }
+                                    // Note: Cashu payment option is disabled for marketplace until
+                                    // multi-merchant payment splitting is properly implemented.
+                                    // See: https://github.com/patrickulrich/nostr.blue/pull/108
 
                                     // Lightning option
                                     {
@@ -953,8 +930,14 @@ fn LightningInvoiceDisplay(
     let mut copied = use_signal(|| false);
     let mut waiting_for_payment = use_signal(|| false);
 
-    // Generate QR code data URL
-    let qr_data = format!("lightning:{}", invoice.to_uppercase());
+    // Sanitize invoice to prevent XSS attacks in the QR code script
+    let sanitized_invoice = crate::utils::validation::sanitize_lightning_invoice(&invoice);
+
+    // Generate QR code data URL only if invoice is valid
+    let qr_data = sanitized_invoice
+        .as_ref()
+        .map(|inv| format!("lightning:{}", inv))
+        .unwrap_or_default();
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-6 space-y-4",
@@ -1172,33 +1155,40 @@ fn MultiMerchantPaymentDisplay(
             if let Some(payment) = current {
                 if !payment.paid {
                     if let Some(ref invoice) = payment.invoice {
-                        // QR Code
-                        div { class: "flex justify-center py-4",
-                            div {
-                                class: "bg-white p-4 rounded-lg",
-                                div {
-                                    class: "w-48 h-48 flex items-center justify-center border-2 border-dashed border-gray-300 rounded",
-                                    id: "qr-container-multi",
-                                }
-                                script {
-                                    dangerous_inner_html: format!(r#"
-                                        (function() {{
-                                            const container = document.getElementById('qr-container-multi');
-                                            if (container && typeof QRCode !== 'undefined') {{
-                                                container.innerHTML = '';
-                                                new QRCode(container, {{
-                                                    text: 'lightning:{}',
-                                                    width: 180,
-                                                    height: 180,
-                                                    colorDark: '#000000',
-                                                    colorLight: '#ffffff',
-                                                    correctLevel: QRCode.CorrectLevel.M
-                                                }});
-                                            }} else {{
-                                                container.innerHTML = '<div class="text-xs text-center text-gray-500 p-4">QR Code<br/>(scan in wallet)</div>';
-                                            }}
-                                        }})();
-                                    "#, invoice.to_uppercase())
+                        // QR Code (invoice is sanitized inline via validation function)
+                        {
+                            // Sanitize invoice to prevent XSS attacks in dangerous_inner_html
+                            let qr_invoice = crate::utils::validation::sanitize_lightning_invoice(invoice)
+                                .unwrap_or_else(|| "INVALID".to_string());
+                            rsx! {
+                                div { class: "flex justify-center py-4",
+                                    div {
+                                        class: "bg-white p-4 rounded-lg",
+                                        div {
+                                            class: "w-48 h-48 flex items-center justify-center border-2 border-dashed border-gray-300 rounded",
+                                            id: "qr-container-multi",
+                                        }
+                                        script {
+                                            dangerous_inner_html: format!(r#"
+                                                (function() {{
+                                                    const container = document.getElementById('qr-container-multi');
+                                                    if (container && typeof QRCode !== 'undefined') {{
+                                                        container.innerHTML = '';
+                                                        new QRCode(container, {{
+                                                            text: 'lightning:{}',
+                                                            width: 180,
+                                                            height: 180,
+                                                            colorDark: '#000000',
+                                                            colorLight: '#ffffff',
+                                                            correctLevel: QRCode.CorrectLevel.M
+                                                        }});
+                                                    }} else {{
+                                                        container.innerHTML = '<div class="text-xs text-center text-gray-500 p-4">QR Code<br/>(scan in wallet)</div>';
+                                                    }}
+                                                }})();
+                                            "#, qr_invoice)
+                                        }
+                                    }
                                 }
                             }
                         }

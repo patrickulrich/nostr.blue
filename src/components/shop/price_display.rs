@@ -38,9 +38,9 @@ pub fn PriceDisplay(props: PriceDisplayProps) -> Element {
 #[component]
 pub fn PriceDisplayCompact(price_sats: u64) -> Element {
     let formatted = if price_sats >= 1_000_000 {
-        format!("{}M", price_sats / 1_000_000)
+        format!("{:.1}M", price_sats as f64 / 1_000_000.0)
     } else if price_sats >= 1_000 {
-        format!("{}k", price_sats / 1_000)
+        format!("{:.1}k", price_sats as f64 / 1_000.0)
     } else {
         price_sats.to_string()
     };

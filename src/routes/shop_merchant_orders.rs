@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus};
+use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
 use crate::stores::shop_store::{fetch_seller_orders, update_order_status, listen_for_order_updates};
 use crate::components::shop::OrderStatusBadge;
 use crate::utils::format::truncate_id;
@@ -299,13 +299,7 @@ pub fn ShopMerchantOrders() -> Element {
                                 div { class: "space-y-2",
                                     for item in order.items.iter() {
                                         {
-                                            // Parse product coordinate to get d-tag as product name
-                                            let parts: Vec<&str> = item.product_coordinate.split(':').collect();
-                                            let product_name = if parts.len() >= 3 {
-                                                parts[2].to_string()
-                                            } else {
-                                                item.product_coordinate.clone()
-                                            };
+                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
                                             rsx! {
                                                 div { class: "flex items-center justify-between text-sm",
                                                     span { "{product_name} x{item.quantity}" }
