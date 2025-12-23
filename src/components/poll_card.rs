@@ -7,6 +7,7 @@ use nostr_sdk::{
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::components::PollTimer;
+use crate::utils::format::format_relative_time_or;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -183,7 +184,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
         .unwrap_or_else(|| format!("{}...{}", &author_pubkey_for_display[..8], &author_pubkey_for_display[author_pubkey_for_display.len()-8..]));
 
-    let time_ago = format_time_ago(created_at);
+    let time_ago = format_relative_time_or(created_at.as_secs(), "now");
     let total_votes: usize = results().values().sum();
     let has_voted = user_vote.read().is_some();
 
@@ -440,18 +441,3 @@ fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<
     counts
 }
 
-// Format timestamp as relative time
-fn format_time_ago(timestamp: Timestamp) -> String {
-    let now = Timestamp::now();
-    let diff = now.as_secs() as i64 - timestamp.as_secs() as i64;
-
-    if diff < 60 {
-        format!("{}s", diff)
-    } else if diff < 3600 {
-        format!("{}m", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h", diff / 3600)
-    } else {
-        format!("{}d", diff / 86400)
-    }
-}

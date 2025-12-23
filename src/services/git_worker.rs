@@ -214,4 +214,29 @@ impl GitWorkerManager {
                 }
             })
     }
+
+    /// Send updated GRASP server list to the web worker
+    /// This is a fire-and-forget message (no RPC response expected)
+    pub fn update_grasp_servers() {
+        use crate::stores::grasp_servers;
+
+        if !Self::is_initialized() {
+            log::warn!("Cannot update GRASP servers: worker not initialized");
+            return;
+        }
+
+        let servers = grasp_servers::get_grasp_servers();
+        let servers_json = serde_json::to_string(&servers).unwrap_or_else(|_| "[]".to_string());
+
+        let script = format!(
+            "window.gitWorkerManager.worker.postMessage({{ type: 'updateGraspServers', servers: {} }})",
+            servers_json
+        );
+
+        if let Err(e) = js_sys::eval(&script) {
+            log::warn!("Failed to send GRASP servers to worker: {:?}", e);
+        } else {
+            log::debug!("Sent {} GRASP servers to git worker", servers.len());
+        }
+    }
 }

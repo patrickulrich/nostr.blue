@@ -3,6 +3,7 @@
 //! Displays full badge information with accept/reject actions.
 
 use dioxus::prelude::*;
+use dioxus::dioxus_core::Task;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
@@ -37,14 +38,22 @@ pub fn BadgeDetailModal(
     let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
     let badge_pubkey = badge.pubkey.clone();
 
+    // Store task handle for cancellation to prevent race conditions
+    let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
+
     // Only re-run when badge pubkey changes (not every render)
     use_effect(use_reactive!(|badge_pubkey| {
+        // Cancel any existing fetch task before spawning new one
+        if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel();
+        }
+
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
         } else {
             // Profile not in cache - fetch it asynchronously using Nostr client
             let pubkey_str = badge_pubkey.clone();
-            spawn(async move {
+            let new_task = spawn(async move {
                 let pubkey = match PublicKey::from_hex(&pubkey_str) {
                     Ok(pk) => pk,
                     Err(e) => {
@@ -72,6 +81,7 @@ pub fn BadgeDetailModal(
                     issuer_profile.set(Some(metadata));
                 }
             });
+            fetch_task.set(Some(new_task));
         }
     }));
 

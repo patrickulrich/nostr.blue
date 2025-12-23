@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
-use crate::utils::validation::css_safe_url;
+use crate::utils::validation::{css_safe_url, is_valid_http_url};
 
 /// Discover recipe card for the explore page
 /// Similar to RecipeCardTrending but with author avatar in TOP-LEFT
@@ -82,11 +82,19 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
                         class: "w-8 h-8 rounded-full overflow-hidden ring-2 ring-white bg-muted flex items-center justify-center",
 
                         if let Some(ref pic_url) = profile_picture {
-                            img {
-                                src: "{pic_url}",
-                                alt: "{display_name}",
-                                class: "w-full h-full object-cover",
-                                loading: "lazy",
+                            if is_valid_http_url(pic_url) {
+                                img {
+                                    src: "{pic_url}",
+                                    alt: "{display_name}",
+                                    class: "w-full h-full object-cover",
+                                    loading: "lazy",
+                                }
+                            } else {
+                                // Invalid URL - show fallback
+                                span {
+                                    class: "text-xs font-semibold text-muted-foreground",
+                                    "{avatar_letter}"
+                                }
                             }
                         } else {
                             span {

@@ -7,7 +7,8 @@ use crate::utils::asciidoc::{
     render_asciidoc, render_content_auto, content_to_plain_text,
     render_content_with_citations, content_has_citations, extract_citation_identifiers,
 };
-use crate::utils::nip54::{extract_wikilinks, has_wikilinks};
+use crate::utils::markdown::sanitize_html;
+use crate::utils::nip54::extract_wikilinks;
 use crate::utils::nkbip03::ResolvedCitation;
 use crate::utils::nkbip08::render_book_wikilinks;
 use crate::stores::citation_store::fetch_citations_by_identifiers;
@@ -138,18 +139,18 @@ pub fn AsciiDocContent(
             class: "asciidoc-content prose prose-sm dark:prose-invert max-w-none {class}",
             dangerous_inner_html: "{rendered}",
         }
-        // Render footnotes section if present
+        // Render footnotes section if present (sanitized for XSS protection)
         if !footnotes_html.is_empty() {
             div {
                 class: "citation-footnotes-container",
-                dangerous_inner_html: "{footnotes_html}",
+                dangerous_inner_html: "{sanitize_html(&footnotes_html)}",
             }
         }
-        // Render endnotes/references section if present
+        // Render endnotes/references section if present (sanitized for XSS protection)
         if !endnotes_html.is_empty() {
             div {
                 class: "citation-endnotes-container mt-8 pt-4 border-t border-border",
-                dangerous_inner_html: "{endnotes_html}",
+                dangerous_inner_html: "{sanitize_html(&endnotes_html)}",
             }
         }
     }
@@ -263,13 +264,10 @@ pub fn WikilinksList(
     #[props(default = String::new())]
     class: String,
 ) -> Element {
-    // Early return if no wikilinks - avoids regex parsing
-    if !has_wikilinks(&content) {
-        return rsx! {};
-    }
-
+    // Hook must be called unconditionally - before any early returns (Dioxus hook rules)
     let links = use_memo(move || extract_wikilinks(&content));
 
+    // Early return now safe - after hook
     if links.read().is_empty() {
         return rsx! {};
     }

@@ -6,7 +6,6 @@
 
 use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::utils::nip34::Repository;
 
 /// Tab configuration
 #[derive(Clone, PartialEq)]
@@ -21,7 +20,6 @@ struct TabConfig {
 /// Repository tab navigation with responsive overflow
 #[component]
 pub fn RepoTabNav(
-    repo: Repository,
     naddr: String,
     active_tab: String,
     #[props(default = None)] issue_count: Option<u32>,

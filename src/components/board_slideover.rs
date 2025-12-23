@@ -160,12 +160,12 @@ pub fn BoardSlideover(
         }
     };
 
-    let pin_count = pins.read().len();
-
-    // Don't render if not shown
+    // Don't render if not shown (early return before expensive signal reads)
     if !*show.read() {
         return rsx! {};
     }
+
+    let pin_count = pins.read().len();
 
     rsx! {
         // Backdrop

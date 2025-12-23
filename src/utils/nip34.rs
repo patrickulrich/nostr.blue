@@ -221,6 +221,31 @@ impl Repository {
             self.pubkey.clone()
         }
     }
+
+    /// Extract GRASP server domains from clone URLs
+    ///
+    /// A domain is considered a GRASP server if it appears in both:
+    /// - `clone` tags (as https://[domain]/...) AND
+    /// - `relays` tags (as wss://[domain])
+    ///
+    /// This follows NIP-34 convention for self-hosted git servers.
+    pub fn extract_grasp_domains(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        use ::url::Url;
+
+        // Extract domains from relay URLs (wss://domain)
+        let relay_domains: HashSet<String> = self.relays.iter()
+            .filter_map(|r| Url::parse(r).ok())
+            .filter_map(|u| u.domain().map(|d| d.to_string()))
+            .collect();
+
+        // Extract domains from clone URLs where domain also appears in relays
+        self.clone.iter()
+            .filter_map(|url| Url::parse(url).ok())
+            .filter_map(|u| u.domain().map(|d| d.to_string()))
+            .filter(|domain| relay_domains.contains(domain))
+            .collect()
+    }
 }
 
 /// Issue parsed from a Kind 1621 event

@@ -5,6 +5,7 @@
 //! Styled to match gittr's readme-section.tsx pattern.
 
 use dioxus::prelude::*;
+use crate::utils::format::truncate_with_word_break;
 use crate::utils::markdown::render_markdown;
 
 /// README viewer with loading/error states
@@ -206,11 +207,8 @@ pub fn ReadmePreview(
     content: String,
     #[props(default = 200)] max_chars: usize,
 ) -> Element {
-    let preview_text = if content.len() > max_chars {
-        format!("{}...", &content[..max_chars])
-    } else {
-        content.clone()
-    };
+    // Use UTF-8 safe truncation to avoid panic on multi-byte characters
+    let preview_text = truncate_with_word_break(&content, max_chars);
 
     rsx! {
         div {

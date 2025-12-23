@@ -12,6 +12,8 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
+use crate::stores::grasp_servers;
+use crate::services::git_worker::GitWorkerManager;
 
 // ============================================================================
 // Cache sizes
@@ -85,6 +87,11 @@ pub fn cache_repo_events(events: &[NostrEvent]) {
     let mut cache = CODE_REPOS_CACHE.write();
     for event in events {
         if let Some(repo) = Repository::from_event(event) {
+            // Register any discovered GRASP servers from this repo's clone/relay tags
+            for domain in repo.extract_grasp_domains() {
+                grasp_servers::add_grasp_server(&domain);
+            }
+
             let coord_str = format!(
                 "{}:{}:{}",
                 Kind::GitRepoAnnouncement.as_u16(),
@@ -93,6 +100,11 @@ pub fn cache_repo_events(events: &[NostrEvent]) {
             );
             cache.put(coord_str, repo);
         }
+    }
+
+    // Sync discovered GRASP servers to git worker (if initialized)
+    if GitWorkerManager::is_initialized() {
+        GitWorkerManager::update_grasp_servers();
     }
 }
 

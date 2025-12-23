@@ -7,6 +7,7 @@
 //! that handle clone URL selection.
 
 use crate::services::git_worker::{FileEntry, GitWorkerManager};
+use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
 
 /// Git Service for repository operations
@@ -47,26 +48,25 @@ impl GitService {
     ///
     /// Prefers GRASP/ngit URLs (CORS enabled), falls back to GitHub/GitLab
     fn select_clone_url(repo: &Repository) -> Option<String> {
-        // GRASP servers that have CORS enabled
-        let grasp_domains = [
-            "relay.ngit.dev",
-            "gitnostr.com",
-            "ngit.danconwaydev.com",
-            "git.shakespeare.diy",
-            "git-01.uid.ovh",
-            "git-02.uid.ovh",
-            "git.jb55.com",
-        ];
-
         // First, try GRASP URLs (preferred - no CORS proxy needed)
+        // Uses dynamic registry that discovers servers from NIP-34 events
         for url in &repo.clone {
-            if grasp_domains.iter().any(|d| url.contains(d)) {
+            if Self::is_grasp_url(url) {
                 return Some(url.clone());
             }
         }
 
         // Fall back to any URL (GitHub/GitLab will use CORS proxy)
         repo.clone.first().cloned()
+    }
+
+    /// Check if a URL points to a known GRASP server
+    fn is_grasp_url(url: &str) -> bool {
+        url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.domain().map(|d| d.to_string()))
+            .map(|domain| grasp_servers::is_grasp_server(&domain))
+            .unwrap_or(false)
     }
 
     /// Ensure a repository is cloned and ready

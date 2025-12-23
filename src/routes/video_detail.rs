@@ -5,6 +5,7 @@ use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, Sh
 use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
 use crate::utils::format_sats_compact;
+use crate::utils::format::format_relative_time_or;
 use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -285,7 +286,7 @@ fn LandscapePlayer(event: Event) -> Element {
                             class: "flex items-center gap-2",
                             "📅"
                             span {
-                                "{format_time_ago(event.created_at.as_secs())}"
+                                {format_relative_time_or(event.created_at.as_secs(), "just now")}
                             }
                         }
                     }
@@ -971,7 +972,7 @@ fn VideoInfo(
                     // Timestamp
                     p {
                         class: "text-white/60 text-xs mt-2",
-                        "{format_time_ago(event.created_at.as_secs())}"
+                        {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
 
@@ -1558,19 +1559,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-// Format timestamp as "X ago"
-fn format_time_ago(timestamp: u64) -> String {
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", diff / 60),
-        3600..=86399 => format!("{}h ago", diff / 3600),
-        86400..=604799 => format!("{}d ago", diff / 86400),
-        _ => format!("{}w ago", diff / 604800),
-    }
-}
 
 // Format count with k/M suffixes
 fn format_count(count: usize) -> String {
