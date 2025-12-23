@@ -32,7 +32,8 @@ pub fn PasswordModal() -> Element {
         !password.read().is_empty() && !prompt_state.loading
     };
 
-    let handle_submit = move |_| {
+    // Centralized submit logic for both button and Enter key
+    let do_submit = move || {
         let pwd = password.read().clone();
 
         // For migration, validate password confirmation
@@ -53,16 +54,17 @@ pub fn PasswordModal() -> Element {
         });
     };
 
+    let handle_submit = move |_| {
+        do_submit();
+    };
+
     let handle_cancel = move |_| {
         cancel_password_prompt();
     };
 
     let handle_key_press = move |evt: KeyboardEvent| {
         if evt.key() == Key::Enter && can_submit {
-            let pwd = password.read().clone();
-            spawn(async move {
-                let _ = restore_with_password(&pwd).await;
-            });
+            do_submit();
         }
     };
 

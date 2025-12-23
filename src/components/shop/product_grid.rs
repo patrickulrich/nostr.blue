@@ -18,8 +18,8 @@ pub fn ProductGrid(props: ProductGridProps) -> Element {
         div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
             // Show skeleton loaders while loading
             if props.loading {
-                for _ in 0..8 {
-                    ProductCardSkeleton {}
+                for i in 0..8 {
+                    ProductCardSkeleton { key: "{i}" }
                 }
             } else if props.products.is_empty() {
                 // Empty state

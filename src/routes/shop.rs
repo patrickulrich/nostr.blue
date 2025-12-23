@@ -400,6 +400,7 @@ pub fn ShopHome() -> Element {
                                 category_filter.set(Vec::new());
                                 digital_only.set(false);
                                 physical_only.set(false);
+                                wot_enabled.set(false);
                             },
                             "Clear Filters"
                         }

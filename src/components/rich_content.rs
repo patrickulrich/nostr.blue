@@ -1373,7 +1373,12 @@ fn render_wiki_minicard(wiki: &WikiArticle, _naddr: &str, _event: &Event) -> Ele
 /// Render a product minicard with HoverCard preview
 fn render_product_minicard(product: &Product, naddr: &str, _event: &Event) -> Element {
     let title = product.title.clone();
-    let price_sats = product.price.amount as u64;
+    // Only show sats price if currency is sats
+    let price_display = if product.price.is_sats() {
+        Some(format!("{}", product.price.amount as u64))
+    } else {
+        None
+    };
     let image_url = product.images.first().map(|i| i.url.clone());
     let naddr_owned = naddr.to_string();
 
@@ -1406,7 +1411,9 @@ fn render_product_minicard(product: &Product, naddr: &str, _event: &Event) -> El
                 div {
                     class: "flex-1 min-w-0",
                     p { class: "font-medium text-sm truncate", "{title}" }
-                    p { class: "text-xs text-primary font-semibold", "⚡ {price_sats} sats" }
+                    if let Some(ref price) = price_display {
+                        p { class: "text-xs text-primary font-semibold", "⚡ {price} sats" }
+                    }
                 }
             }
 
@@ -1429,7 +1436,9 @@ fn render_product_minicard(product: &Product, naddr: &str, _event: &Event) -> El
                             }
                         }
                         h4 { class: "font-bold mb-1", "{title}" }
-                        p { class: "text-lg text-primary font-semibold", "⚡ {price_sats} sats" }
+                        if let Some(ref price) = price_display {
+                            p { class: "text-lg text-primary font-semibold", "⚡ {price} sats" }
+                        }
                         if let Some(summary) = &product.summary {
                             p { class: "text-sm text-muted-foreground mt-2 line-clamp-2", "{summary}" }
                         }

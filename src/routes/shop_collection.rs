@@ -53,7 +53,8 @@ pub fn ShopCollection(naddr: String) -> Element {
                         class: "p-2 hover:bg-accent rounded-full transition",
                         onclick: move |_| {
                             let nav = navigator();
-                            nav.go_back();
+                            // Use push to shop home as reliable fallback for back navigation
+                            nav.push(Route::ShopHome {});
                         },
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
@@ -93,7 +94,7 @@ pub fn ShopCollection(naddr: String) -> Element {
                             class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
                             onclick: move |_| {
                                 let nav = navigator();
-                                nav.go_back();
+                                nav.push(Route::ShopHome {});
                             },
                             "Go Back"
                         }

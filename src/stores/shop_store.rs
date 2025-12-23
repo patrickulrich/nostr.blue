@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 const PRODUCT_CACHE_SIZE: usize = 500;
 const SHIPPING_CACHE_SIZE: usize = 100;
+const PROCESSED_EVENTS_CACHE_SIZE: usize = 1000;
 
 // ============================================================================
 // Global Signals - Products
@@ -86,8 +87,9 @@ pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal:
 
 /// Processed gift wrap event IDs to prevent duplicate order message processing
 /// This prevents the same order update from being applied multiple times
-pub static PROCESSED_ORDER_EVENTS: GlobalSignal<HashSet<String>> =
-    GlobalSignal::new(HashSet::new);
+/// Uses LRU cache to prevent unbounded memory growth
+pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> =
+    GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PROCESSED_EVENTS_CACHE_SIZE).unwrap()));
 
 // ============================================================================
 // Global Signals - Merchant
@@ -711,8 +713,8 @@ pub fn get_shop_stats() -> ShopStats {
 
     let mut digital_count = 0;
     let mut physical_count = 0;
-    let mut categories = std::collections::HashSet::new();
-    let mut merchants = std::collections::HashSet::new();
+    let mut categories = HashSet::new();
+    let mut merchants = HashSet::new();
 
     for (_, product) in cache.iter() {
         match product.format {
@@ -912,6 +914,43 @@ impl OrderMessageContent {
     }
 }
 
+/// Helper to create and send gift-wrapped events to both recipient and sender
+///
+/// Creates NIP-17 gift wraps for both the recipient and sender (for their records),
+/// then sends both events. Returns (receiver_event_id, sender_event_id).
+async fn send_gift_wrapped_rumor(
+    client: &nostr_sdk::Client,
+    signer: &impl nostr_sdk::NostrSigner,
+    recipient_pk: PublicKey,
+    sender_pk: PublicKey,
+    rumor: nostr::UnsignedEvent,
+    log_context: &str,
+) -> Result<(String, String)> {
+    // Create gift wrap for RECEIVER
+    let receiver_gift_wrap = EventBuilder::gift_wrap(signer, &recipient_pk, rumor.clone(), [])
+        .await
+        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
+
+    // Create gift wrap for SENDER (NIP-17 requirement for sender copy)
+    let sender_gift_wrap = EventBuilder::gift_wrap(signer, &sender_pk, rumor, [])
+        .await
+        .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
+
+    // Send to receiver
+    let receiver_result = client.send_event(&receiver_gift_wrap).await
+        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+
+    log::info!("Sent {} to receiver: {:?}", log_context, receiver_result.val);
+
+    // Send sender copy
+    let sender_result = client.send_event(&sender_gift_wrap).await
+        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+
+    log::info!("Sent {} copy to sender: {:?}", log_context, sender_result.val);
+
+    Ok((receiver_result.val.to_hex(), sender_result.val.to_hex()))
+}
+
 /// Send an encrypted order message to a recipient via NIP-17 gift wrap
 pub async fn send_order_message(
     recipient_pubkey: &str,
@@ -943,27 +982,8 @@ pub async fn send_order_message(
     let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json)
         .build(sender_pk);
 
-    // Create gift wrap for RECEIVER
-    let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
-        .await
-        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
-
-    // Create gift wrap for SENDER (NIP-17 requirement for sender copy)
-    let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
-
-    // Send to receiver
-    let receiver_result = client.send_event(&receiver_gift_wrap).await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-
-    log::info!("Sent order message to receiver: {:?}", receiver_result.val);
-
-    // Send sender copy
-    let sender_result = client.send_event(&sender_gift_wrap).await
-        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
-
-    log::info!("Sent order message copy to sender: {:?}", sender_result.val);
+    // Send gift-wrapped message to both recipient and sender
+    send_gift_wrapped_rumor(&client, &signer, recipient_pk, sender_pk, rumor, "order message").await?;
 
     Ok(content.order_id)
 }
@@ -1025,29 +1045,63 @@ pub async fn send_payment_receipt(
 
     log::info!("Sending payment receipt for order {} to merchant {}", order_id, merchant_pubkey);
 
-    // Create gift wrap for RECEIVER (merchant)
-    let receiver_gift_wrap = EventBuilder::gift_wrap(&signer, &recipient_pk, rumor.clone(), [])
-        .await
-        .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
-
-    // Create gift wrap for SENDER (buyer's copy)
-    let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
-        .await
-        .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
-
-    // Send to merchant
-    let receiver_result = client.send_event(&receiver_gift_wrap).await
-        .map_err(|e| format!("Failed to send receipt to merchant: {}", e))?;
-
-    log::info!("Sent payment receipt to merchant: {:?}", receiver_result.val);
-
-    // Send sender copy (for buyer's records)
-    let sender_result = client.send_event(&sender_gift_wrap).await
-        .map_err(|e| format!("Failed to send sender copy of receipt: {}", e))?;
-
-    log::info!("Sent payment receipt copy to sender: {:?}", sender_result.val);
+    // Send gift-wrapped receipt to both merchant and buyer
+    send_gift_wrapped_rumor(&client, &signer, recipient_pk, sender_pk, rumor, "payment receipt").await?;
 
     Ok(order_id.to_string())
+}
+
+/// Validate payment proof format based on payment method
+///
+/// Returns Ok(()) if valid, Err with message if invalid.
+fn validate_payment_proof(payment_method: &str, payment_proof: &str) -> Result<()> {
+    if payment_proof.is_empty() {
+        return Err("Payment proof is required".to_string());
+    }
+
+    match payment_method {
+        "lightning" => {
+            // Lightning preimage should be 64 hex characters (32 bytes)
+            // Multiple preimages are comma-separated for multi-merchant orders
+            for preimage in payment_proof.split(',') {
+                let trimmed = preimage.trim();
+                // Skip "manual_payment" placeholder for manual confirmations
+                if trimmed == "manual_payment" {
+                    continue;
+                }
+                if trimmed.len() != 64 {
+                    return Err(format!(
+                        "Invalid Lightning preimage length: expected 64 hex chars, got {}",
+                        trimmed.len()
+                    ));
+                }
+                if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err("Invalid Lightning preimage: must be hexadecimal".to_string());
+                }
+            }
+        }
+        "cashu" => {
+            // Cashu tokens start with "cashuA" or "cashuB"
+            if !payment_proof.starts_with("cashu") {
+                return Err("Invalid Cashu token format: must start with 'cashu'".to_string());
+            }
+        }
+        "bitcoin" => {
+            // Bitcoin txid should be 64 hex characters
+            if payment_proof.len() != 64 {
+                return Err("Invalid Bitcoin txid: expected 64 hex chars".to_string());
+            }
+            if !payment_proof.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err("Invalid Bitcoin txid: must be hexadecimal".to_string());
+            }
+        }
+        _ => {
+            // Unknown payment method - allow but log warning
+            log::warn!("Unknown payment method '{}', skipping proof validation", payment_method);
+        }
+    }
+
+    Ok(())
 }
 
 /// Create and place a shop order
@@ -1063,6 +1117,9 @@ pub async fn create_shop_order(
     if items.is_empty() {
         return Err("Cannot create order with no items".to_string());
     }
+
+    // Validate payment proof format
+    validate_payment_proof(payment_method, payment_proof)?;
 
     // Generate unique order ID with timestamp + random suffix for collision resistance
     let order_id = crate::utils::format::generate_unique_id();
@@ -1922,7 +1979,7 @@ pub async fn listen_for_order_updates() -> Result<()> {
                 }
 
                 // Mark event as processed after successful unwrap
-                PROCESSED_ORDER_EVENTS.write().insert(event_id);
+                PROCESSED_ORDER_EVENTS.write().put(event_id, ());
             }
             Err(e) => {
                 log::debug!("Failed to unwrap gift wrap: {}", e);

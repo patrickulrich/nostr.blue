@@ -207,7 +207,7 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
             }
             Nip19::EncryptedSecret(_) => {
                 // Encrypted private key (ncryptsec)
-                Err("🔐 This is an encrypted private key (ncryptsec). You can import it in settings.".to_string())
+                Err("🔐 This is an encrypted private key (ncryptsec). While encrypted, avoid pasting it into untrusted websites. Import it safely via Settings.".to_string())
             }
         },
         Err(e) => Err(format!(

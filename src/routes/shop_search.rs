@@ -133,9 +133,13 @@ pub fn ShopSearch(q: String) -> Element {
                                 let query_val = q;
                                 spawn(async move {
                                     loading.set(true);
+                                    search_error.set(None);
                                     match search_products(&query_val, 50).await {
                                         Ok(p) => products.set(p),
-                                        Err(e) => log::error!("Search failed: {}", e),
+                                        Err(e) => {
+                                            log::error!("Search failed: {}", e);
+                                            search_error.set(Some(format!("Search failed: {}", e)));
+                                        }
                                     }
                                     loading.set(false);
                                 });

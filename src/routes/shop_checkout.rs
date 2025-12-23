@@ -52,11 +52,11 @@ fn group_items_by_merchant(items: &[CartItem]) -> Vec<(String, Vec<CartItem>, u6
             0 // Non-sats pricing not fully supported
         };
 
-        groups
+        let entry = groups
             .entry(pubkey)
-            .or_insert_with(|| (Vec::new(), 0))
-            .0.push(item.clone());
-        groups.get_mut(&item.product.pubkey).unwrap().1 += item_sats;
+            .or_insert_with(|| (Vec::new(), 0));
+        entry.0.push(item.clone());
+        entry.1 += item_sats;
     }
 
     groups.into_iter()
@@ -710,13 +710,89 @@ pub fn ShopCheckout() -> Element {
                                                                                         let mut updated = merchant_payments.read().clone();
                                                                                         updated[0].paid = true;
                                                                                         updated[0].preimage = Some(response.preimage);
-                                                                                        merchant_payments.set(updated);
-                                                                                        current_merchant_idx.set(1);
+                                                                                        merchant_payments.set(updated.clone());
 
                                                                                         // Check if more merchants to pay
                                                                                         if payments.len() > 1 {
-                                                                                            // Show progress, continue will be handled by MultiMerchantPayment component
-                                                                                            show_invoice_qr.set(true);
+                                                                                            current_merchant_idx.set(1);
+                                                                                            // Fetch invoice for next merchant and try auto-pay
+                                                                                            let next = updated[1].clone();
+                                                                                            spawn(async move {
+                                                                                                match lnurl::get_invoice_from_lud16(&next.lud16, next.amount_sats, Some(&format!("Order: {}", next.name))).await {
+                                                                                                    Ok(invoice) => {
+                                                                                                        let mut upd = merchant_payments.read().clone();
+                                                                                                        upd[1].invoice = Some(invoice.clone());
+                                                                                                        merchant_payments.set(upd);
+                                                                                                        lightning_invoice.set(Some(invoice.clone()));
+
+                                                                                                        // Try NWC auto-pay for second merchant
+                                                                                                        if nwc_store::is_connected() {
+                                                                                                            match nwc_store::pay_invoice(invoice).await {
+                                                                                                                Ok(resp) => {
+                                                                                                                    log::info!("Paid merchant 2/{} via NWC", payments.len());
+                                                                                                                    let mut upd = merchant_payments.read().clone();
+                                                                                                                    upd[1].paid = true;
+                                                                                                                    upd[1].preimage = Some(resp.preimage.clone());
+                                                                                                                    merchant_payments.set(upd.clone());
+
+                                                                                                                    // Check if all paid
+                                                                                                                    let all_paid = upd.iter().all(|p| p.paid);
+                                                                                                                    if all_paid {
+                                                                                                                        // All merchants paid - create order
+                                                                                                                        let items: Vec<_> = CART_ITEMS.read().clone();
+                                                                                                                        let address = shipping_address.read().clone();
+                                                                                                                        let shipping = if address.is_empty() { None } else { Some(address.clone()) };
+                                                                                                                        let all_preimages: Vec<String> = upd.iter()
+                                                                                                                            .filter_map(|p| p.preimage.clone())
+                                                                                                                            .collect();
+                                                                                                                        let proof = all_preimages.join(",");
+
+                                                                                                                        match create_shop_order(items, shipping, "lightning", &proof).await {
+                                                                                                                            Ok(id) => {
+                                                                                                                                order_id.set(Some(id));
+                                                                                                                                clear_cart();
+                                                                                                                                show_invoice_qr.set(false);
+                                                                                                                                lightning_invoice.set(None);
+                                                                                                                                merchant_payments.set(Vec::new());
+                                                                                                                                step.set(CheckoutStep::Complete);
+                                                                                                                            }
+                                                                                                                            Err(e) => {
+                                                                                                                                log::error!("Failed to create order: {}", e);
+                                                                                                                                let id = crate::utils::format::generate_unique_id();
+                                                                                                                                order_id.set(Some(id));
+                                                                                                                                order_warning.set(Some(format!(
+                                                                                                                                    "All payments confirmed but order notification failed: {}",
+                                                                                                                                    e
+                                                                                                                                )));
+                                                                                                                                clear_cart();
+                                                                                                                                show_invoice_qr.set(false);
+                                                                                                                                step.set(CheckoutStep::Complete);
+                                                                                                                            }
+                                                                                                                        }
+                                                                                                                        payment_processing.set(false);
+                                                                                                                    } else {
+                                                                                                                        // More merchants - continue with next
+                                                                                                                        current_merchant_idx.set(2);
+                                                                                                                        show_invoice_qr.set(true);
+                                                                                                                    }
+                                                                                                                }
+                                                                                                                Err(e) => {
+                                                                                                                    log::warn!("NWC auto-pay failed for merchant 2: {}, showing QR", e);
+                                                                                                                    show_invoice_qr.set(true);
+                                                                                                                }
+                                                                                                            }
+                                                                                                        } else {
+                                                                                                            // No NWC, show QR for manual payment
+                                                                                                            show_invoice_qr.set(true);
+                                                                                                        }
+                                                                                                    }
+                                                                                                    Err(e) => {
+                                                                                                        payment_error.set(Some(format!("Failed to get invoice from {}: {}", next.name, e)));
+                                                                                                        show_invoice_qr.set(false);
+                                                                                                        payment_processing.set(false);
+                                                                                                    }
+                                                                                                }
+                                                                                            });
                                                                                         } else {
                                                                                             // Single merchant paid, complete order
                                                                                             let all_preimages: Vec<String> = merchant_payments.read()

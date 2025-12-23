@@ -21,9 +21,15 @@ pub fn ProductCard(props: ProductCardProps) -> Element {
     // Get first image URL
     let image_url = product.images.first().map(|img| img.url.clone());
 
-    // Convert price to sats for display (assuming price is already in sats for now)
+    // Convert price to sats for display with safe bounds checking
     let price_sats = if product.price.is_sats() {
-        product.price.amount as u64
+        let amount = product.price.amount;
+        // Ensure the f64 value is valid and within u64 range
+        if amount.is_finite() && amount >= 0.0 && amount <= u64::MAX as f64 {
+            amount.round() as u64
+        } else {
+            0
+        }
     } else {
         // For non-sats currencies, we'd need conversion - for now show 0
         0
