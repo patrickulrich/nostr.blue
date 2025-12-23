@@ -141,6 +141,37 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
     // This mitigates DNS rebinding attacks where an attacker's domain resolves
     // to private IPs to access internal services
     let host_lower = host.to_lowercase();
+
+    // Check for private/reserved IPv6 addresses using type-safe Host enum
+    // This avoids false positives on domain names like "facebook.com" or "fdroid.org"
+    if let Some(url::Host::Ipv6(addr)) = parsed.host() {
+        // IPv6 loopback (::1)
+        if addr.is_loopback() {
+            return Err(LnUrlError::UntrustedDomain(format!(
+                "Private/local addresses not allowed: {}",
+                host
+            )));
+        }
+        let segments = addr.segments();
+        // IPv6 link-local (fe80::/10) - first 10 bits are 1111111010
+        if (segments[0] & 0xffc0) == 0xfe80 {
+            return Err(LnUrlError::UntrustedDomain(format!(
+                "Private/local addresses not allowed: {}",
+                host
+            )));
+        }
+        // IPv6 Unique Local Addresses (fc00::/7 = fc00::/8 + fd00::/8)
+        // First 7 bits are 1111110, covering fc00:: through fdff::
+        if (segments[0] & 0xfe00) == 0xfc00 {
+            return Err(LnUrlError::UntrustedDomain(format!(
+                "Private/local addresses not allowed: {}",
+                host
+            )));
+        }
+    }
+
+    // Check for localhost and private IPv4 addresses (string-based checks are safe here
+    // because IPv4 addresses have distinct numeric patterns that don't match domain names)
     if host_lower == "localhost"
         || host_lower.starts_with("127.")      // Loopback (127.0.0.0/8)
         || host_lower.starts_with("10.")       // RFC1918 Class A (10.0.0.0/8)
@@ -164,16 +195,6 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         || host_lower.starts_with("172.29.")
         || host_lower.starts_with("172.30.")
         || host_lower.starts_with("172.31.")
-        // IPv6 loopback
-        || host_lower == "[::1]"
-        // IPv6 link-local (fe80::/10)
-        || host_lower.starts_with("fe80:")
-        || host_lower.starts_with("[fe80:")
-        // IPv6 Unique Local Addresses (fc00::/7 = fc00::/8 + fd00::/8)
-        || host_lower.starts_with("fc")
-        || host_lower.starts_with("fd")
-        || host_lower.starts_with("[fc")
-        || host_lower.starts_with("[fd")
     {
         return Err(LnUrlError::UntrustedDomain(format!(
             "Private/local addresses not allowed: {}",
