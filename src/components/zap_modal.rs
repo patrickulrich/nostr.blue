@@ -65,8 +65,8 @@ pub struct ZapModalProps {
 #[component]
 pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut zap_amount = use_signal(|| 21u64);
-    let mut custom_amount = use_signal(|| String::new());
-    let mut zap_message = use_signal(|| String::new());
+    let mut custom_amount = use_signal(String::new);
+    let mut zap_message = use_signal(String::new);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut invoice = use_signal(|| None::<String>);
@@ -84,7 +84,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
         let amount = *zap_amount.read();
         let message = zap_message.read().clone();
         let event_id_str = props.event_id.clone();
-        let toast_api = toast.clone();
+        let toast_api = toast;
 
         loading.set(true);
         error_msg.set(None);
@@ -131,8 +131,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 client
                     .relays()
                     .await
-                    .into_iter()
-                    .map(|(url, _)| url)
+                    .into_keys()
                     .take(5)
                     .collect::<Vec<RelayUrl>>()
             } else {

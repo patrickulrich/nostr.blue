@@ -118,7 +118,7 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
 
     match client.send_event_builder(builder).await {
         Ok(output) => {
-            log::info!("Published notification checked_at to NIP-78: {}", output.id().to_string());
+            log::info!("Published notification checked_at to NIP-78: {}", output.id());
             *LAST_PUBLISHED_AT.write() = timestamp;
         }
         Err(e) => {
@@ -291,7 +291,7 @@ pub async fn start_realtime_subscription() {
             log::info!("Real-time notification subscription started: {:?}", sub_id);
 
             // Spawn task to listen for incoming notification events
-            let my_pubkey_clone = my_pubkey.clone();
+            let my_pubkey_clone = my_pubkey;
             spawn(async move {
                 let mut notifications = client.notifications();
 

@@ -461,7 +461,7 @@ pub fn merge_pending_into_tree(
         if let Some(parent_id) = pending_comment.parent_comment_id {
             // Replying to another comment - find and insert as child
             // Returns Some(node) if not found (ownership returned), None if consumed
-            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
+            fn insert_as_child(nodes: &mut [ThreadNode], parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
                 for existing in nodes.iter_mut() {
                     if existing.event.id == *parent_id {
                         existing.children.push(node);

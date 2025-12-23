@@ -262,10 +262,8 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
             let _ = audio.play().map_err(|e| {
                 log::debug!("Play failed: {:?}", e);
             });
-        } else {
-            if let Err(e) = audio.pause() {
-                log::debug!("Pause failed: {:?}", e);
-            }
+        } else if let Err(e) = audio.pause() {
+            log::debug!("Pause failed: {:?}", e);
         }
     });
 

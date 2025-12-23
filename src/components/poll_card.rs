@@ -25,10 +25,10 @@ pub fn PollCard(event: NostrEvent) -> Element {
     // State
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut poll_data = use_signal(|| None::<Poll>);
-    let mut votes = use_signal(|| Vec::<NostrEvent>::new());
+    let mut votes = use_signal(Vec::<NostrEvent>::new);
     let mut loading_votes = use_signal(|| true);
     let mut user_vote = use_signal(|| None::<NostrEvent>);
-    let mut selected_options = use_signal(|| Vec::<String>::new());
+    let mut selected_options = use_signal(Vec::<String>::new);
     let mut show_results = use_signal(|| false);
     let mut is_voting = use_signal(|| false);
 
@@ -175,7 +175,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
     // Get display data
     let poll = poll_data.read().clone();
     let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
-    let poll_type = poll.as_ref().map(|p| p.r#type.clone()).unwrap_or(PollType::SingleChoice);
+    let poll_type = poll.as_ref().map(|p| p.r#type).unwrap_or(PollType::SingleChoice);
     let poll_options = poll.as_ref().map(|p| p.options.clone()).unwrap_or_default();
     let poll_ends_at = poll.as_ref().and_then(|p| p.ends_at);
 

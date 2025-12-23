@@ -302,6 +302,7 @@ pub fn create_lightning_receive_history(
 }
 
 /// Create enriched history for lightning send
+#[allow(clippy::too_many_arguments)]
 pub fn create_lightning_send_history(
     event_id: String,
     amount: u64,
@@ -382,6 +383,7 @@ pub fn create_p2pk_send_history(
 }
 
 /// Create enriched history for swap
+#[allow(clippy::too_many_arguments)]
 pub fn create_swap_history(
     event_id: String,
     mint_url: String,

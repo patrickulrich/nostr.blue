@@ -23,9 +23,9 @@ pub fn CommentComposer(
     on_close: EventHandler<()>,
     on_success: EventHandler<()>,
 ) -> Element {
-    let mut content = use_signal(|| String::new());
+    let mut content = use_signal(String::new);
     let mut show_media_uploader = use_signal(|| false);
-    let mut uploaded_media = use_signal(|| Vec::<String>::new());
+    let mut uploaded_media = use_signal(Vec::<String>::new);
     let toast = consume_toast();
 
     // Calculate total length including media URLs
@@ -151,7 +151,7 @@ pub fn CommentComposer(
     };
 
     let handle_publish = {
-        let toast_api = toast.clone();
+        let toast_api = toast;
         move |_| {
             let mut content_value = content.read().clone();
 
@@ -161,7 +161,7 @@ pub fn CommentComposer(
                     content_value.push_str("\n\n");
                 }
                 for url in uploaded_media.read().iter() {
-                    content_value.push_str(&url);
+                    content_value.push_str(url);
                     content_value.push('\n');
                 }
             }
@@ -226,7 +226,7 @@ pub fn CommentComposer(
         // Clone for async block
         let local_id_clone = local_id.clone();
         let content_for_publish = content_value.clone();
-        let toast_for_async = toast_api.clone();
+        let toast_for_async = toast_api;
 
         // Use spawn_forever so the task survives component unmount
         spawn_forever(async move {

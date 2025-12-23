@@ -7,7 +7,7 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
-use crate::utils::format_sats_compact;
+use crate::utils::{format_sats_compact, format_relative_time_or};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -129,7 +129,7 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // State for comment composer
-    let mut comment_text = use_signal(|| String::new());
+    let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
 
     // State for zap modal
@@ -329,8 +329,8 @@ pub fn PhotoCard(event: Event) -> Element {
         });
     }));
 
-    // Format timestamp
-    let timestamp = format_timestamp(created_at.as_secs());
+    // Format timestamp using shared utility
+    let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata
     let display_name = author_metadata.read().as_ref()
@@ -677,7 +677,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     {
                         let count = *reply_count.read();
                         if count == 1 {
-                            format!("View 1 comment")
+                            "View 1 comment".to_string()
                         } else {
                             format!("View all {} comments", count)
                         }
@@ -783,21 +783,5 @@ pub fn PhotoCard(event: Event) -> Element {
                 }
             }
         }
-    }
-}
-
-// Helper to format timestamp
-fn format_timestamp(timestamp: u64) -> String {
-    use nostr_sdk::Timestamp;
-
-    let now = Timestamp::now().as_secs();
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m", diff / 60),
-        3600..=86399 => format!("{}h", diff / 3600),
-        86400..=604799 => format!("{}d", diff / 86400),
-        _ => format!("{}w", diff / 604800),
     }
 }

@@ -240,7 +240,7 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
 #[component]
 fn NostrArtistSection(pubkey: String) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
-    let mut tracks = use_signal(|| Vec::<nostr_music::NostrTrack>::new());
+    let mut tracks = use_signal(Vec::<nostr_music::NostrTrack>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 

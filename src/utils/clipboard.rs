@@ -1,4 +1,4 @@
-//! Clipboard utilities for copying text
+//! Clipboard utilities for copying text and formatted content
 //!
 //! Provides a cross-platform way to copy text to the clipboard using
 //! the Web Clipboard API.
@@ -22,4 +22,27 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
     wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text))
         .await
         .map(|_| ())
+}
+
+/// Copy formatted HTML content to the clipboard
+///
+/// Renders Markdown/AsciiDoc content to styled HTML and copies it.
+/// Falls back to plain text copy if the Clipboard API doesn't support
+/// rich content (ClipboardItem requires web_sys feature flags).
+///
+/// # Arguments
+/// * `content` - The Markdown or AsciiDoc content to render and copy
+///
+/// # Returns
+/// * `Ok(())` if the content was successfully copied
+/// * `Err(JsValue)` if the operation failed
+pub async fn copy_formatted_content(content: &str) -> Result<(), JsValue> {
+    use crate::utils::asciidoc::render_content_styled;
+
+    // Render the content with prose styles
+    let html_content = render_content_styled(content);
+
+    // For now, fall back to copying the rendered HTML as text
+    // Full ClipboardItem support requires web_sys feature: "ClipboardItem"
+    copy_to_clipboard(&html_content).await
 }

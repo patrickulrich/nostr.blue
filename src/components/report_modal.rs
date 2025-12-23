@@ -11,7 +11,7 @@ pub struct ReportModalProps {
 #[component]
 pub fn ReportModal(props: ReportModalProps) -> Element {
     let mut selected_type = use_signal(|| "spam".to_string());
-    let mut details = use_signal(|| String::new());
+    let mut details = use_signal(String::new);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
@@ -19,7 +19,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     // Extract props fields before closures to avoid moving entire props struct
     let event_id = props.event_id.clone();
     let author_pubkey = props.author_pubkey.clone();
-    let on_close = props.on_close.clone();
+    let on_close = props.on_close;
 
     // Report types from NIP-56
     let report_types = vec![
@@ -35,7 +35,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     let handle_report = move |_| {
         let event_id = event_id.clone();
         let author_pubkey = author_pubkey.clone();
-        let on_close = on_close.clone();
+        let on_close = on_close;
         let report_type = selected_type.read().clone();
         let report_details = details.read().clone();
 

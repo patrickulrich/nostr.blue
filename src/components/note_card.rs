@@ -7,9 +7,10 @@ use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
-use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal};
-use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
-use crate::utils::format_sats_compact;
+use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
+use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
+use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or};
+use nostr::nips::nip48::Protocol;
 use std::time::Duration;
 
 #[component]
@@ -405,8 +406,8 @@ pub fn NoteCard(
         });
     });
 
-    // Format timestamp
-    let timestamp = format_timestamp(created_at.as_secs());
+    // Format timestamp using shared utility
+    let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata or fallback
     let display_name = author_metadata.read().as_ref()
@@ -456,7 +457,7 @@ pub fn NoteCard(
                 &reposter_pubkey_str[..8],
                 &reposter_pubkey_str[reposter_pubkey_str.len()-8..]
             ));
-        let repost_time = format_timestamp(repost_timestamp.as_secs());
+        let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
         (reposter_pubkey_str, reposter_display, repost_time)
     });
 
@@ -588,6 +589,20 @@ pub fn NoteCard(
                                 class: "text-muted-foreground text-sm",
                                 "{timestamp}"
                             }
+                            // NIP-48: Show proxy badge for bridged content
+                            {
+                                if let Some(proxy_info) = nip48::get_proxy_info(&event) {
+                                    rsx! {
+                                        span {
+                                            class: "text-muted-foreground text-sm",
+                                            "·"
+                                        }
+                                        ProxyBadge { proxy_info: proxy_info }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            }
                         }
                         // Menu button
                         NoteMenu {
@@ -603,6 +618,25 @@ pub fn NoteCard(
                             content: content.clone(),
                             tags: event.tags.iter().cloned().collect(),
                             collapsible: collapsible
+                        }
+                    }
+
+                    // External content (NIP-73) - books, podcasts, Bitcoin txs, etc.
+                    {
+                        let external_contents = nip73::extract_external_content(&event);
+                        if !external_contents.is_empty() {
+                            let contents_for_display: Vec<_> = external_contents
+                                .into_iter()
+                                .map(|(content, hint)| (content, hint.map(|u| u.to_string())))
+                                .collect();
+                            rsx! {
+                                ExternalContentList {
+                                    contents: contents_for_display,
+                                    compact: true
+                                }
+                            }
+                        } else {
+                            rsx! {}
                         }
                     }
 
@@ -928,19 +962,47 @@ pub fn NoteCard(
     }
 }
 
-// Helper function to format timestamp
-fn format_timestamp(unix_timestamp: u64) -> String {
-    // Use JavaScript's Date.now() for WASM compatibility
-    let now = (js_sys::Date::now() / 1000.0) as u64;
+/// NIP-48 Proxy Badge - shows origin for bridged content
+/// Displays a small icon linking to the original source on another protocol
+#[component]
+fn ProxyBadge(proxy_info: nip48::ProxyInfo) -> Element {
+    let display_name = proxy_info.display_name();
+    let source_url = proxy_info.id.clone();
 
-    let diff = now.saturating_sub(unix_timestamp);
+    // Validate URL to prevent javascript: or other dangerous schemes
+    if !is_valid_http_url(&source_url) {
+        // Don't render link for invalid URLs - just show the icon
+        return rsx! {
+            span {
+                class: "inline-flex items-center text-muted-foreground",
+                title: "Bridged from {display_name}",
+                match &proxy_info.protocol {
+                    Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
+                    Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
+                }
+            }
+        };
+    }
 
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m", diff / 60),
-        3600..=86399 => format!("{}h", diff / 3600),
-        86400..=604799 => format!("{}d", diff / 86400),
-        _ => format!("{}w", diff / 604800),
+    rsx! {
+        a {
+            href: "{source_url}",
+            target: "_blank",
+            rel: "noopener noreferrer",
+            class: "inline-flex items-center text-muted-foreground hover:text-foreground transition-colors",
+            title: "View original on {display_name}",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            match &proxy_info.protocol {
+                Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
+                Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
+                Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
+                Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
+                Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
+            }
+        }
     }
 }
 

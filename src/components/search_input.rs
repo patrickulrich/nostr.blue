@@ -8,13 +8,13 @@ use crate::routes::Route;
 
 #[component]
 pub fn SearchInput() -> Element {
-    let mut query = use_signal(|| String::new());
+    let mut query = use_signal(String::new);
     let mut show_dropdown = use_signal(|| false);
-    let mut search_results = use_signal(|| Vec::<ProfileSearchResult>::new());
+    let mut search_results = use_signal(Vec::<ProfileSearchResult>::new);
     let mut selected_index = use_signal(|| 0usize);
     let mut is_searching = use_signal(|| false);
     let mut relay_search_task = use_signal(|| None::<Task>);
-    let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
+    let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     let navigator = navigator();
 
     // Fetch contacts on mount

@@ -7,7 +7,7 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, calculate_read_time
 };
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::utils::{build_thread_tree, merge_pending_into_tree, format_relative_time_or};
 use crate::stores::pending_comments::get_pending_comments;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
-    let mut comments = use_signal(|| Vec::<NostrEvent>::new());
+    let mut comments = use_signal(Vec::<NostrEvent>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
@@ -265,7 +265,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                             .to_uppercase()
                             .to_string();
 
-                        let timestamp = format_timestamp(published_at);
+                        let timestamp = format_relative_time_or(published_at, "Unknown");
 
                         rsx! {
                             article {
@@ -591,12 +591,3 @@ fn decode_naddr(naddr: &str) -> Result<(String, String), String> {
     }
 }
 
-/// Format timestamp to human-readable string
-fn format_timestamp(timestamp: u64) -> String {
-    use chrono::{DateTime, Utc};
-
-    let dt = DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| Utc::now());
-
-    dt.format("%B %d, %Y").to_string()
-}

@@ -31,56 +31,321 @@
 //!
 //! Subject to browser storage quota (typically ~50MB, varies by browser).
 //! Use `navigator.storage.estimate()` to check available space.
+//!
+//! ## Platform Support
+//!
+//! This module only compiles on wasm32 targets. A stub type is provided for
+//! native targets to allow type checking, but it cannot be instantiated.
 
-// Allow dead_code for keyset counter methods not yet wired to UI
-#![allow(dead_code)]
+// This module is only fully implemented for wasm32 targets
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code, unused_imports, unused_variables))]
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
+// ============================================================================
+// Native stub (non-wasm32)
+// ============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+mod native_stub {
+    use cdk_common::database::{self, WalletDatabase};
+    use cdk_common::common::ProofInfo;
+    use cdk_common::wallet::{MintQuote, MeltQuote, Transaction, TransactionDirection, TransactionId};
+    use cdk_common::mint_url::MintUrl;
+    use cdk_common::nuts::{
+        CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PublicKey as CashuPublicKey,
+        SpendingConditions, State, KeySet,
+    };
+    use std::collections::HashMap;
+    use crate::stores::cashu::{PendingNostrEvent, SyncState};
+
+    /// Stub type for native targets - cannot be instantiated
+    #[derive(Clone, Debug)]
+    pub struct IndexedDbDatabase {
+        _private: (), // Prevents construction
+    }
+
+    unsafe impl Send for IndexedDbDatabase {}
+    unsafe impl Sync for IndexedDbDatabase {}
+
+    impl IndexedDbDatabase {
+        fn make_error(msg: String) -> database::Error {
+            database::Error::Database(Box::new(std::io::Error::other(
+                msg,
+            )))
+        }
+
+        pub async fn new() -> Result<Self, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn add_pending_event(&self, _event: &PendingNostrEvent) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn remove_pending_event(&self, _event_id: &str) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_all_pending_events(&self) -> Result<Vec<PendingNostrEvent>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn update_pending_event(&self, _event: &PendingNostrEvent) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_sync_state(&self) -> Result<Option<SyncState>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn save_sync_state(&self, _state: &SyncState) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn save_order(&self, _order: &crate::utils::nip99::ShopOrder) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_order(&self, _order_id: &str) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_all_orders(&self) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn update_order(&self, _order: &crate::utils::nip99::ShopOrder) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn delete_order(&self, _order_id: &str) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WalletDatabase for IndexedDbDatabase {
+        type Err = database::Error;
+
+        async fn add_mint(&self, _mint_url: MintUrl, _mint_info: Option<MintInfo>) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn remove_mint(&self, _mint_url: MintUrl) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_mint(&self, _mint_url: MintUrl) -> Result<Option<MintInfo>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_mints(&self) -> Result<HashMap<MintUrl, Option<MintInfo>>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn update_mint_url(&self, _old_mint_url: MintUrl, _new_mint_url: MintUrl) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn add_mint_keysets(&self, _mint_url: MintUrl, _keysets: Vec<KeySetInfo>) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_mint_keysets(&self, _mint_url: MintUrl) -> Result<Option<Vec<KeySetInfo>>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_keyset_by_id(&self, _keyset_id: &Id) -> Result<Option<KeySetInfo>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn add_mint_quote(&self, _quote: MintQuote) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_mint_quote(&self, _quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn remove_mint_quote(&self, _quote_id: &str) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn add_melt_quote(&self, _quote: MeltQuote) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_melt_quote(&self, _quote_id: &str) -> Result<Option<MeltQuote>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_melt_quotes(&self) -> Result<Vec<MeltQuote>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn remove_melt_quote(&self, _quote_id: &str) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn add_keys(&self, _keys: KeySet) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_keys(&self, _keyset_id: &Id) -> Result<Option<Keys>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn remove_keys(&self, _keyset_id: &Id) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn increment_keyset_counter(&self, _keyset_id: &Id, _count: u32) -> Result<u32, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn update_proofs(&self, _added: Vec<ProofInfo>, _removed_ys: Vec<CashuPublicKey>) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_proofs(
+            &self,
+            _mint_url: Option<MintUrl>,
+            _unit: Option<CurrencyUnit>,
+            _state: Option<Vec<State>>,
+            _spending_conditions: Option<Vec<SpendingConditions>>,
+        ) -> Result<Vec<ProofInfo>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn update_proofs_state(&self, _ys: Vec<CashuPublicKey>, _state: State) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn add_transaction(&self, _transaction: Transaction) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_transaction(&self, _transaction_id: TransactionId) -> Result<Option<Transaction>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn list_transactions(
+            &self,
+            _mint_url: Option<MintUrl>,
+            _direction: Option<TransactionDirection>,
+            _unit: Option<CurrencyUnit>,
+        ) -> Result<Vec<Transaction>, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn remove_transaction(&self, _transaction_id: TransactionId) -> Result<(), Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        async fn get_balance(
+            &self,
+            _mint_url: Option<MintUrl>,
+            _unit: Option<CurrencyUnit>,
+            _state: Option<Vec<State>>,
+        ) -> Result<u64, Self::Err> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_stub::IndexedDbDatabase;
+
+// ============================================================================
+// WASM32 implementation
+// ============================================================================
+#[cfg(target_arch = "wasm32")]
 use cdk_common::database::{self, WalletDatabase};
+#[cfg(target_arch = "wasm32")]
 use cdk_common::common::ProofInfo;
+#[cfg(target_arch = "wasm32")]
 use cdk_common::wallet::{MintQuote, MeltQuote, Transaction, TransactionDirection, TransactionId};
+#[cfg(target_arch = "wasm32")]
 use cdk_common::mint_url::MintUrl;
+#[cfg(target_arch = "wasm32")]
 use cdk_common::nuts::{
     CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PublicKey as CashuPublicKey,
     SpendingConditions, State, KeySet,
 };
+#[cfg(target_arch = "wasm32")]
 use indexed_db_futures::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use indexed_db_futures::IdbQuerySource;
+#[cfg(target_arch = "wasm32")]
 use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
 use std::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
 use std::future::IntoFuture;
+#[cfg(target_arch = "wasm32")]
 use std::str::FromStr;
+#[cfg(target_arch = "wasm32")]
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
+#[cfg(target_arch = "wasm32")]
 use web_sys::IdbTransactionMode;
 
 // Database constants
+#[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
-const DB_VERSION: u32 = 2;
+#[cfg(target_arch = "wasm32")]
+const DB_VERSION: u32 = 3;
 
 // Object store names
+#[cfg(target_arch = "wasm32")]
 const STORE_MINTS: &str = "mints";
+#[cfg(target_arch = "wasm32")]
 const STORE_KEYSETS: &str = "keysets";
+#[cfg(target_arch = "wasm32")]
 const STORE_KEYSET_BY_ID: &str = "keyset_by_id";
+#[cfg(target_arch = "wasm32")]
 const STORE_KEYS: &str = "keys";
+#[cfg(target_arch = "wasm32")]
 const STORE_MINT_QUOTES: &str = "mint_quotes";
+#[cfg(target_arch = "wasm32")]
 const STORE_MELT_QUOTES: &str = "melt_quotes";
+#[cfg(target_arch = "wasm32")]
 const STORE_PROOFS: &str = "proofs";
+#[cfg(target_arch = "wasm32")]
 const STORE_TRANSACTIONS: &str = "transactions";
+#[cfg(target_arch = "wasm32")]
 const STORE_KEYSET_COUNTERS: &str = "keyset_counters";
+#[cfg(target_arch = "wasm32")]
 const STORE_PENDING_EVENTS: &str = "pending_events";
+#[cfg(target_arch = "wasm32")]
 const STORE_SYNC_STATE: &str = "sync_state";
+#[cfg(target_arch = "wasm32")]
+const STORE_SHOP_ORDERS: &str = "shop_orders";
 
 /// IndexedDB-backed implementation of WalletDatabase
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug)]
 pub struct IndexedDbDatabase {
     db: Arc<IdbDatabase>,
 }
 
+#[cfg(target_arch = "wasm32")]
 // SAFETY: In WASM, there's only one thread, so Send + Sync are safe
 // even though IdbDatabase contains JsValue and closures
+#[cfg(target_arch = "wasm32")]
 unsafe impl Send for IndexedDbDatabase {}
+#[cfg(target_arch = "wasm32")]
 unsafe impl Sync for IndexedDbDatabase {}
 
+#[cfg(target_arch = "wasm32")]
 impl IndexedDbDatabase {
     /// Helper to create a database error from a string
     fn make_error(msg: String) -> database::Error {
@@ -136,6 +401,10 @@ impl IndexedDbDatabase {
             // V2: Add sync state store for incremental Nostr sync
             if !db.object_store_names().any(|n| n == STORE_SYNC_STATE) {
                 db.create_object_store(STORE_SYNC_STATE)?;
+            }
+            // V3: Add shop orders store for marketplace order persistence
+            if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
+                db.create_object_store(STORE_SHOP_ORDERS)?;
             }
 
             Ok(())
@@ -396,11 +665,55 @@ impl IndexedDbDatabase {
     pub async fn clear_sync_state(&self) -> Result<(), database::Error> {
         self.delete_value(STORE_SYNC_STATE, "current").await
     }
+
+    // =========================================================================
+    // Shop Orders (NIP-99 Marketplace)
+    // =========================================================================
+
+    /// Save a shop order to persistent storage
+    pub async fn save_order(
+        &self,
+        order: &crate::utils::nip99::ShopOrder,
+    ) -> Result<(), database::Error> {
+        let key = order.order_id.clone();
+        self.put_value(STORE_SHOP_ORDERS, &key, order).await
+    }
+
+    /// Get a shop order by ID
+    pub async fn get_order(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<crate::utils::nip99::ShopOrder>, database::Error> {
+        self.get_value(STORE_SHOP_ORDERS, order_id).await
+    }
+
+    /// Get all shop orders
+    pub async fn get_all_orders(
+        &self,
+    ) -> Result<Vec<crate::utils::nip99::ShopOrder>, database::Error> {
+        self.get_all_values(STORE_SHOP_ORDERS).await
+    }
+
+    /// Update an existing shop order
+    pub async fn update_order(
+        &self,
+        order: &crate::utils::nip99::ShopOrder,
+    ) -> Result<(), database::Error> {
+        let key = order.order_id.clone();
+        self.put_value(STORE_SHOP_ORDERS, &key, order).await
+    }
+
+    /// Delete a shop order
+    pub async fn delete_order(&self, order_id: &str) -> Result<(), database::Error> {
+        self.delete_value(STORE_SHOP_ORDERS, order_id).await
+    }
 }
 
 // Implement WalletDatabase trait for IndexedDbDatabase
+#[cfg(target_arch = "wasm32")]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg(target_arch = "wasm32")]
 impl WalletDatabase for IndexedDbDatabase {
     type Err = database::Error;
 
@@ -948,7 +1261,17 @@ impl WalletDatabase for IndexedDbDatabase {
         Ok(filtered)
     }
 
-    // Note: get_balance was removed as it's not part of WalletDatabase trait in CDK 0.13.x
+    async fn get_balance(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+    ) -> Result<u64, Self::Err> {
+        // Get proofs with filters, then sum their amounts
+        let proofs = self.get_proofs(mint_url, unit, state, None).await?;
+        let total: u64 = proofs.iter().map(|p| u64::from(p.proof.amount)).sum();
+        Ok(total)
+    }
 
     async fn update_proofs_state(&self, ys: Vec<CashuPublicKey>, state: State) -> Result<(), Self::Err> {
         // Perform all operations in a single write transaction for atomicity
@@ -1067,6 +1390,7 @@ impl WalletDatabase for IndexedDbDatabase {
 // NUT-13 Counter Extensions (beyond WalletDatabase trait)
 // =============================================================================
 
+#[cfg(target_arch = "wasm32")]
 impl IndexedDbDatabase {
     /// Get current counter value for a keyset (NUT-13)
     ///
