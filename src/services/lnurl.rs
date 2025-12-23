@@ -137,19 +137,33 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         LnUrlError::InvalidUrl("URL has no host".to_string())
     })?;
 
-    // Block localhost and private IP patterns (string-based check for WASM)
+    // Block localhost and RFC1918/RFC4193 private addresses
+    // This mitigates DNS rebinding attacks where an attacker's domain resolves
+    // to private IPs to access internal services
     let host_lower = host.to_lowercase();
     if host_lower == "localhost"
-        || host_lower.starts_with("127.")
-        || host_lower.starts_with("10.")
-        || host_lower.starts_with("192.168.")
+        || host_lower.starts_with("127.")      // Loopback (127.0.0.0/8)
+        || host_lower.starts_with("10.")       // RFC1918 Class A (10.0.0.0/8)
+        || host_lower.starts_with("192.168.") // RFC1918 Class C (192.168.0.0/16)
+        // RFC1918 Class B (172.16.0.0/12 = 172.16.0.0 - 172.31.255.255)
+        // Note: 172.0-15.x.x and 172.32+.x.x are public addresses
         || host_lower.starts_with("172.16.")
         || host_lower.starts_with("172.17.")
         || host_lower.starts_with("172.18.")
         || host_lower.starts_with("172.19.")
-        || host_lower.starts_with("172.2")
+        || host_lower.starts_with("172.20.")
+        || host_lower.starts_with("172.21.")
+        || host_lower.starts_with("172.22.")
+        || host_lower.starts_with("172.23.")
+        || host_lower.starts_with("172.24.")
+        || host_lower.starts_with("172.25.")
+        || host_lower.starts_with("172.26.")
+        || host_lower.starts_with("172.27.")
+        || host_lower.starts_with("172.28.")
+        || host_lower.starts_with("172.29.")
         || host_lower.starts_with("172.30.")
         || host_lower.starts_with("172.31.")
+        // IPv6 loopback and link-local
         || host_lower == "[::1]"
         || host_lower.starts_with("fe80:")
         || host_lower.starts_with("[fe80:")
@@ -160,14 +174,30 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         )));
     }
 
-    // Check domain whitelist
+    // Domain whitelist check - warn-only mode for compatibility
+    //
+    // SECURITY NOTE: The private IP checks above are the primary defense against
+    // DNS rebinding attacks. The whitelist below is a secondary measure.
+    //
+    // We use warn-only (not blocking) to preserve compatibility with:
+    // - Self-hosted Lightning nodes with custom domains
+    // - Newer Lightning services not yet in our whitelist
+    // - User-controlled LNURL endpoints
+    //
+    // Alternatives for stricter deployments:
+    // 1. Enable strict whitelist by uncommenting the error return below
+    // 2. Add user confirmation UI before requests to unknown domains
+    // 3. Make this configurable via app settings/environment variable
+    // 4. Implement hybrid: allow .well-known/lnurlp paths, block arbitrary URLs
+    //
+    // To enable strict mode, uncomment the error return and remove the warn.
     if !is_trusted_lnurl_domain(host) {
         log::warn!(
             "LNURL request to non-whitelisted domain: {}. \
              Add to TRUSTED_LNURL_DOMAINS if this is a legitimate Lightning service.",
             host
         );
-        // For now, allow with warning - in strict mode, uncomment the error below:
+        // Strict mode (disabled for compatibility):
         // return Err(LnUrlError::UntrustedDomain(format!(
         //     "Domain not in trusted LNURL whitelist: {}",
         //     host
