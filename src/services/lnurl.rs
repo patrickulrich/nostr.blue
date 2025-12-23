@@ -137,7 +137,7 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         LnUrlError::InvalidUrl("URL has no host".to_string())
     })?;
 
-    // Block localhost and RFC1918/RFC4193 private addresses
+    // Block localhost and private/non-routable addresses
     // This mitigates DNS rebinding attacks where an attacker's domain resolves
     // to private IPs to access internal services
     let host_lower = host.to_lowercase();
@@ -145,6 +145,7 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         || host_lower.starts_with("127.")      // Loopback (127.0.0.0/8)
         || host_lower.starts_with("10.")       // RFC1918 Class A (10.0.0.0/8)
         || host_lower.starts_with("192.168.") // RFC1918 Class C (192.168.0.0/16)
+        || host_lower.starts_with("169.254.") // IPv4 link-local (169.254.0.0/16)
         // RFC1918 Class B (172.16.0.0/12 = 172.16.0.0 - 172.31.255.255)
         // Note: 172.0-15.x.x and 172.32+.x.x are public addresses
         || host_lower.starts_with("172.16.")
@@ -163,10 +164,16 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
         || host_lower.starts_with("172.29.")
         || host_lower.starts_with("172.30.")
         || host_lower.starts_with("172.31.")
-        // IPv6 loopback and link-local
+        // IPv6 loopback
         || host_lower == "[::1]"
+        // IPv6 link-local (fe80::/10)
         || host_lower.starts_with("fe80:")
         || host_lower.starts_with("[fe80:")
+        // IPv6 Unique Local Addresses (fc00::/7 = fc00::/8 + fd00::/8)
+        || host_lower.starts_with("fc")
+        || host_lower.starts_with("fd")
+        || host_lower.starts_with("[fc")
+        || host_lower.starts_with("[fd")
     {
         return Err(LnUrlError::UntrustedDomain(format!(
             "Private/local addresses not allowed: {}",
