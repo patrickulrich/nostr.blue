@@ -6,7 +6,7 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, get_identifier, calculate_read_time
 };
-use crate::utils::format_relative_time_or;
+use crate::utils::{format_relative_time_or, truncate_pubkey};
 
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -30,13 +30,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     // Get display name from metadata or fallback
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
+use crate::utils::truncate_pubkey;
 use crate::utils::validation::{css_safe_url, is_valid_http_url};
 
 /// Discover recipe card for the explore page
@@ -23,7 +24,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &author_pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

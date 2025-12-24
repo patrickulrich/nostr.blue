@@ -10,6 +10,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ZapModal, VoiceReplyComposer, ReactionButton};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::stores::nostr_client::HAS_SIGNER;
+use crate::utils::truncate_pubkey;
 use wasm_bindgen::JsCast;
 use std::time::Duration;
 use js_sys;
@@ -348,7 +349,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     // Get author display info
     let author_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-        .unwrap_or_else(|| format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let author_username = author_metadata.read().as_ref()
         .and_then(|m| m.name.clone())

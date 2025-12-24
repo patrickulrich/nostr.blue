@@ -7,6 +7,7 @@ use nostr_sdk::PublicKey;
 use nostr_sdk::prelude::ToBech32;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 /// Popular chef avatar for the explore page
 #[component]
@@ -19,13 +20,7 @@ pub fn PopularChefAvatar(pubkey: String) -> Element {
     // Get display name from metadata or fallback
     let display_name = profile_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if pubkey.len() > 16 {
-                format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-            } else {
-                pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
     let profile_picture = profile_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

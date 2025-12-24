@@ -9,7 +9,7 @@ use crate::stores::cashu::{WALLET_BALANCE, send_tokens_p2pk, get_balances_per_mi
 use crate::stores::nwc_store;
 use crate::stores::profiles;
 use crate::services::lnurl;
-use crate::utils::format::format_sats_with_separator;
+use crate::utils::format::{format_sats_with_separator, truncate_pubkey};
 
 /// Checkout steps
 #[derive(Clone, Copy, PartialEq)]
@@ -130,7 +130,7 @@ pub fn ShopCheckout() -> Element {
 
                 if let Ok(profile) = profile_result {
                     let name = profile.name.clone()
-                        .unwrap_or_else(|| format!("{}...", &pk[..8]));
+                        .unwrap_or_else(|| truncate_pubkey(&pk));
 
                     if let Some(ref lud16) = profile.lud16 {
                         if first_lud16.is_none() {
@@ -154,7 +154,7 @@ pub fn ShopCheckout() -> Element {
                     }
                 } else {
                     all_have_lud16 = false;
-                    missing_lightning.push(format!("{}...", &pk[..8]));
+                    missing_lightning.push(truncate_pubkey(&pk));
                 }
             }
 

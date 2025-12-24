@@ -7,6 +7,7 @@ use crate::stores::publication_store::{PublicationIndex, PublicationType};
 use crate::stores::profiles;
 use crate::components::icons::{BookOpenIcon, FileVideoIcon};
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use crate::utils::truncate_pubkey;
 
 /// Publication card for feed display
 #[component]
@@ -20,7 +21,7 @@ pub fn PublicationCard(publication: PublicationIndex) -> Element {
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
         .or_else(|| publication.author.clone())
-        .unwrap_or_else(|| format!("{}...", &author_hex[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&author_hex));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
 
     let naddr = publication.naddr.clone();

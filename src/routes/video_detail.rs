@@ -5,7 +5,7 @@ use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, Sh
 use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
 use crate::utils::format_sats_compact;
-use crate::utils::format::format_relative_time_or;
+use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -910,11 +910,7 @@ fn VideoInfo(
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
-            if pk.len() > 16 {
-                format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-            } else {
-                pk
-            }
+            truncate_pubkey(&pk)
         });
 
     let profile_image = author_metadata.read().as_ref()
@@ -1471,11 +1467,7 @@ fn AuthorInfo(pubkey: String) -> Element {
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
-            if pubkey.len() > 16 {
-                format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-            } else {
-                pubkey.clone()
-            }
+            truncate_pubkey(&pubkey)
         });
 
     let profile_image = author_metadata.read().as_ref()

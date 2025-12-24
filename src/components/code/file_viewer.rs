@@ -299,9 +299,11 @@ pub fn CodeFileViewerCompact(
     content: String,
     #[props(default = 10)] max_lines: usize,
 ) -> Element {
-    let lines: Vec<&str> = content.lines().take(max_lines).collect();
-    let total_lines = content.lines().count();
+    // Collect once to avoid iterating the content twice
+    let all_lines: Vec<&str> = content.lines().collect();
+    let total_lines = all_lines.len();
     let truncated = total_lines > max_lines;
+    let lines: Vec<&str> = all_lines.into_iter().take(max_lines).collect();
 
     rsx! {
         div {

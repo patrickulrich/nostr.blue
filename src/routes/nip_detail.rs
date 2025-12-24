@@ -5,7 +5,7 @@ use crate::stores::nostr_client;
 use crate::services::github_nips;
 use crate::hooks::use_author_metadata;
 use crate::components::{ClientInitializing, ThreadedComment, CommentComposer, ShareModal, ArticleContent};
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::utils::{build_thread_tree, merge_pending_into_tree, truncate_pubkey};
 use crate::stores::pending_comments::get_pending_comments;
 use std::time::Duration;
 
@@ -240,13 +240,7 @@ pub fn NipDetail(nip_id: String) -> Element {
             let pubkey = e.pubkey.to_hex();
             author_metadata.read().as_ref()
                 .and_then(|m| m.display_name.clone().or(m.name.clone()))
-                .unwrap_or_else(|| {
-                    if pubkey.len() > 16 {
-                        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-                    } else {
-                        pubkey
-                    }
-                })
+                .unwrap_or_else(|| truncate_pubkey(&pubkey))
         } else {
             String::new()
         }

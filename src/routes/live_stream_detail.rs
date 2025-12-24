@@ -6,6 +6,7 @@ use crate::components::icons::{ArrowLeftIcon, ZapIcon, ShareIcon};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
+use crate::utils::truncate_pubkey;
 use std::time::Duration;
 
 #[component]
@@ -558,11 +559,3 @@ fn render_no_stream_placeholder(status: &StreamStatus) -> Element {
     }
 }
 
-/// Truncate public key for display
-fn truncate_pubkey(pubkey: &str) -> String {
-    if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-    } else {
-        pubkey.to_string()
-    }
-}

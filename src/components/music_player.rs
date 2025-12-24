@@ -471,6 +471,8 @@ pub fn PersistentMusicPlayer() -> Element {
                                 option { value: "1.5", "1.5x" }
                                 option { value: "1.75", "1.75x" }
                                 option { value: "2", "2x" }
+                                option { value: "2.5", "2.5x" }
+                                option { value: "3", "3x" }
                             }
                         }
                     }

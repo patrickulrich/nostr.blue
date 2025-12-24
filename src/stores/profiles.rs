@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
+use crate::utils::format::truncate_pubkey;
 use std::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -77,12 +78,8 @@ impl Profile {
                 return name.clone();
             }
         }
-        // Fallback to npub prefix (first 12 chars)
-        if self.pubkey.len() >= 12 {
-            format!("npub1{}...", &self.pubkey[..12])
-        } else {
-            self.pubkey.clone()
-        }
+        // Fallback to truncated pubkey
+        truncate_pubkey(&self.pubkey)
     }
 
     /// Get the avatar URL, with Dicebear fallback

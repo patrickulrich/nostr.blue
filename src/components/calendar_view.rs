@@ -463,7 +463,9 @@ fn get_weekday_short(date: &str) -> String {
 
     let date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
     let weekday = date.get_day() as usize;
-    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday].to_string()
+    // Use safe indexing with fallback for defensive coding
+    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    WEEKDAYS.get(weekday).unwrap_or(&"???").to_string()
 }
 
 /// Format hour for display
@@ -694,32 +696,17 @@ fn get_event_color(event: &UnifiedEvent) -> &'static str {
     }
 }
 
-/// Get hover color for event
-fn get_event_hover_color(event: &UnifiedEvent) -> &'static str {
-    if event.is_private() {
-        "#9333ea"  // Purple-600
-    } else if event.is_livestream() {
-        "#dc2626"  // Red-600
-    } else if event.is_all_day() {
-        "#2563eb"  // Blue-600
-    } else {
-        "#15803d"  // Green-700
-    }
-}
-
 /// Render a positioned event
 fn render_positioned_event(pe: &PositionedEvent) -> Element {
     let bg_color = get_event_color(&pe.event);
-    let hover_color = get_event_hover_color(&pe.event);
 
     let style = format!(
-        "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {}; --hover-bg: {};",
+        "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {};",
         pe.position.top,
         pe.position.left,
         pe.position.width,
         pe.position.height,
-        bg_color,
-        hover_color
+        bg_color
     );
 
     // Route livestreams to /videos/live, calendar events to /calendar

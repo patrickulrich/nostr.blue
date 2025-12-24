@@ -29,6 +29,8 @@ pub fn CashuReceiveModal(
         // the case where user clears input while a task is in-flight)
         if let Some(task) = preview_task.read().as_ref() {
             task.cancel();
+            // Reset spinner immediately when cancelling to prevent stale UI state
+            is_previewing.set(false);
         }
         preview_task.set(None);
 

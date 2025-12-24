@@ -7,7 +7,7 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
-use crate::utils::{format_sats_compact, format_relative_time_or};
+use crate::utils::{format_sats_compact, format_relative_time_or, truncate_pubkey};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -335,13 +335,7 @@ pub fn PhotoCard(event: Event) -> Element {
     // Get display name and picture from metadata
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let picture_url = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

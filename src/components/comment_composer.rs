@@ -134,11 +134,13 @@ pub fn CommentComposer(
         {
             let current = content.read();
             let pos = *cursor_position.read();
-            // pos is a UTF-8 byte index, so slice to that position and get the last char
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        url_with_space.insert(0, ' ');
+            // pos is a UTF-8 byte index - use safe slicing to avoid panic on invalid boundaries
+            if pos > 0 {
+                if let Some(slice) = current.get(..pos) {
+                    if let Some(prev_char) = slice.chars().last() {
+                        if !prev_char.is_whitespace() {
+                            url_with_space.insert(0, ' ');
+                        }
                     }
                 }
             }

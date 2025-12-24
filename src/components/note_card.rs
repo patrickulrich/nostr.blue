@@ -9,7 +9,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
-use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or};
+use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or, truncate_pubkey};
 use nostr::nips::nip48::Protocol;
 use std::time::Duration;
 
@@ -412,14 +412,7 @@ pub fn NoteCard(
     // Get display name and picture from metadata or fallback
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            // Fallback to truncated pubkey
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let username = author_metadata.read().as_ref()
         .and_then(|m| m.name.clone())
@@ -437,7 +430,7 @@ pub fn NoteCard(
                     Err(e) => {
                         log::warn!("Failed to encode pubkey to bech32: {}, using hex fallback", e);
                         // Fallback to hex truncation
-                        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
+                        truncate_pubkey(&author_pubkey)
                     }
                 }
             } else {
@@ -453,10 +446,7 @@ pub fn NoteCard(
         let reposter_pubkey_str = reposter_pubkey.to_string();
         let reposter_display = reposter_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-            .unwrap_or_else(|| format!("{}...{}",
-                &reposter_pubkey_str[..8],
-                &reposter_pubkey_str[reposter_pubkey_str.len()-8..]
-            ));
+            .unwrap_or_else(|| truncate_pubkey(&reposter_pubkey_str));
         let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");
         (reposter_pubkey_str, reposter_display, repost_time)
     });

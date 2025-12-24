@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::github_nips::OfficialNip;
 use crate::utils::{truncate_pubkey, format::truncate_with_word_break, time::format_relative_time};
+use crate::utils::validation::is_valid_http_url;
 
 /// Card component for displaying an official NIP from GitHub
 #[component]
@@ -69,7 +70,12 @@ pub fn CustomNipCard(
     use crate::hooks::use_author_metadata;
 
     // Extract metadata from event tags
+    // Validate identifier exists - addressable events require a non-empty d-tag per NIP-01
     let identifier = event.tags.identifier().unwrap_or_default().to_string();
+    if identifier.trim().is_empty() {
+        // Skip rendering cards with empty identifiers - they create invalid naddrs
+        return rsx! { div { class: "hidden" } };
+    }
     let title = event.tags.iter()
         .find(|t| t.kind() == TagKind::Title)
         .and_then(|t| t.content().map(|s| s.to_string()))
@@ -131,12 +137,20 @@ pub fn CustomNipCard(
                 div {
                     class: "flex items-center gap-3 mb-3",
 
-                    // Avatar
+                    // Avatar - validate URL to prevent XSS from untrusted metadata
                     if let Some(pic) = &profile_picture {
-                        img {
-                            src: "{pic}",
-                            alt: "{display_name}",
-                            class: "w-8 h-8 rounded-full object-cover",
+                        if is_valid_http_url(pic) {
+                            img {
+                                src: "{pic}",
+                                alt: "{display_name}",
+                                class: "w-8 h-8 rounded-full object-cover",
+                            }
+                        } else {
+                            // Invalid URL - show fallback avatar
+                            div {
+                                class: "w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-medium",
+                                "{avatar_letter}"
+                            }
                         }
                     } else {
                         div {

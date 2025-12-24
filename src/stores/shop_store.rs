@@ -22,6 +22,7 @@ use crate::utils::nip99::{
     OrderMessageType, KIND_PRODUCT, KIND_COLLECTION, KIND_SHIPPING, KIND_REVIEW,
     KIND_ORDER_MESSAGE, KIND_PAYMENT_RECEIPT,
 };
+use crate::utils::format::truncate_pubkey;
 use std::sync::Arc;
 
 // ============================================================================
@@ -1243,11 +1244,7 @@ pub async fn create_shop_order(
         // Generate unique order ID for this merchant's portion
         // For single merchant, use base order_id; for multi-merchant, append merchant suffix
         let merchant_order_id = if merchant_count > 1 {
-            let short_pk = if merchant_pubkey.len() >= 8 {
-                &merchant_pubkey[..8]
-            } else {
-                merchant_pubkey.as_str()
-            };
+            let short_pk = truncate_pubkey(merchant_pubkey);
             format!("{}-{}", order_id, short_pk)
         } else {
             order_id.clone()

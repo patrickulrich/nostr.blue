@@ -5,6 +5,7 @@ use nostr::{TagKind};
 use crate::stores::nostr_client::{get_client, fetch_events_aggregated, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::utils::profile_prefetch;
+use crate::utils::truncate_pubkey;
 use crate::routes::Route;
 use crate::components::{EmojiPicker, RichContent};
 use std::time::Duration;
@@ -381,9 +382,9 @@ fn ChatMessage(event: Event) -> Element {
         if let Some(ref meta) = *metadata.read() {
             meta.display_name.clone()
                 .or_else(|| meta.name.clone())
-                .unwrap_or_else(|| format!("{}...", &author_pk_for_name[..8]))
+                .unwrap_or_else(|| truncate_pubkey(&author_pk_for_name))
         } else {
-            format!("{}...", &author_pk_for_name[..8])
+            truncate_pubkey(&author_pk_for_name)
         }
     });
 

@@ -13,6 +13,7 @@ use crate::components::{
 };
 use crate::stores::nostr_client;
 use crate::utils::podcast;
+use crate::utils::truncate_pubkey;
 use nostr_sdk::prelude::{Filter, Kind};
 use std::time::Duration;
 
@@ -603,7 +604,7 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
 
             Some(PodcastShow {
                 id: format!("inferred:{}", pubkey),
-                title: format!("Podcast by {}", &pubkey[..8]),
+                title: format!("Podcast by {}", truncate_pubkey(&pubkey)),
                 description: Some("Podcast discovered from episodes. Metadata not yet published.".to_string()),
                 author: Some(pubkey.clone()),
                 image,

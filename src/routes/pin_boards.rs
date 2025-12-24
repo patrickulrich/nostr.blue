@@ -13,6 +13,7 @@ use crate::components::{
     PinBoardMosaicGrid, BoardSlideover, ZapModal,
 };
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 /// Number of boards to fetch per page
 const PAGE_SIZE: usize = 30;
@@ -211,14 +212,7 @@ pub fn PinBoardsHome() -> Element {
                 let metadata_opt = zap_author_metadata.read().clone();
                 let author_name = metadata_opt.as_ref()
                     .and_then(|m| m.display_name.clone().or(m.name.clone()))
-                    .unwrap_or_else(|| {
-                        let pk = &board.pubkey;
-                        if pk.len() > 16 {
-                            format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-                        } else {
-                            pk.clone()
-                        }
-                    });
+                    .unwrap_or_else(|| truncate_pubkey(&board.pubkey));
                 let lud16 = metadata_opt.as_ref().and_then(|m| m.lud16.clone());
                 let lud06 = metadata_opt.as_ref().and_then(|m| m.lud06.clone());
                 Some((board.pubkey.clone(), author_name, lud16, lud06, board.event_id.clone()))

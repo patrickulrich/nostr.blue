@@ -19,6 +19,8 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use crate::utils::format::truncate_pubkey;
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -1342,7 +1344,7 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     cache_communities(&communities);
 
     log::info!("Fetched {} user communities for {} ({} member communities attempted)",
-        communities.len(), &user_pubkey[..8], member_community_count);
+        communities.len(), truncate_pubkey(user_pubkey), member_community_count);
     Ok(communities)
 }
 

@@ -9,6 +9,7 @@ use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip58::{self, BadgeAward, BadgeDefinition};
+use crate::utils::truncate_pubkey;
 
 /// Tab selection for the Badges page
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -500,11 +501,7 @@ fn PendingAwardCard(award: BadgeAward, badge: Option<BadgeDefinition>) -> Elemen
 
     let award_clone = award.clone();
     let _badge_clone = badge.clone();
-    let issuer_short = if award.issuer.len() > 8 {
-        format!("{}...", &award.issuer[..8])
-    } else {
-        award.issuer.clone()
-    };
+    let issuer_short = truncate_pubkey(&award.issuer);
 
     rsx! {
         div {

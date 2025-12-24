@@ -235,10 +235,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     }
                     Err(e) => {
                         log::error!("Upload failed: {}", e);
-                        // Revoke object URL to free memory on failure
-                        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
-                            let _ = web_sys::Url::revoke_object_url(url);
-                        }
+                        // Note: Don't revoke object URL on failure - preserve preview for retry
+                        // URL cleanup happens on: successful upload, modal close, new file selection, or clear
                         error.set(Some(e));
                         uploading.set(false);
                     }

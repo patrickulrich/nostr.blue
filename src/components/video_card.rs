@@ -7,6 +7,7 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
+use crate::utils::truncate_pubkey;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -336,9 +337,9 @@ pub fn VideoCard(event: Event) -> Element {
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
         metadata.display_name.clone()
             .or_else(|| metadata.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..]))
+            .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
-        format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..])
+        truncate_pubkey(&author_pubkey_display)
     };
 
     let author_picture = author_metadata.read().as_ref()

@@ -5,6 +5,7 @@ use crate::components::UnifiedTrackCard;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
 use crate::stores::music_player::MusicTrack;
 use crate::stores::{nostr_client, nostr_music, profiles};
+use crate::utils::truncate_pubkey;
 
 /// Check if the ID is a 64-char hex string (nostr pubkey)
 fn is_nostr_pubkey(id: &str) -> bool {
@@ -290,7 +291,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
     // Get display info from profile
     let artist_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let artist_image = profile.read().as_ref()
         .and_then(|p| p.picture.clone())
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));

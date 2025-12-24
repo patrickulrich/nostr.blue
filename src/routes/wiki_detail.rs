@@ -12,6 +12,7 @@ use crate::utils::nip54::WikiMergeRequest;
 use crate::stores::{auth_store, nostr_client, profiles};
 use crate::routes::Route;
 use crate::utils::time::format_relative_time_ex;
+use crate::utils::truncate_pubkey;
 
 /// Wiki page detail view
 #[component]
@@ -162,7 +163,7 @@ pub fn WikiDetail(identifier: String) -> Element {
                             let author_name = author_profile
                                 .as_ref()
                                 .and_then(|p| p.display_name.clone().or(p.name.clone()))
-                                .unwrap_or_else(|| format!("{}...", &author_hex[..8]));
+                                .unwrap_or_else(|| truncate_pubkey(&author_hex));
                             let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
                             let time_ago = format_relative_time_ex(wiki_page.event.created_at, true, true);
 
@@ -463,7 +464,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
     let requester_name = requester_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &request.pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&request.pubkey));
     let requester_picture = requester_profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago = format_relative_time_ex(nostr_sdk::Timestamp::from(request.created_at), true, true);
     let source_id_short = if request.source_event_id.len() > 12 {

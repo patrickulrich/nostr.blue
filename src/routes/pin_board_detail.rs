@@ -16,6 +16,7 @@ use crate::components::{
     PinCardSkeleton, PinGrid,
 };
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn PinBoardDetail(naddr: String) -> Element {
@@ -508,7 +509,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
             if let Some(ref b) = *board.read() {
                 ZapModal {
                     recipient_pubkey: b.pubkey.clone(),
-                    recipient_name: format!("{}...", &b.pubkey[..8]),
+                    recipient_name: truncate_pubkey(&b.pubkey),
                     lud16: None,
                     lud06: None,
                     event_id: Some(b.event_id.clone()),

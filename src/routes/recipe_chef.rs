@@ -8,6 +8,7 @@ use crate::stores::recipe_store::{self, CachedRecipe};
 use crate::stores::nostr_client;
 use crate::components::{RecipeCard, RecipeCardSkeleton};
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn RecipeChef(npub: String) -> Element {
@@ -112,11 +113,7 @@ pub fn RecipeChef(npub: String) -> Element {
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             pubkey_hex.read().clone()
-                .map(|pk| if pk.len() > 16 {
-                    format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-                } else {
-                    pk
-                })
+                .map(|pk| truncate_pubkey(&pk))
                 .unwrap_or_else(|| "Unknown Chef".to_string())
         });
 

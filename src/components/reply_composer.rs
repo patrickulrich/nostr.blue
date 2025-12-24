@@ -7,7 +7,7 @@ use crate::stores::pending_comments::{
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use crate::utils::{SignerValidationResult, get_current_user_pubkey};
+use crate::utils::{SignerValidationResult, get_current_user_pubkey, truncate_pubkey};
 use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use dioxus_core::spawn_forever;
@@ -57,11 +57,7 @@ pub fn ReplyComposer(
 
     // Get author info
     let author_pubkey = reply_to.pubkey.to_hex();
-    let short_author = if author_pubkey.len() > 16 {
-        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-4..])
-    } else {
-        author_pubkey.clone()
-    };
+    let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_id = reply_to.id.to_hex();

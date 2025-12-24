@@ -213,7 +213,7 @@ pub fn CommunityPostComposer(
                 // Character count
                 div {
                     class: "mt-2 text-xs text-muted-foreground text-right",
-                    "{content.read().len()} characters"
+                    "{content.read().chars().count()} characters"
                 }
 
                 // Actions

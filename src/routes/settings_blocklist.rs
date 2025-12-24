@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, profiles};
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 use std::collections::HashMap;
 
 #[component]
@@ -154,7 +155,7 @@ pub fn SettingsBlocklist() -> Element {
                                             {
                                                 user_profiles.read().get(pubkey)
                                                     .map(|p| p.get_display_name())
-                                                    .unwrap_or_else(|| format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..]))
+                                                    .unwrap_or_else(|| truncate_pubkey(pubkey))
                                             }
                                         }
                                         // Show hex as subtitle

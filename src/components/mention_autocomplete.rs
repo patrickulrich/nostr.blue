@@ -433,6 +433,8 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
 #[allow(dead_code)]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
+    // Clamp to valid bounds for consistency with utf16_to_utf8_index
+    let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
 
