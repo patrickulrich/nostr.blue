@@ -58,7 +58,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let handle_upload = move |_| {
         if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
             let quality_val = *quality.read();
-            let on_upload = props.on_upload.clone();
+            let on_upload = props.on_upload;
             let input_id_for_clear = input_id_for_upload.clone();
 
             uploading.set(true);

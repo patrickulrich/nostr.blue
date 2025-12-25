@@ -7,6 +7,8 @@ use nostr_sdk::{
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::components::PollTimer;
+use crate::utils::format::format_relative_time_or;
+use crate::utils::truncate_pubkey;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -25,10 +27,10 @@ pub fn PollCard(event: NostrEvent) -> Element {
     // State
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let mut poll_data = use_signal(|| None::<Poll>);
-    let mut votes = use_signal(|| Vec::<NostrEvent>::new());
+    let mut votes = use_signal(Vec::<NostrEvent>::new);
     let mut loading_votes = use_signal(|| true);
     let mut user_vote = use_signal(|| None::<NostrEvent>);
-    let mut selected_options = use_signal(|| Vec::<String>::new());
+    let mut selected_options = use_signal(Vec::<String>::new);
     let mut show_results = use_signal(|| false);
     let mut is_voting = use_signal(|| false);
 
@@ -175,15 +177,15 @@ pub fn PollCard(event: NostrEvent) -> Element {
     // Get display data
     let poll = poll_data.read().clone();
     let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
-    let poll_type = poll.as_ref().map(|p| p.r#type.clone()).unwrap_or(PollType::SingleChoice);
+    let poll_type = poll.as_ref().map(|p| p.r#type).unwrap_or(PollType::SingleChoice);
     let poll_options = poll.as_ref().map(|p| p.options.clone()).unwrap_or_default();
     let poll_ends_at = poll.as_ref().and_then(|p| p.ends_at);
 
     let author_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-        .unwrap_or_else(|| format!("{}...{}", &author_pubkey_for_display[..8], &author_pubkey_for_display[author_pubkey_for_display.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey_for_display));
 
-    let time_ago = format_time_ago(created_at);
+    let time_ago = format_relative_time_or(created_at.as_secs(), "now");
     let total_votes: usize = results().values().sum();
     let has_voted = user_vote.read().is_some();
 
@@ -440,18 +442,3 @@ fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<
     counts
 }
 
-// Format timestamp as relative time
-fn format_time_ago(timestamp: Timestamp) -> String {
-    let now = Timestamp::now();
-    let diff = now.as_secs() as i64 - timestamp.as_secs() as i64;
-
-    if diff < 60 {
-        format!("{}s", diff)
-    } else if diff < 3600 {
-        format!("{}m", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h", diff / 3600)
-    } else {
-        format!("{}d", diff / 86400)
-    }
-}

@@ -4,17 +4,14 @@ use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Theme {
     Light,
     Dark,
+    #[default]
     System,
 }
 
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::System
-    }
-}
 
 impl Theme {
     pub fn as_str(&self) -> &'static str {

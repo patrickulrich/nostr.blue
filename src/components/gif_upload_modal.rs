@@ -31,7 +31,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     // State
     // Store: (filename, data, mime, preview_url) - preview_url is an Object URL for efficient preview
     let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
-    let mut caption = use_signal(|| String::new());
+    let mut caption = use_signal(String::new);
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -67,57 +67,59 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
 
     // File selection handler
-    let handle_file_select = {
-        let input_id = input_id.clone();
-        move |_evt: Event<FormData>| {
-            let input_id = input_id.read().clone();
-            spawn(async move {
-                error.set(None);
+    let handle_file_select = move |_evt: Event<FormData>| {
+        let input_id = input_id.read().clone();
+        spawn(async move {
+            error.set(None);
 
-                match read_file_as_bytes(&input_id).await {
-                    Ok((filename, data, mime_type)) => {
-                        // Validate GIF magic bytes (GIF87a or GIF89a)
-                        // This is more reliable than MIME type or extension which can be spoofed
-                        if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
-                            error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
-                            return;
-                        }
-
-                        // Also check MIME type or extension as secondary validation
-                        if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
-                            error.set(Some("Please select a GIF file".to_string()));
-                            return;
-                        }
-
-                        // Check file size (max 21MB like gifbuddy)
-                        if data.len() > 21 * 1024 * 1024 {
-                            error.set(Some("File too large. Maximum size is 21MB".to_string()));
-                            return;
-                        }
-
-                        // Create Object URL for efficient preview (avoids base64 memory overhead)
-                        let preview_url = create_object_url(&data, &mime_type);
-
-                        log::info!("Selected GIF: {} ({} bytes)", filename, data.len());
-                        selected_file.set(Some((filename, data, mime_type, preview_url)));
+            match read_file_as_bytes(&input_id).await {
+                Ok((filename, data, mime_type)) => {
+                    // Validate GIF magic bytes (GIF87a or GIF89a)
+                    // This is more reliable than MIME type or extension which can be spoofed
+                    if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
+                        error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
+                        return;
                     }
-                    Err(e) => {
-                        log::error!("Failed to read file: {}", e);
-                        error.set(Some(format!("Failed to read file: {}", e)));
+
+                    // Also check MIME type or extension as secondary validation
+                    if !mime_type.contains("gif") && !filename.to_lowercase().ends_with(".gif") {
+                        error.set(Some("Please select a GIF file".to_string()));
+                        return;
                     }
+
+                    // Check file size (max 21MB like gifbuddy)
+                    if data.len() > 21 * 1024 * 1024 {
+                        error.set(Some("File too large. Maximum size is 21MB".to_string()));
+                        return;
+                    }
+
+                    // Revoke previous object URL to prevent memory leak
+                    if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref() {
+                        let _ = web_sys::Url::revoke_object_url(old_url);
+                    }
+
+                    // Create Object URL for efficient preview (avoids base64 memory overhead)
+                    let preview_url = create_object_url(&data, &mime_type);
+
+                    log::info!("Selected GIF: {} ({} bytes)", filename, data.len());
+                    selected_file.set(Some((filename, data, mime_type, preview_url)));
                 }
-            });
-        }
+                Err(e) => {
+                    log::error!("Failed to read file: {}", e);
+                    error.set(Some(format!("Failed to read file: {}", e)));
+                }
+            }
+        });
     };
 
     // Upload handler
     let handle_upload = {
-        let on_upload = props.on_upload.clone();
+        let on_upload = props.on_upload;
         move |_| {
             let file_data = selected_file.read().clone();
             let caption_text = caption.read().clone();
             let server = upload_server.read().clone();
-            let on_upload = on_upload.clone();
+            let on_upload = on_upload;
 
             if file_data.is_none() {
                 error.set(Some("Please select a file first".to_string()));
@@ -169,16 +171,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     Ok((url, hash, dimensions)) => {
                         log::info!("File uploaded successfully: {}", url);
 
-                        // Now publish the NIP-94 event
-                        let dims = dimensions.map(|(w, h)| (w, h));
-
+                        // Publish the NIP-94 event
                         match gif_store::publish_gif_event(
                             url.clone(),
                             "image/gif".to_string(),
                             hash,
                             caption_text.clone(),
                             Some(file_size),
-                            dims,
+                            dimensions,
                         ).await {
                             Ok(event_id) => {
                                 log::info!("GIF event published: {}", event_id);
@@ -189,7 +189,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 let gif_metadata = gif_store::GifMetadata {
                                     url: url.clone(),
                                     thumbnail: None,
-                                    dimensions: dims.map(|(w, h)| (w as u64, h as u64)),
+                                    dimensions: dimensions.map(|(w, h)| (w as u64, h as u64)),
                                     size: Some(file_size),
                                     blurhash: None,
                                     alt: Some(caption_text.clone()),
@@ -235,10 +235,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     }
                     Err(e) => {
                         log::error!("Upload failed: {}", e);
-                        // Revoke object URL to free memory on failure
-                        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
-                            let _ = web_sys::Url::revoke_object_url(url);
-                        }
+                        // Note: Don't revoke object URL on failure - preserve preview for retry
+                        // URL cleanup happens on: successful upload, modal close, new file selection, or clear
                         error.set(Some(e));
                         uploading.set(false);
                     }
@@ -248,17 +246,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     };
 
     // Clear file selection
-    let handle_clear = {
-        let input_id = input_id.clone();
-        move |_| {
-            // Revoke object URL to free memory
-            if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
-                let _ = web_sys::Url::revoke_object_url(url);
-            }
-            selected_file.set(None);
-            error.set(None);
-            clear_file_input(&input_id.read());
+    let handle_clear = move |_| {
+        // Revoke object URL to free memory
+        if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+            let _ = web_sys::Url::revoke_object_url(url);
         }
+        selected_file.set(None);
+        error.set(None);
+        clear_file_input(&input_id.read());
     };
 
     // Don't render if not visible

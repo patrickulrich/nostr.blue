@@ -37,6 +37,26 @@ pub enum TrackSource {
         /// d-tag identifier
         d_tag: String,
     },
+    /// Podcast episode from Nostr Kind 30054 event
+    NostrPodcast {
+        /// Event coordinate: "30054:pubkey:d-tag"
+        coordinate: String,
+        /// Author pubkey (hex)
+        pubkey: String,
+        /// d-tag identifier
+        d_tag: String,
+        /// Podcast show title
+        podcast_title: String,
+    },
+    /// Podcast episode from RSS feed
+    RssPodcast {
+        /// RSS feed URL
+        feed_url: String,
+        /// Episode GUID
+        episode_guid: String,
+        /// Podcast show title
+        podcast_title: String,
+    },
 }
 
 impl Default for TrackSource {
@@ -490,14 +510,14 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
     }
 
     // Check for multiplier suffix
-    let (num_str, multiplier) = if amount_str.ends_with('m') {
-        (&amount_str[..amount_str.len()-1], 100_000_000_u64) // milli-btc to msats
-    } else if amount_str.ends_with('u') {
-        (&amount_str[..amount_str.len()-1], 100_000_u64) // micro-btc to msats
-    } else if amount_str.ends_with('n') {
-        (&amount_str[..amount_str.len()-1], 100_u64) // nano-btc to msats
-    } else if amount_str.ends_with('p') {
-        (&amount_str[..amount_str.len()-1], 1_u64) // pico-btc to msats (actually 0.1 msat)
+    let (num_str, multiplier) = if let Some(stripped) = amount_str.strip_suffix('m') {
+        (stripped, 100_000_000_u64) // milli-btc to msats
+    } else if let Some(stripped) = amount_str.strip_suffix('u') {
+        (stripped, 100_000_u64) // micro-btc to msats
+    } else if let Some(stripped) = amount_str.strip_suffix('n') {
+        (stripped, 100_u64) // nano-btc to msats
+    } else if let Some(stripped) = amount_str.strip_suffix('p') {
+        (stripped, 1_u64) // pico-btc to msats (actually 0.1 msat)
     } else {
         // No multiplier means BTC
         (amount_str, 100_000_000_000_u64) // btc to msats
@@ -802,6 +822,7 @@ pub async fn resolve_playlist_tracks(
 // ============================================================================
 
 /// Publish a new music track (Kind 36787)
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_track(
     d_tag: String,
     title: String,
@@ -849,6 +870,7 @@ pub async fn publish_track(
 }
 
 /// Publish a new playlist (Kind 34139)
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_playlist(
     d_tag: String,
     title: String,

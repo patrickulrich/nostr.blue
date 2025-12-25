@@ -3,6 +3,7 @@ use nostr_sdk::{Event as NostrEvent, EventId};
 use crate::stores::{nostr_client::HAS_SIGNER, blossom_store};
 use crate::components::{VoiceRecorder, RichContent};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
+use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn VoiceReplyComposer(
@@ -19,11 +20,7 @@ pub fn VoiceReplyComposer(
 
     // Get author info
     let author_pubkey = reply_to.pubkey.to_hex();
-    let short_author = if author_pubkey.len() > 16 {
-        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-4..])
-    } else {
-        author_pubkey.clone()
-    };
+    let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_event = reply_to.clone();

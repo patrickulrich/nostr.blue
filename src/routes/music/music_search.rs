@@ -37,8 +37,8 @@ pub fn MusicSearch(q: String) -> Element {
     let mut error = use_signal(|| None::<String>);
 
     // Separate track results to avoid race conditions during parallel search
-    let mut wavlake_tracks = use_signal(|| Vec::<MusicTrack>::new());
-    let mut nostr_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    let mut wavlake_tracks = use_signal(Vec::<MusicTrack>::new);
+    let mut nostr_tracks = use_signal(Vec::<MusicTrack>::new);
     // Compute unified tracks reactively - no race condition
     let unified_tracks = use_memo(move || {
         let mut combined = wavlake_tracks.read().clone();
@@ -46,13 +46,13 @@ pub fn MusicSearch(q: String) -> Element {
         combined
     });
     // Keep separate for Artists/Albums tabs
-    let mut artist_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
-    let mut nostr_artist_results = use_signal(|| Vec::<(String, profiles::Profile)>::new());
+    let mut artist_results = use_signal(Vec::<WavlakeSearchResult>::new);
+    let mut nostr_artist_results = use_signal(Vec::<(String, profiles::Profile)>::new);
     let mut nostr_artist_loading = use_signal(|| true);
-    let mut album_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
+    let mut album_results = use_signal(Vec::<WavlakeSearchResult>::new);
 
     // Playlist state
-    let mut playlist_id_input = use_signal(|| String::new());
+    let mut playlist_id_input = use_signal(String::new);
     let mut playlist = use_signal(|| None::<WavlakePlaylist>);
     let mut playlist_loading = use_signal(|| false);
     let mut playlist_error = use_signal(|| None::<String>);

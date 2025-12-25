@@ -14,14 +14,14 @@ pub fn MusicHome() -> Element {
     let is_authenticated = auth_store::is_authenticated();
 
     // State signals
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     let mut discovery_tab = use_signal(|| DiscoveryTab::Trending);
     let mut selected_genre = use_signal(|| String::from("all"));
     let mut selected_days = use_signal(|| 7u32);
     let mut selected_platform = use_signal(|| String::from("all")); // "all", "wavlake", "nostr"
 
     // Track state
-    let mut unified_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    let mut unified_tracks = use_signal(Vec::<MusicTrack>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
@@ -30,12 +30,10 @@ pub fn MusicHome() -> Element {
         "Classical", "Blues", "Country", "Reggae", "Punk", "Metal"
     ];
 
-    let time_periods = vec![
-        (1, "24h"),
+    let time_periods = [(1, "24h"),
         (7, "7d"),
         (30, "30d"),
-        (90, "90d"),
-    ];
+        (90, "90d")];
 
     // Fetch tracks when filters change
     use_effect(move || {
@@ -433,7 +431,7 @@ pub fn MusicHome() -> Element {
 /// Playlist discovery section
 #[component]
 fn PlaylistSection(platform_filter: String) -> Element {
-    let mut playlists = use_signal(|| Vec::<nostr_music::NostrPlaylist>::new());
+    let mut playlists = use_signal(Vec::<nostr_music::NostrPlaylist>::new);
     let mut loading = use_signal(|| true);
 
     // Fetch playlists - reacts directly to platform_filter prop changes

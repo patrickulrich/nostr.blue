@@ -26,8 +26,10 @@
 /// ```
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum DataState<T> {
     /// Initial state, no action taken yet
+    #[default]
     Pending,
 
     /// Currently loading/fetching data
@@ -120,11 +122,6 @@ impl<T> DataState<T> {
     }
 }
 
-impl<T> Default for DataState<T> {
-    fn default() -> Self {
-        DataState::Pending
-    }
-}
 
 /// Helper to convert Result into DataState
 impl<T, E: std::fmt::Display> From<Result<T, E>> for DataState<T> {

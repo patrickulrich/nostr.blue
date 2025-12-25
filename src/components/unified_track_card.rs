@@ -106,16 +106,23 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let source_info = match &track.source {
         TrackSource::Wavlake { .. } => ("W", "Wavlake", "bg-orange-500/20 text-orange-400"),
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
+        TrackSource::NostrPodcast { .. } => ("P", "Nostr Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
     };
 
     // Get artwork URL with fallback
     let artwork_url = track.album_art_url.clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
 
-    // Build artist route based on source (both go to music artist page)
+    // Build artist route based on source (both go to music artist page, podcasts go to profile)
     let artist_route = match &track.source {
         TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist { artist_id: artist_id.clone() },
         TrackSource::Nostr { pubkey, .. } => Route::MusicArtist { artist_id: pubkey.clone() },
+        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile { pubkey: pubkey.clone() },
+        TrackSource::RssPodcast { .. } => {
+            // RSS podcasts don't have a profile page, use home as fallback
+            Route::Home {}
+        }
     };
 
     rsx! {
@@ -189,7 +196,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                         "{album}"
                                     }
                                 },
-                                TrackSource::Nostr { .. } => rsx! {
+                                TrackSource::Nostr { .. } |
+                                TrackSource::NostrPodcast { .. } |
+                                TrackSource::RssPodcast { .. } => rsx! {
                                     span { "{album}" }
                                 }
                             }

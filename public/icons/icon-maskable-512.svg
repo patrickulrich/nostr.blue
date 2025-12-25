@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Maskable icons need a safe zone (80% center), so we fill the whole area -->
+  <rect width="512" height="512" fill="#3b82f6"/>
+  <text x="256" y="358" font-family="Arial, sans-serif" font-size="307" font-weight="bold" fill="#fff" text-anchor="middle">N</text>
+</svg>

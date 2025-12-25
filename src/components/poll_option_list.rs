@@ -77,10 +77,10 @@ pub fn PollOptionList(
                                     update_option(option_index, evt.value().clone());
                                 },
                                 // Auto-resize textarea (wasm32 only)
-                                onmounted: move |evt| {
+                                onmounted: move |_evt| {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        if let Some(element) = evt.data.downcast::<web_sys::HtmlTextAreaElement>() {
+                                        if let Some(element) = _evt.data.downcast::<web_sys::HtmlTextAreaElement>() {
                                             let _ = element.set_attribute("style", "height: auto;");
                                             let scroll_height = element.scroll_height();
                                             let _ = element.set_attribute("style", &format!("height: {}px;", scroll_height));
