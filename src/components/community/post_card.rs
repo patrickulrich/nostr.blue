@@ -54,7 +54,10 @@ pub fn CommunityPostCard(
     let author_name = profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &post.pubkey[..8.min(post.pubkey.len())]));
+        .unwrap_or_else(|| {
+            let truncated: String = post.pubkey.chars().take(8).collect();
+            format!("{}...", truncated)
+        });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
     let author_pubkey = post.pubkey.clone();
 
@@ -489,7 +492,10 @@ pub fn CommunityPostCard(
                     let recipient_name = author_profile
                         .as_ref()
                         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-                        .unwrap_or_else(|| format!("{}...", &post.pubkey[..8.min(post.pubkey.len())]));
+                        .unwrap_or_else(|| {
+                            let truncated: String = post.pubkey.chars().take(8).collect();
+                            format!("{}...", truncated)
+                        });
                     let lud16 = author_profile.as_ref().and_then(|p| p.lud16.clone());
                     let lud06: Option<String> = None; // lud06 not commonly used
 
