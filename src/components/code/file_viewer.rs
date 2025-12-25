@@ -204,13 +204,19 @@ pub fn CodeFileViewer(
                             spawn(async move {
                                 if let Some(window) = web_sys::window() {
                                     let clipboard = window.navigator().clipboard();
-                                    let _ = wasm_bindgen_futures::JsFuture::from(
+                                    match wasm_bindgen_futures::JsFuture::from(
                                         clipboard.write_text(&content)
-                                    ).await;
-                                    copied.set(true);
-                                    // Reset after 2 seconds
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                    copied.set(false);
+                                    ).await {
+                                        Ok(_) => {
+                                            copied.set(true);
+                                            // Reset after 2 seconds
+                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                            copied.set(false);
+                                        }
+                                        Err(e) => {
+                                            log::debug!("Clipboard write failed: {:?}", e);
+                                        }
+                                    }
                                 }
                             });
                         }

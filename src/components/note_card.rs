@@ -952,6 +952,17 @@ pub fn NoteCard(
     }
 }
 
+/// Render protocol icon for NIP-48 proxy badges
+fn ProtocolIcon(protocol: &Protocol) -> Element {
+    match protocol {
+        Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
+        Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
+        Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
+        Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
+        Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
+    }
+}
+
 /// NIP-48 Proxy Badge - shows origin for bridged content
 /// Displays a small icon linking to the original source on another protocol
 #[component]
@@ -966,13 +977,7 @@ fn ProxyBadge(proxy_info: nip48::ProxyInfo) -> Element {
             span {
                 class: "inline-flex items-center text-muted-foreground",
                 title: "Bridged from {display_name}",
-                match &proxy_info.protocol {
-                    Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
-                    Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
-                    Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
-                    Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
-                    Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
-                }
+                { ProtocolIcon(&proxy_info.protocol) }
             }
         };
     }
@@ -985,13 +990,7 @@ fn ProxyBadge(proxy_info: nip48::ProxyInfo) -> Element {
             class: "inline-flex items-center text-muted-foreground hover:text-foreground transition-colors",
             title: "View original on {display_name}",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            match &proxy_info.protocol {
-                Protocol::ActivityPub => rsx! { MastodonIcon { class: "w-3.5 h-3.5" } },
-                Protocol::ATProto => rsx! { BlueskyIcon { class: "w-3.5 h-3.5" } },
-                Protocol::Rss => rsx! { RssIcon { class: "w-3.5 h-3.5" } },
-                Protocol::Web => rsx! { GlobeIcon { class: "w-3.5 h-3.5" } },
-                Protocol::Custom(_) => rsx! { ExternalLinkIcon { class: "w-3.5 h-3.5" } },
-            }
+            { ProtocolIcon(&proxy_info.protocol) }
         }
     }
 }

@@ -69,8 +69,9 @@ pub fn RepoActionBar(
             } else {
                 // Check from relays
                 spawn(async move {
-                    if let Ok(starred) = check_user_star(&coord).await {
-                        is_starred.set(starred);
+                    match check_user_star(&coord).await {
+                        Ok(starred) => is_starred.set(starred),
+                        Err(e) => log::debug!("Failed to check star status: {}", e),
                     }
                 });
             }

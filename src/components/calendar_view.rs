@@ -500,7 +500,7 @@ fn format_day_header(date: &str) -> String {
                        "July", "August", "September", "October", "November", "December"];
 
     let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
-    let month_idx = (month - 1) as usize;
+    let month_idx = month.saturating_sub(1) as usize;
     let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
 
     format!("{}, {} {}, {}", weekday_name, month_name, day, year)
@@ -513,11 +513,11 @@ fn get_week_dates(date: &str) -> Vec<String> {
         return vec![];
     }
 
-    let year: i32 = parts[0].parse().unwrap_or(2024);
+    let year: u32 = parts[0].parse().unwrap_or(2024);
     let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1; // JS months are 0-indexed
     let day: i32 = parts[2].parse().unwrap_or(1);
 
-    let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
+    let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
     let current_weekday = js_date.get_day() as i32;
 
     // Go back to Sunday using milliseconds (safer approach)
@@ -776,10 +776,10 @@ pub fn CalendarViewSkeleton() -> Element {
             div {
                 class: "h-12 bg-muted rounded mb-2"
             }
-            // Grid skeleton
+            // Grid skeleton (6 weeks × 7 days = 42 cells to match actual grid)
             div {
                 class: "grid grid-cols-7 gap-1",
-                for _ in 0..35 {
+                for _ in 0..42 {
                     div {
                         class: "h-24 bg-muted rounded"
                     }

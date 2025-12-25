@@ -670,18 +670,8 @@ fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> A
 // Format Helpers
 // ============================================================================
 
-/// Format duration in seconds to display string
-pub fn format_duration(seconds: u64) -> String {
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
-
-    if hours > 0 {
-        format!("{}:{:02}:{:02}", hours, minutes, secs)
-    } else {
-        format!("{}:{:02}", minutes, secs)
-    }
-}
+// Re-export duration formatting from utils for backward compatibility
+pub use crate::utils::duration::format_duration_timecode as format_duration;
 
 #[cfg(test)]
 mod tests {

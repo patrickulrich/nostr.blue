@@ -53,6 +53,9 @@ pub fn CommunityPostComposer(
             match result {
                 Ok(event_id) => {
                     log::info!("Community post published: {}", event_id);
+                    // Reset state before closing to avoid stale state on reopen
+                    posting.set(false);
+                    content.set(String::new());
                     if let Some(handler) = on_success {
                         handler.call(event_id);
                     }

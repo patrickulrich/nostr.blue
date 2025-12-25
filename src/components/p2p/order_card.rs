@@ -10,6 +10,7 @@ use crate::services::btc_price;
 use crate::components::{P2PStatusBadge, P2PTypeBadge, P2PLayerBadge};
 use crate::utils::time::format_relative_time;
 use crate::utils::format::format_sats_with_unit;
+use crate::utils::duration::format_duration_compact;
 
 /// P2P Order Card for list display
 #[component]
@@ -157,7 +158,7 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
                             stroke_width: "2",
                             path { d: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" }
                         }
-                        "Expires in {format_duration(remaining)}"
+                        "Expires in {format_duration_compact(remaining)}"
                     }
                 }
             }
@@ -208,15 +209,3 @@ pub fn P2POrderCardSkeleton() -> Element {
     }
 }
 
-/// Format duration in seconds to human readable
-fn format_duration(seconds: u64) -> String {
-    if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86400 {
-        format!("{}h", seconds / 3600)
-    } else {
-        format!("{}d", seconds / 86400)
-    }
-}

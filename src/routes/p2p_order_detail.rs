@@ -10,6 +10,7 @@ use crate::utils::nip69::{P2POrder, FiatAmount};
 use crate::components::{ClientInitializing, P2PStatusBadge, P2PTypeBadge, P2PLayerBadge, P2PNetworkBadge};
 use crate::utils::time::format_relative_time;
 use crate::utils::format::format_sats_with_separator;
+use crate::utils::duration::format_duration_verbose;
 
 #[component]
 pub fn P2POrderDetail(naddr: String) -> Element {
@@ -305,7 +306,7 @@ fn OrderDetailContent(order: P2POrder) -> Element {
                     if let Some(remaining) = order.time_remaining() {
                         p {
                             class: if remaining < 3600 { "text-red-500" } else { "" },
-                            "Expires in: {format_duration(remaining)}"
+                            "Expires in: {format_duration_verbose(remaining)}"
                         }
                     } else {
                         p { class: "text-red-500", "Expired" }
@@ -317,27 +318,3 @@ fn OrderDetailContent(order: P2POrder) -> Element {
     }
 }
 
-/// Format duration in seconds
-fn format_duration(seconds: u64) -> String {
-    if seconds < 60 {
-        format!("{} seconds", seconds)
-    } else if seconds < 3600 {
-        format!("{} minutes", seconds / 60)
-    } else if seconds < 86400 {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
-        if mins > 0 {
-            format!("{}h {}m", hours, mins)
-        } else {
-            format!("{} hours", hours)
-        }
-    } else {
-        let days = seconds / 86400;
-        let hours = (seconds % 86400) / 3600;
-        if hours > 0 {
-            format!("{}d {}h", days, hours)
-        } else {
-            format!("{} days", days)
-        }
-    }
-}
