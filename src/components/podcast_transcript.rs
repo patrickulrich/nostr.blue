@@ -5,6 +5,8 @@
 //! - Current line highlighting during playback
 //! - Click-to-seek functionality
 //! - Language selection when multiple transcripts available
+//! - Auto-scroll to current cue (podverse-inspired)
+//! - Search/filter functionality
 
 use dioxus::prelude::*;
 use crate::utils::podcast::TranscriptRef;
@@ -181,7 +183,7 @@ fn TranscriptContent(props: TranscriptContentProps) -> Element {
 }
 
 // ============================================================================
-// Transcript View
+// Transcript View with Auto-scroll and Search
 // ============================================================================
 
 #[derive(Props, Clone, PartialEq)]
@@ -197,8 +199,65 @@ struct TranscriptViewProps {
 
 #[component]
 fn TranscriptView(props: TranscriptViewProps) -> Element {
+    // Auto-scroll state
+    let mut auto_scroll_enabled = use_signal(|| true);
+    let mut user_scrolled = use_signal(|| false);
+
+    // Search state
+    let mut search_query = use_signal(String::new);
+    let mut show_search = use_signal(|| false);
+
+    // Track previous current_idx to detect changes - use a non-reactive cell to avoid loops
+    let prev_idx = use_hook(|| std::cell::RefCell::new(None::<usize>));
+
     // Find current cue index
     let current_idx = find_current_cue(&props.cues, props.current_time);
+
+    // Filter cues by search query
+    let search_text = search_query.read().to_lowercase();
+    let filtered_indices: Vec<usize> = if search_text.is_empty() {
+        (0..props.cues.len()).collect()
+    } else {
+        props.cues.iter().enumerate()
+            .filter(|(_, cue)| {
+                cue.text.to_lowercase().contains(&search_text) ||
+                cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    };
+
+    let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
+
+    // Auto-scroll effect - scroll current cue into view
+    // Only reads auto_scroll_enabled (not prev_idx or user_scrolled) to avoid reactive loops
+    use_effect(move || {
+        let auto_scroll = *auto_scroll_enabled.read();
+
+        // Get previous without reactive subscription
+        let previous = *prev_idx.borrow();
+
+        // Only scroll if auto-scroll is enabled and index changed
+        if auto_scroll && current_idx != previous {
+            // Update previous index (non-reactive)
+            *prev_idx.borrow_mut() = current_idx;
+
+            if let Some(idx) = current_idx {
+                // Use JavaScript to scroll the element into view
+                let _ = document::eval(&format!(
+                    r#"
+                    (function() {{
+                        const el = document.querySelector('[data-cue-index="{}"]');
+                        if (el) {{
+                            el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                        }}
+                    }})();
+                    "#,
+                    idx
+                ));
+            }
+        }
+    });
 
     if props.cues.is_empty() {
         return rsx! {
@@ -213,15 +272,148 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
 
     rsx! {
         div {
-            class: "{max_height} overflow-y-auto space-y-1 pr-2 scrollbar-thin scrollbar-thumb-muted",
+            class: "space-y-2",
 
-            for (idx, cue) in props.cues.iter().enumerate() {
-                TranscriptCueItem {
-                    key: "{idx}",
-                    cue: cue.clone(),
-                    is_current: Some(idx) == current_idx,
-                    on_click: props.on_seek,
-                    compact: props.compact
+            // Controls bar
+            div {
+                class: "flex items-center justify-between gap-2",
+
+                // Search toggle and input
+                div {
+                    class: "flex items-center gap-2 flex-1",
+
+                    // Search toggle button
+                    button {
+                        class: if *show_search.read() {
+                            "p-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition"
+                        } else {
+                            "p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition"
+                        },
+                        title: "Toggle search",
+                        onclick: move |_| {
+                            let new_state = !*show_search.read();
+                            show_search.set(new_state);
+                            if !new_state {
+                                search_query.set(String::new());
+                            }
+                        },
+                        dangerous_inner_html: icons::SEARCH
+                    }
+
+                    // Search input (shown when search is toggled)
+                    if *show_search.read() {
+                        div {
+                            class: "flex-1 flex items-center gap-2",
+                            input {
+                                class: "flex-1 px-2 py-1 text-sm bg-muted rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary",
+                                r#type: "text",
+                                placeholder: "Search transcript...",
+                                value: "{search_query}",
+                                oninput: move |e| search_query.set(e.value()),
+                            }
+                            if match_count > 0 {
+                                span {
+                                    class: "text-xs text-muted-foreground whitespace-nowrap",
+                                    "{match_count} matches"
+                                }
+                            }
+                            if !search_query.read().is_empty() {
+                                button {
+                                    class: "p-1 rounded hover:bg-muted text-muted-foreground",
+                                    onclick: move |_| search_query.set(String::new()),
+                                    svg {
+                                        class: "w-3 h-3",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        view_box: "0 0 24 24",
+                                        path {
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            d: "M6 18L18 6M6 6l12 12"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Auto-scroll toggle
+                button {
+                    class: if *auto_scroll_enabled.read() {
+                        "flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition"
+                    } else {
+                        "flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition"
+                    },
+                    title: if *auto_scroll_enabled.read() { "Auto-scroll enabled" } else { "Auto-scroll disabled" },
+                    onclick: move |_| {
+                        let current = *auto_scroll_enabled.read();
+                        auto_scroll_enabled.set(!current);
+                    },
+
+                    // Auto-scroll icon
+                    svg {
+                        class: "w-3.5 h-3.5",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        view_box: "0 0 24 24",
+                        path {
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            d: "M19 14l-7 7m0 0l-7-7m7 7V3"
+                        }
+                    }
+                    "Auto"
+                }
+            }
+
+            // Transcript cues
+            div {
+                class: "{max_height} overflow-y-auto space-y-1 pr-2 scrollbar-thin scrollbar-thumb-muted",
+                onscroll: move |_| {
+                    // User manually scrolled - temporarily disable auto-scroll
+                    if *auto_scroll_enabled.read() {
+                        user_scrolled.set(true);
+                    }
+                },
+
+                if search_text.is_empty() {
+                    // Show all cues
+                    for (idx, cue) in props.cues.iter().enumerate() {
+                        TranscriptCueItem {
+                            key: "{idx}",
+                            cue: cue.clone(),
+                            is_current: Some(idx) == current_idx,
+                            on_click: props.on_seek,
+                            compact: props.compact,
+                            cue_index: idx,
+                            highlight_text: None
+                        }
+                    }
+                } else {
+                    // Show filtered cues with highlighting
+                    if filtered_indices.is_empty() {
+                        div {
+                            class: "text-center py-4 text-muted-foreground text-sm",
+                            "No matches found for \"{search_query}\""
+                        }
+                    } else {
+                        for idx in filtered_indices.iter() {
+                            if let Some(cue) = props.cues.get(*idx) {
+                                TranscriptCueItem {
+                                    key: "{idx}",
+                                    cue: cue.clone(),
+                                    is_current: Some(*idx) == current_idx,
+                                    on_click: props.on_seek,
+                                    compact: props.compact,
+                                    cue_index: *idx,
+                                    highlight_text: Some(search_query.read().clone())
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -259,6 +451,11 @@ struct TranscriptCueItemProps {
     on_click: Option<EventHandler<f64>>,
     #[props(default = false)]
     compact: bool,
+    /// Index for auto-scroll targeting
+    cue_index: usize,
+    /// Text to highlight in search results
+    #[props(default)]
+    highlight_text: Option<String>,
 }
 
 #[component]
@@ -288,6 +485,7 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
     rsx! {
         div {
             class: "{base_class}",
+            "data-cue-index": "{props.cue_index}",
             onclick: handle_click,
 
             // Timestamp
@@ -308,10 +506,18 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
                     }
                 }
 
-                // Text content
-                span {
-                    class: if props.is_current { "text-sm text-foreground" } else { "text-sm text-muted-foreground" },
-                    "{cue.text}"
+                // Text content (with optional highlighting)
+                if let Some(ref highlight) = props.highlight_text {
+                    HighlightedText {
+                        text: cue.text.clone(),
+                        highlight: highlight.clone(),
+                        is_current: props.is_current
+                    }
+                } else {
+                    span {
+                        class: if props.is_current { "text-sm text-foreground" } else { "text-sm text-muted-foreground" },
+                        "{cue.text}"
+                    }
                 }
             }
 
@@ -320,6 +526,70 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
                 div {
                     class: "text-primary flex-shrink-0",
                     dangerous_inner_html: icons::VOLUME_2
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Highlighted Text Component
+// ============================================================================
+
+#[derive(Props, Clone, PartialEq)]
+struct HighlightedTextProps {
+    text: String,
+    highlight: String,
+    is_current: bool,
+}
+
+#[component]
+fn HighlightedText(props: HighlightedTextProps) -> Element {
+    let base_class = if props.is_current { "text-sm text-foreground" } else { "text-sm text-muted-foreground" };
+
+    if props.highlight.is_empty() {
+        return rsx! {
+            span { class: "{base_class}", "{props.text}" }
+        };
+    }
+
+    let text_lower = props.text.to_lowercase();
+    let highlight_lower = props.highlight.to_lowercase();
+
+    // Split text into parts, highlighting matches
+    let mut parts = Vec::new();
+    let mut last_end = 0;
+
+    for (start, _) in text_lower.match_indices(&highlight_lower) {
+        if start > last_end {
+            // Non-matching part
+            parts.push((props.text[last_end..start].to_string(), false));
+        }
+        // Matching part (use original case from text)
+        parts.push((props.text[start..start + props.highlight.len()].to_string(), true));
+        last_end = start + props.highlight.len();
+    }
+
+    // Remaining text
+    if last_end < props.text.len() {
+        parts.push((props.text[last_end..].to_string(), false));
+    }
+
+    rsx! {
+        span {
+            class: "{base_class}",
+            for (idx, (part, is_match)) in parts.iter().enumerate() {
+                if *is_match {
+                    mark {
+                        key: "{idx}",
+                        class: "bg-yellow-300/50 text-foreground rounded px-0.5",
+                        "{part}"
+                    }
+                } else {
+                    span {
+                        key: "{idx}",
+                        "{part}"
+                    }
                 }
             }
         }

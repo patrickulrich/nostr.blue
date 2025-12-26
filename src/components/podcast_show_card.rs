@@ -94,9 +94,14 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
             // naddr encoding would be done here - for now use coordinate
             Route::PodcastNostrDetail { naddr: coordinate.clone() }
         }
-        PodcastSource::Rss { feed_url, .. } => {
-            // Use feed URL for RSS podcasts
-            Route::PodcastRssFeedDetail { feed_url: urlencoding::encode(feed_url).to_string() }
+        PodcastSource::Rss { podcast_id, .. } => {
+            // Use podcast ID if available, otherwise fallback to URL search
+            if let Some(id) = podcast_id {
+                Route::PodcastRssFeedDetail { podcast_id: id.to_string() }
+            } else {
+                // TODO: Add a search-by-URL route or lookup
+                Route::PodcastHome {}
+            }
         }
     };
 

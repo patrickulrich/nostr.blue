@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::services::wavlake::WavlakeAPI;
+use crate::services::podcast_index;
 use crate::stores::music_player::MusicTrack;
 use crate::stores::nostr_music::{self, MusicFeedFilter};
 use crate::stores::auth_store;
@@ -25,6 +26,10 @@ pub fn MusicHome() -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
+    // RSS music state (separate from main track list)
+    let mut rss_music_tracks = use_signal(Vec::<MusicTrack>::new);
+    let mut rss_loading = use_signal(|| true);
+
     let genres = vec![
         "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
         "Classical", "Blues", "Country", "Reggae", "Punk", "Metal"
@@ -42,8 +47,8 @@ pub fn MusicHome() -> Element {
         let days = *selected_days.read();
         let platform = selected_platform.read().clone();
 
-        // Skip fetch if on playlists tab (handled separately)
-        if tab == DiscoveryTab::Playlists {
+        // Skip fetch if on playlists or RSS tab (handled separately)
+        if tab == DiscoveryTab::Playlists || tab == DiscoveryTab::Rss {
             return;
         }
 
@@ -136,13 +141,44 @@ pub fn MusicHome() -> Element {
                         b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0))
                     });
                 }
-                DiscoveryTab::Playlists => {
+                DiscoveryTab::Playlists | DiscoveryTab::Rss => {
                     // Handled separately
                 }
             }
 
             unified_tracks.set(all_tracks);
             loading.set(false);
+        });
+    });
+
+    // Fetch RSS music when RSS tab is selected
+    use_effect(move || {
+        let tab = discovery_tab.read().clone();
+        if tab != DiscoveryTab::Rss {
+            return;
+        }
+
+        rss_loading.set(true);
+
+        spawn(async move {
+            match podcast_index::get_music_albums(Some(20)).await {
+                Ok(albums) => {
+                    let mut tracks = Vec::new();
+                    // Fetch tracks from each album (limit to 15 albums, 5 tracks each)
+                    for album in albums.iter().take(15) {
+                        if let Ok(episodes) = podcast_index::get_episodes_by_feed_id(album.id, Some(5)).await {
+                            for ep in &episodes {
+                                tracks.push(MusicTrack::from_rss_music_track(ep, album));
+                            }
+                        }
+                    }
+                    rss_music_tracks.set(tracks);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch RSS music: {}", e);
+                }
+            }
+            rss_loading.set(false);
         });
     });
 
@@ -155,8 +191,9 @@ pub fn MusicHome() -> Element {
         }
     };
 
-    // Show filters only for track tabs (not playlists)
-    let show_filters = *discovery_tab.read() != DiscoveryTab::Playlists;
+    // Show filters only for track tabs (not playlists or RSS)
+    let current_tab = discovery_tab.read().clone();
+    let show_filters = current_tab != DiscoveryTab::Playlists && current_tab != DiscoveryTab::Rss;
 
     rsx! {
         div {
@@ -360,8 +397,70 @@ pub fn MusicHome() -> Element {
                     PlaylistSection {
                         platform_filter: selected_platform.read().clone()
                     }
+                } else if *discovery_tab.read() == DiscoveryTab::Rss {
+                    // RSS Music tab
+                    if *rss_loading.read() {
+                        for i in 0..8 {
+                            UnifiedTrackCardSkeleton { key: "{i}" }
+                        }
+                    } else if rss_music_tracks.read().is_empty() {
+                        div {
+                            class: "text-center py-16",
+                            div {
+                                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    class: "w-8 h-8 text-muted-foreground",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                    }
+                                }
+                            }
+                            p {
+                                class: "text-muted-foreground font-medium",
+                                "No RSS music found"
+                            }
+                            p {
+                                class: "text-sm text-muted-foreground/70 mt-1",
+                                "Check back later for Podcasting 2.0 music"
+                            }
+                        }
+                    } else {
+                        // Stats bar
+                        div {
+                            class: "py-2 text-sm text-muted-foreground",
+                            span {
+                                "{rss_music_tracks.read().len()} tracks from RSS feeds"
+                            }
+                        }
+
+                        // Track cards
+                        div {
+                            class: "divide-y divide-border/50",
+                            {
+                                let tracks = rss_music_tracks.read().clone();
+                                rsx! {
+                                    for track in tracks.iter() {
+                                        UnifiedTrackCard {
+                                            key: "{track.id}",
+                                            track: track.clone(),
+                                            show_album: true,
+                                            show_sats: true,
+                                            playlist: Some(tracks.clone())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    // Track list
+                    // Track list (Trending/New/Following tabs)
                     if *loading.read() {
                         for i in 0..8 {
                             UnifiedTrackCardSkeleton { key: "{i}" }

@@ -7,7 +7,9 @@ use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, Event
 use nostr_sdk::nips::nip19::Nip19;
 use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
+use crate::services::podcast_index;
 use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::nostr_music::TrackSource;
 use crate::components::icons::{self, NostrBlueMiniLogo};
 use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
 use crate::components::live::stream_card::LiveStreamCard;
@@ -3443,38 +3445,288 @@ fn IsanRenderer(isan: String) -> Element {
     }
 }
 
-/// Render podcast feed GUID reference
+/// Render podcast feed GUID with playable card
 #[component]
 fn PodcastFeedRenderer(guid: String) -> Element {
-    let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+    let guid_for_resource = guid.clone();
+    let podcast_resource = use_resource(move || {
+        let g = guid_for_resource.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        async move {
+            // Wait for nostr client - NIP-98 auth requires a signer
+            if !client_initialized {
+                return Err("Waiting for authentication...".to_string());
+            }
+            podcast_index::get_podcast_by_guid(&g).await
+        }
+    });
 
-    rsx! {
-        a {
-            href: "{podcast_index_url}",
-            target: "_blank",
-            rel: "noopener noreferrer",
-            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
-            onclick: move |e: MouseEvent| e.stop_propagation(),
-            span { "Podcast: " }
-            span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+    match podcast_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex items-center gap-3",
+                    div { class: "w-16 h-16 bg-muted rounded" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-4 bg-muted rounded w-3/4" }
+                        div { class: "h-3 bg-muted rounded w-1/2" }
+                    }
+                }
+            }
+        },
+        // Error state - fall back to simple link
+        Some(Err(_)) => {
+            let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+            rsx! {
+                a {
+                    href: "{podcast_index_url}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    span { "Podcast: " }
+                    span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+                }
+            }
+        },
+        // Success - render podcast card with link to podcast page
+        Some(Ok(podcast)) => {
+            let image = podcast.get_image()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.title));
+            let podcast_id = podcast.id;
+
+            rsx! {
+                Link {
+                    to: Route::PodcastRssFeedDetail { podcast_id: podcast_id.to_string() },
+                    class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card block",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                    div {
+                        class: "flex items-center gap-4 p-4",
+
+                        // Cover art
+                        div {
+                            class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted",
+                            img {
+                                src: "{image}",
+                                alt: "Podcast cover",
+                                class: "w-full h-full object-cover"
+                            }
+                        }
+
+                        // Podcast info
+                        div {
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "font-semibold text-sm truncate",
+                                "{podcast.title}"
+                            }
+                            if let Some(ref author) = podcast.author {
+                                div {
+                                    class: "text-xs text-muted-foreground truncate",
+                                    "{author}"
+                                }
+                            }
+                            if let Some(count) = podcast.episode_count {
+                                div {
+                                    class: "text-xs text-muted-foreground/80 mt-1",
+                                    "{count} episodes"
+                                }
+                            }
+                        }
+
+                        // Badge
+                        div {
+                            class: "flex flex-col items-end gap-1 flex-shrink-0",
+                            div {
+                                class: "flex items-center gap-1 text-xs text-green-500",
+                                dangerous_inner_html: icons::PODCAST,
+                                "Podcast"
+                            }
+                            if podcast.has_v4v() {
+                                div {
+                                    class: "text-xs text-amber-500",
+                                    "V4V"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-/// Render podcast episode GUID reference
+/// Render podcast episode GUID with playable card
 #[component]
 fn PodcastEpisodeRenderer(guid: String) -> Element {
-    let podcast_index_url = format!("https://podcastindex.org/search?q={}", guid);
+    let guid_for_resource = guid.clone();
+    let episode_resource = use_resource(move || {
+        let g = guid_for_resource.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        async move {
+            // Wait for nostr client - NIP-98 auth requires a signer
+            if !client_initialized {
+                return Err("Waiting for authentication...".to_string());
+            }
+            podcast_index::get_episode_by_guid(&g).await
+        }
+    });
 
-    rsx! {
-        a {
-            href: "{podcast_index_url}",
-            target: "_blank",
-            rel: "noopener noreferrer",
-            class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
-            onclick: move |e: MouseEvent| e.stop_propagation(),
-            span { "Episode: " }
-            span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+    match episode_resource.read_unchecked().as_ref() {
+        // Loading state
+        None => rsx! {
+            div {
+                class: "my-2 p-4 border border-border rounded-lg bg-accent/5 animate-pulse",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div { class: "flex items-center gap-3",
+                    div { class: "w-16 h-16 bg-muted rounded" }
+                    div { class: "flex-1 space-y-2",
+                        div { class: "h-4 bg-muted rounded w-3/4" }
+                        div { class: "h-3 bg-muted rounded w-1/2" }
+                    }
+                }
+            }
+        },
+        // Error state - fall back to simple badge
+        Some(Err(_)) => {
+            let podcast_index_url = format!("https://podcastindex.org/search?q={}", guid);
+            rsx! {
+                a {
+                    href: "{podcast_index_url}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    class: "inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800/40 transition text-sm",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    span { "Episode: " }
+                    span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
+                }
+            }
+        },
+        // Success - render playable episode card
+        Some(Ok((episode, podcast))) => {
+            let image = episode.get_image()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.title));
+
+            let episode_clone = episode.clone();
+            let podcast_clone = podcast.clone();
+
+            let handle_play = move |e: MouseEvent| {
+                e.stop_propagation();
+                let ep = episode_clone.clone();
+                let pod = podcast_clone.clone();
+
+                // Build MusicTrack for player
+                let track = MusicTrack {
+                    id: format!("pi-ep-{}", ep.id),
+                    title: ep.title.clone(),
+                    artist: ep.feed_title.clone().unwrap_or_else(|| pod.as_ref().map(|p| p.title.clone()).unwrap_or_default()),
+                    artist_npub: None,
+                    artist_id: None,
+                    artist_art_url: None,
+                    album: ep.feed_title.clone(),
+                    album_id: ep.feed_id.map(|id| id.to_string()),
+                    album_art_url: ep.get_image().map(|s| s.to_string()),
+                    duration: ep.duration.map(|d| d as u32),
+                    media_url: ep.enclosure_url.clone().unwrap_or_default(),
+                    source: TrackSource::RssPodcast {
+                        feed_url: ep.feed_url.clone().unwrap_or_default(),
+                        podcast_id: ep.feed_id,
+                        episode_guid: guid.clone(),
+                        podcast_title: ep.feed_title.clone().unwrap_or_default(),
+                    },
+                    msat_total: None,
+                    created_at: None,
+                    is_podcast: true,
+                    value_block: None, // V4V value conversion would require type mapping
+                    chapters_url: ep.chapters_url.clone(),
+                    transcripts: Vec::new(), // Transcript type conversion would require mapping
+                };
+
+                music_player::play_track(track, None, None);
+            };
+
+            let has_v4v = episode.value.is_some();
+            let duration_str = episode.duration.map(|d| {
+                let mins = d / 60;
+                let secs = d % 60;
+                format!("{:02}:{:02}", mins, secs)
+            });
+
+            rsx! {
+                div {
+                    class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                    div {
+                        class: "flex items-center gap-4 p-4",
+
+                        // Cover art with play button
+                        div {
+                            class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted group",
+                            img {
+                                src: "{image}",
+                                alt: "Episode art",
+                                class: "w-full h-full object-cover"
+                            }
+
+                            // Play button overlay
+                            button {
+                                class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                onclick: handle_play,
+                                dangerous_inner_html: icons::PLAY
+                            }
+                        }
+
+                        // Episode info
+                        div {
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "font-semibold text-sm truncate",
+                                "{episode.title}"
+                            }
+                            if let Some(ref feed_title) = episode.feed_title {
+                                div {
+                                    class: "text-xs text-muted-foreground truncate",
+                                    "{feed_title}"
+                                }
+                            }
+                            if let Some(ref desc) = episode.description {
+                                div {
+                                    class: "text-xs text-muted-foreground/80 truncate mt-1",
+                                    dangerous_inner_html: "{desc}"
+                                }
+                            }
+                        }
+
+                        // Duration and badges
+                        div {
+                            class: "flex flex-col items-end gap-1 flex-shrink-0",
+                            if let Some(ref dur) = duration_str {
+                                div {
+                                    class: "text-xs text-muted-foreground",
+                                    "{dur}"
+                                }
+                            }
+                            div {
+                                class: "flex items-center gap-1 text-xs text-green-500",
+                                dangerous_inner_html: icons::PODCAST,
+                                "Episode"
+                            }
+                            if has_v4v {
+                                div {
+                                    class: "text-xs text-amber-500",
+                                    "V4V"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

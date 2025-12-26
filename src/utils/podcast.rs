@@ -253,6 +253,8 @@ pub enum PodcastSource {
     Rss {
         feed_url: String,
         guid: String,
+        /// Podcast Index feed ID (for routing)
+        podcast_id: Option<u64>,
     },
 }
 

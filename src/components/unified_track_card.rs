@@ -108,6 +108,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
         TrackSource::NostrPodcast { .. } => ("P", "Nostr Podcast", "bg-green-500/20 text-green-400"),
         TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssMusic { .. } => ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400"),
     };
 
     // Get artwork URL with fallback
@@ -122,6 +123,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::RssPodcast { .. } => {
             // RSS podcasts don't have a profile page, use home as fallback
             Route::Home {}
+        }
+        TrackSource::RssMusic { feed_id, .. } => {
+            // RSS music routes to album page
+            Route::MusicRssAlbum { feed_id: *feed_id }
         }
     };
 
@@ -191,6 +196,14 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                 TrackSource::Wavlake { album_id, .. } => rsx! {
                                     Link {
                                         to: Route::MusicAlbum { album_id: album_id.clone() },
+                                        class: "hover:text-foreground hover:underline",
+                                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                                        "{album}"
+                                    }
+                                },
+                                TrackSource::RssMusic { feed_id, .. } => rsx! {
+                                    Link {
+                                        to: Route::MusicRssAlbum { feed_id: *feed_id },
                                         class: "hover:text-foreground hover:underline",
                                         onclick: move |e: Event<MouseData>| e.stop_propagation(),
                                         "{album}"

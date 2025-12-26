@@ -11,7 +11,7 @@ use crate::components::{
     PodcastEpisodeList, DisplayEpisode, icons,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client, auth_store};
+use crate::stores::{nostr_client, auth_store, podcast_subscription};
 use crate::utils::podcast::{self, PodcastMetadata};
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
@@ -122,8 +122,10 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
     // Check if V4V is available
     let has_v4v = metadata.value.is_some();
 
-    // Follow state
-    let mut is_following = use_signal(|| false);
+    // Build coordinate for subscription
+    let coordinate = format!("30078:{}:{}", metadata.pubkey, metadata.d_tag);
+    let is_subscribed = podcast_subscription::is_subscribed(&coordinate);
+    let mut subscribing = use_signal(|| false);
 
     rsx! {
         div {
@@ -216,20 +218,46 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                     div {
                         class: "flex items-center gap-3 mt-4",
 
-                        // Follow button
+                        // Subscribe button
                         if auth.is_authenticated {
                             button {
-                                class: if *is_following.read() {
+                                class: if is_subscribed || *subscribing.read() {
                                     "px-4 py-2 text-sm font-medium border border-border rounded-full hover:bg-muted transition"
                                 } else {
                                     "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition"
                                 },
-                                onclick: move |_| {
-                                    let current = *is_following.read();
-                                    is_following.set(!current);
-                                    // TODO: Implement follow/unfollow
+                                disabled: *subscribing.read(),
+                                onclick: {
+                                    let coord = coordinate.clone();
+                                    move |_| {
+                                        if *subscribing.read() { return; }
+                                        let coord = coord.clone();
+                                        let currently_subscribed = is_subscribed;
+                                        subscribing.set(true);
+
+                                        spawn(async move {
+                                            if currently_subscribed {
+                                                match podcast_subscription::remove_subscription(&coord).await {
+                                                    Ok(()) => log::info!("Unsubscribed from: {}", coord),
+                                                    Err(e) => log::error!("Failed to unsubscribe: {}", e),
+                                                }
+                                            } else {
+                                                match podcast_subscription::add_nostr_subscription(&coord, None).await {
+                                                    Ok(()) => log::info!("Subscribed to: {}", coord),
+                                                    Err(e) => log::error!("Failed to subscribe: {}", e),
+                                                }
+                                            }
+                                            subscribing.set(false);
+                                        });
+                                    }
                                 },
-                                if *is_following.read() { "Following" } else { "Follow" }
+                                if *subscribing.read() {
+                                    "..."
+                                } else if is_subscribed {
+                                    "Subscribed"
+                                } else {
+                                    "Subscribe"
+                                }
                             }
                         }
 

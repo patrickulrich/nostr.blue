@@ -70,6 +70,7 @@ pub mod podcast_transcript;
 pub mod podcast_soundbites;
 pub mod podcast_persons;
 pub mod podcast_v4v;
+pub mod podcast_add_feed_modal;
 pub mod external_content_card;
 pub mod nip_card;
 
@@ -174,6 +175,7 @@ pub use podcast_transcript::PodcastTranscript;
 pub use podcast_soundbites::{PodcastSoundbites, FeaturedSoundbite};
 pub use podcast_persons::{PodcastPersons, InlineCredits};
 pub use podcast_v4v::{V4VInfo, V4VBoostButton};
+pub use podcast_add_feed_modal::PodcastAddFeedModal;
 pub use external_content_card::ExternalContentList;
 
 // Code/Git hosting component exports

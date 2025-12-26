@@ -9,6 +9,7 @@ pub mod content_search;
 pub mod mempool;
 pub mod openlibrary;
 pub mod podcast_rss;
+pub mod podcast_index;
 pub mod github_nips;
 pub mod git_hosting;
 pub mod git_worker;

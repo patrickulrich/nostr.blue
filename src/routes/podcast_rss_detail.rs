@@ -1,6 +1,6 @@
 //! RSS Podcast Detail Route
 //!
-//! Shows an RSS podcast fetched via direct RSS URL:
+//! Shows an RSS podcast fetched via Podcast Index ID:
 //! - Podcast metadata (cover, title, description)
 //! - Episode list with Podcasting 2.0 features
 //! - V4V payment support (if available)
@@ -11,27 +11,53 @@ use crate::components::{
     PodcastEpisodeList, DisplayEpisode, icons,
 };
 use crate::routes::Route;
-use crate::services::podcast_rss::{self, RssPodcast};
-use crate::stores::auth_store;
+use crate::services::podcast_index::{self, PodcastFeed, Episode};
+use crate::stores::{auth_store, nostr_client, podcast_subscription};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastRssFeedDetailProps {
-    pub feed_url: String,
+    pub podcast_id: String,
 }
 
-/// RSS podcast detail page (loaded via direct feed URL)
+/// RSS podcast detail page (loaded via Podcast Index ID)
 #[component]
 pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
-    // Decode the URL-encoded feed URL
-    let url = urlencoding::decode(&props.feed_url)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|_| props.feed_url.clone());
+    // Parse podcast ID
+    let podcast_id = props.podcast_id.clone();
 
-    // Fetch podcast data
+    // Fetch podcast data from Podcast Index API (avoids CORS issues with direct RSS fetching)
+    // Resource is reactive to CLIENT_INITIALIZED and HAS_SIGNER - NIP-98 auth required
     let podcast_data = use_resource(move || {
-        let url = url.clone();
+        let id_str = podcast_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
         async move {
-            podcast_rss::fetch_podcast_feed(&url).await
+            // Wait for nostr client AND signer - NIP-98 auth requires a signer
+            if !client_initialized {
+                return Err("Waiting for client initialization...".to_string());
+            }
+            if !has_signer {
+                return Err("Please sign in to view podcast details.".to_string());
+            }
+
+            // Parse ID
+            let id: u64 = id_str.parse()
+                .map_err(|_| format!("Invalid podcast ID: {}", id_str))?;
+
+            log::info!("Fetching podcast metadata for ID: {}", id);
+
+            // Get podcast metadata from Podcast Index
+            let feed = podcast_index::get_podcast_by_id(id).await?;
+
+            // Get episodes from Podcast Index (avoids CORS issues with direct RSS fetch)
+            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100)).await
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to fetch episodes: {}", e);
+                    Vec::new()
+                });
+
+            log::info!("Successfully loaded podcast: {} with {} episodes", feed.title, episodes.len());
+            Ok::<_, String>((feed, episodes, id))
         }
     });
 
@@ -58,9 +84,11 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
 
             // Content
             match &*podcast_data.read() {
-                Some(Ok(podcast)) => rsx! {
+                Some(Ok((feed, episodes, id))) => rsx! {
                     RssPodcastDetailContent {
-                        podcast: podcast.clone()
+                        feed: feed.clone(),
+                        episodes: episodes.clone(),
+                        podcast_id: *id
                     }
                 },
                 Some(Err(e)) => rsx! {
@@ -86,25 +114,41 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct RssPodcastDetailContentProps {
-    podcast: RssPodcast,
+    feed: PodcastFeed,
+    episodes: Vec<Episode>,
+    podcast_id: u64,
 }
 
 #[component]
 fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
-    let podcast = &props.podcast;
+    let feed = &props.feed;
+    let podcast_id = props.podcast_id;
     let auth = auth_store::AUTH_STATE.read();
 
     // Image URL with fallback
-    let image_url = podcast.image.clone()
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.title));
+    let image_url = feed.get_image()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", feed.title));
 
-    // Check if V4V is available
-    let has_v4v = podcast.value.is_some();
+    // Check if V4V is available (from Podcast Index API)
+    let has_v4v = feed.has_v4v();
+
+    // Subscription state - use podcast_id as the subscription identifier
+    let podcast_id_str = podcast_id.to_string();
+    let feed_url = feed.url.clone();
+    let is_subscribed = podcast_subscription::is_subscribed(&podcast_id_str);
+    let mut subscribing = use_signal(|| false);
 
     // Convert episodes to DisplayEpisode
-    let episodes: Vec<DisplayEpisode> = podcast.episodes.iter()
-        .map(|ep| DisplayEpisode::from_rss_episode(ep, podcast))
+    let episodes: Vec<DisplayEpisode> = props.episodes.iter()
+        .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, feed))
         .collect();
+
+    // Get category names from the HashMap
+    let category_names: Vec<String> = feed.categories
+        .as_ref()
+        .map(|cats| cats.values().cloned().collect())
+        .unwrap_or_default();
 
     rsx! {
         div {
@@ -127,7 +171,7 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                         // Cover image
                         img {
                             src: "{image_url}",
-                            alt: "{podcast.title}",
+                            alt: "{feed.title}",
                             class: "w-32 h-32 md:w-40 md:h-40 rounded-lg object-cover shadow-lg"
                         }
 
@@ -138,11 +182,11 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                             // Title
                             h1 {
                                 class: "text-2xl font-bold truncate",
-                                "{podcast.title}"
+                                "{feed.title}"
                             }
 
                             // Author
-                            if let Some(ref author) = podcast.author {
+                            if let Some(ref author) = feed.author {
                                 p {
                                     class: "text-muted-foreground mt-1",
                                     "{author}"
@@ -159,14 +203,6 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                     "RSS"
                                 }
 
-                                // Podcasting 2.0 badge (if has V4V or other features)
-                                if has_v4v || podcast.trailer.is_some() || !podcast.persons.is_empty() {
-                                    span {
-                                        class: "px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded-full font-medium",
-                                        "Podcasting 2.0"
-                                    }
-                                }
-
                                 // V4V badge
                                 if has_v4v {
                                     span {
@@ -175,21 +211,13 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                         "V4V Enabled"
                                     }
                                 }
-
-                                // Explicit badge
-                                if podcast.explicit {
-                                    span {
-                                        class: "px-2 py-1 text-xs bg-red-500/20 text-red-400 rounded-full font-medium",
-                                        "Explicit"
-                                    }
-                                }
                             }
 
                             // Categories
-                            if !podcast.categories.is_empty() {
+                            if !category_names.is_empty() {
                                 div {
                                     class: "flex items-center gap-1 mt-2 flex-wrap",
-                                    for cat in podcast.categories.iter().take(4) {
+                                    for cat in category_names.iter().take(4) {
                                         span {
                                             key: "{cat}",
                                             class: "px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded",
@@ -205,6 +233,51 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                     div {
                         class: "flex items-center gap-3 mt-4",
 
+                        // Subscribe button
+                        if auth.is_authenticated {
+                            button {
+                                class: if is_subscribed || *subscribing.read() {
+                                    "px-4 py-2 text-sm font-medium border border-border rounded-full hover:bg-muted transition"
+                                } else {
+                                    "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition"
+                                },
+                                disabled: *subscribing.read(),
+                                onclick: {
+                                    let url = feed_url.clone();
+                                    let id = podcast_id;
+                                    move |_| {
+                                        if *subscribing.read() { return; }
+                                        let url = url.clone();
+                                        let currently_subscribed = is_subscribed;
+                                        subscribing.set(true);
+
+                                        spawn(async move {
+                                            let id_str = id.to_string();
+                                            if currently_subscribed {
+                                                match podcast_subscription::remove_subscription(&id_str).await {
+                                                    Ok(()) => log::info!("Unsubscribed from podcast: {}", id),
+                                                    Err(e) => log::error!("Failed to unsubscribe: {}", e),
+                                                }
+                                            } else {
+                                                match podcast_subscription::add_rss_subscription(id, Some(&url)).await {
+                                                    Ok(()) => log::info!("Subscribed to podcast: {}", id),
+                                                    Err(e) => log::error!("Failed to subscribe: {}", e),
+                                                }
+                                            }
+                                            subscribing.set(false);
+                                        });
+                                    }
+                                },
+                                if *subscribing.read() {
+                                    "..."
+                                } else if is_subscribed {
+                                    "Subscribed"
+                                } else {
+                                    "Subscribe"
+                                }
+                            }
+                        }
+
                         // Zap button (if V4V)
                         if has_v4v && auth.is_authenticated {
                             button {
@@ -217,14 +290,14 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
 
                         // RSS Feed link
                         a {
-                            href: "{podcast.feed_url}",
+                            href: "{feed.url}",
                             target: "_blank",
                             class: "px-4 py-2 text-sm font-medium border border-border rounded-full hover:bg-muted transition",
                             "RSS Feed"
                         }
 
                         // Website link
-                        if let Some(ref link) = podcast.link {
+                        if let Some(ref link) = feed.link {
                             a {
                                 href: "{link}",
                                 target: "_blank",
@@ -245,126 +318,12 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
             }
 
             // Description
-            if let Some(ref desc) = podcast.description {
+            if let Some(ref desc) = feed.description {
                 div {
                     class: "px-6 py-4 border-b border-border",
                     div {
                         class: "text-sm text-muted-foreground prose prose-sm dark:prose-invert max-w-none",
                         dangerous_inner_html: "{desc}"
-                    }
-                }
-            }
-
-            // Hosts/Persons
-            if !podcast.persons.is_empty() {
-                div {
-                    class: "px-6 py-4 border-b border-border",
-                    h3 {
-                        class: "font-semibold mb-3",
-                        "Hosts"
-                    }
-                    div {
-                        class: "flex flex-wrap gap-4",
-                        for person in &podcast.persons {
-                            div {
-                                key: "{person.name}",
-                                class: "flex items-center gap-2",
-                                if let Some(ref img) = person.img {
-                                    img {
-                                        src: "{img}",
-                                        alt: "{person.name}",
-                                        class: "w-10 h-10 rounded-full object-cover"
-                                    }
-                                } else {
-                                    div {
-                                        class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center",
-                                        dangerous_inner_html: icons::USER
-                                    }
-                                }
-                                div {
-                                    div {
-                                        class: "font-medium text-sm",
-                                        "{person.name}"
-                                    }
-                                    if let Some(ref role) = person.role {
-                                        div {
-                                            class: "text-xs text-muted-foreground",
-                                            "{role}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Funding links
-            if !podcast.funding.is_empty() {
-                div {
-                    class: "px-6 py-4 border-b border-border",
-                    h3 {
-                        class: "font-semibold mb-2",
-                        "Support this podcast"
-                    }
-                    div {
-                        class: "flex flex-wrap gap-2",
-                        for link in &podcast.funding {
-                            a {
-                                key: "{link.url}",
-                                href: "{link.url}",
-                                target: "_blank",
-                                class: "px-3 py-1.5 text-sm bg-muted hover:bg-muted/80 rounded-full transition",
-                                {link.name.as_deref().unwrap_or("Support")}
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Trailer (if available)
-            if let Some(ref trailer) = podcast.trailer {
-                div {
-                    class: "px-6 py-4 border-b border-border",
-                    h3 {
-                        class: "font-semibold mb-2",
-                        "Trailer"
-                    }
-                    div {
-                        class: "flex items-center gap-4 p-3 bg-muted/50 rounded-lg",
-                        button {
-                            class: "p-3 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition",
-                            // TODO: Play trailer
-                            dangerous_inner_html: icons::PLAY
-                        }
-                        div {
-                            class: "flex-1",
-                            div {
-                                class: "font-medium text-sm",
-                                "Listen to the trailer"
-                            }
-                            if let Some(ref season) = trailer.season {
-                                div {
-                                    class: "text-xs text-muted-foreground",
-                                    "Season {season}"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Podroll (recommended shows)
-            if !podcast.podroll.is_empty() {
-                div {
-                    class: "px-6 py-4 border-b border-border",
-                    h3 {
-                        class: "font-semibold mb-2",
-                        "Recommended Shows"
-                    }
-                    div {
-                        class: "text-sm text-muted-foreground",
-                        "{podcast.podroll.len()} recommended podcasts"
                     }
                 }
             }
