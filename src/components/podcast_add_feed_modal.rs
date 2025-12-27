@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 use crate::services::podcast_index;
-use crate::stores::podcast_subscription;
+use crate::stores::{nostr_client, podcast_subscription};
 
 /// Modal for adding a podcast RSS feed subscription
 #[component]
@@ -40,6 +40,15 @@ pub fn PodcastAddFeedModal(
         // Basic URL validation
         if !url.starts_with("http://") && !url.starts_with("https://") {
             error_msg.set(Some("URL must start with http:// or https://".to_string()));
+            return;
+        }
+
+        // Check for client initialization and signer (NIP-98 auth required)
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
+
+        if !client_initialized || !has_signer {
+            error_msg.set(Some("Please sign in to search for podcasts".to_string()));
             return;
         }
 
