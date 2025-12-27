@@ -514,7 +514,7 @@ fn get_week_dates(date: &str) -> Vec<String> {
     }
 
     let year: u32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1; // JS months are 0-indexed
+    let month: i32 = parts[1].parse::<i32>().unwrap_or(1).clamp(1, 12) - 1; // Validate 1-12, then convert to JS 0-11
     let day: i32 = parts[2].parse().unwrap_or(1);
 
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);

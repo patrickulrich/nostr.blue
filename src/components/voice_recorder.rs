@@ -88,6 +88,7 @@ pub fn VoiceRecorder(
                                 spawn(async move {
                                     let started_at = js_sys::Date::now() / 1000.0;
                                     log::info!("Monitoring loop started at: {}", started_at);
+                                    let mut last_logged_second: i32 = -1;
 
                                     loop {
                                         TimeoutFuture::new(100).await;
@@ -103,9 +104,11 @@ pub fn VoiceRecorder(
                                             let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
                                             monitor_current_time.set(elapsed);
 
-                                            // Log every second
-                                            if ((elapsed * 10.0) as u32).is_multiple_of(10) {
-                                                log::debug!("Recording time: {:.1}s", elapsed);
+                                            // Log once per second (avoid duplicate logs from 100ms polling)
+                                            let current_second = elapsed as i32;
+                                            if current_second != last_logged_second {
+                                                log::debug!("Recording time: {}s", current_second);
+                                                last_logged_second = current_second;
                                             }
 
                                             if elapsed >= MAX_DURATION_SECONDS {

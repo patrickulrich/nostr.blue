@@ -71,11 +71,16 @@ pub fn MusicZapDialog() -> Element {
 
     let preset_amounts = [21, 100, 500, 1000, 2100];
 
-    // Fetch artist profile for nostr tracks
+    // Fetch artist profile for nostr tracks (including radio stations)
     let track_source_for_effect = track.source.clone();
     use_effect(move || {
-        if let TrackSource::Nostr { ref pubkey, .. } = track_source_for_effect {
-            let pubkey = pubkey.clone();
+        let pubkey_to_fetch = match &track_source_for_effect {
+            TrackSource::Nostr { pubkey, .. } => Some(pubkey.clone()),
+            TrackSource::Radio { pubkey, .. } => Some(pubkey.clone()),
+            TrackSource::NostrPodcast { pubkey, .. } => Some(pubkey.clone()),
+            _ => None,
+        };
+        if let Some(pubkey) = pubkey_to_fetch {
             spawn(async move {
                 if let Ok(profile) = profiles::fetch_profile(pubkey).await {
                     artist_profile.set(Some(profile));
@@ -134,6 +139,24 @@ pub fn MusicZapDialog() -> Element {
                     } else {
                         Err("This podcast doesn't have V4V payment info configured. Contact the podcast creator to enable Lightning payments.".to_string())
                     }
+                }
+                TrackSource::RssMusic { .. } => {
+                    // Use V4V payment flow for RSS music
+                    if let Some(ref value_block) = track_value_block {
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                    } else {
+                        Err("This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments.".to_string())
+                    }
+                }
+                TrackSource::Radio { ref pubkey, ref coordinate, .. } => {
+                    // Use NIP-57 zap flow for radio station owners
+                    generate_nostr_zap_invoice(
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    ).await
                 }
             };
 

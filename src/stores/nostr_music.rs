@@ -52,10 +52,36 @@ pub enum TrackSource {
     RssPodcast {
         /// RSS feed URL
         feed_url: String,
+        /// Podcast Index feed ID (for routing)
+        podcast_id: Option<u64>,
         /// Episode GUID
         episode_guid: String,
         /// Podcast show title
         podcast_title: String,
+    },
+    /// Music track from RSS feed (Podcast Index medium="music")
+    RssMusic {
+        /// Podcast Index feed ID
+        feed_id: u64,
+        /// RSS feed URL
+        feed_url: String,
+        /// Episode/track ID from Podcast Index
+        episode_id: u64,
+        /// Album title (from feed title)
+        album_title: String,
+        /// Artist name (from feed author)
+        artist: Option<String>,
+    },
+    /// Live internet radio station from Kind 31237
+    Radio {
+        /// Event coordinate: "31237:pubkey:d-tag"
+        coordinate: String,
+        /// Station owner pubkey (hex)
+        pubkey: String,
+        /// d-tag identifier
+        d_tag: String,
+        /// Station name
+        station_name: String,
     },
 }
 

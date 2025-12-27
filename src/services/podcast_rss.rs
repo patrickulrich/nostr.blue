@@ -161,20 +161,37 @@ pub struct PodrollItem {
 
 /// Fetch and parse a podcast RSS feed
 pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
+    log::info!("Fetching RSS feed from: {}", url);
+
+    // Validate URL
+    if url.is_empty() {
+        return Err("RSS feed URL is empty".to_string());
+    }
+
+    // Ensure HTTPS (browsers block mixed content)
+    let fetch_url = if url.starts_with("http://") {
+        log::warn!("Converting HTTP to HTTPS for RSS feed: {}", url);
+        url.replacen("http://", "https://", 1)
+    } else {
+        url.to_string()
+    };
+
     // Fetch the RSS XML
-    let response = Request::get(url)
+    let response = Request::get(&fetch_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch RSS feed: {}", e))?;
+        .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!("HTTP {} from {}: {}", response.status(), fetch_url, response.status_text()));
     }
 
     let xml = response
         .text()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
+        .map_err(|e| format!("Failed to read response from {}: {}", fetch_url, e))?;
+
+    log::info!("Successfully fetched RSS feed ({} bytes)", xml.len());
 
     // Parse the RSS feed
     parse_podcast_feed(&xml, url)

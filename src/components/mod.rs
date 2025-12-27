@@ -70,6 +70,8 @@ pub mod podcast_transcript;
 pub mod podcast_soundbites;
 pub mod podcast_persons;
 pub mod podcast_v4v;
+pub mod podcast_add_feed_modal;
+pub mod radio_card;
 pub mod external_content_card;
 pub mod nip_card;
 
@@ -142,6 +144,8 @@ pub use sidebar_customizer_modal::SidebarCustomizerModal;
 pub use gif_picker::GifPicker;
 pub use mention_autocomplete::MentionAutocomplete;
 pub use share_modal::ShareModal;
+pub mod content_share_modal;
+pub use content_share_modal::{ContentShareModal, ContentType};
 pub use radial_menu::RadialMenu;
 pub use markdown_editor::MarkdownEditor;
 pub use note_menu::NoteMenu;
@@ -174,6 +178,8 @@ pub use podcast_transcript::PodcastTranscript;
 pub use podcast_soundbites::{PodcastSoundbites, FeaturedSoundbite};
 pub use podcast_persons::{PodcastPersons, InlineCredits};
 pub use podcast_v4v::{V4VInfo, V4VBoostButton};
+pub use podcast_add_feed_modal::PodcastAddFeedModal;
+pub use radio_card::{RadioCard, RadioCardSkeleton};
 pub use external_content_card::ExternalContentList;
 
 // Code/Git hosting component exports

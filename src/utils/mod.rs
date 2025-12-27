@@ -3,6 +3,7 @@
 
 pub mod nip19;
 pub mod nip49;  // NIP-49 Private key encryption
+pub mod nip98;  // NIP-98 HTTP Auth
 pub mod time;
 pub mod duration;  // Duration formatting utilities
 pub mod validation;
@@ -40,6 +41,7 @@ pub mod nkbip03;      // NKBIP-03 Citations (kinds 30-33)
 pub mod nkbip06;      // NKBIP-06 Nostr MIME types (M tag)
 pub mod nkbip08;      // NKBIP-08 Book wikilinks
 pub mod date_helpers; // Date manipulation helpers for calendars
+pub mod radio;        // Kind 31237 Radio Stations
 
 pub use thread_tree::{ThreadNode, ThreadNodeSource, build_thread_tree, merge_pending_into_tree};
 pub use list_kinds::{get_list_type_name, get_list_icon, get_item_count};

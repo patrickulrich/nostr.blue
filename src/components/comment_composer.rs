@@ -108,16 +108,23 @@ pub fn CommentComposer(
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
         let pos = *cursor_position.read();
-        
-        // Ensure position is valid
-        let pos = pos.min(current.len());
-        
+
+        // Ensure position is valid and at UTF-8 character boundary
+        let pos = if pos > current.len() {
+            current.len()
+        } else if !current.is_char_boundary(pos) {
+            // Find the nearest valid boundary (round down)
+            (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+        } else {
+            pos
+        };
+
         // Insert text
         current.insert_str(pos, &text);
-        
+
         // Update content
         content.set(current);
-        
+
         // Update cursor position to be after inserted text
         cursor_position.set(pos + text.len());
     };

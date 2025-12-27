@@ -28,11 +28,12 @@ pub enum SidebarItem {
     Profile,
     Settings,
 
-    // More menu items (default remaining 10)
+    // More menu items (default remaining 11)
     VoiceMessages,
     Polls,
     WebBookmarks,
     Podcasts,
+    Radio,
     Wallet,
     P2PTrading,
     Communities,
@@ -96,6 +97,7 @@ impl SidebarItem {
             SidebarItem::Polls => "Polls",
             SidebarItem::WebBookmarks => "Web Bookmarks",
             SidebarItem::Podcasts => "Podcasts",
+            SidebarItem::Radio => "Radio",
             SidebarItem::Wallet => "Wallet",
             SidebarItem::P2PTrading => "P2P Trading",
             SidebarItem::Communities => "Communities",
@@ -136,6 +138,7 @@ impl SidebarItem {
             SidebarItem::Polls => Some(Route::Polls {}),
             SidebarItem::WebBookmarks => Some(Route::WebBookmarks {}),
             SidebarItem::Podcasts => Some(Route::PodcastHome {}),
+            SidebarItem::Radio => Some(Route::RadioHome {}),
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
             SidebarItem::P2PTrading => Some(Route::P2PHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
@@ -212,11 +215,12 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Bookmarks,
         SidebarItem::Profile,
         SidebarItem::Settings,
-        // More menu (remaining 10)
+        // More menu (remaining 11)
         SidebarItem::VoiceMessages,
         SidebarItem::Polls,
         SidebarItem::WebBookmarks,
         SidebarItem::Podcasts,
+        SidebarItem::Radio,
         SidebarItem::Wallet,
         SidebarItem::P2PTrading,
         SidebarItem::Communities,

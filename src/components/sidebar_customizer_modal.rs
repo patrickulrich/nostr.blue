@@ -7,7 +7,7 @@ use crate::stores::sidebar_store::{
     save_sidebar_preferences, default_sidebar_items, get_available_items
 };
 use crate::components::icons::{
-    HomeIcon, CompassIcon, BookOpenIcon, BellIcon, MailIcon,
+    self as icons, HomeIcon, CompassIcon, BookOpenIcon, BellIcon, MailIcon,
     BookmarkIcon, UserIcon, SettingsIcon, CameraIcon, VideoIcon, PinIcon,
     ShoppingBagIcon,
 };
@@ -647,6 +647,9 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 path { d: "M8 14a5 5 0 1 1 8 0" }
                 path { d: "M17 18.5a9 9 0 1 0-10 0" }
             }
+        },
+        SidebarItem::Radio => rsx! {
+            span { class: "{class}", dangerous_inner_html: icons::RADIO }
         },
         SidebarItem::Wallet => rsx! {
             svg {
