@@ -102,8 +102,11 @@ pub async fn add_person_to_list(
     // Get existing public tags
     let mut public_tags: Vec<Tag> = list_event.tags.clone().into_iter().collect();
 
-    // Get existing private tags
-    let mut private_tags = decrypt_private_tags(list_event).await.unwrap_or_default();
+    // Get existing private tags - MUST succeed to prevent data loss
+    let mut private_tags = decrypt_private_tags(list_event).await.map_err(|e| {
+        log::error!("Failed to decrypt private tags: {}", e);
+        format!("Cannot modify list: failed to decrypt private members ({})", e)
+    })?;
 
     // Check for duplicates in both public and private
     let pubkey_hex = target_pubkey.to_hex();
@@ -170,10 +173,13 @@ pub async fn remove_person_from_list(list_event: &Event, person_pubkey: &str) ->
         })
         .collect();
 
-    // Filter out from private tags
+    // Filter out from private tags - MUST succeed to prevent data loss
     let private_tags: Vec<Tag> = decrypt_private_tags(list_event)
         .await
-        .unwrap_or_default()
+        .map_err(|e| {
+            log::error!("Failed to decrypt private tags: {}", e);
+            format!("Cannot modify list: failed to decrypt private members ({})", e)
+        })?
         .into_iter()
         .filter(|tag| {
             !(tag.kind() == nostr_sdk::TagKind::p()
@@ -216,7 +222,14 @@ pub async fn get_all_list_members(list_event: &Event) -> Result<Vec<PublicKey>, 
     }
 
     // Extract private members (decrypt content)
-    let private_tags = decrypt_private_tags(list_event).await.unwrap_or_default();
+    // For read-only operations, log warning but continue with public members only
+    let private_tags = match decrypt_private_tags(list_event).await {
+        Ok(tags) => tags,
+        Err(e) => {
+            log::warn!("Failed to decrypt private members, showing public only: {}", e);
+            Vec::new()
+        }
+    };
     for tag in private_tags {
         if tag.kind() == nostr_sdk::TagKind::p() {
             if let Some(pk_str) = tag.content() {
