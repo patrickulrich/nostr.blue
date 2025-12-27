@@ -550,11 +550,12 @@ fn HighlightedText(props: HighlightedTextProps) -> Element {
     let text_lower = props.text.to_lowercase();
     let highlight_lower = props.highlight.to_lowercase();
 
-    // Build a mapping from lowercase byte offsets to original byte offsets.
+    // Build two mappings from lowercase byte offsets to original byte offsets.
     // This handles cases where lowercasing changes byte lengths (e.g., 'İ' -> 'i̇').
-    // We align by character: for each char in original, we know its byte range,
-    // and for the corresponding char(s) in lowercase, we map those bytes back.
-    let mut lower_to_orig: Vec<usize> = Vec::with_capacity(text_lower.len() + 1);
+    // - lower_to_orig_start: maps each lowercase byte to the original character's START
+    // - lower_to_orig_end: maps each lowercase byte to the original character's END
+    let mut lower_to_orig_start: Vec<usize> = Vec::with_capacity(text_lower.len() + 1);
+    let mut lower_to_orig_end: Vec<usize> = Vec::with_capacity(text_lower.len() + 1);
     let orig_char_iter = props.text.char_indices();
     let mut lower_char_iter = text_lower.char_indices().peekable();
 
@@ -562,20 +563,23 @@ fn HighlightedText(props: HighlightedTextProps) -> Element {
         // Get the lowercase version of this original character
         let orig_char_lower: String = orig_char.to_lowercase().collect();
         let orig_char_lower_len = orig_char_lower.chars().count();
+        let orig_char_end = orig_byte + orig_char.len_utf8();
 
-        // Map each byte of the lowercase char(s) back to the original byte position
+        // Map each byte of the lowercase char(s) back to the original byte positions
         for _ in 0..orig_char_lower_len {
             if let Some((_lower_byte, lower_char)) = lower_char_iter.next() {
                 // Fill mapping for all bytes in this lowercase character
                 let char_byte_len = lower_char.len_utf8();
                 for _ in 0..char_byte_len {
-                    lower_to_orig.push(orig_byte);
+                    lower_to_orig_start.push(orig_byte);
+                    lower_to_orig_end.push(orig_char_end);
                 }
             }
         }
     }
-    // Add end sentinel for slicing to end of string
-    lower_to_orig.push(props.text.len());
+    // Add end sentinels for slicing to end of string
+    lower_to_orig_start.push(props.text.len());
+    lower_to_orig_end.push(props.text.len());
 
     // Find matches in lowercase string using byte indices
     let mut parts = Vec::new();
@@ -585,8 +589,12 @@ fn HighlightedText(props: HighlightedTextProps) -> Element {
         let lower_end = lower_start + matched.len();
 
         // Map lowercase byte positions to original byte positions
-        let orig_start = lower_to_orig.get(lower_start).copied().unwrap_or(0);
-        let orig_end = lower_to_orig.get(lower_end).copied().unwrap_or(props.text.len());
+        // Use start map for orig_start, end map for orig_end (at last matched byte)
+        let orig_start = lower_to_orig_start.get(lower_start).copied().unwrap_or(0);
+        let orig_end = lower_to_orig_end
+            .get(lower_end.saturating_sub(1))
+            .copied()
+            .unwrap_or(props.text.len());
 
         // Non-matching part before this match
         if orig_start > last_orig_end {

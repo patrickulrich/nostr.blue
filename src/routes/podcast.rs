@@ -2116,18 +2116,18 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
         });
     }
 
-    // Merge episodes reactively
-    let merged_episodes = {
+    // Merge and sort episodes reactively (memoized to avoid redundant work)
+    let sorted_episodes = use_memo(move || {
         let mut all = Vec::new();
         if let Some(ref eps) = *rss_episodes.read() {
-            all.extend(eps.clone());
+            all.extend(eps.iter().cloned());
         }
         if let Some(ref eps) = *nostr_episodes.read() {
-            all.extend(eps.clone());
+            all.extend(eps.iter().cloned());
         }
         all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         all
-    };
+    });
 
     // Check if we have any data yet
     let has_rss_data = rss_episodes.read().is_some();
@@ -2144,17 +2144,6 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
     // Is nostr still loading in the background?
     let nostr_still_loading = props.platform == "all" &&
         (!*nostr_client::CLIENT_INITIALIZED.read() || *nostr_loading.read());
-
-    // Sort episodes by most recent
-    let sorted_episodes = {
-        if merged_episodes.is_empty() && !has_any_data {
-            Vec::new()
-        } else {
-            let mut sorted = merged_episodes.clone();
-            sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            sorted
-        }
-    };
 
     // Show loading skeleton only during initial load
     if is_initial_loading {
@@ -2182,9 +2171,9 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
 
     // Apply limit
     let display_eps: Vec<_> = if let Some(limit) = props.limit {
-        sorted_episodes.iter().take(limit).cloned().collect()
+        sorted_episodes.read().iter().take(limit).cloned().collect()
     } else {
-        sorted_episodes
+        sorted_episodes.read().clone()
     };
 
     if display_eps.is_empty() {

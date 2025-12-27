@@ -16,6 +16,7 @@ use crate::utils::nip34::Repository;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
+#[allow(clippy::clone_on_copy)] // handle_watch closure is Copy only on non-wasm32 targets
 #[component]
 pub fn RepoActionBar(
     repo: Repository,
