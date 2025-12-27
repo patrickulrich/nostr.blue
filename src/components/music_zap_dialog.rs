@@ -58,8 +58,8 @@ pub fn MusicZapDialog() -> Element {
     }
 
     let track = track.unwrap();
-    // NostrPodcast also uses NIP-57 zaps, so include it in the Nostr badge logic
-    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. });
+    // Nostr sources use NIP-57 zaps: Nostr music, NostrPodcast, and Radio stations
+    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. } | TrackSource::Radio { .. });
 
     let mut amount = use_signal(|| 100u64);
     let mut comment = use_signal(String::new);

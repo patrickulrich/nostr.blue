@@ -31,6 +31,7 @@ pub fn MusicHome() -> Element {
     // RSS music state (separate from main track list)
     let mut rss_music_tracks = use_signal(Vec::<MusicTrack>::new);
     let mut rss_loading = use_signal(|| true);
+    let mut rss_error = use_signal(|| None::<String>);
 
     let genres = vec![
         "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
@@ -170,6 +171,7 @@ pub fn MusicHome() -> Element {
         }
 
         rss_loading.set(true);
+        rss_error.set(None);
 
         spawn(async move {
             match podcast_index::get_music_albums(Some(20)).await {
@@ -200,9 +202,11 @@ pub fn MusicHome() -> Element {
                     // Collect successful results
                     let tracks: Vec<MusicTrack> = results.into_iter().flatten().flatten().collect();
                     rss_music_tracks.set(tracks);
+                    rss_error.set(None);
                 }
                 Err(e) => {
                     log::error!("Failed to fetch RSS music: {}", e);
+                    rss_error.set(Some(e));
                 }
             }
             rss_loading.set(false);
@@ -429,6 +433,35 @@ pub fn MusicHome() -> Element {
                     if *rss_loading.read() {
                         for i in 0..8 {
                             UnifiedTrackCardSkeleton { key: "{i}" }
+                        }
+                    } else if let Some(ref err) = *rss_error.read() {
+                        // Error state
+                        div {
+                            class: "text-center py-16",
+                            div {
+                                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    class: "w-8 h-8 text-destructive",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    }
+                                }
+                            }
+                            p {
+                                class: "text-destructive font-medium",
+                                "Failed to load RSS music"
+                            }
+                            p {
+                                class: "text-sm text-muted-foreground mt-1 max-w-md mx-auto",
+                                "{err}"
+                            }
                         }
                     } else if rss_music_tracks.read().is_empty() {
                         div {

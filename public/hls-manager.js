@@ -220,7 +220,6 @@ window.hlsManager = window.hlsManager || {
     parseId3(data) {
         if (!data || data.length < 10) return null;
 
-        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
         const frames = {};
 
         // Check for ID3 header

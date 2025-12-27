@@ -150,7 +150,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             ContentType::MusicTrack,
         ),
         TrackSource::Radio { d_tag, .. } => (
-            format!("https://nostr.blue/radio/{}", d_tag),
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
             ContentType::MusicTrack, // TODO: Add ContentType::RadioStation when available
         ),
     };

@@ -254,7 +254,8 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                     move |_| {
                                         if *subscribing.read() { return; }
                                         let url = url.clone();
-                                        let currently_subscribed = is_subscribed;
+                                        // Re-check subscription state from store (not stale captured value)
+                                        let currently_subscribed = podcast_subscription::is_subscribed(&id.to_string());
                                         subscribing.set(true);
 
                                         spawn(async move {

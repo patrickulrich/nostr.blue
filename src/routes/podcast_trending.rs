@@ -21,9 +21,10 @@ pub fn PodcastTrending() -> Element {
         let category = selected_category.read().clone();
         use_effect(move || {
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            let has_signer = nostr_client::has_signer();
 
-            // Wait for nostr client - NIP-98 auth requires a signer
-            if !client_initialized {
+            // Wait for nostr client AND signer - NIP-98 auth requires both
+            if !client_initialized || !has_signer {
                 return;
             }
 

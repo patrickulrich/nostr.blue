@@ -14,7 +14,7 @@ use crate::components::{
     icons,
 };
 use crate::routes::Route;
-use crate::services::{podcast_rss, podcast_index};
+use crate::services::podcast_index;
 use crate::stores::{nostr_client, auth_store, podcast_subscription};
 use crate::utils::podcast;
 use crate::utils::truncate_pubkey;
@@ -2273,7 +2273,7 @@ fn SubscribedFeedsSection() -> Element {
                 class: "grid gap-2",
                 for sub in rss_feeds {
                     SubscribedFeedCard {
-                        feed_url: sub.id()
+                        podcast_id: sub.id()
                     }
                 }
             }
@@ -2284,7 +2284,8 @@ fn SubscribedFeedsSection() -> Element {
 /// Card for a subscribed RSS feed
 #[derive(Props, Clone, PartialEq)]
 struct SubscribedFeedCardProps {
-    feed_url: String,
+    /// Podcast Index ID (not a URL)
+    podcast_id: String,
 }
 
 #[component]
@@ -2292,33 +2293,40 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
     let mut podcast_info = use_signal(|| None::<(String, Option<String>, Option<String>)>); // (title, author, image)
     let mut is_loading = use_signal(|| true);
     let mut is_removing = use_signal(|| false);
-    let feed_url = props.feed_url.clone();
+    let podcast_id = props.podcast_id.clone();
 
-    // Fetch podcast metadata
+    // Fetch podcast metadata from Podcast Index API by ID
     use_effect(move || {
-        let url = feed_url.clone();
+        let id_str = podcast_id.clone();
         spawn(async move {
-            match podcast_rss::fetch_podcast_feed(&url).await {
-                Ok(podcast) => {
-                    podcast_info.set(Some((podcast.title, podcast.author, podcast.image)));
+            // Parse podcast ID
+            if let Ok(id) = id_str.parse::<u64>() {
+                match podcast_index::get_podcast_by_id(id).await {
+                    Ok(feed) => {
+                        let image = feed.artwork.or(feed.image);
+                        podcast_info.set(Some((feed.title, feed.author, image)));
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch podcast info for ID {}: {}", id_str, e);
+                        // Use ID as fallback title
+                        podcast_info.set(Some((format!("Podcast #{}", id_str), None, None)));
+                    }
                 }
-                Err(e) => {
-                    log::warn!("Failed to fetch podcast info for {}: {}", url, e);
-                    // Use URL as fallback title
-                    podcast_info.set(Some((url.clone(), None, None)));
-                }
+            } else {
+                // Invalid ID format - use as-is
+                podcast_info.set(Some((id_str.clone(), None, None)));
             }
             is_loading.set(false);
         });
     });
 
-    let feed_url_for_remove = props.feed_url.clone();
+    let podcast_id_for_remove = props.podcast_id.clone();
     let handle_remove = move |_| {
-        let url = feed_url_for_remove.clone();
+        let id = podcast_id_for_remove.clone();
         is_removing.set(true);
 
         spawn(async move {
-            if let Err(e) = podcast_subscription::remove_subscription(&url).await {
+            if let Err(e) = podcast_subscription::remove_subscription(&id).await {
                 log::error!("Failed to unsubscribe: {}", e);
             }
             is_removing.set(false);
@@ -2340,7 +2348,7 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
     }
 
     let (title, author, image) = podcast_info.read().clone().unwrap_or_else(|| {
-        (props.feed_url.clone(), None, None)
+        (format!("Podcast #{}", props.podcast_id), None, None)
     });
 
     rsx! {

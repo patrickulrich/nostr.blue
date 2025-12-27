@@ -331,9 +331,12 @@ pub async fn remove_subscription(id: &str) -> Result<(), String> {
 
 /// Publish the subscription list to Nostr
 async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<(), String> {
-    // Check if authenticated
+    // Check if authenticated and have a signer
     if !auth_store::is_authenticated() {
         return Err("Not authenticated".to_string());
+    }
+    if !nostr_client::has_signer() {
+        return Err("No signer available".to_string());
     }
 
     // Get client

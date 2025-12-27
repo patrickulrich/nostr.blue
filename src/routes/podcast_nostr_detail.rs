@@ -234,7 +234,8 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                                     move |_| {
                                         if *subscribing.read() { return; }
                                         let coord = coord.clone();
-                                        let currently_subscribed = is_subscribed;
+                                        // Re-check subscription state from store (not stale captured value)
+                                        let currently_subscribed = podcast_subscription::is_subscribed(&coord);
                                         subscribing.set(true);
 
                                         spawn(async move {

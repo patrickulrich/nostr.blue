@@ -16,7 +16,7 @@ use crate::components::{
     ContentShareModal, ContentType,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client, auth_store, music_player};
+use crate::stores::{nostr_client, auth_store, music_player, nostr_music};
 use crate::services::podcast_rss::{self, format_duration};
 use crate::utils::podcast::{self, PodcastMetadata};
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
@@ -424,14 +424,33 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                 }
             }
 
-            // Share modal
-            if *show_share_modal.read() {
-                ContentShareModal {
-                    title: format!("{} - {}", episode.title, episode.podcast_title),
-                    url: episode.audio_url.clone(),
-                    content_type: ContentType::PodcastEpisode,
-                    image_url: episode.image.clone().or(episode.podcast_image.clone()),
-                    on_close: move |_| show_share_modal.set(false)
+            // Share modal - compute URL outside the if block (RSX doesn't allow let bindings inside)
+            {
+                let share_url = match &episode.source {
+                    nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
+                        format!("https://nostr.blue/podcast/episode/{}", coordinate)
+                    }
+                    nostr_music::TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
+                        if let Some(id) = podcast_id {
+                            format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                                id, urlencoding::encode(episode_guid))
+                        } else {
+                            episode.audio_url.clone()
+                        }
+                    }
+                    _ => episode.audio_url.clone(),
+                };
+
+                rsx! {
+                    if *show_share_modal.read() {
+                        ContentShareModal {
+                            title: format!("{} - {}", episode.title, episode.podcast_title),
+                            url: share_url,
+                            content_type: ContentType::PodcastEpisode,
+                            image_url: episode.image.clone().or(episode.podcast_image.clone()),
+                            on_close: move |_| show_share_modal.set(false)
+                        }
+                    }
                 }
             }
 

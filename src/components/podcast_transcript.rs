@@ -209,26 +209,20 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     // Track previous current_idx to detect changes - use a non-reactive cell to avoid loops
     let prev_idx = use_hook(|| std::cell::RefCell::new(None::<usize>));
 
-    // Use signal for cues to enable reactive filtering when cues change
-    let mut cues_signal = use_signal(|| props.cues.clone());
-
-    // Sync cues signal when props change
-    if *cues_signal.read() != props.cues {
-        cues_signal.set(props.cues.clone());
-    }
-
     // Find current cue index
     let current_idx = find_current_cue(&props.cues, props.current_time);
 
+    // Clone cues for the memo closure (avoids signal sync overhead)
+    let cues_for_filter = props.cues.clone();
+    let cues_len = cues_for_filter.len();
+
     // Filter cues by search query - memoized for performance with large transcripts
-    // Reading cues_signal inside the memo establishes reactive dependency
     let filtered_indices = use_memo(move || {
-        let cues = cues_signal.read();
         let search_text = search_query.read().to_lowercase();
         if search_text.is_empty() {
-            (0..cues.len()).collect::<Vec<usize>>()
+            (0..cues_len).collect::<Vec<usize>>()
         } else {
-            cues.iter().enumerate()
+            cues_for_filter.iter().enumerate()
                 .filter(|(_, cue)| {
                     cue.text.to_lowercase().contains(&search_text) ||
                     cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
@@ -401,22 +395,28 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
                     }
                 } else {
                     // Show filtered cues with highlighting
-                    if filtered_indices.is_empty() {
-                        div {
-                            class: "text-center py-4 text-muted-foreground text-sm",
-                            "No matches found for \"{search_query}\""
-                        }
-                    } else {
-                        for idx in filtered_indices.iter() {
-                            if let Some(cue) = props.cues.get(*idx) {
-                                TranscriptCueItem {
-                                    key: "{idx}",
-                                    cue: cue.clone(),
-                                    is_current: Some(*idx) == current_idx,
-                                    on_click: props.on_seek,
-                                    compact: props.compact,
-                                    cue_index: *idx,
-                                    highlight_text: Some(search_query.read().clone())
+                    // Compute highlight text outside RSX (let bindings not allowed inside RSX)
+                    {
+                        let highlight = search_query.read().clone();
+                        rsx! {
+                            if filtered_indices.is_empty() {
+                                div {
+                                    class: "text-center py-4 text-muted-foreground text-sm",
+                                    "No matches found for \"{search_query}\""
+                                }
+                            } else {
+                                for idx in filtered_indices.iter() {
+                                    if let Some(cue) = props.cues.get(*idx) {
+                                        TranscriptCueItem {
+                                            key: "{idx}",
+                                            cue: cue.clone(),
+                                            is_current: Some(*idx) == current_idx,
+                                            on_click: props.on_seek,
+                                            compact: props.compact,
+                                            cue_index: *idx,
+                                            highlight_text: Some(highlight.clone())
+                                        }
+                                    }
                                 }
                             }
                         }
