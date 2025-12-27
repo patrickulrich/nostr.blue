@@ -143,6 +143,16 @@ pub fn MusicZapDialog() -> Element {
                         Err("This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments.".to_string())
                     }
                 }
+                TrackSource::Radio { ref pubkey, ref coordinate, .. } => {
+                    // Use NIP-57 zap flow for radio station owners
+                    generate_nostr_zap_invoice(
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    ).await
+                }
             };
 
             match result {

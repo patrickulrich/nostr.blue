@@ -72,6 +72,17 @@ pub enum TrackSource {
         /// Artist name (from feed author)
         artist: Option<String>,
     },
+    /// Live internet radio station from Kind 31237
+    Radio {
+        /// Event coordinate: "31237:pubkey:d-tag"
+        coordinate: String,
+        /// Station owner pubkey (hex)
+        pubkey: String,
+        /// d-tag identifier
+        d_tag: String,
+        /// Station name
+        station_name: String,
+    },
 }
 
 impl Default for TrackSource {
