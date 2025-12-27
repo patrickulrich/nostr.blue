@@ -3657,6 +3657,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                     msat_total: None,
                     created_at: None,
                     is_podcast: true,
+                    is_live_stream: false,
                     value_block: None, // V4V value conversion would require type mapping
                     chapters_url: ep.chapters_url.clone(),
                     transcripts: Vec::new(), // Transcript type conversion would require mapping

@@ -7,6 +7,7 @@ use crate::services::wavlake::WavlakeTrack;
 use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::nostr_music::{TrackSource, NostrTrack, KIND_MUSIC_TRACK};
+use crate::utils::radio::{RadioStation, select_best_stream, NowPlaying};
 use nostr_sdk::{EventBuilder, Timestamp, Kind, Tag, TagKind};
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
@@ -40,6 +41,9 @@ pub struct MusicTrack {
     /// Whether this is a podcast episode (affects player UI controls)
     #[serde(default)]
     pub is_podcast: bool,
+    /// Whether this is a live stream (no seeking, no duration, no progress bar)
+    #[serde(default)]
+    pub is_live_stream: bool,
     /// V4V payment info (for RSS podcasts with podcast:value tag)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_block: Option<crate::utils::podcast::ValueBlock>,
@@ -74,8 +78,9 @@ impl From<WavlakeTrack> for MusicTrack {
             },
             msat_total,
             created_at: None, // Wavlake tracks don't have created_at in rankings
-            // Not a podcast
+            // Not a podcast or live stream
             is_podcast: false,
+            is_live_stream: false,
             value_block: None,
             chapters_url: None,
             transcripts: Vec::new(),
@@ -104,8 +109,48 @@ impl From<NostrTrack> for MusicTrack {
             },
             msat_total: None, // Will be filled in by zap totals fetch
             created_at: Some(track.created_at),
-            // Not a podcast
+            // Not a podcast or live stream
             is_podcast: false,
+            is_live_stream: false,
+            value_block: None,
+            chapters_url: None,
+            transcripts: Vec::new(),
+        }
+    }
+}
+
+impl From<RadioStation> for MusicTrack {
+    fn from(station: RadioStation) -> Self {
+        // Select the best stream for playback
+        let best_stream = select_best_stream(&station.streams);
+        let media_url = best_stream
+            .map(|s| s.url.clone())
+            .unwrap_or_default();
+
+        Self {
+            // Use coordinate as ID for addressable events (stable across updates)
+            id: station.coordinate.clone(),
+            title: station.name.clone(),
+            artist: station.name.clone(), // Station name acts as "artist"
+            album: None, // Radio stations don't have albums
+            media_url,
+            album_art_url: station.thumbnail.clone(),
+            artist_art_url: station.thumbnail,
+            duration: None, // Live streams have no duration
+            artist_id: None,
+            album_id: None,
+            artist_npub: Some(station.pubkey.clone()),
+            source: TrackSource::Radio {
+                coordinate: station.coordinate,
+                pubkey: station.pubkey,
+                d_tag: station.d_tag,
+                station_name: station.name,
+            },
+            msat_total: None,
+            created_at: Some(station.created_at),
+            // Not a podcast, but IS a live stream
+            is_podcast: false,
+            is_live_stream: true,
             value_block: None,
             chapters_url: None,
             transcripts: Vec::new(),
@@ -214,6 +259,7 @@ impl MusicTrack {
             msat_total: None,
             created_at: episode.date_published.map(|d| d as u64),
             is_podcast: false, // This is music, not podcast
+            is_live_stream: false,
             value_block,
             chapters_url: episode.chapters_url.clone(),
             transcripts: Vec::new(),
@@ -242,6 +288,23 @@ pub struct MusicPlayerState {
     /// Playback speed for podcasts (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
     #[serde(default = "default_playback_speed")]
     pub playback_speed: f64,
+
+    // Stream playback state
+    /// Error message if stream playback failed
+    #[serde(skip)]
+    pub playback_error: Option<String>,
+    /// Whether stream is buffering
+    #[serde(skip)]
+    pub is_buffering: bool,
+    /// Current stream index for fallback logic
+    #[serde(skip)]
+    pub current_stream_index: usize,
+    /// All available streams for current track (for fallback)
+    #[serde(skip)]
+    pub available_streams: Vec<String>,
+    /// Now playing metadata from HLS ID3 tags (for radio streams)
+    #[serde(skip)]
+    pub now_playing: Option<NowPlaying>,
 }
 
 fn default_playback_speed() -> f64 {
@@ -263,6 +326,12 @@ impl Default for MusicPlayerState {
             show_zap_dialog: false,
             zap_track: None,
             playback_speed: 1.0,
+            // Stream playback state
+            playback_error: None,
+            is_buffering: false,
+            current_stream_index: 0,
+            available_streams: Vec::new(),
+            now_playing: None,
         }
     }
 }
@@ -367,6 +436,24 @@ async fn publish_music_status(track: &MusicTrack) {
             // Link to RSS music album
             format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
+        TrackSource::Radio { pubkey, d_tag, .. } => {
+            // Create nostr:naddr1... URI for radio stations
+            use nostr::prelude::*;
+            if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                let coord = nostr::nips::nip01::Coordinate::new(
+                    nostr::Kind::from(crate::utils::radio::KIND_RADIO_STATION),
+                    pk
+                ).identifier(d_tag);
+                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                if let Ok(naddr) = nip19_coord.to_bech32() {
+                    format!("nostr:{}", naddr)
+                } else {
+                    format!("https://nostr.blue/radio/{}", d_tag)
+                }
+            } else {
+                format!("https://nostr.blue/radio/{}", d_tag)
+            }
+        }
     };
 
     // Create LiveStatus with expiration based on track duration
@@ -437,6 +524,7 @@ pub fn play_track(track: MusicTrack, playlist: Option<Vec<MusicTrack>>, index_ov
     state.is_playing = true;
     state.is_visible = true;
     state.current_time = 0.0;
+    state.now_playing = None; // Clear now playing when switching tracks
 
     log::info!("Playing track: {}", track.title);
 
@@ -746,6 +834,20 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 
             log::debug!("Voting for RSS music track: {}", episode_id);
         }
+        TrackSource::Radio { coordinate, pubkey, d_tag, .. } => {
+            // Parse pubkey for Coordinate
+            let pk = nostr_sdk::PublicKey::from_hex(pubkey)
+                .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+            // Create coordinate for the radio station (Kind 31237)
+            let coord = Coordinate::new(Kind::from(crate::utils::radio::KIND_RADIO_STATION), pk)
+                .identifier(d_tag);
+
+            tags.push(Tag::coordinate(coord, None));
+            tags.push(Tag::custom(TagKind::custom("k"), vec![crate::utils::radio::KIND_RADIO_STATION.to_string()]));
+
+            log::debug!("Voting for radio station: {}", coordinate);
+        }
     }
 
     let builder = EventBuilder::new(Kind::from(KIND_MUSIC_VOTE), "").tags(tags);
@@ -797,4 +899,65 @@ pub fn skip_backward(seconds: f64) {
     let new_time = (state.current_time - seconds).max(0.0);
     state.current_time = new_time;
     log::debug!("Skipped backward {} seconds to {}", seconds, new_time);
+}
+
+/// Set playback error message
+pub fn set_playback_error(error: Option<String>) {
+    MUSIC_PLAYER.write().playback_error = error;
+}
+
+/// Set buffering state
+pub fn set_buffering(buffering: bool) {
+    MUSIC_PLAYER.write().is_buffering = buffering;
+}
+
+/// Try next available stream when current one fails
+/// Returns true if there's a fallback stream to try, false if all failed
+pub fn try_next_stream() -> bool {
+    let mut state = MUSIC_PLAYER.write();
+
+    if state.available_streams.is_empty() {
+        return false;
+    }
+
+    let next_idx = state.current_stream_index + 1;
+    if next_idx >= state.available_streams.len() {
+        // All streams failed
+        state.playback_error = Some("All streams failed - station may be offline".to_string());
+        return false;
+    }
+
+    // Get the new URL first to avoid borrow issues
+    let new_url = state.available_streams[next_idx].clone();
+    let total_streams = state.available_streams.len();
+
+    state.current_stream_index = next_idx;
+
+    if let Some(ref mut track) = state.current_track {
+        track.media_url = new_url;
+    }
+
+    log::info!(
+        "Falling back to stream {}/{}",
+        next_idx + 1,
+        total_streams
+    );
+    true
+}
+
+/// Set available streams for fallback logic
+pub fn set_available_streams(streams: Vec<String>) {
+    let mut state = MUSIC_PLAYER.write();
+    state.available_streams = streams;
+    state.current_stream_index = 0;
+}
+
+/// Set now playing metadata from HLS ID3 tags
+pub fn set_now_playing(now_playing: Option<NowPlaying>) {
+    MUSIC_PLAYER.write().now_playing = now_playing;
+}
+
+/// Clear now playing metadata
+pub fn clear_now_playing() {
+    MUSIC_PLAYER.write().now_playing = None;
 }

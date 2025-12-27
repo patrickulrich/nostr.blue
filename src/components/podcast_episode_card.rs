@@ -249,6 +249,7 @@ impl DisplayEpisode {
             created_at: None,
             source: self.source.clone(),
             is_podcast: true,
+            is_live_stream: self.is_live,
             value_block: self.value.clone(),
             chapters_url: self.chapters_url.clone(),
             transcripts: Vec::new(), // Would need to pass these

@@ -116,6 +116,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::NostrPodcast { .. } => ("P", "Nostr Podcast", "bg-green-500/20 text-green-400"),
         TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
         TrackSource::RssMusic { .. } => ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400"),
+        TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
     };
 
     // Get artwork URL with fallback
@@ -148,6 +149,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             format!("https://nostr.blue/music/rss/album/{}#track-{}", feed_id, episode_id),
             ContentType::MusicTrack,
         ),
+        TrackSource::Radio { d_tag, .. } => (
+            format!("https://nostr.blue/radio/{}", d_tag),
+            ContentType::MusicTrack, // TODO: Add ContentType::RadioStation when available
+        ),
     };
 
     // Build artist route based on source (both go to music artist page, podcasts go to profile)
@@ -162,6 +167,10 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::RssMusic { feed_id, .. } => {
             // RSS music routes to album page
             Route::MusicRssAlbum { feed_id: *feed_id }
+        }
+        TrackSource::Radio { pubkey, .. } => {
+            // Radio stations route to station owner's profile
+            Route::Profile { pubkey: pubkey.clone() }
         }
     };
 
@@ -246,7 +255,8 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                 },
                                 TrackSource::Nostr { .. } |
                                 TrackSource::NostrPodcast { .. } |
-                                TrackSource::RssPodcast { .. } => rsx! {
+                                TrackSource::RssPodcast { .. } |
+                                TrackSource::Radio { .. } => rsx! {
                                     span { "{album}" }
                                 }
                             }
