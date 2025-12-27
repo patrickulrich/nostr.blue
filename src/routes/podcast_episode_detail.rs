@@ -13,6 +13,7 @@ use crate::components::{
     icons, PodcastChapters, DisplayEpisode,
     PodcastTranscript, PodcastSoundbites, FeaturedSoundbite,
     PodcastPersons, InlineCredits, V4VInfo, V4VBoostButton,
+    ContentShareModal, ContentType,
 };
 use crate::routes::Route;
 use crate::stores::{nostr_client, auth_store, music_player};
@@ -213,7 +214,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let player_state = music_player::MUSIC_PLAYER.read();
 
     let mut show_chapters = use_signal(|| true);
-    let mut copied_share = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
 
     // Check if this episode is currently playing
     let is_current_track = player_state.current_track.as_ref()
@@ -410,41 +411,27 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                     }
                                 }
 
-                                // Share/Copy button
+                                // Share button
                                 button {
-                                    class: if *copied_share.read() {
-                                        "p-3 hover:bg-muted rounded-full transition text-green-500"
-                                    } else {
-                                        "p-3 hover:bg-muted rounded-full transition"
-                                    },
-                                    title: if *copied_share.read() { "Copied!" } else { "Copy link" },
-                                    onclick: {
-                                        let episode_title = episode.title.clone();
-                                        let podcast_title = episode.podcast_title.clone();
-                                        let audio_url = episode.audio_url.clone();
-                                        move |_| {
-                                            let share_text = format!("{} - {}\n{}", episode_title, podcast_title, audio_url);
-                                            spawn(async move {
-                                                if let Some(window) = web_sys::window() {
-                                                    let clipboard = window.navigator().clipboard();
-                                                    let _ = clipboard.write_text(&share_text);
-                                                    copied_share.set(true);
-                                                    // Reset after 2 seconds
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                                    copied_share.set(false);
-                                                }
-                                            });
-                                        }
-                                    },
-                                    dangerous_inner_html: if *copied_share.read() {
-                                        icons::CHECK
-                                    } else {
-                                        icons::SHARE
-                                    }
+                                    class: "p-3 hover:bg-muted rounded-full transition",
+                                    title: "Share",
+                                    onclick: move |_| show_share_modal.set(true),
+                                    dangerous_inner_html: icons::SHARE
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            // Share modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: format!("{} - {}", episode.title, episode.podcast_title),
+                    url: episode.audio_url.clone(),
+                    content_type: ContentType::PodcastEpisode,
+                    image_url: episode.image.clone().or(episode.podcast_image.clone()),
+                    on_close: move |_| show_share_modal.set(false)
                 }
             }
 

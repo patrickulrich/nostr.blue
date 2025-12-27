@@ -998,27 +998,42 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 }
             }
 
-            // Fetch regular episodes from subscriptions
-            for podcast_id in podcast_ids.iter().take(20) {
-                // Get podcast metadata first
-                match podcast_index::get_podcast_by_id(*podcast_id).await {
-                    Ok(feed) => {
-                        // Then get episodes
-                        match podcast_index::get_episodes_by_feed_id(*podcast_id, Some(5)).await {
-                            Ok(episodes) => {
-                                for ep in episodes {
-                                    all_episodes.push(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
-                            }
+            // Fetch regular episodes from subscriptions concurrently
+            // Create futures for each podcast to fetch feed + episodes in parallel
+            let fetch_futures: Vec<_> = podcast_ids.iter().take(20).map(|&podcast_id| {
+                async move {
+                    // Fetch feed and episodes concurrently for this podcast
+                    let (feed_result, episodes_result) = futures::join!(
+                        podcast_index::get_podcast_by_id(podcast_id),
+                        podcast_index::get_episodes_by_feed_id(podcast_id, Some(5))
+                    );
+
+                    match (feed_result, episodes_result) {
+                        (Ok(feed), Ok(episodes)) => {
+                            let display_episodes: Vec<DisplayEpisode> = episodes
+                                .iter()
+                                .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                                .collect();
+                            Some(display_episodes)
+                        }
+                        (Err(e), _) => {
+                            log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
+                            None
+                        }
+                        (_, Err(e)) => {
+                            log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
+                            None
                         }
                     }
-                    Err(e) => {
-                        log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
-                    }
                 }
+            }).collect();
+
+            // Execute all podcast fetches concurrently
+            let results = futures::future::join_all(fetch_futures).await;
+
+            // Collect successful results
+            for result in results.into_iter().flatten() {
+                all_episodes.extend(result);
             }
 
             rss_episodes.set(Some(all_episodes));
@@ -1281,7 +1296,7 @@ struct SubscribedPodcastRowProps {
 /// Metadata loaded for a subscribed podcast (unified for RSS and Nostr)
 #[derive(Clone, Debug)]
 enum SubscriptionMetadata {
-    Rss(podcast_index::PodcastFeed),
+    Rss(Box<podcast_index::PodcastFeed>),
     Nostr { title: String, image: Option<String>, author: Option<String> },
 }
 
@@ -1303,7 +1318,7 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                     return None;
                 }
                 match podcast_index::get_podcast_by_id(id).await {
-                    Ok(feed) => return Some(SubscriptionMetadata::Rss(feed)),
+                    Ok(feed) => return Some(SubscriptionMetadata::Rss(Box::new(feed))),
                     Err(e) => {
                         log::warn!("Failed to fetch RSS podcast {}: {}", id, e);
                         return None;
@@ -1393,17 +1408,13 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
     };
 
     // Determine the route based on subscription type
-    let route = if let Some(podcast_id) = props.subscription.podcast_id {
-        Some(Route::PodcastRssFeedDetail {
+    let route = props.subscription.podcast_id
+        .map(|podcast_id| Route::PodcastRssFeedDetail {
             podcast_id: podcast_id.to_string()
         })
-    } else if let Some(ref coord) = props.subscription.nostr_coordinate {
-        Some(Route::PodcastNostrDetail {
+        .or_else(|| props.subscription.nostr_coordinate.as_ref().map(|coord| Route::PodcastNostrDetail {
             naddr: coord.clone()
-        })
-    } else {
-        None
-    };
+        }));
 
     // Show loading state while fetching
     let is_loading = data.is_none();

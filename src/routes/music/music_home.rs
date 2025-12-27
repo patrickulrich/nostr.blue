@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use std::sync::Arc;
 use crate::services::wavlake::WavlakeAPI;
 use crate::services::podcast_index;
 use crate::stores::music_player::MusicTrack;
@@ -444,7 +445,7 @@ pub fn MusicHome() -> Element {
                         div {
                             class: "divide-y divide-border/50",
                             {
-                                let tracks = rss_music_tracks.read().clone();
+                                let tracks = Arc::new(rss_music_tracks.read().clone());
                                 rsx! {
                                     for track in tracks.iter() {
                                         UnifiedTrackCard {
@@ -506,7 +507,7 @@ pub fn MusicHome() -> Element {
                         div {
                             class: "divide-y divide-border/50",
                             {
-                                let tracks = unified_tracks.read().clone();
+                                let tracks = Arc::new(unified_tracks.read().clone());
                                 rsx! {
                                     for track in tracks.iter() {
                                         UnifiedTrackCard {

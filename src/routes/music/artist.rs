@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use std::sync::Arc;
 use crate::routes::Route;
 use crate::components::icons::*;
 use crate::components::UnifiedTrackCard;
@@ -299,9 +300,9 @@ fn NostrArtistSection(pubkey: String) -> Element {
         .and_then(|p| p.about.clone());
 
     // Convert tracks to MusicTrack for UnifiedTrackCard
-    let music_tracks: Vec<MusicTrack> = tracks.read().iter()
+    let music_tracks: Arc<Vec<MusicTrack>> = Arc::new(tracks.read().iter()
         .map(|t| t.clone().into())
-        .collect();
+        .collect());
 
     rsx! {
         div { class: "container mx-auto px-4 py-8",

@@ -9,6 +9,7 @@
 use dioxus::prelude::*;
 use crate::components::{
     PodcastEpisodeList, DisplayEpisode, icons,
+    ContentShareModal, ContentType,
 };
 use crate::routes::Route;
 use crate::stores::{nostr_client, auth_store, podcast_subscription};
@@ -114,6 +115,7 @@ struct PodcastDetailContentProps {
 fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
     let metadata = &props.metadata;
     let auth = auth_store::AUTH_STATE.read();
+    let mut show_share_modal = use_signal(|| false);
 
     // Image URL with fallback
     let image_url = metadata.image.clone()
@@ -274,9 +276,21 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                         button {
                             class: "p-2 hover:bg-muted rounded-full transition",
                             title: "Share",
+                            onclick: move |_| show_share_modal.set(true),
                             dangerous_inner_html: icons::SHARE
                         }
                     }
+                }
+            }
+
+            // Share modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: metadata.title.clone(),
+                    url: format!("https://nostr.blue/podcast/nostr/{}", coordinate),
+                    content_type: ContentType::Podcast,
+                    image_url: metadata.image.clone(),
+                    on_close: move |_| show_share_modal.set(false)
                 }
             }
 

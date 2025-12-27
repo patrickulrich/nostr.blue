@@ -3450,14 +3450,12 @@ fn IsanRenderer(isan: String) -> Element {
 #[component]
 fn PodcastFeedRenderer(guid: String) -> Element {
     let guid_for_resource = guid.clone();
+    // Don't gate on CLIENT_INITIALIZED here - use_resource captures the value
+    // at initialization which can bake a false value permanently.
+    // Let the service layer (authenticated_get) handle auth/retry behavior.
     let podcast_resource = use_resource(move || {
         let g = guid_for_resource.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         async move {
-            // Wait for nostr client - NIP-98 auth requires a signer
-            if !client_initialized {
-                return Err("Waiting for authentication...".to_string());
-            }
             podcast_index::get_podcast_by_guid(&g).await
         }
     });
@@ -3565,14 +3563,12 @@ fn PodcastFeedRenderer(guid: String) -> Element {
 #[component]
 fn PodcastEpisodeRenderer(guid: String) -> Element {
     let guid_for_resource = guid.clone();
+    // Don't gate on CLIENT_INITIALIZED here - use_resource captures the value
+    // at initialization which can bake a false value permanently.
+    // Let the service layer (authenticated_get) handle auth/retry behavior.
     let episode_resource = use_resource(move || {
         let g = guid_for_resource.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         async move {
-            // Wait for nostr client - NIP-98 auth requires a signer
-            if !client_initialized {
-                return Err("Waiting for authentication...".to_string());
-            }
             podcast_index::get_episode_by_guid(&g).await
         }
     });

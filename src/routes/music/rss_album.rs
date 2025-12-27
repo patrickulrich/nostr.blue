@@ -1,9 +1,11 @@
 use dioxus::prelude::*;
+use std::sync::Arc;
 use crate::routes::Route;
 use crate::components::icons::*;
 use crate::services::podcast_index::{self, PodcastFeed, Episode};
 use crate::stores::music_player::{self, MusicTrack};
-use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
+use crate::stores::nostr_client;
+use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton, ContentShareModal, ContentType};
 
 #[component]
 pub fn MusicRssAlbum(feed_id: u64) -> Element {
@@ -11,9 +13,18 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
     let mut episodes_state = use_signal(Vec::<Episode>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
+    let mut show_share_modal = use_signal(|| false);
 
     // Fetch album (feed) and tracks (episodes)
+    // Wait for client initialization before making NIP-98 authenticated requests
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only fetch if client is initialized (NIP-98 auth requires signer)
+        if !client_initialized {
+            return;
+        }
+
         loading.set(true);
         error_msg.set(None);
 
@@ -44,21 +55,23 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
         });
     });
 
-    // Convert episodes to MusicTrack for player
-    let tracks = use_memo(move || {
-        if let Some(ref feed) = *feed_state.read() {
+    // Convert episodes to MusicTrack for player, wrapped in Arc for efficient sharing
+    let tracks_arc = use_memo(move || {
+        let tracks = if let Some(ref feed) = *feed_state.read() {
             episodes_state.read()
                 .iter()
                 .map(|ep| MusicTrack::from_rss_music_track(ep, feed))
                 .collect::<Vec<MusicTrack>>()
         } else {
             Vec::new()
-        }
+        };
+        Arc::new(tracks)
     });
 
-    let play_album = move |tracks: Vec<MusicTrack>| {
+    let play_album = move |tracks: Arc<Vec<MusicTrack>>| {
         if let Some(first_track) = tracks.first().cloned() {
-            music_player::play_track(first_track, Some(tracks), Some(0));
+            // Convert Arc to Vec for player (player owns the playlist)
+            music_player::play_track(first_track, Some((*tracks).clone()), Some(0));
         }
     };
 
@@ -104,7 +117,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
             if !*loading.read() && error_msg.read().is_none() {
                 if let Some(feed) = feed_state.read().clone() {
                     {
-                        let tracks_vec = tracks();
+                        let tracks_arc = tracks_arc();
                         let album_art = feed.get_image().map(String::from);
                         let artist = feed.author.clone().unwrap_or_else(|| feed.title.clone());
 
@@ -147,8 +160,8 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                             div { class: "flex items-center gap-4 text-sm text-muted-foreground",
                                                 span { class: "flex items-center gap-1",
                                                     MusicIcon { class: "w-3 h-3" }
-                                                    "{tracks_vec.len()} "
-                                                    if tracks_vec.len() == 1 { "track" } else { "tracks" }
+                                                    "{tracks_arc.len()} "
+                                                    if tracks_arc.len() == 1 { "track" } else { "tracks" }
                                                 }
                                                 if let Some(lang) = &feed.language {
                                                     span { class: "flex items-center gap-1",
@@ -166,16 +179,15 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                             div { class: "flex items-center gap-4 pt-2",
                                                 button {
                                                     class: "px-4 py-2 bg-primary hover:bg-primary/90 rounded text-primary-foreground transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
-                                                    disabled: tracks_vec.is_empty(),
+                                                    disabled: tracks_arc.is_empty(),
                                                     onclick: move |_| {
-                                                        let tracks_clone = tracks_vec.clone();
-                                                        play_album(tracks_clone);
+                                                        play_album(tracks_arc.clone());
                                                     },
                                                     PlayIcon { class: "w-4 h-4" }
                                                     "Play Album"
                                                 }
 
-                                                if let Some(first_track) = tracks_vec.first() {
+                                                if let Some(first_track) = tracks_arc.first() {
                                                     {
                                                         let zap_track = first_track.clone();
                                                         rsx! {
@@ -188,8 +200,27 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                         }
                                                     }
                                                 }
+
+                                                // Share button
+                                                button {
+                                                    class: "px-4 py-2 rounded border border-border hover:border-primary text-sm transition-colors inline-flex items-center gap-1",
+                                                    onclick: move |_| show_share_modal.set(true),
+                                                    ShareIcon { class: "w-3 h-3" }
+                                                    "Share"
+                                                }
                                             }
                                         }
+                                    }
+                                }
+
+                                // Share modal
+                                if *show_share_modal.read() {
+                                    ContentShareModal {
+                                        title: feed.title.clone(),
+                                        url: format!("https://nostr.blue/music/rss/album/{}", feed_id),
+                                        content_type: ContentType::MusicAlbum,
+                                        image_url: feed.get_image().map(String::from),
+                                        on_close: move |_| show_share_modal.set(false)
                                     }
                                 }
 
@@ -200,20 +231,20 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                         h2 { class: "text-xl font-bold", "Tracks" }
                                     }
 
-                                    if tracks_vec.is_empty() {
+                                    if tracks_arc.is_empty() {
                                         div { class: "text-center py-8",
                                             MusicIcon { class: "w-12 h-12 text-muted-foreground mx-auto mb-4" }
                                             p { class: "text-muted-foreground", "No tracks found in this album." }
                                         }
                                     } else {
                                         div { class: "divide-y divide-border/50",
-                                            for track in tracks_vec.iter() {
+                                            for track in tracks_arc.iter() {
                                                 UnifiedTrackCard {
                                                     key: "{track.id}",
                                                     track: track.clone(),
                                                     show_album: false,
                                                     show_sats: true,
-                                                    playlist: Some(tracks_vec.clone())
+                                                    playlist: Some(tracks_arc.clone())
                                                 }
                                             }
                                         }

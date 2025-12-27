@@ -84,7 +84,7 @@ pub fn PodcastTrending() -> Element {
                     for cat in podcast_subscription::get_categories() {
                         CategoryChip {
                             label: cat.name,
-                            selected: selected_category.read().as_ref().map_or(false, |c| c == cat.name),
+                            selected: selected_category.read().as_ref().is_some_and(|c| c == cat.name),
                             onclick: move |_| selected_category.set(Some(cat.name.to_string()))
                         }
                     }

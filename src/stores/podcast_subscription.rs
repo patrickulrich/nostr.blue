@@ -154,18 +154,44 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         return Ok(Vec::new());
     }
 
-    // Get client and pubkey
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
+    // Get client and pubkey - clear loading state on early failures
+    let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
+        Some(c) => c.clone(),
+        None => {
+            let err = "Client not initialized".to_string();
+            log::warn!("{}", err);
+            SUBSCRIPTIONS_LOADING.write().clone_from(&false);
+            SUBSCRIPTIONS_LOADED.write().clone_from(&true);
+            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(err.clone()));
+            return Err(err);
+        }
+    };
 
     let auth = auth_store::AUTH_STATE.read();
-    let pubkey_str = auth.pubkey.as_ref().ok_or("No pubkey")?;
-    let pubkey = nostr_sdk::PublicKey::from_bech32(pubkey_str)
+    let pubkey_str = match auth.pubkey.as_ref() {
+        Some(p) => p,
+        None => {
+            let err = "No pubkey".to_string();
+            log::warn!("{}", err);
+            SUBSCRIPTIONS_LOADING.write().clone_from(&false);
+            SUBSCRIPTIONS_LOADED.write().clone_from(&true);
+            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(err.clone()));
+            return Err(err);
+        }
+    };
+    let pubkey = match nostr_sdk::PublicKey::from_bech32(pubkey_str)
         .or_else(|_| nostr_sdk::PublicKey::from_hex(pubkey_str))
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    {
+        Ok(pk) => pk,
+        Err(e) => {
+            let err = format!("Invalid pubkey: {}", e);
+            log::warn!("{}", err);
+            SUBSCRIPTIONS_LOADING.write().clone_from(&false);
+            SUBSCRIPTIONS_LOADED.write().clone_from(&true);
+            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(err.clone()));
+            return Err(err);
+        }
+    };
 
     // Build filter for subscription list event
     let filter = Filter::new()

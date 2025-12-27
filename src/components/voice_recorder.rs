@@ -104,7 +104,7 @@ pub fn VoiceRecorder(
                                             monitor_current_time.set(elapsed);
 
                                             // Log every second
-                                            if ((elapsed * 10.0) as u32).is_multiple_of(10) {
+                                            if (elapsed * 10.0) as u32 % 10 == 0 {
                                                 log::debug!("Recording time: {:.1}s", elapsed);
                                             }
 

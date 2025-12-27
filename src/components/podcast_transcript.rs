@@ -546,48 +546,73 @@ fn HighlightedText(props: HighlightedTextProps) -> Element {
         };
     }
 
-    // Use character-based matching to avoid UTF-8 boundary issues
-    // Lowercasing can change byte lengths for certain Unicode chars
-    let text_chars: Vec<char> = props.text.chars().collect();
-    let text_lower_chars: Vec<char> = props.text.to_lowercase().chars().collect();
-    let highlight_lower_chars: Vec<char> = props.highlight.to_lowercase().chars().collect();
-    let highlight_len = highlight_lower_chars.len();
+    // Create lowercase versions for matching
+    let text_lower = props.text.to_lowercase();
+    let highlight_lower = props.highlight.to_lowercase();
 
-    // Build a mapping from char index to byte offset in original text
-    let char_to_byte: Vec<usize> = props.text
-        .char_indices()
-        .map(|(i, _)| i)
-        .chain(std::iter::once(props.text.len()))
-        .collect();
+    // Build a mapping from lowercase byte offsets to original byte offsets.
+    // This handles cases where lowercasing changes byte lengths (e.g., 'İ' -> 'i̇').
+    // We align by character: for each char in original, we know its byte range,
+    // and for the corresponding char(s) in lowercase, we map those bytes back.
+    let mut lower_to_orig: Vec<usize> = Vec::with_capacity(text_lower.len() + 1);
+    let orig_char_iter = props.text.char_indices();
+    let mut lower_char_iter = text_lower.char_indices().peekable();
 
-    // Find matches using character indices
-    let mut parts = Vec::new();
-    let mut last_char_end = 0;
-    let mut char_idx = 0;
+    for (orig_byte, orig_char) in orig_char_iter {
+        // Get the lowercase version of this original character
+        let orig_char_lower: String = orig_char.to_lowercase().collect();
+        let orig_char_lower_len = orig_char_lower.chars().count();
 
-    while char_idx + highlight_len <= text_lower_chars.len() {
-        if text_lower_chars[char_idx..char_idx + highlight_len] == highlight_lower_chars[..] {
-            // Found a match
-            if char_idx > last_char_end {
-                // Non-matching part before this match
-                let start_byte = char_to_byte[last_char_end];
-                let end_byte = char_to_byte[char_idx];
-                parts.push((props.text[start_byte..end_byte].to_string(), false));
+        // Map each byte of the lowercase char(s) back to the original byte position
+        for _ in 0..orig_char_lower_len {
+            if let Some((_lower_byte, lower_char)) = lower_char_iter.next() {
+                // Fill mapping for all bytes in this lowercase character
+                let char_byte_len = lower_char.len_utf8();
+                for _ in 0..char_byte_len {
+                    lower_to_orig.push(orig_byte);
+                }
             }
-            // Matching part (use original chars from text)
-            let match_str: String = text_chars[char_idx..char_idx + highlight_len].iter().collect();
-            parts.push((match_str, true));
-            last_char_end = char_idx + highlight_len;
-            char_idx = last_char_end;
-        } else {
-            char_idx += 1;
+        }
+    }
+    // Add end sentinel for slicing to end of string
+    lower_to_orig.push(props.text.len());
+
+    // Find matches in lowercase string using byte indices
+    let mut parts = Vec::new();
+    let mut last_orig_end = 0;
+
+    for (lower_start, matched) in text_lower.match_indices(&highlight_lower) {
+        let lower_end = lower_start + matched.len();
+
+        // Map lowercase byte positions to original byte positions
+        let orig_start = lower_to_orig.get(lower_start).copied().unwrap_or(0);
+        let orig_end = lower_to_orig.get(lower_end).copied().unwrap_or(props.text.len());
+
+        // Non-matching part before this match
+        if orig_start > last_orig_end {
+            if let Some(slice) = props.text.get(last_orig_end..orig_start) {
+                parts.push((slice.to_string(), false));
+            }
+        }
+
+        // Matching part (use original text to preserve case)
+        if let Some(slice) = props.text.get(orig_start..orig_end) {
+            parts.push((slice.to_string(), true));
+        }
+
+        last_orig_end = orig_end;
+    }
+
+    // Remaining text after last match
+    if last_orig_end < props.text.len() {
+        if let Some(slice) = props.text.get(last_orig_end..) {
+            parts.push((slice.to_string(), false));
         }
     }
 
-    // Remaining text
-    if last_char_end < text_chars.len() {
-        let start_byte = char_to_byte[last_char_end];
-        parts.push((props.text[start_byte..].to_string(), false));
+    // If no parts were created (no matches), show the whole text
+    if parts.is_empty() {
+        parts.push((props.text.clone(), false));
     }
 
     rsx! {
