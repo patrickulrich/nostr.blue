@@ -212,20 +212,24 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     // Find current cue index
     let current_idx = find_current_cue(&props.cues, props.current_time);
 
-    // Filter cues by search query
-    let search_text = search_query.read().to_lowercase();
-    let filtered_indices: Vec<usize> = if search_text.is_empty() {
-        (0..props.cues.len()).collect()
-    } else {
-        props.cues.iter().enumerate()
-            .filter(|(_, cue)| {
-                cue.text.to_lowercase().contains(&search_text) ||
-                cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
-            })
-            .map(|(idx, _)| idx)
-            .collect()
-    };
+    // Filter cues by search query - memoized for performance with large transcripts
+    let cues_for_memo = props.cues.clone();
+    let filtered_indices = use_memo(move || {
+        let search_text = search_query.read().to_lowercase();
+        if search_text.is_empty() {
+            (0..cues_for_memo.len()).collect::<Vec<usize>>()
+        } else {
+            cues_for_memo.iter().enumerate()
+                .filter(|(_, cue)| {
+                    cue.text.to_lowercase().contains(&search_text) ||
+                    cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
+                })
+                .map(|(idx, _)| idx)
+                .collect::<Vec<usize>>()
+        }
+    });
 
+    let search_text = search_query.read().to_lowercase();
     let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
 
     // Auto-scroll effect - scroll current cue into view
@@ -243,6 +247,7 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
 
             if let Some(idx) = current_idx {
                 // Use JavaScript to scroll the element into view
+                // Note: document::eval returns Eval (async), errors handled internally by Dioxus
                 let _ = document::eval(&format!(
                     r#"
                     (function() {{

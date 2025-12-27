@@ -27,6 +27,7 @@ window.hlsManager = window.hlsManager || {
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js';
             script.crossOrigin = 'anonymous';
+            script.integrity = 'sha384-1B+J55elPxu+trIhW7QThjZg3evX8C5P6zjB82Xnn46RKPAXpL+vkanRSjCidsJv';
             script.onload = () => {
                 console.log('[HLS Manager] hls.js loaded');
                 this.hlsLoaded = true;
@@ -253,7 +254,7 @@ window.hlsManager = window.hlsManager || {
             if (frameId === 'TIT2' || frameId === 'TPE1') {
                 // Text encoding byte + text content
                 const encoding = data[offset];
-                const textData = data.slice(offset + 1, offset + size - 1);
+                const textData = data.slice(offset + 1, offset + size);
 
                 let text = '';
                 if (encoding === 0 || encoding === 3) {

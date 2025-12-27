@@ -311,7 +311,11 @@ pub fn ContentShareModal(
 
                             // Share to Nostr button
                             button {
-                                class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
+                                class: if has_signer {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
+                                } else {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
+                                },
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
                                 disabled: !has_signer,
                                 MessageCircleIcon { class: "w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" }
@@ -334,7 +338,11 @@ pub fn ContentShareModal(
 
                             // Send via DM button
                             button {
-                                class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
+                                class: if has_signer {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
+                                } else {
+                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
+                                },
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
                                 disabled: !has_signer,
                                 SendIcon { class: "w-5 h-5 text-pink-500 flex-shrink-0 mt-0.5" }

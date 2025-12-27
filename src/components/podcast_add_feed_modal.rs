@@ -86,11 +86,9 @@ pub fn PodcastAddFeedModal(
 
     // Handle subscribe
     let handle_subscribe = move |_| {
-        let preview_data = preview.read().clone();
-        if preview_data.is_none() {
+        let Some(preview_data) = preview.read().clone() else {
             return;
-        }
-        let preview_data = preview_data.unwrap();
+        };
         let podcast_id = preview_data.podcast_id;
         let url = preview_data.feed_url.clone();
 
