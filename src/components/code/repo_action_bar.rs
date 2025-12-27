@@ -224,7 +224,7 @@ pub fn RepoActionBar(
                     active: *is_watching.read(),
                     disabled: false,
                     loading: false,
-                    onclick: handle_watch,
+                    onclick: handle_watch.clone(),
                 }
 
                 // Star button

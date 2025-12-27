@@ -5,6 +5,7 @@ use crate::services::podcast_index;
 use crate::stores::music_player::MusicTrack;
 use crate::stores::nostr_music::{self, MusicFeedFilter};
 use crate::stores::auth_store;
+use crate::stores::nostr_client;
 use crate::components::{
     DiscoveryTabs, DiscoveryTab,
     UnifiedTrackCard, UnifiedTrackCardSkeleton,
@@ -159,20 +160,45 @@ pub fn MusicHome() -> Element {
             return;
         }
 
+        // Check for client initialization and signer (NIP-98 auth requires signer)
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
+
+        if !client_initialized || !has_signer {
+            // Not ready yet - will re-run when signals change
+            return;
+        }
+
         rss_loading.set(true);
 
         spawn(async move {
             match podcast_index::get_music_albums(Some(20)).await {
                 Ok(albums) => {
-                    let mut tracks = Vec::new();
-                    // Fetch tracks from each album (limit to 15 albums, 5 tracks each)
-                    for album in albums.iter().take(15) {
-                        if let Ok(episodes) = podcast_index::get_episodes_by_feed_id(album.id, Some(5)).await {
-                            for ep in &episodes {
-                                tracks.push(MusicTrack::from_rss_music_track(ep, album));
+                    // Fetch tracks from each album concurrently (limit to 15 albums, 5 tracks each)
+                    let fetch_futures: Vec<_> = albums.iter().take(15).map(|album| {
+                        let album = album.clone();
+                        async move {
+                            match podcast_index::get_episodes_by_feed_id(album.id, Some(5)).await {
+                                Ok(episodes) => {
+                                    let tracks: Vec<MusicTrack> = episodes
+                                        .iter()
+                                        .map(|ep| MusicTrack::from_rss_music_track(ep, &album))
+                                        .collect();
+                                    Some(tracks)
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to fetch tracks for album {}: {}", album.id, e);
+                                    None
+                                }
                             }
                         }
-                    }
+                    }).collect();
+
+                    // Execute all fetches concurrently
+                    let results = futures::future::join_all(fetch_futures).await;
+
+                    // Collect successful results
+                    let tracks: Vec<MusicTrack> = results.into_iter().flatten().flatten().collect();
                     rss_music_tracks.set(tracks);
                 }
                 Err(e) => {

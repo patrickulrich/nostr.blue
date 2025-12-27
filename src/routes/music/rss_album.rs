@@ -16,14 +16,18 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
     let mut show_share_modal = use_signal(|| false);
 
     // Fetch album (feed) and tracks (episodes)
-    // Wait for client initialization before making NIP-98 authenticated requests
+    // Wait for client initialization and signer before making NIP-98 authenticated requests
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
 
-        // Only fetch if client is initialized (NIP-98 auth requires signer)
-        if !client_initialized {
+        // Only fetch if client is initialized and has signer (NIP-98 auth requires signer)
+        if !client_initialized || !has_signer {
             return;
         }
+
+        // Capture feed_id for the async block
+        let feed_id = feed_id;
 
         loading.set(true);
         error_msg.set(None);

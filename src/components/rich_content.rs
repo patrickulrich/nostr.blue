@@ -3617,6 +3617,24 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                 let ep = episode_clone.clone();
                 let pod = podcast_clone.clone();
 
+                // Validate enclosure URL before attempting playback
+                let media_url = match &ep.enclosure_url {
+                    Some(url) if !url.trim().is_empty() => url.clone(),
+                    _ => {
+                        log::warn!("Cannot play episode '{}': missing or empty enclosure URL", ep.title);
+                        return;
+                    }
+                };
+
+                // Safely convert duration: clamp u64 to valid u32 range
+                let duration = ep.duration.map(|d| {
+                    if d > u32::MAX as u64 {
+                        u32::MAX
+                    } else {
+                        d as u32
+                    }
+                });
+
                 // Build MusicTrack for player
                 let track = MusicTrack {
                     id: format!("pi-ep-{}", ep.id),
@@ -3628,8 +3646,8 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                     album: ep.feed_title.clone(),
                     album_id: ep.feed_id.map(|id| id.to_string()),
                     album_art_url: ep.get_image().map(|s| s.to_string()),
-                    duration: ep.duration.map(|d| d as u32),
-                    media_url: ep.enclosure_url.clone().unwrap_or_default(),
+                    duration,
+                    media_url,
                     source: TrackSource::RssPodcast {
                         feed_url: ep.feed_url.clone().unwrap_or_default(),
                         podcast_id: ep.feed_id,

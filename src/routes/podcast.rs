@@ -2037,27 +2037,41 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
 
             spawn(async move {
                 let podcast_ids = podcast_subscription::get_rss_podcast_ids();
-                let mut all_episodes = Vec::new();
 
-                for podcast_id in podcast_ids.iter().take(20) {
-                    match podcast_index::get_podcast_by_id(*podcast_id).await {
-                        Ok(feed) => {
-                            match podcast_index::get_episodes_by_feed_id(*podcast_id, Some(5)).await {
-                                Ok(episodes) => {
-                                    for ep in episodes {
-                                        all_episodes.push(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
-                                }
+                // Fetch all podcasts and their episodes concurrently
+                let fetch_futures: Vec<_> = podcast_ids.iter().take(20).map(|&podcast_id| {
+                    async move {
+                        // Fetch feed and episodes concurrently for this podcast
+                        let (feed_result, episodes_result) = futures::join!(
+                            podcast_index::get_podcast_by_id(podcast_id),
+                            podcast_index::get_episodes_by_feed_id(podcast_id, Some(5))
+                        );
+
+                        match (feed_result, episodes_result) {
+                            (Ok(feed), Ok(episodes)) => {
+                                let display_episodes: Vec<DisplayEpisode> = episodes
+                                    .iter()
+                                    .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                                    .collect();
+                                Some(display_episodes)
+                            }
+                            (Err(e), _) => {
+                                log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
+                                None
+                            }
+                            (_, Err(e)) => {
+                                log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
+                                None
                             }
                         }
-                        Err(e) => {
-                            log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
-                        }
                     }
-                }
+                }).collect();
+
+                // Execute all podcast fetches concurrently
+                let results = futures::future::join_all(fetch_futures).await;
+
+                // Collect successful results
+                let all_episodes: Vec<DisplayEpisode> = results.into_iter().flatten().flatten().collect();
 
                 log::info!("Fetched {} RSS episodes from subscriptions", all_episodes.len());
                 rss_episodes.set(Some(all_episodes));
