@@ -342,7 +342,14 @@ fn TrendingPodcasts(props: TrendingPodcastsProps) -> Element {
     let mut podcasts = use_signal(|| None::<Vec<podcast_index::PodcastFeed>>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let category = props.category.clone();
+
+    // Use signal for category to enable reactive re-fetching when category changes
+    let mut category_signal = use_signal(|| props.category.clone());
+
+    // Sync props to signal when category changes
+    if *category_signal.read() != props.category {
+        category_signal.set(props.category.clone());
+    }
 
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -354,7 +361,8 @@ fn TrendingPodcasts(props: TrendingPodcastsProps) -> Element {
             return;
         }
 
-        let cat = category.clone();
+        // Read category signal inside effect to establish reactive dependency
+        let cat = category_signal.read().clone();
         loading.set(true);
         error.set(None);
 
@@ -1335,7 +1343,14 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                 // Parse coordinate: "kind:pubkey:d-tag"
                 let parts: Vec<&str> = coord.split(':').collect();
                 if parts.len() >= 3 {
-                    let kind_num: u16 = parts[0].parse().unwrap_or(0);
+                    // Parse kind - skip this coordinate if invalid (don't default to 0)
+                    let kind_num: u16 = match parts[0].parse() {
+                        Ok(k) => k,
+                        Err(_) => {
+                            log::warn!("Invalid kind in coordinate '{}': could not parse '{}'", coord, parts[0]);
+                            return None;
+                        }
+                    };
                     let pubkey_hex = parts[1];
                     let d_tag = parts[2..].join(":"); // d-tag might contain colons
 

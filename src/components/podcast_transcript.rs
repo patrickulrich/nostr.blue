@@ -209,17 +209,26 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     // Track previous current_idx to detect changes - use a non-reactive cell to avoid loops
     let prev_idx = use_hook(|| std::cell::RefCell::new(None::<usize>));
 
+    // Use signal for cues to enable reactive filtering when cues change
+    let mut cues_signal = use_signal(|| props.cues.clone());
+
+    // Sync cues signal when props change
+    if *cues_signal.read() != props.cues {
+        cues_signal.set(props.cues.clone());
+    }
+
     // Find current cue index
     let current_idx = find_current_cue(&props.cues, props.current_time);
 
     // Filter cues by search query - memoized for performance with large transcripts
-    let cues_for_memo = props.cues.clone();
+    // Reading cues_signal inside the memo establishes reactive dependency
     let filtered_indices = use_memo(move || {
+        let cues = cues_signal.read();
         let search_text = search_query.read().to_lowercase();
         if search_text.is_empty() {
-            (0..cues_for_memo.len()).collect::<Vec<usize>>()
+            (0..cues.len()).collect::<Vec<usize>>()
         } else {
-            cues_for_memo.iter().enumerate()
+            cues.iter().enumerate()
                 .filter(|(_, cue)| {
                     cue.text.to_lowercase().contains(&search_text) ||
                     cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
