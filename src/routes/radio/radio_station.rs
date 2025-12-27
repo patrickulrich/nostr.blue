@@ -6,6 +6,7 @@ use crate::components::icons;
 use crate::stores::music_player::{self, MusicTrack, MUSIC_PLAYER};
 use crate::stores::nostr_client;
 use crate::utils::radio::{RadioStation as RadioStationData, fetch_station_by_naddr, get_ranked_stream_urls};
+use crate::utils::validation::is_valid_http_url;
 
 #[component]
 pub fn RadioStation(naddr: String) -> Element {
@@ -269,8 +270,8 @@ pub fn RadioStation(naddr: String) -> Element {
                             }
                         }
 
-                        // Website link
-                        if let Some(website) = s.website.as_ref() {
+                        // Website link (only render valid http/https URLs to prevent XSS)
+                        if let Some(website) = s.website.as_ref().filter(|w| is_valid_http_url(w)) {
                             a {
                                 href: "{website}",
                                 target: "_blank",

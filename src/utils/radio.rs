@@ -159,6 +159,24 @@ impl RadioStream {
             None
         }
     }
+
+    /// Create a stream with a specific bitrate (for testing)
+    #[cfg(test)]
+    pub fn with_bitrate(
+        url: String,
+        mime: Option<&str>,
+        bitrate: Option<u32>,
+        is_primary: bool,
+    ) -> Self {
+        let quality = StreamQuality {
+            bitrate: bitrate.unwrap_or(0),
+            codec: mime
+                .map(|m| m.split('/').last().unwrap_or("unknown").to_string())
+                .unwrap_or_default(),
+            sample_rate: 0,
+        };
+        Self::new(url, mime, quality, is_primary)
+    }
 }
 
 /// "Now Playing" metadata from stream
@@ -300,15 +318,13 @@ impl RadioStation {
             );
         }
 
-        // Parse genres from category tags: ["c", "genre-name", "genre"]
+        // Parse genres from hashtag tags: ["t", "genre-name"]
+        // This aligns with the relay-level filter using filter.hashtag()
+        // and matches the pattern used in the music module
         let genres: Vec<String> = event
             .tags
             .iter()
-            .filter(|t| {
-                let slice = t.as_slice();
-                slice.first().map(|s| s.as_str()) == Some("c")
-                    && slice.get(2).map(|s| s.as_str()) == Some("genre")
-            })
+            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t"))
             .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
             .collect();
 
