@@ -84,7 +84,7 @@ pub fn LiveStreamNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(Route::Home {});
+            navigator.push(Route::Home { list: String::new() });
         }
     });
 

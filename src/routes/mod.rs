@@ -31,6 +31,7 @@ pub mod search;
 
 // Placeholder modules for missing routes
 mod lists;
+mod list_detail;
 pub mod dvm;
 pub mod photos;
 pub mod photo_detail;
@@ -180,6 +181,7 @@ use photo_new::PhotoNew;
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
 use lists::Lists;
+use list_detail::ListDetail;
 use dvm::DVM;
 use terms::Terms;
 use privacy::Privacy;
@@ -263,8 +265,8 @@ use shop_search::ShopSearch;
 #[allow(clippy::upper_case_acronyms)]
 pub enum Route {
     #[layout(Layout)]
-        #[route("/")]
-        Home {},
+        #[route("/?:list")]
+        Home { list: String },
 
         #[route("/explore")]
         Explore {},
@@ -626,6 +628,9 @@ pub enum Route {
         #[route("/lists")]
         Lists {},
 
+        #[route("/lists/:identifier")]
+        ListDetail { identifier: String },
+
         #[route("/dvm")]
         DVM {},
 
@@ -735,7 +740,7 @@ fn Layout() -> Element {
     );
 
     // Check if we're on home page for home button styling
-    let is_home_page = matches!(current_route, Route::Home {});
+    let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
 
     rsx! {
@@ -769,7 +774,7 @@ fn Layout() -> Element {
                                     }
                                 } else {
                                     // Navigate to home
-                                    navigator.push(Route::Home {});
+                                    navigator.push(Route::Home { list: String::new() });
                                 }
                             },
                             div {
@@ -798,7 +803,7 @@ fn Layout() -> Element {
                                                             window.scroll_to_with_x_and_y(0.0, 0.0);
                                                         }
                                                     } else {
-                                                        navigator.push(Route::Home {});
+                                                        navigator.push(Route::Home { list: String::new() });
                                                     }
                                                 },
                                                 {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
@@ -997,7 +1002,7 @@ fn Layout() -> Element {
                                             }
                                         } else {
                                             // Navigate to home
-                                            navigator.push(Route::Home {});
+                                            navigator.push(Route::Home { list: String::new() });
                                         }
                                     },
                                     div {
@@ -1030,7 +1035,7 @@ fn Layout() -> Element {
                                                                     window.scroll_to_with_x_and_y(0.0, 0.0);
                                                                 }
                                                             } else {
-                                                                navigator.push(Route::Home {});
+                                                                navigator.push(Route::Home { list: String::new() });
                                                             }
                                                         },
                                                         {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
@@ -1280,7 +1285,7 @@ fn NavLink(
 
     // Check if this is the active route
     let is_active = match (&to, &current_route) {
-        (Route::Home {}, Route::Home {}) => true,
+        (Route::Home { .. }, Route::Home { .. }) => true,
         (Route::Explore {}, Route::Explore {}) => true,
         (Route::Articles {}, Route::Articles {}) => true,
         (Route::Notifications {}, Route::Notifications {}) => true,

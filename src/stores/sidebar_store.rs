@@ -122,7 +122,7 @@ impl SidebarItem {
     /// Note: Profile requires pubkey parameter, returns None if not available
     pub fn as_route(&self, pubkey: Option<&str>) -> Option<Route> {
         match self {
-            SidebarItem::Home => Some(Route::Home {}),
+            SidebarItem::Home => Some(Route::Home { list: String::new() }),
             SidebarItem::Explore => Some(Route::Explore {}),
             SidebarItem::Articles => Some(Route::Articles {}),
             SidebarItem::Music => Some(Route::MusicHome {}),

@@ -17,6 +17,8 @@ pub struct UserList {
     pub created_at: u64,
     pub author: String,
     pub event: Event,
+    /// Indicates if the list has encrypted private content (NIP-44)
+    pub has_private_content: bool,
 }
 
 impl UserList {
@@ -28,11 +30,19 @@ impl UserList {
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())?;
 
-        // Get title tag or use identifier as fallback
+        // Get name tag first (NIP-51 standard), then title tag as fallback (deprecated)
+        // If neither exists, use identifier as fallback
         let name = event.tags.iter()
-            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
+            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("name"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
+            .or_else(|| {
+                // Fallback to deprecated "title" tag for backwards compatibility
+                event.tags.iter()
+                    .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
+                    .and_then(|tag| tag.content())
+                    .map(|s| s.to_string())
+            })
             .or_else(|| Some(identifier.clone()))
             .unwrap_or_else(|| "Untitled List".to_string());
 
@@ -43,6 +53,9 @@ impl UserList {
             .map(|s| s.to_string())
             .unwrap_or_default();
 
+        // Check if content is non-empty (indicates encrypted private members)
+        let has_private_content = !event.content.is_empty();
+
         Some(UserList {
             id: event.id.to_string(),
             kind: event.kind.as_u16(),
@@ -52,6 +65,7 @@ impl UserList {
             tags: event.tags.clone().to_vec(),
             created_at: event.created_at.as_secs(),
             author: event.pubkey.to_string(),
+            has_private_content,
             event,
         })
     }

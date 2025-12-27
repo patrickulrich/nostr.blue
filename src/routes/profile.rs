@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store, dms, pinned_notes};
-use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, PinnedNotesCarousel, ProfileBadgesSection};
-use crate::components::icons::{InfoIcon, MailIcon};
+use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, PinnedNotesCarousel, ProfileBadgesSection, AddToPeopleListModal};
+use crate::components::icons::{InfoIcon, MailIcon, ListIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
 use crate::services::profile_stats;
@@ -108,6 +108,9 @@ pub fn Profile(pubkey: String) -> Element {
     // Info dialog state (npub/lightning)
     let mut show_info_dialog = use_signal(|| false);
 
+    // Add to list modal state
+    let mut show_add_to_list_modal = use_signal(|| false);
+
     // Pinned notes state
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
@@ -119,6 +122,7 @@ pub fn Profile(pubkey: String) -> Element {
     let pubkey_for_dm = pubkey.clone();
     let pubkey_for_info = pubkey.clone();
     let pubkey_for_pinned = pubkey.clone();
+    let pubkey_for_list = pubkey.clone();
 
     // Parse pubkey once for comparisons
     let parsed_pubkey = PublicKey::from_bech32(&pubkey)
@@ -695,6 +699,17 @@ pub fn Profile(pubkey: String) -> Element {
                             "aria-label": "Message",
                             title: "Message",
                             MailIcon { class: "w-5 h-5".to_string(), filled: false }
+                        }
+                    }
+
+                    // Add to List button (other users' profiles only)
+                    if !is_own_profile && auth.is_authenticated {
+                        button {
+                            class: "p-2 border border-border rounded-full hover:bg-accent transition",
+                            onclick: move |_| show_add_to_list_modal.set(true),
+                            "aria-label": "Add to List",
+                            title: "Add to List",
+                            ListIcon { class: "w-5 h-5".to_string(), filled: false }
                         }
                     }
 
@@ -1466,6 +1481,15 @@ pub fn Profile(pubkey: String) -> Element {
                         }
                     }
                 }
+            }
+        }
+
+        // Add to People List Modal
+        if *show_add_to_list_modal.read() {
+            AddToPeopleListModal {
+                person_pubkey: pubkey_for_list.clone(),
+                on_close: move |_| show_add_to_list_modal.set(false),
+                on_added: move |_| show_add_to_list_modal.set(false),
             }
         }
     }

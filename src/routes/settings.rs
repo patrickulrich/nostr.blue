@@ -1559,7 +1559,7 @@ fn render_account_info() -> Element {
                     let nav = navigator();
                     spawn(async move {
                         auth_store::logout().await;
-                        nav.push(Route::Home {});
+                        nav.push(Route::Home { list: String::new() });
                     });
                 },
                 "🚪 Logout"

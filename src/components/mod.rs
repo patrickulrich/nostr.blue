@@ -60,6 +60,7 @@ pub mod nwc_setup_modal;
 pub mod password_modal;  // NIP-49 password entry for encrypted keys
 pub mod report_modal;
 pub mod add_to_list_modal;
+pub mod create_list_modal;
 pub mod dvm_selector_modal;
 pub mod gif_upload_modal;
 pub mod podcast_show_card;
@@ -164,6 +165,11 @@ pub use cashu::{
 pub use nwc_setup_modal::NwcSetupModal;
 pub use report_modal::ReportModal;
 pub use add_to_list_modal::AddToListModal;
+pub use create_list_modal::CreateListModal;
+pub mod add_to_people_list_modal;
+pub use add_to_people_list_modal::AddToPeopleListModal;
+pub mod people_list_members_modal;
+pub use people_list_members_modal::PeopleListMembersModal;
 pub use poll_creator_modal::PollCreatorModal;
 pub use dvm_selector_modal::DvmSelectorModal;
 pub mod dialog;

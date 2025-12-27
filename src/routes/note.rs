@@ -206,7 +206,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             {
                 let data_is_voice = note_data.read().as_ref().map(is_voice_message);
                 let is_voice_note = data_is_voice.unwrap_or(initial_is_voice);
-                let back_route = if is_voice_note { Route::VoiceMessages {} } else { Route::Home {} };
+                let back_route = if is_voice_note { Route::VoiceMessages {} } else { Route::Home { list: String::new() } };
                 let title = if is_voice_note { "Voice Message" } else { "Post" };
 
                 rsx! {

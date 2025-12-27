@@ -2,32 +2,36 @@ use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 use crate::components::{NoteCard, NoteComposer, ArticleCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll;
-use crate::utils::{DataState, FeedItem, extract_reposted_event};
+use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
+use crate::utils::{DataState, FeedItem, extract_reposted_event, get_item_count};
+use crate::utils::list_kinds::NAMED_PEOPLE;
+use crate::utils::list_encryption::get_all_list_members;
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 enum FeedType {
-    Following,          // Top level posts only
-    FollowingWithReplies, // All posts including replies
-    Global,             // Global feed from all users
+    Following,              // Top level posts only
+    FollowingWithReplies,   // All posts including replies
+    Global,                 // Global feed from all users
+    PeopleList(Box<UserList>),   // Feed from a specific people list (boxed to reduce enum size)
 }
 
 impl FeedType {
-    fn label(&self) -> &'static str {
+    fn label(&self) -> String {
         match self {
-            FeedType::Following => "Following",
-            FeedType::FollowingWithReplies => "Following + Replies",
-            FeedType::Global => "Global",
+            FeedType::Following => "Following".to_string(),
+            FeedType::FollowingWithReplies => "Following + Replies".to_string(),
+            FeedType::Global => "Global".to_string(),
+            FeedType::PeopleList(list) => list.name.clone(),
         }
     }
 }
 
 #[component]
-pub fn Home() -> Element {
+pub fn Home(list: String) -> Element {
     // State for feed items using type-state machine pattern
     let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
     let mut refresh_trigger = use_signal(|| 0);
@@ -59,11 +63,48 @@ pub fn Home() -> Element {
     // Track active subscription IDs for cleanup
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
 
+    // Fetch user's people lists for the dropdown
+    let (all_lists, _lists_loading, _lists_error, _) = use_user_lists();
+
+    // Filter to only people lists (kind 30000)
+    let people_lists = use_memo(move || {
+        all_lists.read()
+            .iter()
+            .filter(|list| list.kind == NAMED_PEOPLE)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+
+    // Handle list URL parameter for deep linking from /lists page
+    use_effect({
+        let list_param = list.clone();
+        move || {
+            // Only process non-empty list parameter
+            if list_param.is_empty() {
+                return;
+            }
+
+            // Wait for people lists to load
+            let lists = people_lists.read();
+            if lists.is_empty() {
+                return;
+            }
+
+            // Find the list with matching identifier
+            if let Some(matching_list) = lists.iter().find(|l| l.identifier == list_param) {
+                log::info!("Deep link: Setting feed to list '{}'", matching_list.name);
+                feed_type.set(FeedType::PeopleList(Box::new(matching_list.clone())));
+            } else {
+                log::warn!("Deep link: List with identifier '{}' not found", list_param);
+            }
+        }
+    });
+
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         // Watch refresh trigger and feed type
         let _ = refresh_trigger.read();
-        let current_feed_type = *feed_type.read();
+        let current_feed_type = feed_type.read().clone();
 
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -234,6 +275,45 @@ pub fn Home() -> Element {
                             }
                         }
                     }
+                    FeedType::PeopleList(list) => {
+                        match load_people_list_feed(&list, None).await {
+                            Ok(feed_items) => {
+                                // Track oldest timestamp for pagination
+                                if let Some(last_item) = feed_items.last() {
+                                    oldest_timestamp.set(Some(last_item.sort_timestamp().as_secs()));
+                                }
+
+                                // Always assume there's more content on initial load
+                                has_more.set(true);
+
+                                // Display feed immediately
+                                feed_state.set(DataState::Loaded(feed_items.clone()));
+
+                                // Batch fetch interaction counts for all events
+                                let items_for_counts = feed_items.clone();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+
+                                // Spawn non-blocking background prefetch for metadata
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
+                            Err(e) => {
+                                feed_state.set(DataState::Error(e));
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -262,7 +342,7 @@ pub fn Home() -> Element {
 
     // Real-time subscription for live feed updates (starts AFTER initial load)
     use_effect(move || {
-        let current_feed_type = *feed_type.read();
+        let current_feed_type = feed_type.read().clone();
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -385,6 +465,8 @@ pub fn Home() -> Element {
 
                         // Handle incoming events for this batch
                         let client_for_notifications = client.clone();
+                        // Clone feed type for this batch's async task (UserList isn't Copy)
+                        let batch_feed_type = current_feed_type.clone();
                         spawn(async move {
                             let mut notifications = client_for_notifications.notifications();
 
@@ -419,12 +501,12 @@ pub fn Home() -> Element {
                                         }
                                     } else if event.kind == Kind::TextNote {
                                         // Check if this matches our feed type
-                                        let should_add = match current_feed_type {
+                                        let should_add = match &batch_feed_type {
                                             FeedType::Following => {
                                                 // Only top-level posts (no e tags)
                                                 !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
                                             }
-                                            FeedType::FollowingWithReplies | FeedType::Global => {
+                                            FeedType::FollowingWithReplies | FeedType::Global | FeedType::PeopleList(_) => {
                                                 // All posts including replies
                                                 true
                                             }
@@ -505,7 +587,7 @@ pub fn Home() -> Element {
         spawn(async move {
             // Read signals fresh on each invocation to avoid stale closure bug
             let until = *oldest_timestamp.read();
-            let current_feed_type = *feed_type.read();
+            let current_feed_type = feed_type.read().clone();
 
             log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
 
@@ -514,6 +596,7 @@ pub fn Home() -> Element {
                 FeedType::Following => load_following_feed(until).await.map(|(items, _)| items),
                 FeedType::FollowingWithReplies => load_following_with_replies(until).await,
                 FeedType::Global => load_global_feed(until).await,
+                FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
             };
 
             match fetch_result {
@@ -661,6 +744,55 @@ pub fn Home() -> Element {
                                         }
                                         if *feed_type.read() == FeedType::Global {
                                             span { "✓" }
+                                        }
+                                    }
+
+                                    // People Lists Section
+                                    if !people_lists.read().is_empty() {
+                                        div {
+                                            class: "border-t border-border"
+                                        }
+                                        div {
+                                            class: "px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide",
+                                            "Your Lists"
+                                        }
+
+                                        for list in people_lists.read().iter() {
+                                            {
+                                                let list_for_select = list.clone();
+                                                let list_for_check = list.clone();
+                                                let item_count = get_item_count(&list.tags);
+                                                rsx! {
+                                                    button {
+                                                        key: "{list.id}",
+                                                        class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
+                                                        onclick: move |_| {
+                                                            feed_type.set(FeedType::PeopleList(Box::new(list_for_select.clone())));
+                                                            show_dropdown.set(false);
+                                                        },
+                                                        div {
+                                                            div {
+                                                                class: "font-medium flex items-center gap-2",
+                                                                "👥 {list.name}"
+                                                                if list.has_private_content {
+                                                                    span {
+                                                                        class: "text-sm",
+                                                                        title: "Has private members",
+                                                                        "🔒"
+                                                                    }
+                                                                }
+                                                            }
+                                                            div {
+                                                                class: "text-xs text-muted-foreground",
+                                                                "{item_count} members"
+                                                            }
+                                                        }
+                                                        if matches!(feed_type.read().clone(), FeedType::PeopleList(ref l) if l.id == list_for_check.id) {
+                                                            span { "✓" }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1393,7 +1525,7 @@ fn ProfileSection() -> Element {
                         let nav = navigator();
                         spawn(async move {
                             auth_store::logout().await;
-                            nav.push(Route::Home {});
+                            nav.push(Route::Home { list: String::new() });
                         });
                     },
                     "Logout"
@@ -1829,4 +1961,74 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
 
     // Use optimized prefetch utility
     profile_prefetch::prefetch_pubkeys(pubkeys).await;
+}
+
+/// Helper function to load feed from a people list
+/// Fetches posts from all members (public + private) of the list
+async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Vec<FeedItem>, String> {
+    log::info!("Loading people list feed for '{}' (until: {:?})", list.name, until);
+
+    // Get all members from the list (both public and private via NIP-44 decryption)
+    let members = get_all_list_members(&list.event).await.map_err(|e| {
+        log::error!("Failed to get list members: {}", e);
+        format!("Failed to decrypt list members: {}", e)
+    })?;
+
+    if members.is_empty() {
+        log::info!("People list '{}' has no members", list.name);
+        return Ok(Vec::new());
+    }
+
+    log::info!("People list '{}' has {} members", list.name, members.len());
+
+    // Create filter for posts AND reposts from list members
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .authors(members)
+        .limit(100);
+
+    // Add until for pagination
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+
+    // Fetch events using aggregated pattern (database-first)
+    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+        Ok(events) => {
+            log::info!("Loaded {} events from people list '{}'", events.len(), list.name);
+
+            // Process events into FeedItems
+            let mut feed_items: Vec<FeedItem> = Vec::new();
+
+            for event in events.into_iter() {
+                if event.kind == Kind::Repost {
+                    // Parse repost to extract original event
+                    match extract_reposted_event(&event) {
+                        Ok(original) => {
+                            feed_items.push(FeedItem::Repost {
+                                original,
+                                reposted_by: event.pubkey,
+                                repost_timestamp: event.created_at,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                        }
+                    }
+                } else if event.kind == Kind::TextNote {
+                    // Include all posts (including replies) for people list feeds
+                    feed_items.push(FeedItem::OriginalPost(event));
+                }
+            }
+
+            // Sort by timestamp (repost time for reposts, created_at for originals)
+            feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+
+            Ok(feed_items)
+        }
+        Err(e) => {
+            log::error!("Failed to fetch events for people list '{}': {}", list.name, e);
+            Err(format!("Failed to load feed: {}", e))
+        }
+    }
 }

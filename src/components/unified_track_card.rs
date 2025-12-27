@@ -162,7 +162,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         TrackSource::NostrPodcast { pubkey, .. } => Route::Profile { pubkey: pubkey.clone() },
         TrackSource::RssPodcast { .. } => {
             // RSS podcasts don't have a profile page, use home as fallback
-            Route::Home {}
+            Route::Home { list: String::new() }
         }
         TrackSource::RssMusic { feed_id, .. } => {
             // RSS music routes to album page
