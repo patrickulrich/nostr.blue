@@ -42,6 +42,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
     let author_pubkey_follow_action = author_pubkey.clone();
     let author_pubkey_block = author_pubkey.clone();
     let author_pubkey_modal = author_pubkey.clone();
+    let author_pubkey_modal_list = author_pubkey.clone();
     let event_id = props.event_id.clone();
     let event_id_list = event_id.clone();
     let event_id_mute = event_id.clone();
@@ -407,6 +408,7 @@ pub fn NoteMenu(props: NoteMenuProps) -> Element {
         if *show_add_to_list_modal.read() {
             AddToListModal {
                 event_id: event_id_modal_list.clone(),
+                author_pubkey: author_pubkey_modal_list.clone(),
                 on_close: move |_| show_add_to_list_modal.set(false)
             }
         }

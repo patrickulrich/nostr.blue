@@ -118,7 +118,7 @@ pub fn PollNew() -> Element {
     // Redirect if not authenticated - hoist use_effect to maintain hook order
     use_effect(move || {
         if !*is_authenticated.read() {
-            nav_effect.push(crate::routes::Route::Home {});
+            nav_effect.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

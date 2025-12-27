@@ -13,6 +13,7 @@ pub mod thread_tree;
 pub mod article_meta;
 pub mod markdown;
 pub mod list_kinds;
+pub mod list_encryption;  // NIP-51 List encryption (private members via NIP-44)
 pub mod notification_nip78;
 pub mod mention_extractor;
 pub mod data_state;

@@ -54,7 +54,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                 Ok(event_id) => {
                     log::info!("Note published successfully: {}", event_id);
                     is_publishing.set(false);
-                    navigator.push(crate::routes::Route::Home {});
+                    navigator.push(crate::routes::Route::Home { list: String::new() });
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
@@ -100,7 +100,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     // Redirect if not authenticated - effect must be called unconditionally
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

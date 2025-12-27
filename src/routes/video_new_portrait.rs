@@ -90,7 +90,7 @@ pub fn VideoNewPortrait() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

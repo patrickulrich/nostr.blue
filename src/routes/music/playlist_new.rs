@@ -38,7 +38,7 @@ pub fn MusicPlaylistNew() -> Element {
                         "You need to sign in to create playlists."
                     }
                     Link {
-                        to: Route::Home {},
+                        to: Route::Home { list: String::new() },
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                         "Go Home"
                     }
