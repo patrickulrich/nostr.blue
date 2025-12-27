@@ -51,10 +51,17 @@ pub fn PodcastAddFeedModal(
             // Use Podcast Index API to look up by feed URL - this gives us the podcast ID
             match podcast_index::get_podcast_by_url(&url).await {
                 Ok(feed) => {
-                    log::info!("Found podcast: {} (id: {})", feed.title, feed.id);
+                    log::info!("Found podcast: {} (id: {}, guid: {:?})", feed.title, feed.id, feed.podcast_guid);
+                    // Require GUID for NIP-73 compliance
+                    let Some(guid) = feed.podcast_guid.clone() else {
+                        error_msg.set(Some("Podcast does not have a GUID - cannot subscribe".to_string()));
+                        is_fetching.set(false);
+                        return;
+                    };
                     let has_v4v = feed.has_v4v();
                     let image = feed.get_image().map(String::from);
                     preview.set(Some(PodcastPreview {
+                        podcast_guid: guid,
                         podcast_id: feed.id,
                         title: feed.title,
                         description: feed.description,
@@ -89,6 +96,7 @@ pub fn PodcastAddFeedModal(
         let Some(preview_data) = preview.read().clone() else {
             return;
         };
+        let podcast_guid = preview_data.podcast_guid.clone();
         let podcast_id = preview_data.podcast_id;
         let url = preview_data.feed_url.clone();
 
@@ -96,9 +104,9 @@ pub fn PodcastAddFeedModal(
         error_msg.set(None);
 
         spawn(async move {
-            match podcast_subscription::add_rss_subscription(podcast_id, Some(&url)).await {
+            match podcast_subscription::add_rss_subscription(&podcast_guid, Some(podcast_id), Some(&url)).await {
                 Ok(()) => {
-                    log::info!("Subscribed to podcast: {} (id: {})", url, podcast_id);
+                    log::info!("Subscribed to podcast: {} (guid: {}, id: {})", url, podcast_guid, podcast_id);
                     is_saving.set(false);
                     on_added.call(url);
                 }
@@ -311,6 +319,7 @@ pub fn PodcastAddFeedModal(
 /// Preview data for a podcast feed
 #[derive(Clone, Debug)]
 struct PodcastPreview {
+    podcast_guid: String,
     podcast_id: u64,
     title: String,
     description: Option<String>,

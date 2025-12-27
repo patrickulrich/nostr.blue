@@ -136,10 +136,15 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     // Check if V4V is available (from Podcast Index API)
     let has_v4v = feed.has_v4v();
 
-    // Subscription state - use podcast_id as the subscription identifier
-    let podcast_id_str = podcast_id.to_string();
+    // Subscription state - use podcast GUID as the subscription identifier (NIP-73 compliant)
+    let podcast_guid = feed.podcast_guid.clone();
     let feed_url = feed.url.clone();
-    let is_subscribed = podcast_subscription::is_subscribed(&podcast_id_str);
+    // Check subscription by GUID if available, otherwise fall back to ID string
+    let is_subscribed = if let Some(ref guid) = podcast_guid {
+        podcast_subscription::is_subscribed(guid)
+    } else {
+        podcast_subscription::is_subscribed(&podcast_id.to_string())
+    };
     let mut subscribing = use_signal(|| false);
 
     // Convert episodes to DisplayEpisode
@@ -250,25 +255,32 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                 disabled: *subscribing.read(),
                                 onclick: {
                                     let url = feed_url.clone();
+                                    let guid = podcast_guid.clone();
                                     let id = podcast_id;
                                     move |_| {
                                         if *subscribing.read() { return; }
                                         let url = url.clone();
+                                        let guid = guid.clone();
                                         // Re-check subscription state from store (not stale captured value)
-                                        let currently_subscribed = podcast_subscription::is_subscribed(&id.to_string());
+                                        let sub_id = guid.clone().unwrap_or_else(|| id.to_string());
+                                        let currently_subscribed = podcast_subscription::is_subscribed(&sub_id);
                                         subscribing.set(true);
 
                                         spawn(async move {
-                                            let id_str = id.to_string();
                                             if currently_subscribed {
-                                                match podcast_subscription::remove_subscription(&id_str).await {
-                                                    Ok(()) => log::info!("Unsubscribed from podcast: {}", id),
+                                                match podcast_subscription::remove_subscription(&sub_id).await {
+                                                    Ok(()) => log::info!("Unsubscribed from podcast: {}", sub_id),
                                                     Err(e) => log::error!("Failed to unsubscribe: {}", e),
                                                 }
                                             } else {
-                                                match podcast_subscription::add_rss_subscription(id, Some(&url)).await {
-                                                    Ok(()) => log::info!("Subscribed to podcast: {}", id),
-                                                    Err(e) => log::error!("Failed to subscribe: {}", e),
+                                                // Require GUID for new subscriptions (NIP-73 compliance)
+                                                if let Some(ref guid) = guid {
+                                                    match podcast_subscription::add_rss_subscription(guid, Some(id), Some(&url)).await {
+                                                        Ok(()) => log::info!("Subscribed to podcast: {} (guid: {})", url, guid),
+                                                        Err(e) => log::error!("Failed to subscribe: {}", e),
+                                                    }
+                                                } else {
+                                                    log::error!("Cannot subscribe: podcast does not have a GUID");
                                                 }
                                             }
                                             subscribing.set(false);

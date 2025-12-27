@@ -30,7 +30,9 @@ const D_TAG: &str = "podcast-subscriptions";
 /// A podcast subscription entry (RSS feed or Nostr podcast)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PodcastSubscription {
-    /// Podcast Index ID for RSS podcasts (primary identifier, stored in `r` tag)
+    /// Podcast GUID for RSS podcasts (NIP-73 compliant identifier, stored in `i` tag)
+    pub podcast_guid: Option<String>,
+    /// Podcast Index numeric ID (cached for API efficiency, not stored in event)
     pub podcast_id: Option<u64>,
     /// RSS feed URL (cached for convenience, not stored in event)
     pub feed_url: Option<String>,
@@ -45,10 +47,12 @@ pub struct PodcastSubscription {
 }
 
 impl PodcastSubscription {
-    /// Create a subscription from a Podcast Index ID
-    pub fn from_rss(podcast_id: u64, feed_url: Option<String>) -> Self {
+    /// Create a subscription from a Podcast Index GUID and optional numeric ID
+    /// GUID is the primary identifier (NIP-73 compliant), ID is cached for API efficiency
+    pub fn from_rss(podcast_guid: String, podcast_id: Option<u64>, feed_url: Option<String>) -> Self {
         Self {
-            podcast_id: Some(podcast_id),
+            podcast_guid: Some(podcast_guid),
+            podcast_id,
             feed_url,
             nostr_coordinate: None,
             relay_hint: None,
@@ -60,6 +64,7 @@ impl PodcastSubscription {
     /// Create a subscription from a Nostr coordinate
     pub fn from_nostr(coordinate: String, relay_hint: Option<String>) -> Self {
         Self {
+            podcast_guid: None,
             podcast_id: None,
             feed_url: None,
             nostr_coordinate: Some(coordinate),
@@ -70,19 +75,27 @@ impl PodcastSubscription {
     }
 
     /// Get unique identifier for this subscription
-    pub fn id(&self) -> String {
-        if let Some(podcast_id) = self.podcast_id {
-            podcast_id.to_string()
+    /// Returns GUID for RSS podcasts (NIP-73 compliant), coordinate for Nostr podcasts
+    /// Returns None if the subscription is invalid
+    pub fn id(&self) -> Option<String> {
+        if let Some(ref guid) = self.podcast_guid {
+            Some(guid.clone())
         } else if let Some(ref coordinate) = self.nostr_coordinate {
-            coordinate.clone()
+            Some(coordinate.clone())
         } else {
-            String::new()
+            log::warn!("Invalid subscription: no podcast_guid or nostr_coordinate");
+            None
         }
+    }
+
+    /// Get the Podcast Index numeric ID if available (for API calls)
+    pub fn numeric_id(&self) -> Option<u64> {
+        self.podcast_id
     }
 
     /// Check if this is an RSS subscription
     pub fn is_rss(&self) -> bool {
-        self.podcast_id.is_some()
+        self.podcast_guid.is_some()
     }
 
     /// Check if this is a Nostr subscription
@@ -215,9 +228,11 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
             }
         }
         Err(e) => {
+            let error_msg = format!("Fetch error: {}", e);
             log::warn!("Failed to fetch subscriptions: {}", e);
-            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(format!("Fetch error: {}", e)));
-            Vec::new()
+            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(error_msg.clone()));
+            SUBSCRIPTIONS_LOADING.write().clone_from(&false);
+            return Err(error_msg);
         }
     };
 
@@ -237,11 +252,22 @@ fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription
         let tag_vec: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
 
         match tag_vec.as_slice() {
-            // Podcast Index ID (stored as r tag with numeric ID)
-            ["r", podcast_id_str] => {
-                if let Ok(podcast_id) = podcast_id_str.parse::<u64>() {
-                    subscriptions.push(PodcastSubscription::from_rss(podcast_id, None));
+            // NIP-73 format: ["i", "podcast:guid:<guid>"] or with optional URL hint
+            ["i", identifier] | ["i", identifier, _] => {
+                if let Some(guid) = identifier.strip_prefix("podcast:guid:") {
+                    subscriptions.push(PodcastSubscription::from_rss(
+                        guid.to_string(),
+                        None, // No cached numeric ID from Nostr
+                        None,
+                    ));
                 }
+            }
+            // Legacy format: r tag with numeric ID (backward compatibility)
+            // TODO: Remove this once migration is complete
+            ["r", podcast_id_str] => {
+                log::warn!("Found legacy r tag with numeric ID: {}. Consider re-subscribing for NIP-73 compliance.", podcast_id_str);
+                // We can't use this directly since we need the GUID
+                // Skip legacy subscriptions - they'll need to be re-added
             }
             // Nostr coordinate (a tag for Kind 30078)
             ["a", coordinate] => {
@@ -264,19 +290,29 @@ fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription
 // Modify Functions
 // ============================================================================
 
-/// Add an RSS feed subscription by Podcast Index ID
-pub async fn add_rss_subscription(podcast_id: u64, feed_url: Option<&str>) -> Result<(), String> {
-    log::info!("Adding RSS subscription: podcast_id={}", podcast_id);
+/// Add an RSS feed subscription by Podcast GUID (NIP-73 compliant)
+/// - `podcast_guid`: The podcast's GUID (required for NIP-73 compliance)
+/// - `podcast_id`: Optional Podcast Index numeric ID (cached for API efficiency)
+/// - `feed_url`: Optional feed URL (cached for convenience)
+pub async fn add_rss_subscription(
+    podcast_guid: &str,
+    podcast_id: Option<u64>,
+    feed_url: Option<&str>,
+) -> Result<(), String> {
+    log::info!("Adding RSS subscription: guid={}, id={:?}", podcast_guid, podcast_id);
 
-    // Check if already subscribed (by ID)
-    let id_str = podcast_id.to_string();
-    if is_subscribed(&id_str) {
+    // Check if already subscribed (by GUID)
+    if is_subscribed(podcast_guid) {
         return Err("Already subscribed to this podcast".to_string());
     }
 
     // Add to local state
     let mut subs = SUBSCRIPTIONS.read().clone();
-    subs.push(PodcastSubscription::from_rss(podcast_id, feed_url.map(String::from)));
+    subs.push(PodcastSubscription::from_rss(
+        podcast_guid.to_string(),
+        podcast_id,
+        feed_url.map(String::from),
+    ));
 
     // Publish updated list
     publish_subscriptions(&subs).await?;
@@ -316,9 +352,9 @@ pub async fn add_nostr_subscription(coordinate: &str, relay_hint: Option<&str>) 
 pub async fn remove_subscription(id: &str) -> Result<(), String> {
     log::info!("Removing subscription: {}", id);
 
-    // Remove from local state
+    // Remove from local state (skip invalid subscriptions with None id)
     let mut subs = SUBSCRIPTIONS.read().clone();
-    subs.retain(|s| s.id() != id);
+    subs.retain(|s| s.id().as_deref() != Some(id));
 
     // Publish updated list
     publish_subscriptions(&subs).await?;
@@ -346,6 +382,9 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
         .ok_or("Client not initialized")?
         .clone();
 
+    // Ensure relays are ready before publishing
+    nostr_client::ensure_relays_ready(&client).await;
+
     // Build tags
     let mut tags = vec![
         Tag::identifier(D_TAG),
@@ -356,11 +395,16 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
     ];
 
     for sub in subscriptions {
-        if let Some(podcast_id) = sub.podcast_id {
-            // RSS podcast - use r tag with podcast index ID
+        if let Some(ref guid) = sub.podcast_guid {
+            // RSS podcast - use NIP-73 `i` tag with podcast:guid:<guid> format
             tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("r")),
-                vec![podcast_id.to_string()],
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("i")),
+                vec![format!("podcast:guid:{}", guid)],
+            ));
+            // Also add the k tag for the external content type
+            tags.push(Tag::custom(
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+                vec!["podcast:guid".to_string()],
             ));
         } else if let Some(ref coordinate) = sub.nostr_coordinate {
             // Nostr podcast - use a tag
@@ -399,12 +443,13 @@ pub fn get_subscriptions() -> Vec<PodcastSubscription> {
     SUBSCRIPTIONS.read().clone()
 }
 
-/// Get only RSS podcast IDs
-pub fn get_rss_podcast_ids() -> Vec<u64> {
+/// Get RSS subscriptions (for iterating and handling mixed ID types)
+pub fn get_rss_subscriptions() -> Vec<PodcastSubscription> {
     SUBSCRIPTIONS
         .read()
         .iter()
-        .filter_map(|s| s.podcast_id)
+        .filter(|s| s.is_rss())
+        .cloned()
         .collect()
 }
 
@@ -419,7 +464,7 @@ pub fn get_nostr_podcasts() -> Vec<String> {
 
 /// Check if subscribed to a feed/podcast
 pub fn is_subscribed(id: &str) -> bool {
-    SUBSCRIPTIONS.read().iter().any(|s| s.id() == id)
+    SUBSCRIPTIONS.read().iter().any(|s| s.id().as_deref() == Some(id))
 }
 
 /// Check if subscriptions have been loaded

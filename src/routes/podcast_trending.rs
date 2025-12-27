@@ -25,6 +25,9 @@ pub fn PodcastTrending() -> Element {
 
             // Wait for nostr client AND signer - NIP-98 auth requires both
             if !client_initialized || !has_signer {
+                // Not authenticated - clear loading state and show message
+                loading.set(false);
+                error.set(Some("Sign in to view trending podcasts".into()));
                 return;
             }
 

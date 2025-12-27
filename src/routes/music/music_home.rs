@@ -166,7 +166,9 @@ pub fn MusicHome() -> Element {
         let has_signer = nostr_client::has_signer();
 
         if !client_initialized || !has_signer {
-            // Not ready yet - will re-run when signals change
+            // Not authenticated - clear loading state and show message
+            rss_loading.set(false);
+            rss_error.set(Some("Sign in to browse RSS music".into()));
             return;
         }
 

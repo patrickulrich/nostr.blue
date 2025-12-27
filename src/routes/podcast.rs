@@ -987,8 +987,12 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
 
         rss_loading.set(true);
         spawn(async move {
-            let podcast_ids = podcast_subscription::get_rss_podcast_ids();
-            let podcast_ids_set: std::collections::HashSet<u64> = podcast_ids.iter().copied().collect();
+            let subscriptions = podcast_subscription::get_rss_subscriptions();
+            // Build a set of numeric IDs for live episode filtering
+            let podcast_ids_set: std::collections::HashSet<u64> = subscriptions
+                .iter()
+                .filter_map(|s| s.numeric_id())
+                .collect();
             let mut all_episodes = Vec::new();
 
             // Fetch live episodes first (filtered to subscribed podcasts)
@@ -1007,32 +1011,34 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
             }
 
             // Fetch regular episodes from subscriptions concurrently
-            // Create futures for each podcast to fetch feed + episodes in parallel
-            let fetch_futures: Vec<_> = podcast_ids.iter().take(20).map(|&podcast_id| {
+            // Handle both GUID-only and ID-cached subscriptions
+            let fetch_futures: Vec<_> = subscriptions.iter().take(20).map(|sub| {
+                let guid = sub.podcast_guid.clone();
+                let id = sub.numeric_id();
                 async move {
-                    // Fetch feed and episodes concurrently for this podcast
-                    let (feed_result, episodes_result) = futures::join!(
-                        podcast_index::get_podcast_by_id(podcast_id),
-                        podcast_index::get_episodes_by_feed_id(podcast_id, Some(5))
-                    );
+                    // Try by ID first (cached, more efficient), then by GUID
+                    let feed_result = if let Some(id) = id {
+                        podcast_index::get_podcast_by_id(id).await
+                    } else if let Some(ref guid) = guid {
+                        podcast_index::get_podcast_by_guid(guid).await
+                    } else {
+                        return None;
+                    };
 
-                    match (feed_result, episodes_result) {
-                        (Ok(feed), Ok(episodes)) => {
-                            let display_episodes: Vec<DisplayEpisode> = episodes
-                                .iter()
-                                .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
-                                .collect();
-                            Some(display_episodes)
-                        }
-                        (Err(e), _) => {
-                            log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
-                            None
-                        }
-                        (_, Err(e)) => {
-                            log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
-                            None
-                        }
-                    }
+                    let Ok(feed) = feed_result else {
+                        log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
+                        return None;
+                    };
+
+                    // Fetch episodes by feed ID (need the ID from the feed response)
+                    let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5)).await
+                        .unwrap_or_default();
+
+                    let display_episodes: Vec<DisplayEpisode> = episodes
+                        .iter()
+                        .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                        .collect();
+                    Some(display_episodes)
                 }
             }).collect();
 
@@ -2051,34 +2057,37 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
             rss_loading.set(true);
 
             spawn(async move {
-                let podcast_ids = podcast_subscription::get_rss_podcast_ids();
+                let subscriptions = podcast_subscription::get_rss_subscriptions();
 
                 // Fetch all podcasts and their episodes concurrently
-                let fetch_futures: Vec<_> = podcast_ids.iter().take(20).map(|&podcast_id| {
+                // Handle both GUID-only and ID-cached subscriptions
+                let fetch_futures: Vec<_> = subscriptions.iter().take(20).map(|sub| {
+                    let guid = sub.podcast_guid.clone();
+                    let id = sub.numeric_id();
                     async move {
-                        // Fetch feed and episodes concurrently for this podcast
-                        let (feed_result, episodes_result) = futures::join!(
-                            podcast_index::get_podcast_by_id(podcast_id),
-                            podcast_index::get_episodes_by_feed_id(podcast_id, Some(5))
-                        );
+                        // Try by ID first (cached, more efficient), then by GUID
+                        let feed_result = if let Some(id) = id {
+                            podcast_index::get_podcast_by_id(id).await
+                        } else if let Some(ref guid) = guid {
+                            podcast_index::get_podcast_by_guid(guid).await
+                        } else {
+                            return None;
+                        };
 
-                        match (feed_result, episodes_result) {
-                            (Ok(feed), Ok(episodes)) => {
-                                let display_episodes: Vec<DisplayEpisode> = episodes
-                                    .iter()
-                                    .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
-                                    .collect();
-                                Some(display_episodes)
-                            }
-                            (Err(e), _) => {
-                                log::warn!("Failed to fetch podcast {}: {}", podcast_id, e);
-                                None
-                            }
-                            (_, Err(e)) => {
-                                log::warn!("Failed to fetch episodes for {}: {}", podcast_id, e);
-                                None
-                            }
-                        }
+                        let Ok(feed) = feed_result else {
+                            log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
+                            return None;
+                        };
+
+                        // Fetch episodes by feed ID
+                        let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5)).await
+                            .unwrap_or_default();
+
+                        let display_episodes: Vec<DisplayEpisode> = episodes
+                            .iter()
+                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                            .collect();
+                        Some(display_episodes)
                     }
                 }).collect();
 
@@ -2240,9 +2249,14 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
 #[component]
 fn SubscribedFeedsSection() -> Element {
     let subscriptions = podcast_subscription::get_subscriptions();
-    let rss_feeds: Vec<_> = subscriptions.iter().filter(|s| s.is_rss()).collect();
+    // Filter RSS feeds and extract valid IDs (skip any with None id)
+    let rss_feed_ids: Vec<String> = subscriptions
+        .iter()
+        .filter(|s| s.is_rss())
+        .filter_map(|s| s.id())
+        .collect();
 
-    if rss_feeds.is_empty() {
+    if rss_feed_ids.is_empty() {
         return rsx! {
             div {
                 class: "bg-muted/30 rounded-lg p-4",
@@ -2266,14 +2280,14 @@ fn SubscribedFeedsSection() -> Element {
                 "Your Subscriptions"
                 span {
                     class: "text-xs text-muted-foreground font-normal ml-2",
-                    "({rss_feeds.len()} feeds)"
+                    "({rss_feed_ids.len()} feeds)"
                 }
             }
             div {
                 class: "grid gap-2",
-                for sub in rss_feeds {
+                for podcast_id in rss_feed_ids {
                     SubscribedFeedCard {
-                        podcast_id: sub.id()
+                        podcast_id: podcast_id
                     }
                 }
             }

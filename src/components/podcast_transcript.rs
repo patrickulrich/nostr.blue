@@ -209,46 +209,47 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     // Track previous current_idx to detect changes - use a non-reactive cell to avoid loops
     let prev_idx = use_hook(|| std::cell::RefCell::new(None::<usize>));
 
-    // Find current cue index
+    // Signal to track current cue index (effect subscribes to this for reactivity)
+    let mut current_idx_signal = use_signal(|| None::<usize>);
+
+    // Find current cue index and update signal if changed
     let current_idx = find_current_cue(&props.cues, props.current_time);
+    if current_idx != *current_idx_signal.peek() {
+        current_idx_signal.set(current_idx);
+    }
 
-    // Clone cues for the memo closure (avoids signal sync overhead)
-    let cues_for_filter = props.cues.clone();
-    let cues_len = cues_for_filter.len();
-
-    // Filter cues by search query - memoized for performance with large transcripts
-    let filtered_indices = use_memo(move || {
-        let search_text = search_query.read().to_lowercase();
-        if search_text.is_empty() {
-            (0..cues_len).collect::<Vec<usize>>()
-        } else {
-            cues_for_filter.iter().enumerate()
-                .filter(|(_, cue)| {
-                    cue.text.to_lowercase().contains(&search_text) ||
-                    cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
-                })
-                .map(|(idx, _)| idx)
-                .collect::<Vec<usize>>()
-        }
-    });
-
+    // Compute filtered indices directly during render
+    // (reads current props.cues and search_query - updates when either changes)
     let search_text = search_query.read().to_lowercase();
+    let filtered_indices: Vec<usize> = if search_text.is_empty() {
+        (0..props.cues.len()).collect()
+    } else {
+        props.cues.iter().enumerate()
+            .filter(|(_, cue)| {
+                cue.text.to_lowercase().contains(&search_text) ||
+                cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    };
+
     let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
 
     // Auto-scroll effect - scroll current cue into view
-    // Only reads auto_scroll_enabled (not prev_idx) to avoid reactive loops
+    // Subscribes to both auto_scroll_enabled and current_idx_signal
     use_effect(move || {
         let auto_scroll = *auto_scroll_enabled.read();
+        let current = *current_idx_signal.read(); // Subscribe to current_idx changes
 
-        // Get previous without reactive subscription
+        // Get previous without reactive subscription (use peek to avoid extra subscription)
         let previous = *prev_idx.borrow();
 
         // Only scroll if auto-scroll is enabled and index changed
-        if auto_scroll && current_idx != previous {
+        if auto_scroll && current != previous {
             // Update previous index (non-reactive)
-            *prev_idx.borrow_mut() = current_idx;
+            *prev_idx.borrow_mut() = current;
 
-            if let Some(idx) = current_idx {
+            if let Some(idx) = current {
                 // Use JavaScript to scroll the element into view
                 // Note: document::eval returns Eval (async), errors handled internally by Dioxus
                 let _ = document::eval(&format!(
