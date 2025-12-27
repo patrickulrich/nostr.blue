@@ -23,6 +23,7 @@ use crate::utils::nip54::{parse_wiki_article, WikiArticle};
 use crate::utils::nip58::{parse_badge_definition, BadgeDefinition};
 use crate::utils::nip99::{parse_product, parse_collection, parse_review, Product, ProductCollection, ProductReview};
 use crate::utils::nkbip03::{parse_citation, Citation};
+use crate::utils::markdown::sanitize_html;
 use crate::components::citation::card::get_citation_style;
 use crate::utils::recipe::{is_recipe_event, extract_metadata as extract_recipe_metadata, RecipeMetadata};
 use crate::stores::nostr_music::{parse_track_event, parse_playlist_event, NostrTrack, NostrPlaylist};
@@ -3656,6 +3657,8 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                 let secs = d % 60;
                 format!("{:02}:{:02}", mins, secs)
             });
+            // Sanitize description to prevent XSS from external podcast feeds
+            let safe_desc = episode.description.as_ref().map(|d| sanitize_html(d));
 
             rsx! {
                 div {
@@ -3695,7 +3698,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                                     "{feed_title}"
                                 }
                             }
-                            if let Some(ref desc) = episode.description {
+                            if let Some(ref desc) = safe_desc {
                                 div {
                                     class: "text-xs text-muted-foreground/80 truncate mt-1",
                                     dangerous_inner_html: "{desc}"

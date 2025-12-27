@@ -665,7 +665,7 @@ fn Layout() -> Element {
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
-    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
+    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicRssAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
     let is_podcast_page = matches!(current_route, Route::PodcastHome {} | Route::PodcastTrending {} | Route::PodcastNostrDetail { .. } | Route::PodcastRssFeedDetail { .. } | Route::PodcastNostrEpisodeDetail { .. } | Route::PodcastRssEpisodeDetail { .. });
     let is_nips_page = matches!(current_route, Route::NipsHome {} | Route::NipDetail { .. } | Route::NipNew {});
     let is_badges_page = matches!(current_route, Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {});
@@ -1277,6 +1277,7 @@ fn NavLink(
         (Route::MusicHome {}, Route::MusicSearch { .. }) |
         (Route::MusicHome {}, Route::MusicArtist { .. }) |
         (Route::MusicHome {}, Route::MusicAlbum { .. }) |
+        (Route::MusicHome {}, Route::MusicRssAlbum { .. }) |
         (Route::MusicHome {}, Route::MusicTrackNew {}) |
         (Route::MusicHome {}, Route::MusicPlaylistNew {}) |
         (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,

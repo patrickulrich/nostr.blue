@@ -9,10 +9,12 @@
 use dioxus::prelude::*;
 use crate::components::{
     PodcastEpisodeList, DisplayEpisode, icons,
+    ContentShareModal, ContentType,
 };
 use crate::routes::Route;
 use crate::services::podcast_index::{self, PodcastFeed, Episode};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
+use crate::utils::markdown::sanitize_html;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastRssFeedDetailProps {
@@ -124,6 +126,7 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let feed = &props.feed;
     let podcast_id = props.podcast_id;
     let auth = auth_store::AUTH_STATE.read();
+    let mut show_share_modal = use_signal(|| false);
 
     // Image URL with fallback
     let image_url = feed.get_image()
@@ -149,6 +152,9 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
         .as_ref()
         .map(|cats| cats.values().cloned().collect())
         .unwrap_or_default();
+
+    // Sanitize description to prevent XSS from external podcast feeds
+    let safe_description = feed.description.as_ref().map(|d| sanitize_html(d));
 
     rsx! {
         div {
@@ -311,14 +317,26 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                         button {
                             class: "p-2 hover:bg-muted rounded-full transition",
                             title: "Share",
+                            onclick: move |_| show_share_modal.set(true),
                             dangerous_inner_html: icons::SHARE
                         }
                     }
                 }
             }
 
+            // Share modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: feed.title.clone(),
+                    url: format!("https://nostr.blue/podcast/rss/{}", podcast_id),
+                    content_type: ContentType::Podcast,
+                    image_url: feed.get_image().map(String::from),
+                    on_close: move |_| show_share_modal.set(false)
+                }
+            }
+
             // Description
-            if let Some(ref desc) = feed.description {
+            if let Some(ref desc) = safe_description {
                 div {
                     class: "px-6 py-4 border-b border-border",
                     div {

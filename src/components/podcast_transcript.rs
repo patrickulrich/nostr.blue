@@ -201,7 +201,6 @@ struct TranscriptViewProps {
 fn TranscriptView(props: TranscriptViewProps) -> Element {
     // Auto-scroll state
     let mut auto_scroll_enabled = use_signal(|| true);
-    let mut user_scrolled = use_signal(|| false);
 
     // Search state
     let mut search_query = use_signal(String::new);
@@ -230,7 +229,7 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
 
     // Auto-scroll effect - scroll current cue into view
-    // Only reads auto_scroll_enabled (not prev_idx or user_scrolled) to avoid reactive loops
+    // Only reads auto_scroll_enabled (not prev_idx) to avoid reactive loops
     use_effect(move || {
         let auto_scroll = *auto_scroll_enabled.read();
 
@@ -372,12 +371,6 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
             // Transcript cues
             div {
                 class: "{max_height} overflow-y-auto space-y-1 pr-2 scrollbar-thin scrollbar-thumb-muted",
-                onscroll: move |_| {
-                    // User manually scrolled - temporarily disable auto-scroll
-                    if *auto_scroll_enabled.read() {
-                        user_scrolled.set(true);
-                    }
-                },
 
                 if search_text.is_empty() {
                     // Show all cues
@@ -553,26 +546,48 @@ fn HighlightedText(props: HighlightedTextProps) -> Element {
         };
     }
 
-    let text_lower = props.text.to_lowercase();
-    let highlight_lower = props.highlight.to_lowercase();
+    // Use character-based matching to avoid UTF-8 boundary issues
+    // Lowercasing can change byte lengths for certain Unicode chars
+    let text_chars: Vec<char> = props.text.chars().collect();
+    let text_lower_chars: Vec<char> = props.text.to_lowercase().chars().collect();
+    let highlight_lower_chars: Vec<char> = props.highlight.to_lowercase().chars().collect();
+    let highlight_len = highlight_lower_chars.len();
 
-    // Split text into parts, highlighting matches
+    // Build a mapping from char index to byte offset in original text
+    let char_to_byte: Vec<usize> = props.text
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(props.text.len()))
+        .collect();
+
+    // Find matches using character indices
     let mut parts = Vec::new();
-    let mut last_end = 0;
+    let mut last_char_end = 0;
+    let mut char_idx = 0;
 
-    for (start, _) in text_lower.match_indices(&highlight_lower) {
-        if start > last_end {
-            // Non-matching part
-            parts.push((props.text[last_end..start].to_string(), false));
+    while char_idx + highlight_len <= text_lower_chars.len() {
+        if text_lower_chars[char_idx..char_idx + highlight_len] == highlight_lower_chars[..] {
+            // Found a match
+            if char_idx > last_char_end {
+                // Non-matching part before this match
+                let start_byte = char_to_byte[last_char_end];
+                let end_byte = char_to_byte[char_idx];
+                parts.push((props.text[start_byte..end_byte].to_string(), false));
+            }
+            // Matching part (use original chars from text)
+            let match_str: String = text_chars[char_idx..char_idx + highlight_len].iter().collect();
+            parts.push((match_str, true));
+            last_char_end = char_idx + highlight_len;
+            char_idx = last_char_end;
+        } else {
+            char_idx += 1;
         }
-        // Matching part (use original case from text)
-        parts.push((props.text[start..start + props.highlight.len()].to_string(), true));
-        last_end = start + props.highlight.len();
     }
 
     // Remaining text
-    if last_end < props.text.len() {
-        parts.push((props.text[last_end..].to_string(), false));
+    if last_char_end < text_chars.len() {
+        let start_byte = char_to_byte[last_char_end];
+        parts.push((props.text[start_byte..].to_string(), false));
     }
 
     rsx! {
