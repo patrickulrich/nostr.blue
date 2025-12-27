@@ -224,18 +224,30 @@ pub fn PersistentMusicPlayer() -> Element {
         });
     });
 
-    // Poll for HLS now-playing metadata (for live streams)
+    // Memoize is_live to prevent effect re-running on every render
+    let is_live = use_memo(move || {
+        MUSIC_PLAYER.read().current_track.as_ref().map(|t| t.is_live_stream).unwrap_or(false)
+    });
+
+    // Clear now playing when switching away from live stream
+    // Only clear if there's actually something to clear (avoid re-render loop)
     use_effect(move || {
-        let is_live = MUSIC_PLAYER.read().current_track.as_ref().map(|t| t.is_live_stream).unwrap_or(false);
-
-        if !is_live {
-            // Clear now playing if not a live stream
+        if !is_live() && MUSIC_PLAYER.read().now_playing.is_some() {
             music_player::clear_now_playing();
-            return;
         }
+    });
 
-        // Set up interval to poll for HLS metadata
-        let interval_id = gloo_timers::callback::Interval::new(2000, move || {
+    // Poll for HLS now-playing metadata (for live streams) using a coroutine
+    let _now_playing_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
+        loop {
+            // Wait 2 seconds between checks
+            gloo_timers::future::TimeoutFuture::new(2000).await;
+
+            // Only poll when playing a live stream
+            if !is_live() {
+                continue;
+            }
+
             // Read hlsManager.nowPlaying from JavaScript
             let result = eval(r#"
                 (function() {
@@ -255,11 +267,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     }
                 }
             }
-        });
-
-        // Keep interval alive by moving it into the effect cleanup
-        // The interval will be dropped when the effect re-runs or component unmounts
-        std::mem::forget(interval_id);
+        }
     });
 
     // Don't render if player is not visible

@@ -84,6 +84,11 @@ pub fn RadioStationNew() -> Element {
     }
 
     let mut handle_submit = move |_| {
+        // Guard against double submission
+        if *is_submitting.read() {
+            return;
+        }
+
         let name_val = name.read().clone();
         let description_val = description.read().clone();
         let thumbnail_val = thumbnail_url.read().clone();

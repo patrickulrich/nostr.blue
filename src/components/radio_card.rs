@@ -51,6 +51,10 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
             // Otherwise, play this station
             // Get ranked stream URLs for fallback logic
             let ranked_streams = get_ranked_stream_urls(&station.streams);
+            if ranked_streams.is_empty() {
+                log::warn!("Station has no available streams: {}", station.name);
+                return;
+            }
             music_player::set_available_streams(ranked_streams);
 
             let music_track: MusicTrack = station.clone().into();

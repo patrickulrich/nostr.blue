@@ -7,6 +7,7 @@ window.hlsManager = window.hlsManager || {
     hlsLoaded: false,
     hlsLoading: null,
     nowPlaying: null, // Current HLS metadata {title, artist}
+    nowPlayingAudioId: null, // Track which audio element owns nowPlaying
 
     /**
      * Lazy load hls.js from CDN
@@ -45,7 +46,7 @@ window.hlsManager = window.hlsManager || {
      * Check if URL is an HLS stream
      */
     isHlsUrl(url) {
-        return url && (url.includes('.m3u8') || url.includes('application/x-mpegURL'));
+        return url && url.includes('.m3u8');
     },
 
     /**
@@ -146,6 +147,7 @@ window.hlsManager = window.hlsManager || {
                         const frames = this.parseId3(sample.data);
                         if (frames && (frames.TIT2 || frames.TPE1)) {
                             // Store in hlsManager for polling from Rust
+                            this.nowPlayingAudioId = audioId;
                             this.nowPlaying = {
                                 title: frames.TIT2 || null,
                                 artist: frames.TPE1 || null
@@ -163,6 +165,7 @@ window.hlsManager = window.hlsManager || {
                         }
                     } catch (e) {
                         // ID3 parsing errors are non-fatal
+                        console.debug('[HLS Manager] ID3 parsing error:', e);
                     }
                 });
             });
@@ -179,8 +182,11 @@ window.hlsManager = window.hlsManager || {
             hls.destroy();
             this.instances.delete(audioId);
         }
-        // Clear now playing metadata
-        this.nowPlaying = null;
+        // Clear now playing metadata only if this audio owned it
+        if (this.nowPlayingAudioId === audioId) {
+            this.nowPlaying = null;
+            this.nowPlayingAudioId = null;
+        }
     },
 
     /**
@@ -220,14 +226,26 @@ window.hlsManager = window.hlsManager || {
         const id3 = String.fromCharCode(data[0], data[1], data[2]);
         if (id3 !== 'ID3') return null;
 
+        // Get ID3 version (byte 3 is major version: 3 for ID3v2.3, 4 for ID3v2.4)
+        const majorVersion = data[3];
+
         let offset = 10; // Skip ID3 header
 
         while (offset < data.length - 10) {
             const frameId = String.fromCharCode(data[offset], data[offset + 1], data[offset + 2], data[offset + 3]);
             if (frameId === '\0\0\0\0') break;
 
-            // ID3v2.3+ frame size (syncsafe for v2.4)
-            const size = (data[offset + 4] << 24) | (data[offset + 5] << 16) | (data[offset + 6] << 8) | data[offset + 7];
+            // ID3v2.4 uses syncsafe integers (7 bits per byte), v2.3 uses regular integers
+            let size;
+            if (majorVersion >= 4) {
+                // Syncsafe: 7 bits per byte
+                size = ((data[offset + 4] & 0x7f) << 21) |
+                       ((data[offset + 5] & 0x7f) << 14) |
+                       ((data[offset + 6] & 0x7f) << 7) |
+                       (data[offset + 7] & 0x7f);
+            } else {
+                size = (data[offset + 4] << 24) | (data[offset + 5] << 16) | (data[offset + 6] << 8) | data[offset + 7];
+            }
             if (size <= 0 || size > data.length - offset) break;
 
             offset += 10; // Skip frame header
@@ -239,8 +257,9 @@ window.hlsManager = window.hlsManager || {
 
                 let text = '';
                 if (encoding === 0 || encoding === 3) {
-                    // ISO-8859-1 or UTF-8
-                    text = new TextDecoder('utf-8').decode(textData);
+                    // encoding 0 = ISO-8859-1, encoding 3 = UTF-8
+                    const charset = encoding === 0 ? 'iso-8859-1' : 'utf-8';
+                    text = new TextDecoder(charset).decode(textData);
                 } else if (encoding === 1) {
                     // UTF-16 with BOM
                     text = new TextDecoder('utf-16').decode(textData);

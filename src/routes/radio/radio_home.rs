@@ -22,12 +22,15 @@ pub fn RadioHome() -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_input = use_signal(String::new);
     let mut is_searching = use_signal(|| false);
+    let mut refetch_trigger = use_signal(|| 0u32);
 
     let is_logged_in = auth_store::get_pubkey().is_some();
 
     // Fetch stations when client is initialized and genre/search changes
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        // Subscribe to refetch trigger for manual retry
+        let _ = refetch_trigger.read();
 
         if !client_initialized {
             return;
@@ -247,9 +250,8 @@ pub fn RadioHome() -> Element {
                         button {
                             class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                             onclick: move |_| {
-                                // Trigger refetch by toggling genre
-                                let current = selected_genre.read().clone();
-                                selected_genre.set(current);
+                                // Trigger refetch by incrementing trigger signal
+                                refetch_trigger.set(refetch_trigger() + 1);
                             },
                             "Try Again"
                         }
