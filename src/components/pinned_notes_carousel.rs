@@ -3,6 +3,7 @@ use nostr_sdk::Event as NostrEvent;
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::time::format_relative_time;
+use crate::utils::truncate_pubkey;
 use crate::components::icons::PinIcon;
 
 /// Props for the PinnedNotesCarousel component
@@ -65,7 +66,7 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
 
     let author_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &author_pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     // Truncate content for preview (first 150 chars, UTF-8 safe)
     let preview_content = if content.chars().count() > 150 {

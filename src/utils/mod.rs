@@ -3,7 +3,9 @@
 
 pub mod nip19;
 pub mod nip49;  // NIP-49 Private key encryption
+pub mod nip98;  // NIP-98 HTTP Auth
 pub mod time;
+pub mod duration;  // Duration formatting utilities
 pub mod validation;
 pub mod error;
 pub mod content_parser;

@@ -4,6 +4,7 @@ use crate::stores::{auth_store, dms, mdk_store, nostr_client, profiles};
 use crate::stores::dms::ConversationMessage;
 use crate::routes::Route;
 use crate::utils::time;
+use crate::utils::truncate_pubkey;
 use wasm_bindgen::prelude::*;
 
 /// Tab selection for DMs view
@@ -799,7 +800,7 @@ fn NewMlsGroupComposer(
                         }
                         for (index, member) in members.read().iter().enumerate() {
                             {
-                                let member_display = format!("{}...{}", &member[..8], &member[member.len()-8..]);
+                                let member_display = truncate_pubkey(member);
                                 rsx! {
                                     div {
                                         key: "{member}",
@@ -1211,9 +1212,7 @@ fn ConversationListItem(
 
     let display_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...{}",
-            &conversation.pubkey[..8],
-            &conversation.pubkey[conversation.pubkey.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&conversation.pubkey));
 
     let avatar_url = profile.read().as_ref()
         .map(|p| p.get_avatar_url())
@@ -1444,9 +1443,7 @@ fn ConversationView(pubkey: String) -> Element {
 
     let display_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...{}",
-            &pubkey_for_display[..8],
-            &pubkey_for_display[pubkey_for_display.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey_for_display));
 
     let avatar_url = profile.read().as_ref()
         .map(|p| p.get_avatar_url())

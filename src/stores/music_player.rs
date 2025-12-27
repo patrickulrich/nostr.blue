@@ -4,6 +4,7 @@ use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
+use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::nostr_music::{TrackSource, NostrTrack, KIND_MUSIC_TRACK};
 use nostr_sdk::{EventBuilder, Timestamp, Kind, Tag, TagKind};
@@ -129,9 +130,9 @@ impl MusicTrack {
                 }
                 None
             }
-            TrackSource::RssPodcast { feed_url, .. } => {
-                Some(Route::PodcastRssFeedDetail {
-                    feed_url: urlencoding::encode(feed_url).to_string()
+            TrackSource::RssPodcast { podcast_id, .. } => {
+                podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string()
                 })
             }
             TrackSource::Wavlake { artist_id, .. } => {
@@ -157,14 +158,65 @@ impl MusicTrack {
                 }
                 None
             }
-            TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
-                Some(Route::PodcastRssEpisodeDetail {
-                    podcast_id: urlencoding::encode(feed_url).to_string(),
+            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
+                podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                    podcast_id: id.to_string(),
                     episode_id: urlencoding::encode(episode_guid).to_string(),
                 })
             }
             // For music tracks, we could link to a track detail page in the future
             _ => None,
+        }
+    }
+
+    /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
+    pub fn from_rss_music_track(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+        // Convert podcast_index::ValueBlock to utils::podcast::ValueBlock
+        let value_block = episode.value.as_ref()
+            .or(feed.value.as_ref())
+            .map(|v| {
+                let model = v.model.as_ref();
+                crate::utils::podcast::ValueBlock {
+                    value_type: model.and_then(|m| m.model_type.clone()).unwrap_or_else(|| "lightning".to_string()),
+                    method: model.and_then(|m| m.method.clone()).unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model.and_then(|m| m.suggested.as_ref()).and_then(|s| s.parse().ok()),
+                    recipients: v.destinations.iter().map(|d| crate::utils::podcast::ValueRecipient {
+                        name: d.name.clone(),
+                        recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                        address: d.address.clone().unwrap_or_default(),
+                        custom_key: None,
+                        custom_value: None,
+                        split: d.split.unwrap_or(100),
+                        fee: None,
+                    }).collect(),
+                }
+            });
+
+        Self {
+            id: episode.id.to_string(),
+            title: episode.title.clone(),
+            artist: feed.author.clone().unwrap_or_else(|| feed.title.clone()),
+            album: Some(feed.title.clone()),
+            media_url: episode.enclosure_url.clone().unwrap_or_default(),
+            album_art_url: episode.get_image().or(feed.get_image()).map(String::from),
+            artist_art_url: feed.get_image().map(String::from),
+            duration: episode.duration.map(|d| d as u32),
+            artist_id: None,
+            album_id: None,
+            artist_npub: None,
+            source: TrackSource::RssMusic {
+                feed_id: feed.id,
+                feed_url: feed.url.clone(),
+                episode_id: episode.id,
+                album_title: feed.title.clone(),
+                artist: feed.author.clone(),
+            },
+            msat_total: None,
+            created_at: episode.date_published.map(|d| d as u64),
+            is_podcast: false, // This is music, not podcast
+            value_block,
+            chapters_url: episode.chapters_url.clone(),
+            transcripts: Vec::new(),
         }
     }
 }
@@ -310,6 +362,10 @@ async fn publish_music_status(track: &MusicTrack) {
             // Link to RSS podcast episode (encode feed_url)
             format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
                 urlencoding::encode(feed_url), urlencoding::encode(episode_guid))
+        }
+        TrackSource::RssMusic { feed_id, .. } => {
+            // Link to RSS music album
+            format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
     };
 
@@ -681,6 +737,14 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
             tags.push(Tag::custom(TagKind::custom("episode_guid"), vec![episode_guid.clone()]));
 
             log::debug!("Voting for RSS podcast episode: {}", episode_guid);
+        }
+        TrackSource::RssMusic { feed_url, episode_id, .. } => {
+            // Use r-tag with feed URL and episode ID for RSS music tracks
+            tags.push(Tag::custom(TagKind::custom("r"), vec![feed_url.clone()]));
+            tags.push(Tag::custom(TagKind::custom("k"), vec!["rss-music".to_string()]));
+            tags.push(Tag::custom(TagKind::custom("episode_id"), vec![episode_id.to_string()]));
+
+            log::debug!("Voting for RSS music track: {}", episode_id);
         }
     }
 

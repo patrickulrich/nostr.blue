@@ -8,7 +8,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::{fetch_pull_request, fetch_pr_comments_by_id, publish_pr_comment_by_id, update_pr_status_by_id};
 use crate::utils::nip34::{PullRequest, GitComment, IssueStatus};
 use crate::utils::format_relative_time_or;
-use crate::utils::format::truncate_commit;
+use crate::utils::format::{truncate_commit, truncate_pubkey};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 
@@ -471,7 +471,7 @@ fn CommentCard(comment: GitComment) -> Element {
     let author_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &comment.pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
 
     rsx! {
         div {

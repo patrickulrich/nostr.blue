@@ -13,6 +13,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::format::truncate_pubkey;
 
 // nostr 0.43 types for MDK (renamed import)
 use nostr_mdk::JsonUtil as MdkJsonUtil;
@@ -313,7 +314,7 @@ pub async fn create_mls_group(
             Err(e) => {
                 log::warn!("Could not fetch key package for {}: {}", pk_str, e);
                 // Track members who don't have key packages
-                let display = format!("{}...{}", &pk_str[..8], &pk_str[pk_str.len()-8..]);
+                let display = truncate_pubkey(pk_str);
                 members_without_keypackage.push(display);
             }
         }

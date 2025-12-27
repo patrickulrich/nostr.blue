@@ -12,6 +12,7 @@ use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::utils::podcast::{PodcastEpisode, ValueBlock, TranscriptRef, Soundbite, Person};
 use crate::services::podcast_rss::{RssEpisode, RssPodcast, format_duration};
+use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::components::icons;
 use crate::routes::Route;
 
@@ -56,6 +57,8 @@ pub struct DisplayEpisode {
     pub soundbites: Vec<Soundbite>,
     /// Episode-level persons/guests
     pub persons: Vec<Person>,
+    /// Whether this is a live streaming episode
+    pub is_live: bool,
 }
 
 impl DisplayEpisode {
@@ -90,6 +93,7 @@ impl DisplayEpisode {
             transcripts: episode.transcripts.clone(),
             soundbites: episode.soundbites.clone(),
             persons: Vec::new(), // Nostr podcasts don't have persons at episode level yet
+            is_live: false,
         }
     }
 
@@ -117,6 +121,7 @@ impl DisplayEpisode {
             podcast_image: podcast.image.clone(),
             source: TrackSource::RssPodcast {
                 feed_url: podcast.feed_url.clone(),
+                podcast_id: None, // TODO: Pass podcast_id when available
                 episode_guid: episode.guid.clone(),
                 podcast_title: podcast.title.clone(),
             },
@@ -125,7 +130,105 @@ impl DisplayEpisode {
             transcripts: episode.transcripts.clone(),
             soundbites: episode.soundbites.clone(),
             persons: episode.persons.clone(),
+            is_live: false,
         }
+    }
+
+    /// Create from Podcast Index API episode
+    pub fn from_podcast_index_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+        // Convert timestamp to created_at
+        let created_at = episode.date_published.unwrap_or(0) as u64;
+
+        // Format publication date
+        let pub_date = episode.date_published.map(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.format("%b %d, %Y").to_string())
+                .unwrap_or_else(|| "Unknown date".to_string())
+        });
+
+        // Convert transcripts (filter out invalid ones)
+        let transcripts: Vec<TranscriptRef> = episode.transcripts.iter()
+            .filter_map(|t| {
+                let url = t.url.clone()?;
+                Some(TranscriptRef {
+                    url,
+                    transcript_type: t.transcript_type.clone().unwrap_or_else(|| "text/plain".to_string()),
+                    language: None,
+                    rel: None,
+                })
+            })
+            .collect();
+
+        // Convert soundbites (filter out invalid ones)
+        let soundbites: Vec<Soundbite> = episode.soundbites.iter()
+            .filter_map(|s| {
+                Some(Soundbite {
+                    start_time: s.start_time?,
+                    duration: s.duration?,
+                    title: s.title.clone(),
+                })
+            })
+            .collect();
+
+        Self {
+            id: episode.id.to_string(),
+            title: episode.title.clone(),
+            description: episode.description.clone(),
+            image: episode.get_image().map(|s| s.to_string()),
+            audio_url: episode.enclosure_url.clone().unwrap_or_default(),
+            duration: episode.duration,
+            pub_date,
+            created_at,
+            season: episode.season,
+            episode_number: episode.episode,
+            chapters_url: episode.chapters_url.clone(),
+            has_transcript: !episode.transcripts.is_empty(),
+            podcast_title: feed.title.clone(),
+            podcast_image: feed.get_image().map(|s| s.to_string()),
+            source: TrackSource::RssPodcast {
+                feed_url: feed.url.clone(),
+                podcast_id: Some(feed.id),
+                episode_guid: episode.id.to_string(),
+                podcast_title: feed.title.clone(),
+            },
+            // Episode-level V4V overrides podcast-level
+            // Convert podcast_index::ValueBlock to utils::podcast::ValueBlock
+            value: episode.value.as_ref()
+                .or(feed.value.as_ref())
+                .map(|v| {
+                    let model = v.model.as_ref();
+                    crate::utils::podcast::ValueBlock {
+                        value_type: model.and_then(|m| m.model_type.clone()).unwrap_or_else(|| "lightning".to_string()),
+                        method: model.and_then(|m| m.method.clone()).unwrap_or_else(|| "keysend".to_string()),
+                        suggested: model.and_then(|m| m.suggested.as_ref()).and_then(|s| s.parse().ok()),
+                        recipients: v.destinations.iter().map(|d| crate::utils::podcast::ValueRecipient {
+                            name: d.name.clone(),
+                            recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                            address: d.address.clone().unwrap_or_default(),
+                            custom_key: None,
+                            custom_value: None,
+                            split: d.split.unwrap_or(100),
+                            fee: None,
+                        }).collect(),
+                    }
+                }),
+            transcripts,
+            soundbites,
+            persons: Vec::new(), // Podcast Index API doesn't return persons
+            is_live: false,
+        }
+    }
+
+    /// Create from Podcast Index API live episode
+    pub fn from_podcast_index_live_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+        let mut ep = Self::from_podcast_index_episode(episode, feed);
+        ep.is_live = true;
+        // For live episodes, use current time as created_at to sort to top
+        ep.created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        ep
     }
 
     /// Convert to MusicTrack for player
@@ -168,9 +271,9 @@ impl DisplayEpisode {
                 }
                 None
             }
-            TrackSource::RssPodcast { feed_url, .. } => {
-                Some(Route::PodcastRssFeedDetail {
-                    feed_url: urlencoding::encode(feed_url).to_string()
+            TrackSource::RssPodcast { podcast_id, .. } => {
+                podcast_id.map(|id| Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string()
                 })
             }
             _ => None,
@@ -193,9 +296,9 @@ impl DisplayEpisode {
                 }
                 None
             }
-            TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
-                Some(Route::PodcastRssEpisodeDetail {
-                    podcast_id: urlencoding::encode(feed_url).to_string(),
+            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
+                podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                    podcast_id: id.to_string(),
                     episode_id: urlencoding::encode(episode_guid).to_string(),
                 })
             }
@@ -311,6 +414,17 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
                 div {
                     class: "absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold {source_badge.1}",
                     "{source_badge.0}"
+                }
+
+                // Live badge
+                if episode.is_live {
+                    div {
+                        class: "absolute -top-1 -left-1 px-1.5 py-0.5 rounded flex items-center gap-1 bg-red-600 text-white text-[9px] font-bold uppercase",
+                        span {
+                            class: "w-1.5 h-1.5 rounded-full bg-white animate-pulse"
+                        }
+                        "Live"
+                    }
                 }
 
                 // Play button overlay

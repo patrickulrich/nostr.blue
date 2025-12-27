@@ -10,6 +10,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, profiles};
 use crate::utils::nip58::{self, BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
+use crate::utils::truncate_pubkey;
 
 /// Badge detail page component
 #[component]
@@ -101,7 +102,7 @@ pub fn BadgeDetail(naddr: String) -> Element {
     let (issuer_display_name, created_timestamp) = if let Some(ref b) = badge_data {
         let name = issuer_name
             .clone()
-            .unwrap_or_else(|| format!("{}...", &b.pubkey[..8]));
+            .unwrap_or_else(|| truncate_pubkey(&b.pubkey));
         let ts = Timestamp::from(b.created_at);
         (name, ts)
     } else {

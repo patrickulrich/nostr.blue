@@ -8,6 +8,7 @@ use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
 use crate::components::recipe_tag_chip::RecipeTagChipSmall;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use crate::utils::truncate_pubkey;
 
 /// Recipe card for grid display
 #[component]
@@ -37,13 +38,7 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
     // Get display name from metadata or fallback
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());

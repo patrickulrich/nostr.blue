@@ -11,6 +11,7 @@ use crate::utils::nip52::{RsvpStatus, is_online_location};
 use crate::utils::nip53::{RoomPresence, LiveActivityEvent};
 use crate::utils::ics::{export_event_to_ics, download_ics};
 use crate::components::ClientInitializing;
+use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
@@ -666,7 +667,7 @@ fn OrganizerCard(pubkey: String) -> Element {
         .ok()
         .and_then(|pk| nostr::nips::nip19::ToBech32::to_bech32(&pk).ok())
         .map(|s| format!("{}...{}", &s[..12], &s[s.len()-8..]))
-        .unwrap_or_else(|| format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
     rsx! {
         Link {

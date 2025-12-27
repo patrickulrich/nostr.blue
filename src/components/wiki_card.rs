@@ -11,6 +11,7 @@ use crate::components::asciidoc_content::AsciiDocPreview;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::asciidoc::content_to_plain_text;
+use crate::utils::truncate_pubkey;
 
 /// Wiki page card for feed display
 #[component]
@@ -23,7 +24,7 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
     let author_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &author_hex[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&author_hex));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
 
     let identifier = page.article.identifier.clone();
@@ -290,7 +291,7 @@ pub fn WikiMetadataCard(metadata: WikiMetadata) -> Element {
     let author_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &metadata.author_pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&metadata.author_pubkey));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
 
     rsx! {

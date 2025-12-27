@@ -108,16 +108,23 @@ pub fn CommentComposer(
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
         let pos = *cursor_position.read();
-        
-        // Ensure position is valid
-        let pos = pos.min(current.len());
-        
+
+        // Ensure position is valid and at UTF-8 character boundary
+        let pos = if pos > current.len() {
+            current.len()
+        } else if !current.is_char_boundary(pos) {
+            // Find the nearest valid boundary (round down)
+            (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+        } else {
+            pos
+        };
+
         // Insert text
         current.insert_str(pos, &text);
-        
+
         // Update content
         content.set(current);
-        
+
         // Update cursor position to be after inserted text
         cursor_position.set(pos + text.len());
     };
@@ -134,11 +141,13 @@ pub fn CommentComposer(
         {
             let current = content.read();
             let pos = *cursor_position.read();
-            // pos is a UTF-8 byte index, so slice to that position and get the last char
-            if pos > 0 && pos <= current.len() {
-                if let Some(prev_char) = current[..pos].chars().last() {
-                    if !prev_char.is_whitespace() {
-                        url_with_space.insert(0, ' ');
+            // pos is a UTF-8 byte index - use safe slicing to avoid panic on invalid boundaries
+            if pos > 0 {
+                if let Some(slice) = current.get(..pos) {
+                    if let Some(prev_char) = slice.chars().last() {
+                        if !prev_char.is_whitespace() {
+                            url_with_space.insert(0, ' ');
+                        }
                     }
                 }
             }

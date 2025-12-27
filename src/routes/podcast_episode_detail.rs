@@ -13,6 +13,7 @@ use crate::components::{
     icons, PodcastChapters, DisplayEpisode,
     PodcastTranscript, PodcastSoundbites, FeaturedSoundbite,
     PodcastPersons, InlineCredits, V4VInfo, V4VBoostButton,
+    ContentShareModal, ContentType,
 };
 use crate::routes::Route;
 use crate::stores::{nostr_client, auth_store, music_player};
@@ -117,11 +118,21 @@ pub fn PodcastRssEpisodeDetail(props: PodcastRssEpisodeDetailProps) -> Element {
     let podcast_id = props.podcast_id.clone();
     let episode_id = props.episode_id.clone();
 
-    // Fetch episode data
+    // Fetch episode data - wait for authentication since Podcast Index API requires NIP-98
     let episode_data = use_resource(move || {
         let podcast_id = podcast_id.clone();
         let episode_id = episode_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = nostr_client::has_signer();
         async move {
+            // Wait for nostr client AND signer - NIP-98 auth requires a signer
+            if !client_initialized {
+                return Err("Waiting for client initialization...".to_string());
+            }
+            if !has_signer {
+                return Err("Please sign in to view episode details.".to_string());
+            }
+
             fetch_rss_episode(&podcast_id, &episode_id).await
         }
     });
@@ -203,7 +214,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let player_state = music_player::MUSIC_PLAYER.read();
 
     let mut show_chapters = use_signal(|| true);
-    let mut copied_share = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
 
     // Check if this episode is currently playing
     let is_current_track = player_state.current_track.as_ref()
@@ -400,41 +411,27 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                     }
                                 }
 
-                                // Share/Copy button
+                                // Share button
                                 button {
-                                    class: if *copied_share.read() {
-                                        "p-3 hover:bg-muted rounded-full transition text-green-500"
-                                    } else {
-                                        "p-3 hover:bg-muted rounded-full transition"
-                                    },
-                                    title: if *copied_share.read() { "Copied!" } else { "Copy link" },
-                                    onclick: {
-                                        let episode_title = episode.title.clone();
-                                        let podcast_title = episode.podcast_title.clone();
-                                        let audio_url = episode.audio_url.clone();
-                                        move |_| {
-                                            let share_text = format!("{} - {}\n{}", episode_title, podcast_title, audio_url);
-                                            spawn(async move {
-                                                if let Some(window) = web_sys::window() {
-                                                    let clipboard = window.navigator().clipboard();
-                                                    let _ = clipboard.write_text(&share_text);
-                                                    copied_share.set(true);
-                                                    // Reset after 2 seconds
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                                    copied_share.set(false);
-                                                }
-                                            });
-                                        }
-                                    },
-                                    dangerous_inner_html: if *copied_share.read() {
-                                        icons::CHECK
-                                    } else {
-                                        icons::SHARE
-                                    }
+                                    class: "p-3 hover:bg-muted rounded-full transition",
+                                    title: "Share",
+                                    onclick: move |_| show_share_modal.set(true),
+                                    dangerous_inner_html: icons::SHARE
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            // Share modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: format!("{} - {}", episode.title, episode.podcast_title),
+                    url: episode.audio_url.clone(),
+                    content_type: ContentType::PodcastEpisode,
+                    image_url: episode.image.clone().or(episode.podcast_image.clone()),
+                    on_close: move |_| show_share_modal.set(false)
                 }
             }
 
@@ -766,24 +763,46 @@ async fn fetch_nostr_episode(
     Ok((display_episode, metadata))
 }
 
-/// Fetch RSS podcast episode by podcast feed URL and episode GUID
+/// Fetch RSS podcast episode by podcast ID (numeric Podcast Index ID) or feed URL and episode GUID
 async fn fetch_rss_episode(
     podcast_id: &str,
     episode_id: &str,
 ) -> Result<DisplayEpisode, String> {
-    // The podcast_id should be a feed URL (URL-encoded in the route)
-    // Decode it and fetch the RSS feed
-    let feed_url = urlencoding::decode(podcast_id)
-        .map_err(|e| format!("Invalid podcast URL encoding: {}", e))?
-        .into_owned();
+    use crate::services::podcast_index;
 
-    let podcast = podcast_rss::fetch_podcast_feed(&feed_url).await?;
-
-    // Find the episode by GUID (also URL-decode the episode_id)
+    // Decode the episode_id (GUID) first
     let decoded_episode_id = urlencoding::decode(episode_id)
         .map_err(|e| format!("Invalid episode ID encoding: {}", e))?
         .into_owned();
 
+    // Check if podcast_id is a numeric Podcast Index feed ID
+    if let Ok(feed_id) = podcast_id.parse::<u64>() {
+        log::info!("Fetching episode via Podcast Index API: feed_id={}, episode_id={}", feed_id, decoded_episode_id);
+
+        // Get podcast metadata from Podcast Index
+        let feed = podcast_index::get_podcast_by_id(feed_id).await?;
+
+        // Get episodes and find the matching one by Podcast Index episode ID
+        let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await?;
+
+        // Find episode by Podcast Index episode ID (which is what we store as episode_guid in TrackSource)
+        let episode = episodes.iter()
+            .find(|ep| ep.id.to_string() == decoded_episode_id)
+            .ok_or_else(|| format!("Episode not found: {}", decoded_episode_id))?;
+
+        return Ok(DisplayEpisode::from_podcast_index_episode(episode, &feed));
+    }
+
+    // Fall back to treating podcast_id as a URL-encoded feed URL
+    let feed_url = urlencoding::decode(podcast_id)
+        .map_err(|e| format!("Invalid podcast URL encoding: {}", e))?
+        .into_owned();
+
+    log::info!("Fetching episode via RSS feed: url={}, episode_guid={}", feed_url, decoded_episode_id);
+
+    let podcast = podcast_rss::fetch_podcast_feed(&feed_url).await?;
+
+    // Find the episode by GUID
     let episode = podcast.episodes.iter()
         .find(|ep| ep.guid == decoded_episode_id)
         .ok_or_else(|| "Episode not found".to_string())?;

@@ -463,7 +463,9 @@ fn get_weekday_short(date: &str) -> String {
 
     let date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
     let weekday = date.get_day() as usize;
-    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday].to_string()
+    // Use safe indexing with fallback for defensive coding
+    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    WEEKDAYS.get(weekday).unwrap_or(&"???").to_string()
 }
 
 /// Format hour for display
@@ -498,7 +500,7 @@ fn format_day_header(date: &str) -> String {
                        "July", "August", "September", "October", "November", "December"];
 
     let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
-    let month_idx = (month - 1) as usize;
+    let month_idx = month.saturating_sub(1) as usize;
     let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
 
     format!("{}, {} {}, {}", weekday_name, month_name, day, year)
@@ -511,11 +513,11 @@ fn get_week_dates(date: &str) -> Vec<String> {
         return vec![];
     }
 
-    let year: i32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1; // JS months are 0-indexed
+    let year: u32 = parts[0].parse().unwrap_or(2024);
+    let month: i32 = parts[1].parse::<i32>().unwrap_or(1).clamp(1, 12) - 1; // Validate 1-12, then convert to JS 0-11
     let day: i32 = parts[2].parse().unwrap_or(1);
 
-    let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
+    let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
     let current_weekday = js_date.get_day() as i32;
 
     // Go back to Sunday using milliseconds (safer approach)
@@ -694,32 +696,17 @@ fn get_event_color(event: &UnifiedEvent) -> &'static str {
     }
 }
 
-/// Get hover color for event
-fn get_event_hover_color(event: &UnifiedEvent) -> &'static str {
-    if event.is_private() {
-        "#9333ea"  // Purple-600
-    } else if event.is_livestream() {
-        "#dc2626"  // Red-600
-    } else if event.is_all_day() {
-        "#2563eb"  // Blue-600
-    } else {
-        "#15803d"  // Green-700
-    }
-}
-
 /// Render a positioned event
 fn render_positioned_event(pe: &PositionedEvent) -> Element {
     let bg_color = get_event_color(&pe.event);
-    let hover_color = get_event_hover_color(&pe.event);
 
     let style = format!(
-        "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {}; --hover-bg: {};",
+        "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {};",
         pe.position.top,
         pe.position.left,
         pe.position.width,
         pe.position.height,
-        bg_color,
-        hover_color
+        bg_color
     );
 
     // Route livestreams to /videos/live, calendar events to /calendar
@@ -789,10 +776,10 @@ pub fn CalendarViewSkeleton() -> Element {
             div {
                 class: "h-12 bg-muted rounded mb-2"
             }
-            // Grid skeleton
+            // Grid skeleton (6 weeks × 7 days = 42 cells to match actual grid)
             div {
                 class: "grid grid-cols-7 gap-1",
-                for _ in 0..35 {
+                for _ in 0..42 {
                     div {
                         class: "h-24 bg-muted rounded"
                     }

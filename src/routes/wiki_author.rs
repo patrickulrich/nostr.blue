@@ -7,6 +7,7 @@ use crate::components::icons::{BookOpenIcon, ArrowLeftIcon, UserIcon};
 use crate::stores::{wiki_store, nostr_client, profiles};
 use crate::stores::wiki_store::CachedWikiPage;
 use crate::routes::Route;
+use crate::utils::truncate_pubkey;
 
 /// Wiki author page - shows all wiki articles by a specific author
 #[component]
@@ -21,13 +22,7 @@ pub fn WikiAuthor(pubkey: String) -> Element {
     let author_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
-        .unwrap_or_else(|| {
-            if pubkey.len() > 16 {
-                format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-            } else {
-                pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let author_picture = author_profile.as_ref().and_then(|p| p.picture.clone());
 
     // Fetch wiki pages by author

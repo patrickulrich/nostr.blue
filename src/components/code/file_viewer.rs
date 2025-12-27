@@ -204,13 +204,19 @@ pub fn CodeFileViewer(
                             spawn(async move {
                                 if let Some(window) = web_sys::window() {
                                     let clipboard = window.navigator().clipboard();
-                                    let _ = wasm_bindgen_futures::JsFuture::from(
+                                    match wasm_bindgen_futures::JsFuture::from(
                                         clipboard.write_text(&content)
-                                    ).await;
-                                    copied.set(true);
-                                    // Reset after 2 seconds
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                    copied.set(false);
+                                    ).await {
+                                        Ok(_) => {
+                                            copied.set(true);
+                                            // Reset after 2 seconds
+                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                            copied.set(false);
+                                        }
+                                        Err(e) => {
+                                            log::debug!("Clipboard write failed: {:?}", e);
+                                        }
+                                    }
                                 }
                             });
                         }
@@ -299,9 +305,11 @@ pub fn CodeFileViewerCompact(
     content: String,
     #[props(default = 10)] max_lines: usize,
 ) -> Element {
-    let lines: Vec<&str> = content.lines().take(max_lines).collect();
-    let total_lines = content.lines().count();
+    // Collect once to avoid iterating the content twice
+    let all_lines: Vec<&str> = content.lines().collect();
+    let total_lines = all_lines.len();
     let truncated = total_lines > max_lines;
+    let lines: Vec<&str> = all_lines.into_iter().take(max_lines).collect();
 
     rsx! {
         div {

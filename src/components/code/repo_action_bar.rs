@@ -16,6 +16,7 @@ use crate::utils::nip34::Repository;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
+#[allow(clippy::clone_on_copy)] // handle_watch closure is Copy only on non-wasm32 targets
 #[component]
 pub fn RepoActionBar(
     repo: Repository,
@@ -69,8 +70,9 @@ pub fn RepoActionBar(
             } else {
                 // Check from relays
                 spawn(async move {
-                    if let Ok(starred) = check_user_star(&coord).await {
-                        is_starred.set(starred);
+                    match check_user_star(&coord).await {
+                        Ok(starred) => is_starred.set(starred),
+                        Err(e) => log::debug!("Failed to check star status: {}", e),
                     }
                 });
             }

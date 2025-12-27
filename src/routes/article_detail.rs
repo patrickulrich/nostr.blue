@@ -7,7 +7,7 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, calculate_read_time
 };
-use crate::utils::{build_thread_tree, merge_pending_into_tree, format_relative_time_or};
+use crate::utils::{build_thread_tree, merge_pending_into_tree, format_relative_time_or, truncate_pubkey};
 use crate::stores::pending_comments::get_pending_comments;
 use std::time::Duration;
 
@@ -255,7 +255,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
 
                         let display_name = author_metadata.read().as_ref()
                             .and_then(|m| m.display_name.clone().or(m.name.clone()))
-                            .unwrap_or_else(|| format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..]));
+                            .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
                         let profile_picture = author_metadata.read().as_ref()
                             .and_then(|m| m.picture.clone());

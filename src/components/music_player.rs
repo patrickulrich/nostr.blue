@@ -21,7 +21,7 @@ fn format_time(seconds: f64) -> String {
 #[component]
 pub fn PersistentMusicPlayer() -> Element {
     let state = MUSIC_PLAYER.read().clone();
-    let _is_seeking = use_signal(|| false);
+    let mut is_seeking = use_signal(|| false);
     let audio_id = "global-music-player-audio";
 
     // Update audio element when track or playing state changes
@@ -96,10 +96,12 @@ pub fn PersistentMusicPlayer() -> Element {
         let current_time = state.current_time;
         let last_time = last_synced_time();
 
-        // Only sync if the time changed significantly (more than 1 second jump indicates programmatic change)
+        // Only sync if the time changed significantly (more than 0.5 second jump indicates programmatic change)
         // This prevents fighting with the ontimeupdate event that continuously syncs audio → state
-        if (current_time - last_time).abs() > 1.0 {
+        // Threshold aligned with JS check below for consistency
+        if (current_time - last_time).abs() > 0.5 {
             last_synced_time.set(current_time);
+            is_seeking.set(true);
 
             spawn(async move {
                 let audio_id_json = serde_json::to_string(&audio_id)
@@ -120,6 +122,17 @@ pub fn PersistentMusicPlayer() -> Element {
                     current_time = current_time
                 );
                 let _ = eval(&script);
+
+                // Clear seeking flag after a short delay to allow the seek to complete
+                #[cfg(target_family = "wasm")]
+                {
+                    gloo_timers::future::TimeoutFuture::new(500).await;
+                }
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                is_seeking.set(false);
             });
         }
     });
@@ -158,10 +171,15 @@ pub fn PersistentMusicPlayer() -> Element {
                 preload: "metadata",
                 style: "display: none;",
                 ontimeupdate: move |evt| {
+                    // Skip updates while programmatic seek is in progress
+                    if *is_seeking.read() {
+                        return;
+                    }
                     if let Some(target) = evt.data.as_web_event().target() {
                         if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                             let current_time = audio.current_time();
                             if !current_time.is_nan() {
+                                last_synced_time.set(current_time);
                                 music_player::set_current_time(current_time);
                             }
                         }
@@ -200,10 +218,15 @@ pub fn PersistentMusicPlayer() -> Element {
             style: "display: none;",
             src: "{track.media_url}",
             ontimeupdate: move |evt| {
+                // Skip updates while programmatic seek is in progress
+                if *is_seeking.read() {
+                    return;
+                }
                 if let Some(target) = evt.data.as_web_event().target() {
                     if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                         let current_time = audio.current_time();
                         if !current_time.is_nan() {
+                            last_synced_time.set(current_time);
                             music_player::set_current_time(current_time);
                         }
                     }
@@ -471,6 +494,8 @@ pub fn PersistentMusicPlayer() -> Element {
                                 option { value: "1.5", "1.5x" }
                                 option { value: "1.75", "1.75x" }
                                 option { value: "2", "2x" }
+                                option { value: "2.5", "2.5x" }
+                                option { value: "3", "3x" }
                             }
                         }
                     }

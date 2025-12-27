@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, nostr_client};
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
-use crate::utils::format::format_relative_time_or;
+use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -508,11 +508,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
-            if pk.len() > 16 {
-                format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-            } else {
-                pk
-            }
+            truncate_pubkey(&pk)
         });
 
     let video_id = event.id.to_hex();

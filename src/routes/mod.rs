@@ -50,6 +50,7 @@ pub mod podcast;
 pub mod podcast_nostr_detail;
 pub mod podcast_rss_detail;
 pub mod podcast_episode_detail;
+pub mod podcast_trending;
 pub mod nips;
 pub mod nip_detail;
 
@@ -158,7 +159,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use articles::Articles;
 use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch, MusicTrackNew, MusicPlaylistNew, MusicPlaylistDetail};
+use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch, MusicTrackNew, MusicPlaylistNew, MusicPlaylistDetail, MusicRssAlbum};
 use photos::Photos;
 use photo_detail::PhotoDetail;
 use voicemessages::VoiceMessages;
@@ -185,6 +186,7 @@ use podcast::PodcastHome;
 use podcast_nostr_detail::PodcastNostrDetail;
 use podcast_rss_detail::PodcastRssFeedDetail;
 use podcast_episode_detail::{PodcastNostrEpisodeDetail, PodcastRssEpisodeDetail};
+use podcast_trending::PodcastTrending;
 use nips::{NipsHome, NipNew};
 use nip_detail::NipDetail;
 use badges::BadgesHome;
@@ -319,14 +321,20 @@ pub enum Route {
         #[route("/music/playlist/:naddr")]
         MusicPlaylistDetail { naddr: String },
 
+        #[route("/music/rss/album/:feed_id")]
+        MusicRssAlbum { feed_id: u64 },
+
         #[route("/podcast")]
         PodcastHome {},
+
+        #[route("/podcast/trending")]
+        PodcastTrending {},
 
         #[route("/podcast/nostr/:naddr")]
         PodcastNostrDetail { naddr: String },
 
-        #[route("/podcast/feed/:feed_url")]
-        PodcastRssFeedDetail { feed_url: String },
+        #[route("/podcast/rss/:podcast_id")]
+        PodcastRssFeedDetail { podcast_id: String },
 
         #[route("/podcast/nostr/episode/:naddr")]
         PodcastNostrEpisodeDetail { naddr: String },
@@ -657,8 +665,8 @@ fn Layout() -> Element {
     let is_dms_page = matches!(current_route, Route::DMs {});
     let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
     let is_wallet_page = matches!(current_route, Route::CashuWallet {});
-    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
-    let is_podcast_page = matches!(current_route, Route::PodcastHome {} | Route::PodcastNostrDetail { .. } | Route::PodcastRssFeedDetail { .. } | Route::PodcastNostrEpisodeDetail { .. } | Route::PodcastRssEpisodeDetail { .. });
+    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicRssAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
+    let is_podcast_page = matches!(current_route, Route::PodcastHome {} | Route::PodcastTrending {} | Route::PodcastNostrDetail { .. } | Route::PodcastRssFeedDetail { .. } | Route::PodcastNostrEpisodeDetail { .. } | Route::PodcastRssEpisodeDetail { .. });
     let is_nips_page = matches!(current_route, Route::NipsHome {} | Route::NipDetail { .. } | Route::NipNew {});
     let is_badges_page = matches!(current_route, Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {});
     let is_code_page = matches!(current_route,
@@ -1269,6 +1277,7 @@ fn NavLink(
         (Route::MusicHome {}, Route::MusicSearch { .. }) |
         (Route::MusicHome {}, Route::MusicArtist { .. }) |
         (Route::MusicHome {}, Route::MusicAlbum { .. }) |
+        (Route::MusicHome {}, Route::MusicRssAlbum { .. }) |
         (Route::MusicHome {}, Route::MusicTrackNew {}) |
         (Route::MusicHome {}, Route::MusicPlaylistNew {}) |
         (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,

@@ -439,8 +439,8 @@ pub fn BoardSlideover(
             ZapModal {
                 recipient_pubkey: board.pubkey.clone(),
                 recipient_name: display_name(),
-                lud16: None,
-                lud06: None,
+                lud16: author_metadata.read().as_ref().and_then(|m| m.lud16.clone()),
+                lud06: author_metadata.read().as_ref().and_then(|m| m.lud06.clone()),
                 event_id: Some(board.event_id.clone()),
                 on_close: move |_| show_zap_modal.set(false),
             }

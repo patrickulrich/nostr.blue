@@ -9,6 +9,18 @@ use crate::stores::calendar_store::{UnifiedEvent, get_rsvp_count};
 use crate::utils::time::format_relative_time;
 use crate::utils::nip52::is_online_location;
 
+/// Build route based on event type
+/// - Livestreams (30311) go to /videos/live/:naddr
+/// - Calendar events (31922/31923) go to /calendar/:naddr
+/// - Meeting rooms (30313) go to /calendar/:naddr
+fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
+    if event.is_livestream() {
+        Route::LiveStreamDetail { note_id: event.naddr().to_string() }
+    } else {
+        Route::CalendarEventDetail { naddr: event.naddr().to_string(), from }
+    }
+}
+
 /// Event Card for grid/list display
 /// `from` parameter indicates source page for back navigation ("events" or "calendar")
 #[component]
@@ -27,15 +39,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
     let hashtags: Vec<&str> = all_hashtags.iter().take(3).copied().collect();
     let extra_tags = all_hashtags.len().saturating_sub(3);
 
-    // Build route based on event type
-    // - Livestreams (30311) go to /videos/live/:naddr
-    // - Calendar events (31922/31923) go to /calendar/:naddr
-    // - Meeting rooms (30313) go to /calendar/:naddr
-    let detail_route = if event.is_livestream() {
-        Route::LiveStreamDetail { note_id: event.naddr().to_string() }
-    } else {
-        Route::CalendarEventDetail { naddr: event.naddr().to_string(), from }
-    };
+    let detail_route = get_event_detail_route(&event, from);
 
     rsx! {
         Link {
@@ -275,11 +279,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
 #[component]
 pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<String>) -> Element {
     let time_display = format_event_time_short(&event);
-    let detail_route = if event.is_livestream() {
-        Route::LiveStreamDetail { note_id: event.naddr().to_string() }
-    } else {
-        Route::CalendarEventDetail { naddr: event.naddr().to_string(), from }
-    };
+    let detail_route = get_event_detail_route(&event, from);
 
     rsx! {
         Link {

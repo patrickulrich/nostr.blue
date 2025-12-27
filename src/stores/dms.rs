@@ -3,6 +3,7 @@ use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use crate::stores::{auth_store, mdk_store, nostr_client};
+use crate::utils::format::truncate_pubkey;
 use std::time::Duration;
 use std::collections::HashMap;
 
@@ -254,7 +255,7 @@ pub async fn init_dms() -> Result<(), String> {
                     let mls_messages = mdk_store::get_messages(&group_id_hex);
 
                     log::info!("Integrating {} MLS messages from 1:1 group with {}",
-                        mls_messages.len(), &other_pk[..8]);
+                        mls_messages.len(), truncate_pubkey(&other_pk));
 
                     for msg in mls_messages {
                         // Parse sender pubkey and event ID

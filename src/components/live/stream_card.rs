@@ -7,6 +7,7 @@ use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
 use crate::components::StreamStatus;
 use crate::utils::nip53::{parse_nip53_live_event, extract_live_event_host};
+use crate::utils::truncate_pubkey;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
@@ -111,13 +112,13 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
         });
     }));
 
-    // Get author display info
+    // Get author display info (using safe UTF-8 truncation)
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
         metadata.display_name.clone()
             .or_else(|| metadata.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..]))
+            .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
-        format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..])
+        truncate_pubkey(&author_pubkey_display)
     };
 
     let author_picture = author_metadata.read().as_ref()

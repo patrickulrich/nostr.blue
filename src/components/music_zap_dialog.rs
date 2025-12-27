@@ -58,7 +58,8 @@ pub fn MusicZapDialog() -> Element {
     }
 
     let track = track.unwrap();
-    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. });
+    // NostrPodcast also uses NIP-57 zaps, so include it in the Nostr badge logic
+    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. });
 
     let mut amount = use_signal(|| 100u64);
     let mut comment = use_signal(String::new);
@@ -132,6 +133,14 @@ pub fn MusicZapDialog() -> Element {
                         generate_v4v_invoice(value_block, amount_value, &comment_value).await
                     } else {
                         Err("This podcast doesn't have V4V payment info configured. Contact the podcast creator to enable Lightning payments.".to_string())
+                    }
+                }
+                TrackSource::RssMusic { .. } => {
+                    // Use V4V payment flow for RSS music
+                    if let Some(ref value_block) = track_value_block {
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                    } else {
+                        Err("This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments.".to_string())
                     }
                 }
             };

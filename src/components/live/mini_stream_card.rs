@@ -6,6 +6,7 @@ use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
 use crate::components::StreamStatus;
 use crate::utils::nip53::{parse_nip53_live_event, extract_live_event_host};
+use crate::utils::truncate_pubkey;
 
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
@@ -85,15 +86,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
 
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            // Use author_pubkey (which may be host_pubkey) for consistent fallback display
-            let pk = author_pubkey.clone();
-            if pk.len() > 16 {
-                format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-            } else {
-                pk
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     // Format timestamp as "X ago"
     let format_time_ago = |timestamp: u64| -> String {

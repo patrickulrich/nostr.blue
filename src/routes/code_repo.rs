@@ -10,6 +10,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, fetch_readme};
 use crate::utils::nip34::Repository;
 use crate::utils::format_relative_time_or;
+use crate::utils::truncate_pubkey;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::nostr_client;
 
@@ -295,7 +296,7 @@ fn MaintainerBadge(pubkey: String) -> Element {
     let name = profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| format!("{}...", &pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
     rsx! {
         Link {
