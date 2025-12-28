@@ -6,16 +6,15 @@ use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
 use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, retry_pending_comment};
 use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
 use crate::routes::Route;
-use crate::stores::nostr_client::{self, publish_repost, HAS_SIGNER, get_client};
+use crate::stores::nostr_client::{publish_repost, HAS_SIGNER, get_client};
 use crate::stores::voice_messages_store;
-use crate::hooks::use_reaction;
+use crate::hooks::{use_reaction, use_author_metadata};
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::format_sats_compact;
-use nostr_sdk::{Metadata, Filter, Kind};
-use nostr_sdk::prelude::NostrDatabaseExt;
+use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
 
 const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
@@ -46,7 +45,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let author_pubkey_like = author_pubkey_str.clone();
     let author_pubkey_repost = author_pubkey_str.clone();
 
-    let mut author_metadata = use_signal(|| None::<Metadata>);
+    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
+    let author_metadata = use_author_metadata(author_pubkey_str.clone());
 
     // State for interactions
     let mut is_reposting = use_signal(|| false);
@@ -95,24 +95,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         None
     };
-
-    // Fetch author metadata
-    use_effect(move || {
-        spawn(async move {
-            if let Some(client) = nostr_client::NOSTR_CLIENT.read().as_ref() {
-                // Check database first (instant, no network)
-                if let Ok(Some(metadata)) = client.database().metadata(author_pubkey).await {
-                    author_metadata.set(Some(metadata));
-                    return;
-                }
-
-                // If not in database, fetch from relays (auto-caches to database)
-                if let Ok(Some(metadata)) = client.fetch_metadata(author_pubkey, std::time::Duration::from_secs(5)).await {
-                    author_metadata.set(Some(metadata));
-                }
-            }
-        });
-    });
 
     // Fetch counts
     use_effect(move || {
@@ -253,10 +235,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             let _ = audio.play().map_err(|e| {
                 log::debug!("Play failed: {:?}", e);
             });
-        } else {
-            if let Err(e) = audio.pause() {
-                log::debug!("Pause failed: {:?}", e);
-            }
+        } else if let Err(e) = audio.pause() {
+            log::debug!("Pause failed: {:?}", e);
         }
     });
 
@@ -328,7 +308,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
-                    let navigator = nav.clone();
+                    let navigator = nav;
                     let is_pending_node = is_pending;
                     let status = pending_status.clone();
                     move |_| {
@@ -676,10 +656,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                             if let Err(e) = bookmarks::unbookmark_event(event_id_clone).await {
                                                 log::error!("Failed to unbookmark: {}", e);
                                             }
-                                        } else {
-                                            if let Err(e) = bookmarks::bookmark_event(event_id_clone).await {
-                                                log::error!("Failed to bookmark: {}", e);
-                                            }
+                                        } else if let Err(e) = bookmarks::bookmark_event(event_id_clone).await {
+                                            log::error!("Failed to bookmark: {}", e);
                                         }
                                         is_bookmarking.set(false);
                                     });

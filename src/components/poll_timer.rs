@@ -102,20 +102,20 @@ fn format_ended_date(ends_at: Timestamp) -> String {
     let diff = now.as_secs() as i64 - ends_at.as_secs() as i64;
 
     if diff < 60 {
-        return "just now".to_string();
+        "just now".to_string()
     } else if diff < 3600 {
         let minutes = diff / 60;
-        return format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" });
+        format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" })
     } else if diff < 86400 {
         let hours = diff / 3600;
-        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
+        format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" })
     } else if diff < 604800 {
         let days = diff / 86400;
-        return format!("{} day{} ago", days, if days == 1 { "" } else { "s" });
+        format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
     } else {
         // Format as date for older polls
         let date = chrono::DateTime::from_timestamp(ends_at.as_secs() as i64, 0)
             .unwrap_or_default();
-        return date.format("%b %d, %Y").to_string();
+        date.format("%b %d, %Y").to_string()
     }
 }

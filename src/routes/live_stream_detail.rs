@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, FromBech32};
 use crate::components::{LiveStreamPlayer, LiveChat, StreamStatus, ZapModal, LiveStreamShareModal};
-use crate::components::live_stream_card::{parse_live_stream_event, LiveStreamMeta};
+use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
 use crate::components::icons::{ArrowLeftIcon, ZapIcon, ShareIcon};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
+use crate::utils::truncate_pubkey;
 use std::time::Duration;
 
 #[component]
@@ -321,8 +322,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                                 {
                                                     // Get host-aware identifier (use p tag host if available, otherwise event publisher)
                                                     let event_pubkey = event.pubkey.to_string();
-                                                    let author_identifier = meta.host_pubkey.as_ref()
-                                                        .map(|s| s.as_str())
+                                                    let author_identifier = meta.host_pubkey.as_deref()
                                                         .unwrap_or(&event_pubkey);
 
                                                     let host_verified = meta.host_verified;
@@ -487,10 +487,8 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 /// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
 fn parse_naddr(note_id: &str) -> (String, String) {
     // First try to decode as NIP-19 bech32 naddr
-    if let Ok(nip19) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
-        if let nostr_sdk::nips::nip19::Nip19::Coordinate(coord) = nip19 {
-            return (coord.public_key.to_hex(), coord.identifier.clone());
-        }
+    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
+        return (coord.public_key.to_hex(), coord.identifier.clone());
     }
 
     // Fall back to colon-split logic for non-bech32 formats
@@ -561,11 +559,3 @@ fn render_no_stream_placeholder(status: &StreamStatus) -> Element {
     }
 }
 
-/// Truncate public key for display
-fn truncate_pubkey(pubkey: &str) -> String {
-    if pubkey.len() > 16 {
-        format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-    } else {
-        pubkey.to_string()
-    }
-}

@@ -25,8 +25,8 @@ pub fn ShareModal(
 ) -> Element {
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
-    let mut nostr_text = use_signal(|| String::new());
-    let mut dm_recipient = use_signal(|| String::new());
+    let mut nostr_text = use_signal(String::new);
+    let mut dm_recipient = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);
@@ -57,14 +57,25 @@ pub fn ShareModal(
         .next()
         .unwrap_or_default();
 
-    // Generate nostr.blue URL based on event kind
+    // Detect content type
     use nostr_sdk::{Kind, ToBech32};
 
+    // Detect if this is a recipe (has nostrcooking hashtag)
+    let is_recipe = event.tags.hashtags().any(|tag| tag == "nostrcooking");
+    let is_article = event.kind == Kind::LongFormTextNote && !is_recipe;
+
+    // Generate nostr.blue URL based on event kind
     let content_url = if event.kind.is_addressable() {
-        // For articles (Kind 30023) and other addressable events, use naddr
+        // For addressable events, use naddr
         if let Some(coord) = event.coordinate() {
             match coord.to_bech32() {
-                Ok(naddr) => format!("https://nostr.blue/articles/{}", naddr),
+                Ok(naddr) => {
+                    if is_recipe {
+                        format!("https://nostr.blue/recipes/{}", naddr)
+                    } else {
+                        format!("https://nostr.blue/articles/{}", naddr)
+                    }
+                }
                 Err(_) => format!("https://nostr.blue/articles/{}", event.id.to_hex()),
             }
         } else {
@@ -74,16 +85,13 @@ pub fn ShareModal(
         format!("https://nostr.blue/videos/{}", event.id.to_hex())
     };
 
-    // Determine content type for modal title
-    let is_article = event.kind == Kind::LongFormTextNote;
-
     // Generate NIP-19 identifier with relay hints from author's write relays
-    let content_nip19 = use_signal(|| String::new());
+    let content_nip19 = use_signal(String::new);
 
     // Generate nevent/naddr (with gossip, relay hints are not needed)
     {
         let event_clone = event.clone();
-        let mut content_nip19_clone = content_nip19.clone();
+        let mut content_nip19_clone = content_nip19;
         use_effect(move || {
             let event_for_async = event_clone.clone();
             spawn(async move {
@@ -171,6 +179,7 @@ pub fn ShareModal(
 
     let handle_send_dm = {
         let content_url_dm = content_url.clone();
+        let is_recipe_dm = is_recipe;
         let is_article_dm = is_article;
         move |_| {
             let manual_recipient = dm_recipient.read().trim().to_string();
@@ -182,6 +191,7 @@ pub fn ShareModal(
             is_publishing.set(true);
 
             let content_url_clone = content_url_dm.clone();
+            let is_recipe_clone = is_recipe_dm;
             let is_article_clone = is_article_dm;
 
             spawn(async move {
@@ -197,7 +207,9 @@ pub fn ShareModal(
                     return;
                 };
 
-                let content_type = if is_article_clone { "article" } else { "video" };
+                let content_type = if is_recipe_clone { "recipe" }
+                    else if is_article_clone { "article" }
+                    else { "video" };
                 let message = format!("Check out this {} on nostr.blue: {}", content_type, content_url_clone);
 
                 // Send DM using NIP-17
@@ -247,7 +259,11 @@ pub fn ShareModal(
                         h3 {
                             class: "text-lg font-semibold ml-2",
                             match *share_mode.read() {
-                                ShareMode::Main => if is_article { "Share Article" } else { "Share Video" },
+                                ShareMode::Main => {
+                                    if is_recipe { "Share Recipe" }
+                                    else if is_article { "Share Article" }
+                                    else { "Share Video" }
+                                },
                                 ShareMode::Nostr => "Share to Nostr",
                                 ShareMode::Dm => "Send via DM",
                             }
@@ -271,7 +287,9 @@ pub fn ShareModal(
                             class: "bg-accent rounded-lg p-4 flex items-center gap-3",
                             div {
                                 class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0",
-                                if is_article {
+                                if is_recipe {
+                                    span { class: "text-2xl", "🍳" }
+                                } else if is_article {
                                     HashIcon { class: "w-6 h-6 text-white" }
                                 } else {
                                     FileVideoIcon { class: "w-6 h-6 text-white" }
@@ -285,7 +303,9 @@ pub fn ShareModal(
                                 }
                                 p {
                                     class: "text-sm text-muted-foreground",
-                                    if is_article { "nostr.blue Article" } else { "nostr.blue Video" }
+                                    if is_recipe { "nostr.blue Recipe" }
+                                    else if is_article { "nostr.blue Article" }
+                                    else { "nostr.blue Video" }
                                 }
                             }
                         }
@@ -335,7 +355,9 @@ pub fn ShareModal(
                                     p {
                                         class: "text-xs text-muted-foreground",
                                         if has_signer {
-                                            if is_article { "Post about this article" } else { "Post about this video" }
+                                            if is_recipe { "Post about this recipe" }
+                                            else if is_article { "Post about this article" }
+                                            else { "Post about this video" }
                                         } else {
                                             "Login required"
                                         }

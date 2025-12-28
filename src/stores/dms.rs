@@ -6,7 +6,7 @@ use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 use std::collections::HashMap;
 
-/// Represents a message in a conversation, handling both NIP-04 and NIP-17
+/// Represents a message in a conversation, handling NIP-04 and NIP-17
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationMessage {
     /// NIP-04 legacy encrypted direct message
@@ -43,6 +43,14 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { event } => event.pubkey,
             Self::Nip17 { sender, .. } => *sender,
+        }
+    }
+
+    /// Get the encryption type for display
+    pub fn encryption_type(&self) -> &'static str {
+        match self {
+            Self::Nip04 { .. } => "NIP-04",
+            Self::Nip17 { .. } => "NIP-17",
         }
     }
 }
@@ -214,7 +222,7 @@ pub async fn init_dms() -> Result<(), String> {
 
     // Sort messages in each conversation by timestamp (uses actual rumor timestamp for NIP-17)
     for conversation in conversations.values_mut() {
-        conversation.messages.sort_by(|a, b| a.created_at().cmp(&b.created_at()));
+        conversation.messages.sort_by_key(|a| a.created_at());
     }
 
     log::info!("Organized into {} conversations", conversations.len());
@@ -283,7 +291,7 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
     Ok(())
 }
 
-/// Decrypt a DM message (supports both NIP-04 and NIP-17)
+/// Decrypt a DM message (supports NIP-04 and NIP-17)
 pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
     // NIP-17: Content is already available from the unwrapped rumor
     if let ConversationMessage::Nip17 { rumor, .. } = msg {

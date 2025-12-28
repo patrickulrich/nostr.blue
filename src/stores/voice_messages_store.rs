@@ -49,7 +49,7 @@ pub static VOICE_PLAYBACK: GlobalSignal<VoicePlaybackState> = Signal::global(Voi
 
 /// Global recording state signal
 #[allow(dead_code)]
-pub static RECORDING_STATE: GlobalSignal<RecordingState> = Signal::global(|| RecordingState::default());
+pub static RECORDING_STATE: GlobalSignal<RecordingState> = Signal::global(RecordingState::default);
 
 /// Play a voice message (pauses any currently playing)
 #[allow(dead_code)]
@@ -157,7 +157,7 @@ pub fn generate_waveform(samples: &[f32], target_points: usize) -> Vec<u8> {
 
     // Guard against samples.len() < target_points by using ceiling division
     // and ensuring chunk_size is at least 1
-    let chunk_size = ((samples.len() + target_points - 1) / target_points).max(1);
+    let chunk_size = samples.len().div_ceil(target_points).max(1);
     let mut waveform = Vec::with_capacity(target_points);
 
     for i in 0..target_points {
