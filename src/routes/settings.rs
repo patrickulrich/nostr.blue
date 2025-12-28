@@ -48,7 +48,9 @@ pub fn Settings() -> Element {
     let relay_tab: ReadSignal<Option<String>> = use_signal(|| None::<String>).into();
 
     // Live relay connection info for Connections tab
+    // Read CLIENT_INITIALIZED to make resource reactive to client initialization
     let connection_info = use_resource(move || async move {
+        let _initialized = *nostr_client::CLIENT_INITIALIZED.read();
         nostr_client::get_relay_display_info().await
     });
 

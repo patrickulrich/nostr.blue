@@ -56,7 +56,6 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
-    let _new_recipient = use_signal(String::new);
 
     // Load DMs on mount
     use_effect(move || {

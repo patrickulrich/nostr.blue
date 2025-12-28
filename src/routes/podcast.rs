@@ -1523,18 +1523,31 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
             }
         }
     } else {
+        // Check if this is a GUID-only subscription that's still loading or needs auth
+        let has_guid = props.subscription.podcast_guid.is_some();
+        let has_signer = nostr_client::has_signer();
+        let needs_auth = has_guid && !has_signer;
+
+        let (icon, message) = if needs_auth {
+            ("🔐", "Sign in to load podcast")
+        } else if has_guid && is_loading {
+            ("⏳", "Loading podcast...")
+        } else {
+            ("?", "Invalid subscription")
+        };
+
         rsx! {
             div {
                 class: "flex items-center gap-3 p-2 rounded-lg opacity-50",
                 div {
                     class: "w-12 h-12 rounded bg-muted flex items-center justify-center text-muted-foreground",
-                    "?"
+                    "{icon}"
                 }
                 div {
                     class: "flex-1 min-w-0",
                     div {
                         class: "font-medium truncate",
-                        "Invalid subscription"
+                        "{message}"
                     }
                 }
             }

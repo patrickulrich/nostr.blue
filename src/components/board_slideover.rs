@@ -50,15 +50,12 @@ pub fn BoardSlideover(
     let mut deleting = use_signal(|| false);
     let mut pending_pin_removal = use_signal(|| None::<Pin>);
 
-    // Check if current user owns this board - reactive to auth state changes
-    // Access AUTH_STATE directly so use_memo tracks the GlobalSignal dependency
-    let author_pubkey_for_owner = author_pubkey.clone();
-    let is_owner = use_memo(move || {
-        auth_store::AUTH_STATE.read().pubkey
-            .as_ref()
-            .map(|pk| pk == &author_pubkey_for_owner)
-            .unwrap_or(false)
-    });
+    // Check if current user owns this board
+    // Recompute each render to stay in sync with board prop changes
+    let is_owner = auth_store::AUTH_STATE.read().pubkey
+        .as_ref()
+        .map(|pk| pk == &board.pubkey)
+        .unwrap_or(false);
 
     // Memoize derived display values to avoid recalculating on every render
     let display_name = use_memo(move || {
@@ -237,7 +234,7 @@ pub fn BoardSlideover(
                             }
 
                             // Edit button (if owner)
-                            if *is_owner.read() {
+                            if is_owner {
                                 Link {
                                     to: Route::PinBoardEdit { naddr: naddr.clone() },
                                     class: "p-2 rounded-lg hover:bg-muted transition",
@@ -408,7 +405,7 @@ pub fn BoardSlideover(
                                 filled: false
                             }
                             p { "This board is empty." }
-                            if *is_owner.read() {
+                            if is_owner {
                                 p { class: "text-sm mt-2", "Add items from recipes, notes, communities, and more!" }
                             }
                         }
@@ -419,7 +416,7 @@ pub fn BoardSlideover(
                                 PinCard {
                                     key: "{pin.event_id}",
                                     pin: pin.clone(),
-                                    show_remove: *is_owner.read(),
+                                    show_remove: is_owner,
                                     on_remove: handle_pin_remove,
                                 }
                             }

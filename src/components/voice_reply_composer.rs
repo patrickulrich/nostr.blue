@@ -4,6 +4,7 @@ use crate::stores::{nostr_client::HAS_SIGNER, blossom_store};
 use crate::components::{VoiceRecorder, RichContent};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
+use crate::utils::format::display_server_url;
 
 #[component]
 pub fn VoiceReplyComposer(
@@ -272,12 +273,4 @@ pub fn VoiceReplyComposer(
             }
         }
     }
-}
-
-/// Helper function to display server URL in a user-friendly format
-fn display_server_url(url: &str) -> String {
-    url.replace("https://", "")
-        .replace("http://", "")
-        .trim_end_matches('/')
-        .to_string()
 }

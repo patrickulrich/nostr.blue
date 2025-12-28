@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, blossom_store};
 use crate::components::VoiceRecorder;
+use crate::utils::format::display_server_url;
 
 #[component]
 pub fn VoiceMessageNew() -> Element {
@@ -242,12 +243,4 @@ pub fn VoiceMessageNew() -> Element {
             }
         }
     }
-}
-
-/// Helper function to display server URL in a user-friendly format
-fn display_server_url(url: &str) -> String {
-    url.replace("https://", "")
-        .replace("http://", "")
-        .trim_end_matches('/')
-        .to_string()
 }

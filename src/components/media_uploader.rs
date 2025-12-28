@@ -3,6 +3,7 @@ use dioxus::events::FormData;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 use crate::stores::blossom_store;
+use crate::utils::format::display_server_url;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
@@ -304,14 +305,6 @@ fn format_file_size(bytes: usize) -> String {
     } else {
         format!("{} bytes", bytes)
     }
-}
-
-/// Helper function to display server URL in a user-friendly format
-fn display_server_url(url: &str) -> String {
-    url.replace("https://", "")
-        .replace("http://", "")
-        .trim_end_matches('/')
-        .to_string()
 }
 
 /// Helper function to clear the file input element value

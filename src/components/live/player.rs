@@ -44,6 +44,7 @@ export async function loadVideoJs() {
         link.href = 'https://vjs.zencdn.net/8.10.0/video-js.css';
         link.integrity = 'sha384-6LeG/ONVwTyNrI1eNFYoIcUrglv6y7o8hvl3DB8Qd4K2/wD8niobYgHS3RJSO7uL';
         link.crossOrigin = 'anonymous';
+        link.onerror = () => reject(new Error('Failed to load Video.js CSS'));
         document.head.appendChild(link);
 
         // Load JS with SRI

@@ -1,3 +1,12 @@
+/// Format server URL for user-friendly display
+/// Removes protocol prefixes and trailing slashes
+pub fn display_server_url(url: &str) -> String {
+    url.replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// Format satoshi amount with thousands separator (e.g., 1,234,567)
 pub fn format_sats_with_separator(sats: u64) -> String {
     let s = sats.to_string();
