@@ -710,10 +710,15 @@ async fn generate_v4v_invoice(
 
     let lnaddress = &recipient.address;
 
-    // Calculate this recipient's share using integer arithmetic with rounding
+    // Calculate this recipient's share using checked arithmetic to prevent overflow
     // Formula: (a * b + c/2) / c rounds to nearest integer
     // Minimum 1 sat to avoid zero payments
-    let recipient_share = ((amount_sats * recipient.split as u64 + total_split as u64 / 2) / total_split as u64).max(1);
+    let recipient_share = amount_sats
+        .checked_mul(recipient.split as u64)
+        .and_then(|v| v.checked_add(total_split as u64 / 2))
+        .map(|v| v / total_split as u64)
+        .unwrap_or(1)
+        .max(1);
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
 
     // Use floating point for accurate percentage display

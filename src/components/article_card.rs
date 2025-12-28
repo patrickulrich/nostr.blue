@@ -6,7 +6,7 @@ use crate::utils::article_meta::{
     get_title, get_summary, get_image, get_published_at,
     get_hashtags, get_identifier, calculate_read_time
 };
-use crate::utils::{format_relative_time_or, truncate_pubkey};
+use crate::utils::{format_relative_time_or, truncate_pubkey, is_valid_http_url};
 
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -33,7 +33,8 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
-        .and_then(|m| m.picture.clone());
+        .and_then(|m| m.picture.clone())
+        .filter(|url| is_valid_http_url(url));
 
     // Generate avatar fallback (first letter of display name)
     let avatar_letter = display_name.chars().next()

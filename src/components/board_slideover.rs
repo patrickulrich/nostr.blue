@@ -51,10 +51,12 @@ pub fn BoardSlideover(
     let mut pending_pin_removal = use_signal(|| None::<Pin>);
 
     // Check if current user owns this board - reactive to auth state changes
+    // Access AUTH_STATE directly so use_memo tracks the GlobalSignal dependency
     let author_pubkey_for_owner = author_pubkey.clone();
     let is_owner = use_memo(move || {
-        auth_store::get_pubkey()
-            .map(|pk| pk == author_pubkey_for_owner)
+        auth_store::AUTH_STATE.read().pubkey
+            .as_ref()
+            .map(|pk| pk == &author_pubkey_for_owner)
             .unwrap_or(false)
     });
 

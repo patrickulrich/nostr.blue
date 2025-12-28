@@ -360,6 +360,9 @@ pub fn PersistentMusicPlayer() -> Element {
                 // MEDIA_ERR_DECODE (3), MEDIA_ERR_SRC_NOT_SUPPORTED (4)
                 log::warn!("Audio playback error, attempting fallback...");
 
+                // Clear buffering state since we're no longer buffering
+                music_player::set_buffering(false);
+
                 // Try next stream if available
                 if !music_player::try_next_stream() {
                     // All streams failed - show error to user

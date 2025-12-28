@@ -302,7 +302,15 @@ self.onmessage = async (e) => {
 
   // Handle GRASP server updates (non-RPC message)
   if (data.type === 'updateGraspServers' && Array.isArray(data.servers)) {
-    data.servers.forEach(server => graspServers.add(server));
+    // Hostname validation regex: domain labels separated by dots
+    const hostnameRegex = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+    data.servers.forEach(server => {
+      if (server && typeof server === 'string' && hostnameRegex.test(server)) {
+        graspServers.add(server);
+      } else {
+        console.warn('[GitWorker] Invalid GRASP server ignored:', server);
+      }
+    });
     console.log('[GitWorker] Updated GRASP servers:', [...graspServers]);
     return;
   }
