@@ -551,11 +551,13 @@ pub async fn search_citations(query: &str, pubkey_hex: &str, limit: usize) -> St
 // ============================================================================
 
 /// Publish an internal Nostr citation (Kind 30)
+/// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
 pub async fn publish_internal_citation(
     cited_address: &str,
     cited_text: &str,
     title: Option<&str>,
     author: Option<&str>,
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
@@ -564,10 +566,14 @@ pub async fn publish_internal_citation(
         return Err("No signer attached".to_string());
     }
 
-    // Generate d-tag from title or address
-    let d_tag = title
-        .map(crate::utils::nip54::normalize_wiki_dtag)
-        .unwrap_or_else(|| format!("citation-{}", &cited_address[..8.min(cited_address.len())]));
+    // Use existing d-tag if editing, otherwise generate new one
+    let d_tag = existing_d_tag
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            title
+                .map(crate::utils::nip54::normalize_wiki_dtag)
+                .unwrap_or_else(|| format!("citation-{}", &cited_address[..8.min(cited_address.len())]))
+        });
 
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
@@ -601,11 +607,13 @@ pub async fn publish_internal_citation(
 }
 
 /// Publish an external web citation (Kind 31)
+/// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
 pub async fn publish_external_citation(
     url: &str,
     cited_text: &str,
     title: Option<&str>,
     author: Option<&str>,
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
@@ -614,9 +622,14 @@ pub async fn publish_external_citation(
         return Err("No signer attached".to_string());
     }
 
-    let d_tag = title
-        .map(crate::utils::nip54::normalize_wiki_dtag)
-        .unwrap_or_else(|| format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-")));
+    // Use existing d-tag if editing, otherwise generate new one
+    let d_tag = existing_d_tag
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            title
+                .map(crate::utils::nip54::normalize_wiki_dtag)
+                .unwrap_or_else(|| format!("web-{}", &url[..20.min(url.len())].replace([':', '/'], "-")))
+        });
 
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
@@ -650,6 +663,7 @@ pub async fn publish_external_citation(
 }
 
 /// Publish a hardcopy citation (Kind 32)
+/// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
 pub async fn publish_hardcopy_citation(
     title: &str,
     author: &str,
@@ -657,6 +671,7 @@ pub async fn publish_hardcopy_citation(
     page_range: Option<&str>,
     publisher: Option<&str>,
     doi: Option<&str>,
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
@@ -665,7 +680,10 @@ pub async fn publish_hardcopy_citation(
         return Err("No signer attached".to_string());
     }
 
-    let d_tag = crate::utils::nip54::normalize_wiki_dtag(title);
+    // Use existing d-tag if editing, otherwise generate new one
+    let d_tag = existing_d_tag
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::utils::nip54::normalize_wiki_dtag(title));
 
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),
@@ -703,11 +721,13 @@ pub async fn publish_hardcopy_citation(
 }
 
 /// Publish a prompt/AI citation (Kind 33)
+/// If existing_d_tag is provided (editing), it will be preserved to replace the existing event.
 pub async fn publish_prompt_citation(
     llm: &str,
     cited_text: &str,
     conversation_summary: Option<&str>,
     url: Option<&str>,
+    existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
@@ -716,7 +736,10 @@ pub async fn publish_prompt_citation(
         return Err("No signer attached".to_string());
     }
 
-    let d_tag = format!("prompt-{}-{}", llm.to_lowercase().replace(' ', "-"), Timestamp::now().as_secs());
+    // Use existing d-tag if editing, otherwise generate new one
+    let d_tag = existing_d_tag
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("prompt-{}-{}", llm.to_lowercase().replace(' ', "-"), Timestamp::now().as_secs()));
 
     let mut tags: Vec<Tag> = vec![
         Tag::identifier(&d_tag),

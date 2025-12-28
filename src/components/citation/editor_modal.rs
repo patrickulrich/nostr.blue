@@ -85,6 +85,11 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
+    // Extract editing state before closures (avoids borrow issues)
+    let is_editing = props.citation_to_edit.is_some();
+    let existing_d_tag = props.citation_to_edit.as_ref()
+        .and_then(|c| c.event.tags.identifier().map(|s| s.to_string()));
+
     // Load existing citation if editing
     use_effect(use_reactive(
         (&*props.show.read(), &props.citation_to_edit),
@@ -199,6 +204,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let prompt_url_val = prompt_url.read().clone();
         let on_save = props.on_save;
         let mut show = props.show;
+        let existing_d_tag = existing_d_tag.clone();
 
         spawn(async move {
             let result = match current_tab {
@@ -208,6 +214,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         &cited_text_val,
                         if title_val.is_empty() { None } else { Some(&title_val) },
                         if author_val.is_empty() { None } else { Some(&author_val) },
+                        existing_d_tag.as_deref(),
                     ).await
                 }
                 CitationEditorTab::External => {
@@ -216,6 +223,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         &cited_text_val,
                         if title_val.is_empty() { None } else { Some(&title_val) },
                         if author_val.is_empty() { None } else { Some(&author_val) },
+                        existing_d_tag.as_deref(),
                     ).await
                 }
                 CitationEditorTab::Hardcopy => {
@@ -226,6 +234,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         if page_range_val.is_empty() { None } else { Some(&page_range_val) },
                         if publisher_val.is_empty() { None } else { Some(&publisher_val) },
                         if doi_val.is_empty() { None } else { Some(&doi_val) },
+                        existing_d_tag.as_deref(),
                     ).await
                 }
                 CitationEditorTab::Prompt => {
@@ -234,6 +243,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         &cited_text_val,
                         if summary_val.is_empty() { None } else { Some(&summary_val) },
                         if prompt_url_val.is_empty() { None } else { Some(&prompt_url_val) },
+                        existing_d_tag.as_deref(),
                     ).await
                 }
             };
@@ -287,7 +297,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
                     h2 {
                         class: "text-lg font-semibold",
-                        if props.citation_to_edit.is_some() {
+                        if is_editing {
                             "Edit Citation"
                         } else {
                             "New Citation"
@@ -578,7 +588,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
                         if *saving.read() {
                             "Saving..."
-                        } else if props.citation_to_edit.is_some() {
+                        } else if is_editing {
                             "Update Citation"
                         } else {
                             "Create Citation"
