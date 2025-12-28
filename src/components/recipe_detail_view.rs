@@ -242,8 +242,19 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                             r#type: "button",
                             class: "flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm font-medium",
                             onclick: move |_| show_cookbook_modal.set(true),
-                            span { class: "text-base", "📚" }
-                            "Save"
+                            svg {
+                                class: "w-4 h-4",
+                                fill: "none",
+                                stroke: "currentColor",
+                                view_box: "0 0 24 24",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    stroke_width: "2",
+                                    d: "M12 4v16m8-8H4"
+                                }
+                            }
+                            "Cookbook"
                         }
                     }
                 }

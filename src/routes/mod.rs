@@ -670,7 +670,7 @@ pub enum Route {
 
 #[component]
 fn Layout() -> Element {
-    use crate::stores::{auth_store, notifications as notif_store};
+    use crate::stores::{auth_store, music_player::MUSIC_PLAYER, notifications as notif_store};
 
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
@@ -743,6 +743,12 @@ fn Layout() -> Element {
     // Check if we're on home page for home button styling
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
+
+    // Check if music player is visible to add bottom padding
+    let music_player_visible = {
+        let state = MUSIC_PLAYER.read();
+        state.is_visible && state.current_track.is_some()
+    };
 
     rsx! {
         div {
@@ -1170,10 +1176,14 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page {
-                        "w-full flex-1 border-r border-border"
-                    } else {
-                        "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
+                    class: {
+                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page;
+                        match (is_wide_page, music_player_visible) {
+                            (true, true) => "w-full flex-1 border-r border-border pb-24",
+                            (true, false) => "w-full flex-1 border-r border-border",
+                            (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
+                            (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
+                        }
                     },
 
                     // Mobile header

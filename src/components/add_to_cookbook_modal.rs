@@ -2,6 +2,7 @@
 //! Modal for adding a recipe to an existing cookbook or creating a new one
 
 use dioxus::prelude::*;
+use nostr_sdk::{nips::nip01::Coordinate, FromBech32};
 use crate::stores::pin_boards_store::{self, Pinboard, PinboardInput, PinInput, PinReference};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::MediaUploader;
@@ -78,8 +79,9 @@ pub fn AddToCookbookModal(
 
         spawn(async move {
             // Create a pin for this recipe
+            // Use a_tag (coordinate format) for board reference to ensure proper discovery
             let pin_input = PinInput {
-                board_addresses: vec![cookbook.naddr.clone()],
+                board_addresses: vec![cookbook.a_tag.clone()],
                 reference: PinReference::Coordinate {
                     address: naddr,
                     relay_hint: None,
@@ -133,9 +135,19 @@ pub fn AddToCookbookModal(
 
             match pin_boards_store::publish_pinboard(cookbook_input, None).await {
                 Ok(cookbook_naddr) => {
+                    // Convert naddr to a_tag (coordinate format) for board reference
+                    let board_a_tag = Coordinate::from_bech32(&cookbook_naddr)
+                        .map(|coord| format!(
+                            "{}:{}:{}",
+                            coord.kind.as_u16(),
+                            coord.public_key.to_hex(),
+                            coord.identifier
+                        ))
+                        .unwrap_or_else(|_| cookbook_naddr.clone());
+
                     // Now add the recipe as a pin
                     let pin_input = PinInput {
-                        board_addresses: vec![cookbook_naddr.clone()],
+                        board_addresses: vec![board_a_tag],
                         reference: PinReference::Coordinate {
                             address: naddr,
                             relay_hint: None,

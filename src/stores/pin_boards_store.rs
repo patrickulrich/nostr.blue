@@ -575,10 +575,25 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
         let slice = tag.as_slice();
         match slice.first().map(|s| s.as_str()) {
             // Uppercase A = board reference per NIP spec
+            // Support both coordinate format ("30067:pubkey:d_tag") and naddr format ("naddr1...")
             Some("A") => {
                 if let Some(address) = slice.get(1) {
                     if address.starts_with("30067:") {
+                        // Standard coordinate format
                         board_addresses.push(address.to_string());
+                    } else if address.starts_with("naddr1") {
+                        // naddr format - convert to coordinate format for consistency
+                        if let Ok(coord) = Coordinate::from_bech32(address) {
+                            if coord.kind.as_u16() == KIND_PINBOARD {
+                                let a_tag = format!(
+                                    "{}:{}:{}",
+                                    coord.kind.as_u16(),
+                                    coord.public_key.to_hex(),
+                                    coord.identifier
+                                );
+                                board_addresses.push(a_tag);
+                            }
+                        }
                     }
                 }
             }
@@ -1356,7 +1371,15 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
     // Add board references using uppercase A per NIP spec
     for board_addr in &input.board_addresses {
         // Parse the board address to create proper coordinate tag with uppercase
-        if let Ok(coord) = Coordinate::parse(board_addr) {
+        // Support both coordinate format ("30067:pubkey:d_tag") and naddr format ("naddr1...")
+        // Using naddr aligns with NIP-21 URI scheme for shareable references
+        let coord_opt = if board_addr.starts_with("naddr1") {
+            Coordinate::from_bech32(board_addr).ok()
+        } else {
+            Coordinate::parse(board_addr).ok()
+        };
+
+        if let Some(coord) = coord_opt {
             tags.push(Tag::from_standardized(TagStandard::Coordinate {
                 coordinate: coord,
                 relay_url: None,
@@ -1364,6 +1387,7 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             }));
         } else {
             // Fallback to custom tag if parsing fails
+            log::warn!("Failed to parse board address: {}", board_addr);
             tags.push(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
                 vec![board_addr.clone()],
