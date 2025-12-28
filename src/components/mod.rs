@@ -248,18 +248,18 @@ pub(crate) mod recipe_ingredients_editor;
 pub(crate) mod recipe_directions_editor;
 pub(crate) mod recipe_tag_selector;
 pub mod recipe_form;
-pub mod collection_card;
-pub mod tag_section_card;
-pub mod popular_chef_avatar;
+pub mod cookbook_card;
+pub mod create_cookbook_modal;
+pub mod add_to_cookbook_modal;
 pub mod discover_recipe_card;
 
 pub use recipe_card::{RecipeCard, RecipeCardSkeleton};
 pub use recipe_tag_chip::RecipeTagChipExplore;
 pub use recipe_detail_view::{RecipeDetailView, RecipeDetailViewSkeleton};
 pub use recipe_form::{RecipeForm, RecipeFormData};
-pub use collection_card::{CollectionCard, CollectionCardSkeleton};
-pub use tag_section_card::TagSectionCard;
-pub use popular_chef_avatar::{PopularChefAvatar, PopularChefAvatarSkeleton};
+pub use cookbook_card::{CookbookCard, CookbookCardSkeleton};
+pub use create_cookbook_modal::CreateCookbookModal;
+pub use add_to_cookbook_modal::AddToCookbookModal;
 pub use discover_recipe_card::{DiscoverRecipeCard, DiscoverRecipeCardSkeleton};
 // Note: RecipeIngredientsEditor, RecipeDirectionsEditor, RecipeTagSelector are internal to RecipeForm
 

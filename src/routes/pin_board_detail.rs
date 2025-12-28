@@ -2,12 +2,13 @@
 //! View a pin board with its pins, engagement, and actions
 //! Uses two-stage loading: board metadata first, then pins
 
+use std::collections::HashMap;
 use dioxus::prelude::*;
 use crate::stores::pin_boards_store::{
-    self, Pinboard, Pin, delete_pinboard, delete_pin,
+    self, Pinboard, Pin, PinMetadata, delete_pinboard, delete_pin,
     fetch_pinboard_reaction_count, fetch_pinboard_zap_total,
     has_user_reacted_to_pinboard, toggle_pinboard_reaction,
-    fetch_pins_for_board_filtered,
+    fetch_pins_for_board_filtered, enrich_pins_metadata,
 };
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::auth_store;
@@ -29,6 +30,9 @@ pub fn PinBoardDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut pins_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+
+    // Enriched metadata for pins (includes content type, title, image, summary)
+    let mut pin_metadata = use_signal(HashMap::<String, PinMetadata>::new);
 
     // Engagement state
     let mut reaction_count = use_signal(|| 0usize);
@@ -101,6 +105,10 @@ pub fn PinBoardDetail(naddr: String) -> Element {
 
                 match result {
                     Ok(fetched_pins) => {
+                        // Enrich pins with metadata from referenced events (image, title, content type)
+                        let metadata = enrich_pins_metadata(&fetched_pins).await;
+                        pin_metadata.set(metadata);
+
                         pins.set(fetched_pins);
                     }
                     Err(e) => {
@@ -489,6 +497,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                             pins: pins.read().clone(),
                             show_remove: *is_owner.read(),
                             on_remove: handle_remove_pin,
+                            metadata_map: pin_metadata.read().clone(),
                         }
                     }
                 }

@@ -8,6 +8,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::auth_store;
 use crate::stores::recipe_store::CachedRecipe;
 use crate::components::recipe_tag_chip::RecipeTagChip;
+use crate::components::AddToCookbookModal;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
 
@@ -42,6 +43,11 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
     #[allow(unused_variables)]
     let naddr_for_share = naddr.clone();
     let naddr_for_fork = naddr.clone();
+    let naddr_for_cookbook = naddr.clone();
+    let title_for_cookbook = title.clone();
+
+    // Add to cookbook modal state
+    let mut show_cookbook_modal = use_signal(|| false);
 
     // Cooking mode - checkboxes for ingredients
     let mut cooking_mode = use_signal(|| false);
@@ -229,6 +235,15 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                 span { class: "text-base", "🍴" }
                                 "Fork"
                             }
+                        }
+
+                        // Add to Cookbook button
+                        button {
+                            r#type: "button",
+                            class: "flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg transition text-sm font-medium",
+                            onclick: move |_| show_cookbook_modal.set(true),
+                            span { class: "text-base", "📚" }
+                            "Save"
                         }
                     }
                 }
@@ -516,6 +531,15 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                         class: "prose prose-neutral dark:prose-invert max-w-none p-4 bg-muted/30 rounded-lg",
                         p { "{resources}" }
                     }
+                }
+            }
+
+            // Add to Cookbook Modal
+            if *show_cookbook_modal.read() {
+                AddToCookbookModal {
+                    recipe_naddr: naddr_for_cookbook.clone(),
+                    recipe_title: Some(title_for_cookbook.clone()),
+                    on_close: move |_| show_cookbook_modal.set(false)
                 }
             }
         }

@@ -204,6 +204,7 @@ pub fn PinBoardCard(
 #[component]
 pub fn PinBoardCardMosaic(
     board: Pinboard,
+    /// DEPRECATED: No longer used - cards now link directly to board detail
     #[props(default)]
     on_click: Option<EventHandler<Pinboard>>,
     /// Event handler for zap button click - parent should open ZapModal
@@ -215,8 +216,9 @@ pub fn PinBoardCardMosaic(
 ) -> Element {
     let title = board.title.clone();
     let cover_image = board.image.clone();
+    let naddr = board.naddr.clone();
     let author_pubkey = board.pubkey.clone();
-    let board_for_click = board.clone();
+    let _board_for_click = board.clone(); // Kept for backwards compat, but no longer used
     let board_for_zap = board.clone();
     let board_for_react = board.clone();
 
@@ -273,14 +275,9 @@ pub fn PinBoardCardMosaic(
     };
 
     rsx! {
-        div {
-            class: "group relative overflow-hidden rounded-lg bg-muted cursor-pointer break-inside-avoid mb-2 shadow-sm hover:shadow-lg transition-shadow duration-300",
-            onclick: move |e| {
-                e.stop_propagation();
-                if let Some(handler) = &on_click {
-                    handler.call(board_for_click.clone());
-                }
-            },
+        Link {
+            to: Route::PinBoardDetail { naddr: naddr.clone() },
+            class: "group relative overflow-hidden rounded-lg bg-muted cursor-pointer break-inside-avoid mb-2 shadow-sm hover:shadow-lg transition-shadow duration-300 block",
 
             // Cover image (always visible) - natural aspect ratio for masonry
             if let Some(ref img_url) = cover_image {

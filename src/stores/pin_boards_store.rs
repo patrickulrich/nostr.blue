@@ -14,6 +14,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use crate::stores::nostr_client;
+use crate::utils::nip73::ExternalContentId;
 
 // ============================================================================
 // Constants
@@ -54,6 +55,9 @@ pub enum PinContentType {
     LiveStream,
     Badge,
     Pinboard,
+    // NIP-73 external content types
+    Book,
+    Location,
 }
 
 impl std::fmt::Display for PinContentType {
@@ -75,6 +79,8 @@ impl std::fmt::Display for PinContentType {
             PinContentType::LiveStream => write!(f, "live_stream"),
             PinContentType::Badge => write!(f, "badge"),
             PinContentType::Pinboard => write!(f, "pinboard"),
+            PinContentType::Book => write!(f, "book"),
+            PinContentType::Location => write!(f, "location"),
         }
     }
 }
@@ -99,6 +105,8 @@ impl PinContentType {
             PinContentType::LiveStream => "Live Stream",
             PinContentType::Badge => "Badge",
             PinContentType::Pinboard => "Pinboard",
+            PinContentType::Book => "Book",
+            PinContentType::Location => "Location",
         }
     }
 }
@@ -160,44 +168,72 @@ pub enum PinReference {
         address: String, // "kind:pubkey:d-tag"
         relay_hint: Option<String>,
     },
-    /// Reference to an external URL (r tag)
-    External { url: String },
+    /// Reference to external content via NIP-73 (i tag + k tag)
+    External {
+        content: ExternalContentId,
+        hint: Option<String>,
+    },
 }
 
 impl PinReference {
     /// Infer content type from the reference
     pub fn infer_content_type(&self) -> PinContentType {
         match self {
-            PinReference::External { url } => {
-                let lower = url.to_lowercase();
-                if is_image_url(&lower) {
-                    PinContentType::Image
-                } else if is_video_url(&lower) {
-                    PinContentType::Video
-                } else {
-                    PinContentType::Link
+            PinReference::External { content, .. } => {
+                // Use NIP-73 content type inference
+                match content {
+                    ExternalContentId::Url(url) => {
+                        // Keep existing URL pattern inference for images/videos
+                        let lower = url.as_str().to_lowercase();
+                        if is_image_url(&lower) {
+                            PinContentType::Image
+                        } else if is_video_url(&lower) {
+                            PinContentType::Video
+                        } else {
+                            PinContentType::Link
+                        }
+                    }
+                    ExternalContentId::Book(_) => PinContentType::Book,
+                    ExternalContentId::PodcastFeed(_)
+                    | ExternalContentId::PodcastEpisode(_)
+                    | ExternalContentId::PodcastPublisher(_) => PinContentType::Podcast,
+                    ExternalContentId::Movie(_) => PinContentType::Video,
+                    ExternalContentId::Paper(_) => PinContentType::Article,
+                    ExternalContentId::Geohash(_) => PinContentType::Location,
+                    ExternalContentId::Hashtag(_) => PinContentType::Text,
+                    ExternalContentId::BlockchainTransaction { .. }
+                    | ExternalContentId::BlockchainAddress { .. } => PinContentType::Link,
                 }
             }
             PinReference::Event { .. } => PinContentType::Note,
             PinReference::Coordinate { address, .. } => {
-                // Extract kind from coordinate "kind:pubkey:d-tag"
-                if let Some(kind_str) = address.split(':').next() {
-                    if let Ok(kind) = kind_str.parse::<u32>() {
-                        return match kind {
-                            30023 => PinContentType::Article,
-                            30078 => PinContentType::Recipe, // nostrcooking
-                            34550 => PinContentType::Community,
-                            30617 => PinContentType::CodeRepo,
-                            31922 | 31923 => PinContentType::CalendarEvent,
-                            30311 => PinContentType::LiveStream,
-                            30009 => PinContentType::Badge,
-                            30067 => PinContentType::Pinboard,
-                            32123 => PinContentType::Podcast,
-                            31337 | 32267 => PinContentType::Music, // Wavlake kinds
-                            0 => PinContentType::Profile,
-                            _ => PinContentType::Note,
-                        };
-                    }
+                // Extract kind - supports both coordinate format and naddr
+                let kind_opt = if address.starts_with("naddr1") {
+                    // Parse naddr bech32 format
+                    Coordinate::from_bech32(address)
+                        .ok()
+                        .map(|c| c.kind.as_u16() as u32)
+                } else {
+                    // Parse coordinate format "kind:pubkey:d-tag"
+                    address.split(':').next()
+                        .and_then(|s| s.parse::<u32>().ok())
+                };
+
+                if let Some(kind) = kind_opt {
+                    return match kind {
+                        30023 => PinContentType::Article,
+                        30078 => PinContentType::Recipe, // nostrcooking
+                        34550 => PinContentType::Community,
+                        30617 => PinContentType::CodeRepo,
+                        31922 | 31923 => PinContentType::CalendarEvent,
+                        30311 => PinContentType::LiveStream,
+                        30009 => PinContentType::Badge,
+                        30067 => PinContentType::Pinboard,
+                        32123 => PinContentType::Podcast,
+                        31337 | 32267 => PinContentType::Music, // Wavlake kinds
+                        0 => PinContentType::Profile,
+                        _ => PinContentType::Note,
+                    };
                 }
                 PinContentType::Note
             }
@@ -205,11 +241,11 @@ impl PinReference {
     }
 
     /// Get the display reference (URL or identifier)
-    pub fn display_ref(&self) -> &str {
+    pub fn display_ref(&self) -> String {
         match self {
-            PinReference::External { url } => url,
-            PinReference::Event { id, .. } => id,
-            PinReference::Coordinate { address, .. } => address,
+            PinReference::External { content, .. } => content.to_string(),
+            PinReference::Event { id, .. } => id.clone(),
+            PinReference::Coordinate { address, .. } => address.clone(),
         }
     }
 }
@@ -238,7 +274,9 @@ pub struct Pin {
 }
 
 impl Pin {
-    /// Get inferred content type
+    /// Get inferred content type from reference
+    /// Note: For Kind 30023 events, this returns Article. Use fetch_pin_content_type()
+    /// to get accurate type by checking the actual referenced event's tags.
     pub fn content_type(&self) -> PinContentType {
         self.reference.infer_content_type()
     }
@@ -527,25 +565,28 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
         return None;
     }
 
-    // Extract board references (a tags with kind 30067)
+    // Extract board references (uppercase A tags with kind 30067 per NIP spec)
     let mut board_addresses: Vec<String> = Vec::new();
     let mut content_coordinate: Option<(String, Option<String>)> = None;
     let mut event_ref: Option<(String, Option<String>)> = None;
-    let mut external_url: Option<String> = None;
+    let mut external_content: Option<(ExternalContentId, Option<String>)> = None;
 
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         match slice.first().map(|s| s.as_str()) {
+            // Uppercase A = board reference per NIP spec
+            Some("A") => {
+                if let Some(address) = slice.get(1) {
+                    if address.starts_with("30067:") {
+                        board_addresses.push(address.to_string());
+                    }
+                }
+            }
+            // Lowercase a = content coordinate (any addressable event, including pinboards for meta-curation)
             Some("a") => {
                 if let Some(address) = slice.get(1) {
                     let relay_hint = slice.get(2).map(|s| s.to_string());
-                    // Check if this is a board reference (starts with "30067:")
-                    if address.starts_with("30067:") {
-                        board_addresses.push(address.to_string());
-                    } else {
-                        // This is a content coordinate reference
-                        content_coordinate = Some((address.to_string(), relay_hint));
-                    }
+                    content_coordinate = Some((address.to_string(), relay_hint));
                 }
             }
             Some("e") => {
@@ -554,12 +595,12 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
                     event_ref = Some((id.to_string(), relay_hint));
                 }
             }
-            Some("r") => {
-                if let Some(url) = slice.get(1) {
-                    external_url = Some(url.to_string());
-                }
-            }
             _ => {}
+        }
+
+        // Check for NIP-73 external content via standardized tag parsing
+        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
+            external_content = Some((content.clone(), hint.as_ref().map(|u| u.to_string())));
         }
     }
 
@@ -571,8 +612,8 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
             address,
             relay_hint,
         }
-    } else if let Some(url) = external_url {
-        PinReference::External { url }
+    } else if let Some((content, hint)) = external_content {
+        PinReference::External { content, hint }
     } else {
         // No valid content reference found
         log::warn!("Pin event {} has no content reference", event.id.to_hex());
@@ -594,6 +635,216 @@ pub fn parse_pin_event(event: &NostrEvent) -> Option<Pin> {
         tags,
         event: event.clone(),
     })
+}
+
+/// Determine the accurate content type for a pin by fetching the referenced event.
+/// This is needed because Kind 30023 can be either an article or a recipe (identified by `nostrcooking` tag).
+/// Returns the inferred type if fetch fails or referenced event doesn't change the inference.
+pub async fn fetch_pin_content_type(pin: &Pin) -> PinContentType {
+    // For coordinates referencing Kind 30023, we need to check if it's a recipe
+    if let PinReference::Coordinate { address, .. } = &pin.reference {
+        // Parse coordinate - supports both naddr and coordinate format
+        let coord_opt = if address.starts_with("naddr1") {
+            Coordinate::from_bech32(address).ok()
+        } else {
+            Coordinate::parse(address).ok()
+        };
+
+        if let Some(coord) = coord_opt {
+            // Only enrich Kind 30023 (could be article or recipe)
+            if coord.kind.as_u16() == 30023 {
+                let filter = Filter::new()
+                    .kind(coord.kind)
+                    .author(coord.public_key)
+                    .identifier(&coord.identifier)
+                    .limit(1);
+
+                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.first() {
+                        // Check if it has the nostrcooking hashtag (making it a recipe)
+                        if event.tags.hashtags().any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX) {
+                            return PinContentType::Recipe;
+                        }
+                        // It's a regular article
+                        return PinContentType::Article;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fall back to inference for other types
+    pin.content_type()
+}
+
+/// Enrich a list of pins with accurate content types by fetching referenced events.
+/// For Kind 30023 references, this checks if they are recipes or articles.
+pub async fn enrich_pins_content_types(pins: &[Pin]) -> Vec<(String, PinContentType)> {
+    use futures::future::join_all;
+
+    // Collect pins that need enrichment (Kind 30023 references)
+    // Supports both coordinate format ("30023:pubkey:d-tag") and naddr format
+    let futures: Vec<_> = pins.iter()
+        .filter(|pin| {
+            if let PinReference::Coordinate { address, .. } = &pin.reference {
+                // Check if this is a Kind 30023 reference in either format
+                if address.starts_with("30023:") {
+                    return true;
+                }
+                if address.starts_with("naddr1") {
+                    // Parse naddr to check if it's Kind 30023
+                    if let Ok(coord) = Coordinate::from_bech32(address) {
+                        return coord.kind.as_u16() == 30023;
+                    }
+                }
+                false
+            } else {
+                false
+            }
+        })
+        .map(|pin| {
+            let event_id = pin.event_id.clone();
+            async move {
+                let content_type = fetch_pin_content_type(pin).await;
+                (event_id, content_type)
+            }
+        })
+        .collect();
+
+    join_all(futures).await
+}
+
+// ============================================================================
+// Pin Metadata Enrichment
+// ============================================================================
+
+/// Metadata extracted from the referenced event for display in pin cards
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinMetadata {
+    /// Accurate content type (resolves Article vs Recipe for Kind 30023)
+    pub content_type: Option<PinContentType>,
+    /// Title from the referenced event
+    pub title: Option<String>,
+    /// Cover image URL from the referenced event
+    pub image: Option<String>,
+    /// Summary/description from the referenced event
+    pub summary: Option<String>,
+}
+
+/// Fetch metadata for a pin by retrieving the referenced event.
+/// Extracts title, image, and summary from the referenced event's tags.
+pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
+    match &pin.reference {
+        PinReference::Coordinate { address, .. } => {
+            // Parse coordinate - supports both naddr and coordinate format
+            let coord_opt = if address.starts_with("naddr1") {
+                Coordinate::from_bech32(address).ok()
+            } else {
+                Coordinate::parse(address).ok()
+            };
+
+            if let Some(coord) = coord_opt {
+                let filter = Filter::new()
+                    .kind(coord.kind)
+                    .author(coord.public_key)
+                    .identifier(&coord.identifier)
+                    .limit(1);
+
+                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.first() {
+                        return extract_event_metadata(event, coord.kind.as_u16());
+                    }
+                }
+            }
+            PinMetadata::default()
+        }
+        PinReference::Event { id, .. } => {
+            // Fetch regular event by ID
+            if let Ok(event_id) = EventId::from_hex(id) {
+                let filter = Filter::new()
+                    .id(event_id)
+                    .limit(1);
+
+                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                    if let Some(event) = events.first() {
+                        return extract_event_metadata(event, event.kind.as_u16());
+                    }
+                }
+            }
+            PinMetadata::default()
+        }
+        PinReference::External { .. } => {
+            // External references don't have Nostr metadata to fetch
+            PinMetadata::default()
+        }
+    }
+}
+
+/// Extract metadata from an event based on its kind
+fn extract_event_metadata(event: &NostrEvent, kind: u16) -> PinMetadata {
+    let tags = &event.tags;
+
+    // Extract common metadata tags
+    let title = extract_tag_value(tags, "title");
+    let image = extract_tag_value(tags, "image");
+    let summary = extract_tag_value(tags, "summary");
+
+    // Determine content type
+    let content_type = match kind {
+        30023 => {
+            // Check if it's a recipe (has nostrcooking hashtag)
+            if tags.hashtags().any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX) {
+                Some(PinContentType::Recipe)
+            } else {
+                Some(PinContentType::Article)
+            }
+        }
+        30078 => Some(PinContentType::Recipe),
+        34550 => Some(PinContentType::Community),
+        30617 => Some(PinContentType::CodeRepo),
+        31922 | 31923 => Some(PinContentType::CalendarEvent),
+        30311 => Some(PinContentType::LiveStream),
+        30009 => Some(PinContentType::Badge),
+        30067 => Some(PinContentType::Pinboard),
+        32123 => Some(PinContentType::Podcast),
+        31337 | 32267 => Some(PinContentType::Music),
+        0 => Some(PinContentType::Profile),
+        1 => Some(PinContentType::Note),
+        _ => None,
+    };
+
+    PinMetadata {
+        content_type,
+        title,
+        image,
+        summary,
+    }
+}
+
+/// Enrich a list of pins with full metadata by fetching referenced events.
+/// This is more comprehensive than enrich_pins_content_types - it also gets image, title, summary.
+pub async fn enrich_pins_metadata(pins: &[Pin]) -> std::collections::HashMap<String, PinMetadata> {
+    use futures::future::join_all;
+    use std::collections::HashMap;
+
+    // Only enrich pins that reference Nostr events (not external content)
+    let futures: Vec<_> = pins.iter()
+        .filter(|pin| !matches!(pin.reference, PinReference::External { .. }))
+        .map(|pin| {
+            let event_id = pin.event_id.clone();
+            async move {
+                let metadata = fetch_pin_metadata(pin).await;
+                (event_id, metadata)
+            }
+        })
+        .collect();
+
+    let results = join_all(futures).await;
+
+    // Filter out empty results and collect into HashMap
+    results.into_iter()
+        .filter(|(_, meta)| meta.title.is_some() || meta.image.is_some() || meta.content_type.is_some())
+        .collect::<HashMap<_, _>>()
 }
 
 // ============================================================================
@@ -640,11 +891,11 @@ pub fn pinboards_by_hashtag_filter(hashtag: &str, limit: usize) -> Filter {
         .limit(limit)
 }
 
-/// Build a filter for pins referencing a board
+/// Build a filter for pins referencing a board (uppercase A per NIP spec)
 pub fn pins_for_board_filter(board_a_tag: &str, limit: usize) -> Filter {
     Filter::new()
         .kind(Kind::Custom(KIND_PIN))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
         .limit(limit)
 }
 
@@ -656,7 +907,7 @@ pub fn pins_by_author_filter(pubkey: PublicKey, limit: usize) -> Filter {
         .limit(limit)
 }
 
-/// Build a filter for pins by author referencing a specific board
+/// Build a filter for pins by author referencing a specific board (uppercase A per NIP spec)
 pub fn pins_by_author_for_board_filter(
     pubkey: PublicKey,
     board_a_tag: &str,
@@ -665,7 +916,7 @@ pub fn pins_by_author_for_board_filter(
     Filter::new()
         .kind(Kind::Custom(KIND_PIN))
         .author(pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
         .limit(limit)
 }
 
@@ -748,6 +999,57 @@ pub async fn fetch_pinboards_page(
     Ok(boards)
 }
 
+/// Fetch cookbooks (pinboards tagged with "cookbook")
+pub async fn fetch_cookbooks(limit: usize) -> std::result::Result<Vec<Pinboard>, String> {
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_PINBOARD))
+        .hashtag("cookbook")
+        .limit(limit);
+
+    let current_user = crate::stores::auth_store::get_pubkey();
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
+
+    let mut cookbooks: Vec<Pinboard> = events
+        .iter()
+        .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
+        .collect();
+
+    // Sort by created_at descending (newest first)
+    cookbooks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    cache_pinboards(&cookbooks);
+    log::info!("Fetched {} cookbooks", cookbooks.len());
+    Ok(cookbooks)
+}
+
+/// Fetch the current user's cookbooks (pinboards tagged with "cookbook")
+pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String> {
+    let current_user = crate::stores::auth_store::get_pubkey()
+        .ok_or("Not logged in")?;
+
+    let pubkey = nostr_sdk::PublicKey::from_hex(&current_user)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_PINBOARD))
+        .author(pubkey)
+        .hashtag("cookbook");
+
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+
+    let mut cookbooks: Vec<Pinboard> = events
+        .iter()
+        .filter_map(|e| parse_pinboard_event(e, Some(&current_user)))
+        .collect();
+
+    // Sort by created_at descending (newest first)
+    cookbooks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    cache_pinboards(&cookbooks);
+    log::info!("Fetched {} user cookbooks", cookbooks.len());
+    Ok(cookbooks)
+}
+
 /// Fetch a pinboard by naddr
 pub async fn fetch_pinboard_by_naddr(naddr: &str) -> std::result::Result<Option<Pinboard>, String> {
     // Check cache first
@@ -825,9 +1127,10 @@ pub async fn fetch_pins_for_board_filtered(
     owner_pubkey: Option<&str>,
     allowed_authors: Option<Vec<String>>,
 ) -> std::result::Result<Vec<Pin>, String> {
+    // Use uppercase A for board references per NIP spec
     let mut filter = Filter::new()
         .kind(Kind::Custom(KIND_PIN))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), board_a_tag)
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), board_a_tag)
         .limit(500);
 
     // Apply author filtering at relay level (most efficient)
@@ -1050,12 +1353,22 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
 
     let mut tags: Vec<Tag> = vec![];
 
-    // Add board references (if any)
+    // Add board references using uppercase A per NIP spec
     for board_addr in &input.board_addresses {
-        tags.push(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
-            vec![board_addr.clone()],
-        ));
+        // Parse the board address to create proper coordinate tag with uppercase
+        if let Ok(coord) = Coordinate::parse(board_addr) {
+            tags.push(Tag::from_standardized(TagStandard::Coordinate {
+                coordinate: coord,
+                relay_url: None,
+                uppercase: true, // NIP requires uppercase A for board refs
+            }));
+        } else {
+            // Fallback to custom tag if parsing fails
+            tags.push(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+                vec![board_addr.clone()],
+            ));
+        }
     }
 
     // Add content reference (required)
@@ -1078,16 +1391,24 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
             if let Some(relay) = relay_hint {
                 vals.push(relay.clone());
             }
+            // Content coordinates use lowercase a
             tags.push(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                 vals,
             ));
         }
-        PinReference::External { url } => {
-            tags.push(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
-                vec![url.clone()],
-            ));
+        PinReference::External { content, hint } => {
+            // Add NIP-73 i tag (external content ID)
+            tags.push(Tag::from_standardized(TagStandard::ExternalContent {
+                content: content.clone(),
+                hint: hint.as_ref().and_then(|h| Url::parse(h).ok()),
+                uppercase: false,
+            }));
+            // Add k tag (NIP-73 content kind)
+            tags.push(Tag::from_standardized(TagStandard::Nip73Kind {
+                kind: content.kind(),
+                uppercase: false,
+            }));
         }
     }
 
