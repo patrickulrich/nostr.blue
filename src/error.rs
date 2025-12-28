@@ -32,20 +32,6 @@ pub enum NostrBlueError {
     #[error("Profile not found: {0}")]
     ProfileNotFound(String),
 
-    // MLS/MDK (wrap mdk_core::Error)
-    #[error("MDK not initialized")]
-    MdkNotInitialized,
-    #[error("MLS error: {0}")]
-    MlsError(String),
-    #[error("No key packages found for: {0}")]
-    NoKeyPackages(String),
-    #[error("Key package error: {0}")]
-    KeyPackage(String),
-    #[error("Welcome error: {0}")]
-    Welcome(String),
-    #[error("MLS group error: {0}")]
-    MlsGroup(String),
-
     // Storage
     #[error("Storage error: {0}")]
     StorageError(String),

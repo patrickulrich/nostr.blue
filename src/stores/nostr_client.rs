@@ -126,6 +126,7 @@ pub enum RelayStatus {
 
 /// Relay information
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct RelayInfo {
     pub url: String,
     pub status: RelayStatus,
@@ -2594,4 +2595,67 @@ pub async fn search_custom_nips(
         .limit(limit);
 
     fetch_events_aggregated(filter, Duration::from_secs(10)).await
+}
+
+/// Relay connection info for display in settings
+#[derive(Clone, Debug)]
+pub struct RelayDisplayInfo {
+    pub url: String,
+    pub status: String,
+    pub bytes_sent: usize,
+    pub bytes_received: usize,
+    pub has_read: bool,
+    pub has_write: bool,
+}
+
+/// Get display info for all connected relays (for Connections tab in settings)
+pub async fn get_relay_display_info() -> Vec<RelayDisplayInfo> {
+    let Some(client) = get_client() else {
+        return vec![];
+    };
+
+    let relays = client.relays().await;
+    let mut info_list = Vec::new();
+
+    for (url, relay) in relays {
+        let status = match relay.status() {
+            nostr_relay_pool::RelayStatus::Connected => "Connected",
+            nostr_relay_pool::RelayStatus::Connecting => "Connecting",
+            nostr_relay_pool::RelayStatus::Disconnected => "Disconnected",
+            nostr_relay_pool::RelayStatus::Initialized => "Initialized",
+            nostr_relay_pool::RelayStatus::Terminated => "Terminated",
+            nostr_relay_pool::RelayStatus::Pending => "Pending",
+            nostr_relay_pool::RelayStatus::Banned => "Banned",
+            nostr_relay_pool::RelayStatus::Sleeping => "Sleeping",
+        };
+
+        let stats = relay.stats();
+        let flags = relay.flags();
+
+        info_list.push(RelayDisplayInfo {
+            url: url.to_string(),
+            status: status.to_string(),
+            bytes_sent: stats.bytes_sent(),
+            bytes_received: stats.bytes_received(),
+            has_read: flags.has_read(),
+            has_write: flags.has_write(),
+        });
+    }
+
+    // Sort by status (Connected first) then by URL
+    info_list.sort_by(|a, b| {
+        let status_order = |s: &str| match s {
+            "Connected" => 0,
+            "Connecting" => 1,
+            "Pending" => 2,
+            "Initialized" => 3,
+            "Disconnected" => 4,
+            "Terminated" => 5,
+            _ => 6,
+        };
+        status_order(&a.status).cmp(&status_order(&b.status))
+            .then_with(|| a.url.cmp(&b.url))
+    });
+
+    info_list
 }

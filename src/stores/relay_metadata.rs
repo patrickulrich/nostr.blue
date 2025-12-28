@@ -34,25 +34,47 @@ pub struct RelayListMetadata {
 pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> =
     Signal::global(|| None);
 
+/// Default NIP-65 relay URLs
+pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band",
+    "wss://nos.lol",
+];
+
+/// Default DM inbox relay URLs (NIP-17)
+pub const DEFAULT_DM_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://auth.nostr1.com",
+];
+
 /// Default relays to use when no kind 10002 is found
 pub fn default_relays() -> Vec<RelayConfig> {
-    vec![
-        RelayConfig {
-            url: "wss://relay.damus.io".to_string(),
-            read: true,
-            write: true,
-        },
-        RelayConfig {
-            url: "wss://relay.nostr.band".to_string(),
-            read: true,
-            write: true,
-        },
-        RelayConfig {
-            url: "wss://nos.lol".to_string(),
-            read: true,
-            write: true,
-        },
-    ]
+    DEFAULT_NIP65_RELAYS.iter().map(|url| RelayConfig {
+        url: url.to_string(),
+        read: true,
+        write: true,
+    }).collect()
+}
+
+/// Default DM relays to use when no kind 10050 is found
+pub fn default_dm_relays() -> Vec<String> {
+    DEFAULT_DM_RELAYS.iter().map(|s| s.to_string()).collect()
+}
+
+/// Reset general relays to defaults (local change only)
+pub fn reset_general_relays_to_default() {
+    let mut metadata = USER_RELAY_METADATA.write();
+    if let Some(m) = metadata.as_mut() {
+        m.relays = default_relays();
+    }
+}
+
+/// Reset DM relays to defaults (local change only)
+pub fn reset_dm_relays_to_default() {
+    let mut metadata = USER_RELAY_METADATA.write();
+    if let Some(m) = metadata.as_mut() {
+        m.dm_relays = default_dm_relays();
+    }
 }
 
 /// Parse relay list from kind 10002 event
@@ -315,7 +337,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
 
         let default = RelayListMetadata {
             relays: default_relays(),
-            dm_relays: vec!["wss://relay.damus.io".to_string()],
+            dm_relays: default_dm_relays(),
             updated_at: now_secs,
         };
 

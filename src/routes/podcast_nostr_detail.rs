@@ -126,7 +126,11 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
 
     // Build coordinate for subscription
     let coordinate = format!("30078:{}:{}", metadata.pubkey, metadata.d_tag);
-    let is_subscribed = podcast_subscription::is_subscribed(&coordinate);
+    // Check subscription reactively using use_memo so UI updates when SUBSCRIPTIONS changes
+    let coordinate_for_memo = coordinate.clone();
+    let is_subscribed = use_memo(move || {
+        podcast_subscription::is_subscribed(&coordinate_for_memo)
+    });
     let mut subscribing = use_signal(|| false);
 
     rsx! {
@@ -223,7 +227,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                         // Subscribe button
                         if auth.is_authenticated {
                             button {
-                                class: if is_subscribed || *subscribing.read() {
+                                class: if *is_subscribed.read() || *subscribing.read() {
                                     "px-4 py-2 text-sm font-medium border border-border rounded-full hover:bg-muted transition"
                                 } else {
                                     "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition"
@@ -256,7 +260,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
                                 },
                                 if *subscribing.read() {
                                     "..."
-                                } else if is_subscribed {
+                                } else if *is_subscribed.read() {
                                     "Subscribed"
                                 } else {
                                     "Subscribe"

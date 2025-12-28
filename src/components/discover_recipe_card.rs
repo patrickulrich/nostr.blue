@@ -9,6 +9,20 @@ use crate::stores::recipe_store::CachedRecipe;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::{css_safe_url, is_valid_http_url};
 
+/// Fallback image for recipes without a valid image URL
+#[component]
+fn RecipeFallbackImage() -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center",
+            span {
+                class: "text-5xl opacity-50",
+                "🍳"
+            }
+        }
+    }
+}
+
 /// Discover recipe card for the explore page
 /// Similar to RecipeCardTrending but with author avatar in TOP-LEFT
 #[component]
@@ -55,24 +69,11 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
                         }
                     } else {
                         // URL failed validation - show fallback
-                        div {
-                            class: "absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center",
-
-                            span {
-                                class: "text-5xl opacity-50",
-                                "🍳"
-                            }
-                        }
+                        RecipeFallbackImage {}
                     }
                 } else {
-                    div {
-                        class: "absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center",
-
-                        span {
-                            class: "text-5xl opacity-50",
-                            "🍳"
-                        }
-                    }
+                    // No image URL - show fallback
+                    RecipeFallbackImage {}
                 }
 
                 // Author avatar in TOP-LEFT

@@ -6,11 +6,13 @@ use dioxus::prelude::*;
 use crate::utils::is_valid_http_url;
 
 /// Escape a URL for use in CSS url() function
-/// Escapes backslashes, single quotes, and closing parentheses
+/// Escapes backslashes, single quotes, closing parentheses, and removes
+/// newlines/quotes that could be used for CSS injection
 fn escape_css_url(url: &str) -> String {
     url.replace('\\', "\\\\")
         .replace('\'', "\\'")
         .replace(')', "\\)")
+        .replace(['\n', '\r', '"'], "")
 }
 
 /// Collection card for the explore page

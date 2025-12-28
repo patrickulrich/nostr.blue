@@ -394,17 +394,21 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
         ),
     ];
 
+    // NIP-73: Add ONE k tag per content type for queryability (not per item)
+    let has_rss = subscriptions.iter().any(|s| s.podcast_guid.is_some());
+    if has_rss {
+        tags.push(Tag::custom(
+            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+            vec!["podcast:guid".to_string()],
+        ));
+    }
+
     for sub in subscriptions {
         if let Some(ref guid) = sub.podcast_guid {
             // RSS podcast - use NIP-73 `i` tag with podcast:guid:<guid> format
             tags.push(Tag::custom(
                 nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("i")),
                 vec![format!("podcast:guid:{}", guid)],
-            ));
-            // Also add the k tag for the external content type
-            tags.push(Tag::custom(
-                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("k")),
-                vec!["podcast:guid".to_string()],
             ));
         } else if let Some(ref coordinate) = sub.nostr_coordinate {
             // Nostr podcast - use a tag
@@ -465,11 +469,6 @@ pub fn get_nostr_podcasts() -> Vec<String> {
 /// Check if subscribed to a feed/podcast
 pub fn is_subscribed(id: &str) -> bool {
     SUBSCRIPTIONS.read().iter().any(|s| s.id().as_deref() == Some(id))
-}
-
-/// Check if subscriptions have been loaded
-pub fn is_loaded() -> bool {
-    *SUBSCRIPTIONS_LOADED.read()
 }
 
 /// Check if currently loading

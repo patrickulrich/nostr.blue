@@ -38,15 +38,20 @@ export async function loadVideoJs() {
     }
 
     return new Promise((resolve, reject) => {
-        // Load CSS
+        // Load CSS with SRI
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = 'https://vjs.zencdn.net/8.10.0/video-js.css';
+        link.integrity = 'sha384-6LeG/ONVwTyNrI1eNFYoIcUrglv6y7o8hvl3DB8Qd4K2/wD8niobYgHS3RJSO7uL';
+        link.crossOrigin = 'anonymous';
+        link.onerror = () => reject(new Error('Failed to load Video.js CSS'));
         document.head.appendChild(link);
 
-        // Load JS
+        // Load JS with SRI
         const script = document.createElement('script');
         script.src = 'https://vjs.zencdn.net/8.10.0/video.min.js';
+        script.integrity = 'sha384-KUwosImoEnKt2Q36Bs3MxeOh0vghQarvecyjG6yVFknPMBxWK1YB0/gqXVWFgzsj';
+        script.crossOrigin = 'anonymous';
         script.onload = () => {
             console.log('Video.js loaded successfully');
             resolve();

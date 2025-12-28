@@ -28,12 +28,6 @@ nwc = { version = "0.44.0" }
 cdk = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
 cdk-common = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
 
-# Marmot MLS E2EE messaging
-mdk-core = { git = "https://github.com/patrickulrich/mdk", default-features = false, features = ["wasm"] }
-mdk-memory-storage = { git = "https://github.com/patrickulrich/mdk", default-features = false, features = ["wasm"] }
-# nostr 0.43 for MDK compatibility (MDK uses 0.43, nostr-sdk uses 0.44)
-nostr_mdk = { package = "nostr", version = "0.43", default-features = false, features = ["std"] }
-
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sha2 = "0.10"

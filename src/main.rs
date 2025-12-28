@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, mdk_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay_store, shop_store, sidebar_store};
+use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, shop_store, sidebar_store};
 
 // Modules
 mod components;
@@ -53,24 +53,7 @@ fn App() -> Element {
                     auth_store::restore_session_async().await;
 
                     // Run all remaining operations in parallel for faster startup
-                    let pubkey = auth_store::get_pubkey();
                     futures::join!(
-                        async {
-                            if let Some(pk) = &pubkey {
-                                // Fetch user's key package relays (kind 10051)
-                                if let Err(e) = relay_store::fetch_key_package_relays(pk).await {
-                                    log::debug!("Failed to fetch key package relays: {}", e);
-                                }
-                            }
-                        },
-                        async {
-                            if pubkey.is_some() {
-                                // Load existing key package info for rotation tracking
-                                if let Err(e) = mdk_store::load_key_package_info().await {
-                                    log::debug!("Failed to load key package info: {}", e);
-                                }
-                            }
-                        },
                         // Load user's preferred reactions from Nostr (NIP-78)
                         reactions_store::load_preferred_reactions(),
                         // Load user's sidebar preferences from Nostr (NIP-78)

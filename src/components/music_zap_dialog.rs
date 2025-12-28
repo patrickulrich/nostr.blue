@@ -677,8 +677,10 @@ async fn generate_v4v_invoice(
         return Err("No payment recipients configured for this podcast".to_string());
     }
 
-    // Calculate total split for percentage calculation
-    let total_split: u32 = value_block.recipients.iter().map(|r| r.split).sum();
+    // Calculate total split for percentage calculation using checked arithmetic
+    let total_split: u32 = value_block.recipients.iter()
+        .try_fold(0u32, |acc, r| acc.checked_add(r.split))
+        .ok_or("Split values overflow - invalid podcast configuration")?;
     if total_split == 0 {
         return Err("Invalid split configuration - total is zero".to_string());
     }
@@ -710,10 +712,15 @@ async fn generate_v4v_invoice(
 
     let lnaddress = &recipient.address;
 
-    // Calculate this recipient's share using integer arithmetic with rounding
+    // Calculate this recipient's share using checked arithmetic to prevent overflow
     // Formula: (a * b + c/2) / c rounds to nearest integer
     // Minimum 1 sat to avoid zero payments
-    let recipient_share = ((amount_sats * recipient.split as u64 + total_split as u64 / 2) / total_split as u64).max(1);
+    let recipient_share = amount_sats
+        .checked_mul(recipient.split as u64)
+        .and_then(|v| v.checked_add(total_split as u64 / 2))
+        .map(|v| v / total_split as u64)
+        .ok_or("Arithmetic overflow calculating recipient share")?
+        .max(1);
     let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
 
     // Use floating point for accurate percentage display

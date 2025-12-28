@@ -34,8 +34,9 @@ pub fn PodcastHome() -> Element {
     let is_authenticated = auth_store::is_authenticated();
 
     // Load subscriptions on mount (authenticated users only)
+    // Always fetch to ensure data is current after navigation
     use_effect(move || {
-        if auth_store::is_authenticated() && !podcast_subscription::is_loaded() {
+        if auth_store::is_authenticated() {
             spawn(async move {
                 if let Err(e) = podcast_subscription::fetch_subscriptions().await {
                     log::error!("Failed to fetch podcast subscriptions: {}", e);
@@ -979,9 +980,10 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
+        let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
 
-        // Need auth for Podcast Index API
-        if !client_initialized || !has_signer {
+        // Need auth for Podcast Index API, and wait for subscriptions to load
+        if !client_initialized || !has_signer || !subs_loaded {
             return;
         }
 
@@ -1055,10 +1057,11 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
         });
     });
 
-    // Fetch Nostr episodes from subscriptions (waits for client)
+    // Fetch Nostr episodes from subscriptions (waits for client and subscriptions)
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
+        let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
+        if !client_initialized || !subs_loaded {
             return;
         }
 
@@ -1134,9 +1137,16 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
 
     let has_any_data = (show_rss && rss_episodes.read().is_some()) ||
                        (show_nostr && nostr_episodes.read().is_some());
-    let is_initial_loading = (show_rss && *rss_loading.read() && rss_episodes.read().is_none()) ||
+    // Check if we're still initializing - show skeleton until client is ready and subscriptions loaded
+    let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
+    let has_signer = nostr_client::has_signer();
+    let subs_loading = *podcast_subscription::SUBSCRIPTIONS_LOADING.read();
+    let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
+    // Show loading if: client not ready, no signer, subscriptions not loaded, or still fetching episodes
+    let is_initial_loading = !client_ready || !has_signer || !subs_loaded || subs_loading ||
+                             (show_rss && *rss_loading.read() && rss_episodes.read().is_none()) ||
                              (show_nostr && *nostr_loading.read() && nostr_episodes.read().is_none() && !show_rss);
-    let nostr_still_loading = show_nostr && (!*nostr_client::CLIENT_INITIALIZED.read() || *nostr_loading.read());
+    let nostr_still_loading = show_nostr && (!client_ready || *nostr_loading.read());
 
     if is_initial_loading && !has_any_data {
         return rsx! {
@@ -1322,22 +1332,40 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
     // Fetch podcast metadata - RSS from Podcast Index, Nostr from relays
     let podcast_data = use_resource(move || {
         let podcast_id = sub.podcast_id;
+        let podcast_guid = sub.podcast_guid.clone();
         let nostr_coord = sub.nostr_coordinate.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
         async move {
-            // RSS podcast - fetch from Podcast Index API
-            if let Some(id) = podcast_id {
+            // RSS podcast - fetch from Podcast Index API (by ID or GUID)
+            if podcast_id.is_some() || podcast_guid.is_some() {
                 if !client_initialized || !has_signer {
                     return None;
                 }
-                match podcast_index::get_podcast_by_id(id).await {
-                    Ok(feed) => return Some(SubscriptionMetadata::Rss(Box::new(feed))),
-                    Err(e) => {
-                        log::warn!("Failed to fetch RSS podcast {}: {}", id, e);
-                        return None;
+
+                // Try by ID first (more efficient), then by GUID
+                if let Some(id) = podcast_id {
+                    match podcast_index::get_podcast_by_id(id).await {
+                        Ok(feed) => return Some(SubscriptionMetadata::Rss(Box::new(feed))),
+                        Err(e) => {
+                            log::warn!("Failed to fetch RSS podcast by ID {}: {}", id, e);
+                            // Fall through to try GUID if available
+                        }
                     }
                 }
+
+                // Try by GUID (used when subscription loaded from Nostr with only GUID)
+                if let Some(ref guid) = podcast_guid {
+                    match podcast_index::get_podcast_by_guid(guid).await {
+                        Ok(feed) => return Some(SubscriptionMetadata::Rss(Box::new(feed))),
+                        Err(e) => {
+                            log::warn!("Failed to fetch RSS podcast by GUID {}: {}", guid, e);
+                            return None;
+                        }
+                    }
+                }
+
+                return None;
             }
 
             // Nostr podcast - fetch from relays using coordinate
@@ -1418,6 +1446,8 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                 .unwrap_or_else(|| {
                     if let Some(id) = props.subscription.podcast_id {
                         format!("Podcast #{}", id)
+                    } else if props.subscription.podcast_guid.is_some() {
+                        "Loading podcast...".to_string()
                     } else {
                         "Nostr Podcast".to_string()
                     }
@@ -1429,9 +1459,20 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
     };
 
     // Determine the route based on subscription type
+    // For RSS podcasts, prefer subscription's podcast_id, then fall back to ID from fetched feed
     let route = props.subscription.podcast_id
         .map(|podcast_id| Route::PodcastRssFeedDetail {
             podcast_id: podcast_id.to_string()
+        })
+        .or_else(|| {
+            // If we fetched by GUID, get the ID from the fetched feed
+            if let Some(SubscriptionMetadata::Rss(ref feed)) = metadata {
+                Some(Route::PodcastRssFeedDetail {
+                    podcast_id: feed.id.to_string()
+                })
+            } else {
+                None
+            }
         })
         .or_else(|| props.subscription.nostr_coordinate.as_ref().map(|coord| Route::PodcastNostrDetail {
             naddr: coord.clone()
@@ -1482,18 +1523,31 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
             }
         }
     } else {
+        // Check if this is a GUID-only subscription that's still loading or needs auth
+        let has_guid = props.subscription.podcast_guid.is_some();
+        let has_signer = nostr_client::has_signer();
+        let needs_auth = has_guid && !has_signer;
+
+        let (icon, message) = if needs_auth {
+            ("🔐", "Sign in to load podcast")
+        } else if has_guid && is_loading {
+            ("⏳", "Loading podcast...")
+        } else {
+            ("?", "Invalid subscription")
+        };
+
         rsx! {
             div {
                 class: "flex items-center gap-3 p-2 rounded-lg opacity-50",
                 div {
                     class: "w-12 h-12 rounded bg-muted flex items-center justify-center text-muted-foreground",
-                    "?"
+                    "{icon}"
                 }
                 div {
                     class: "flex-1 min-w-0",
                     div {
                         class: "font-medium truncate",
-                        "Invalid subscription"
+                        "{message}"
                     }
                 }
             }

@@ -134,6 +134,11 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
             });
 
             search_task.set(Some(new_task));
+        } else {
+            // User not authenticated - clear search state
+            // Search requires authentication to query personal citations
+            search_results.set(Vec::new());
+            is_searching.set(false);
         }
     };
 

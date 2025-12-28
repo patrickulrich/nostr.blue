@@ -8,11 +8,54 @@ use std::io::Cursor;
 use std::time::Duration;
 use crate::stores::{nostr_client, auth_store};
 
+#[cfg(target_arch = "wasm32")]
+use gloo_storage::{LocalStorage, Storage};
+
 /// Default Blossom server
 pub const DEFAULT_SERVER: &str = "https://blossom.primal.net";
 
 /// Kind 10063 - User Blossom Server List (NIP-B7)
 pub const KIND_USER_BLOSSOM_SERVERS: u16 = 10063;
+
+/// Local storage key for blossom servers (persists across page reloads)
+#[allow(dead_code)] // Used in WASM-only code paths
+const BLOSSOM_SERVERS_STORAGE_KEY: &str = "nostr_blue_blossom_servers";
+
+/// Save servers to local storage (WASM only)
+#[cfg(target_arch = "wasm32")]
+fn save_servers_to_storage(servers: &[String]) {
+    if let Err(e) = LocalStorage::set(BLOSSOM_SERVERS_STORAGE_KEY, servers.to_vec()) {
+        log::warn!("Failed to save blossom servers to local storage: {:?}", e);
+    } else {
+        log::debug!("Saved {} blossom servers to local storage", servers.len());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_servers_to_storage(_servers: &[String]) {
+    // No-op on non-WASM platforms
+}
+
+/// Load servers from local storage (WASM only)
+#[cfg(target_arch = "wasm32")]
+pub fn load_servers_from_storage() -> Option<Vec<String>> {
+    match LocalStorage::get::<Vec<String>>(BLOSSOM_SERVERS_STORAGE_KEY) {
+        Ok(servers) if !servers.is_empty() => {
+            log::info!("Loaded {} blossom servers from local storage", servers.len());
+            Some(servers)
+        }
+        Ok(_) => None,
+        Err(e) => {
+            log::debug!("No blossom servers in local storage: {:?}", e);
+            None
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_servers_from_storage() -> Option<Vec<String>> {
+    None
+}
 
 /// Global signal for the list of configured Blossom servers
 /// Store for blossom servers with fine-grained reactivity
@@ -38,6 +81,7 @@ pub fn add_server(url: String) {
     let mut servers = data.write();
     if !servers.contains(&url) {
         servers.push(url);
+        save_servers_to_storage(&servers);
     }
 }
 
@@ -52,11 +96,40 @@ pub fn remove_server(url: &str) {
     if servers.is_empty() {
         servers.push(DEFAULT_SERVER.to_string());
     }
+    save_servers_to_storage(&servers);
 }
 
 /// Get the first server from the list (primary upload target)
 pub fn get_primary_server() -> String {
-    BLOSSOM_SERVERS.read().data().read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string())
+    let server = BLOSSOM_SERVERS.read().data().read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string());
+    log::debug!("get_primary_server returning: {}", server);
+    server
+}
+
+/// Get all configured Blossom servers
+pub fn get_servers() -> Vec<String> {
+    BLOSSOM_SERVERS.read().data().read().clone()
+}
+
+/// Set a server as preferred (moves to first position in list)
+/// Changes are persisted to local storage immediately, and to Nostr via `publish_user_servers()`
+pub fn set_as_preferred(url: &str) {
+    log::info!("set_as_preferred called with: {}", url);
+    let store = BLOSSOM_SERVERS.read();
+    let mut data = store.data();
+    let mut servers = data.write();
+    log::info!("Current servers before reorder: {:?}", *servers);
+    if let Some(pos) = servers.iter().position(|s| s == url) {
+        log::info!("Found server at position {}, moving to first", pos);
+        let server = servers.remove(pos);
+        servers.insert(0, server);
+        log::info!("Servers after reorder: {:?}", *servers);
+        // Persist to local storage so preference survives page reload
+        save_servers_to_storage(&servers);
+    } else {
+        log::warn!("Server not found in list: {}", url);
+        log::warn!("Available servers: {:?}", *servers);
+    }
 }
 
 /// Upload media (image or video) to Blossom with optional compression
@@ -65,6 +138,7 @@ pub fn get_primary_server() -> String {
 /// * `data` - Raw media bytes
 /// * `content_type` - MIME type (e.g., "image/png", "image/jpeg", "video/mp4")
 /// * `quality` - Compression quality (0-100). 100 = original, no compression. Only applies to images.
+/// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
 /// URL of the uploaded media
@@ -72,6 +146,7 @@ pub async fn upload_image(
     data: Vec<u8>,
     content_type: String,
     quality: u8,
+    server_url: Option<String>,
 ) -> Result<String, String> {
     let is_video = content_type.starts_with("video/");
     let media_type = if is_video { "video" } else { "image" };
@@ -108,6 +183,7 @@ pub async fn upload_image(
         content_type,
         format!("Upload {} via nostr.blue", media_type),
         50.0,
+        server_url,
     ).await
 }
 
@@ -168,6 +244,7 @@ async fn compress_image(
 /// * `content_type` - MIME type
 /// * `auth_content` - Authorization message content
 /// * `start_progress` - Progress value to set at upload start (after any pre-processing)
+/// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
 /// URL of the uploaded blob
@@ -176,6 +253,7 @@ async fn upload_blob_with_auth(
     content_type: String,
     auth_content: String,
     start_progress: f32,
+    server_url: Option<String>,
 ) -> Result<String, String> {
     // Get signer for authentication
     let signer = nostr_client::get_signer()
@@ -183,8 +261,8 @@ async fn upload_blob_with_auth(
 
     UPLOAD_PROGRESS.write().replace(start_progress);
 
-    // Get primary server
-    let server_url = get_primary_server();
+    // Use provided server or fall back to primary
+    let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
 
     // Create Blossom client
@@ -251,12 +329,14 @@ async fn upload_blob_with_auth(
 /// # Arguments
 /// * `data` - Raw audio bytes
 /// * `content_type` - MIME type (e.g., "audio/mp4", "audio/webm", "audio/ogg")
+/// * `server_url` - Optional server URL to upload to (uses primary server if None)
 ///
 /// # Returns
 /// URL of the uploaded audio
 pub async fn upload_audio(
     data: Vec<u8>,
     content_type: String,
+    server_url: Option<String>,
 ) -> Result<String, String> {
     log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
 
@@ -268,6 +348,7 @@ pub async fn upload_audio(
         content_type,
         "Upload voice message via nostr.blue".to_string(),
         25.0,
+        server_url,
     ).await
 }
 
@@ -282,7 +363,16 @@ pub fn calculate_sha256(data: &[u8]) -> String {
 
 /// Fetch user's Blossom servers from kind 10063 (NIP-B7)
 /// Should be called on authentication to load user's preferred servers
+/// Local storage is checked first to preserve user's preferred order
 pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
+    // Check local storage first - user's local preferences take priority
+    if let Some(local_servers) = load_servers_from_storage() {
+        log::info!("Using {} blossom servers from local storage (preferred order preserved)", local_servers.len());
+        set_servers(local_servers.clone());
+        *SERVERS_LOADED.write() = true;
+        return Ok(local_servers);
+    }
+
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
@@ -290,7 +380,7 @@ pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
         .or_else(|_| PublicKey::from_hex(&pubkey_str))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    log::info!("Fetching user's Blossom servers (kind 10063)...");
+    log::info!("Fetching user's Blossom servers from Nostr (kind 10063)...");
 
     // Build filter for kind 10063
     let filter = Filter::new()
