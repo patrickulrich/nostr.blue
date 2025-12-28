@@ -727,6 +727,7 @@ fn Layout() -> Element {
         Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
         Route::ShopCollectionNew {} | Route::ShopSearch { .. }
     );
+    let is_settings_page = matches!(current_route, Route::Settings {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -1199,8 +1200,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, and Shop pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, Shop, and Settings pages
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_settings_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {

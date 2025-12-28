@@ -33,8 +33,6 @@ pub mod grasp_servers;  // NIP-34 GRASP server discovery
 pub mod p2p_store;  // NIP-69 P2P orders
 pub mod shop_store; // NIP-99 Marketplace (products, collections, orders)
 pub mod calendar_store;  // NIP-52 Calendar events + NIP-53 Live activities
-pub mod mdk_store;  // Marmot MLS E2EE messaging
-pub mod relay_store;  // NIP-65/NIP-17 relay type management
 pub mod community_store;  // NIP-72 Moderated Communities
 pub mod recipe_store;     // Kind 30023 Recipes
 pub mod sidebar_store;    // NIP-78 sidebar layout preferences

@@ -14,6 +14,7 @@ pub fn VoiceReplyComposer(
     let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
+    let mut selected_server = use_signal(blossom_store::get_primary_server);
     let has_signer = *HAS_SIGNER.read();
 
     let can_publish = audio_data.read().is_some() && !*is_publishing.read() && has_signer;
@@ -45,6 +46,7 @@ pub fn VoiceReplyComposer(
         is_publishing.set(true);
         error_message.set(None);
         let event_for_reply = reply_event.clone();
+        let server_url = selected_server.read().clone();
 
         // Determine the root event ID for cache invalidation
         let parent_root = event_for_reply.tags.iter().find_map(|tag| {
@@ -68,7 +70,7 @@ pub fn VoiceReplyComposer(
 
         spawn(async move {
             // Upload to Blossom with actual MIME type from recorder
-            match blossom_store::upload_audio(bytes, mime_type.clone()).await {
+            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url)).await {
                 Ok(audio_url) => {
                     log::info!("Voice reply audio uploaded successfully: {}", audio_url);
 
@@ -200,6 +202,35 @@ pub fn VoiceReplyComposer(
                             }
                         }
 
+                        // Blossom server selector
+                        div {
+                            class: "mb-4",
+                            label {
+                                class: "block text-sm font-medium mb-2",
+                                "Upload to"
+                            }
+                            select {
+                                class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm",
+                                disabled: *is_publishing.read(),
+                                onchange: move |evt| {
+                                    selected_server.set(evt.value());
+                                },
+                                {
+                                    let servers = blossom_store::get_servers();
+                                    let current_server = selected_server.read().clone();
+                                    rsx! {
+                                        for server in servers.iter() {
+                                            option {
+                                                value: "{server}",
+                                                selected: *server == current_server,
+                                                "{display_server_url(server)}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Error message
                         if let Some(err) = error_message.read().as_ref() {
                             div {
@@ -241,4 +272,12 @@ pub fn VoiceReplyComposer(
             }
         }
     }
+}
+
+/// Helper function to display server URL in a user-friendly format
+fn display_server_url(url: &str) -> String {
+    url.replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string()
 }

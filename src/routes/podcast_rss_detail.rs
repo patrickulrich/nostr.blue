@@ -139,12 +139,15 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     // Subscription state - use podcast GUID as the subscription identifier (NIP-73 compliant)
     let podcast_guid = feed.podcast_guid.clone();
     let feed_url = feed.url.clone();
-    // Check subscription by GUID if available, otherwise fall back to ID string
-    let is_subscribed = if let Some(ref guid) = podcast_guid {
-        podcast_subscription::is_subscribed(guid)
-    } else {
-        podcast_subscription::is_subscribed(&podcast_id.to_string())
-    };
+    // Check subscription reactively using use_memo so UI updates when SUBSCRIPTIONS changes
+    let podcast_guid_for_memo = podcast_guid.clone();
+    let is_subscribed = use_memo(move || {
+        if let Some(ref guid) = podcast_guid_for_memo {
+            podcast_subscription::is_subscribed(guid)
+        } else {
+            podcast_subscription::is_subscribed(&podcast_id.to_string())
+        }
+    });
     let mut subscribing = use_signal(|| false);
 
     // Convert episodes to DisplayEpisode
@@ -247,7 +250,7 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                         // Subscribe button
                         if auth.is_authenticated {
                             button {
-                                class: if is_subscribed || *subscribing.read() {
+                                class: if *is_subscribed.read() || *subscribing.read() {
                                     "px-4 py-2 text-sm font-medium border border-border rounded-full hover:bg-muted transition"
                                 } else {
                                     "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition"
@@ -289,7 +292,7 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                 },
                                 if *subscribing.read() {
                                     "..."
-                                } else if is_subscribed {
+                                } else if *is_subscribed.read() {
                                     "Subscribed"
                                 } else {
                                     "Subscribe"

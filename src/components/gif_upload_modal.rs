@@ -33,6 +33,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut selected_file = use_signal(|| None::<(String, Vec<u8>, String, Option<String>)>);
     let mut caption = use_signal(String::new);
     let mut upload_server = use_signal(|| UploadServer::NostrBuild);
+    let mut selected_blossom_server = use_signal(blossom_store::get_primary_server);
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
@@ -119,6 +120,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             let file_data = selected_file.read().clone();
             let caption_text = caption.read().clone();
             let server = upload_server.read().clone();
+            let blossom_server = selected_blossom_server.read().clone();
             let on_upload = on_upload;
 
             if file_data.is_none() {
@@ -163,6 +165,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             data,
                             mime_type.clone(),
                             100, // No compression for GIFs
+                            Some(blossom_server.clone()),
                         ).await.map(|url| (url, file_hash.clone(), None))
                     }
                 };
@@ -426,7 +429,37 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 option {
                                     value: "blossom",
                                     selected: *upload_server.read() == UploadServer::Blossom,
-                                    "Blossom ({blossom_store::get_primary_server()})"
+                                    "Blossom"
+                                }
+                            }
+                        }
+
+                        // Blossom server selector (shown when Blossom is selected)
+                        if *upload_server.read() == UploadServer::Blossom {
+                            div {
+                                label {
+                                    class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                                    "Blossom Server"
+                                }
+                                select {
+                                    class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    disabled: *uploading.read(),
+                                    onchange: move |evt| {
+                                        selected_blossom_server.set(evt.value());
+                                    },
+                                    {
+                                        let servers = blossom_store::get_servers();
+                                        let current_server = selected_blossom_server.read().clone();
+                                        rsx! {
+                                            for server in servers.iter() {
+                                                option {
+                                                    value: "{server}",
+                                                    selected: *server == current_server,
+                                                    "{display_server_url(server)}"
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -557,6 +590,14 @@ fn format_file_size(bytes: usize) -> String {
     } else {
         format!("{} bytes", bytes)
     }
+}
+
+/// Helper function to display server URL in a user-friendly format
+fn display_server_url(url: &str) -> String {
+    url.replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Create an Object URL from raw bytes (more memory efficient than base64 for large files)

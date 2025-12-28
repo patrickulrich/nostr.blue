@@ -14,6 +14,9 @@ pub struct MediaUploaderProps {
     /// Unique ID for the file input (to avoid conflicts)
     #[props(default = uuid::Uuid::new_v4().to_string())]
     pub input_id: String,
+    /// Whether to show server selector (defaults to true)
+    #[props(default = true)]
+    pub show_server_selector: bool,
 }
 
 #[component]
@@ -23,6 +26,9 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let upload_progress = blossom_store::UPLOAD_PROGRESS.read();
+    // Selected server for upload (defaults to primary)
+    let mut selected_server = use_signal(blossom_store::get_primary_server);
+    let show_server_selector = props.show_server_selector;
 
     // Clone input_id for use in rsx! and closures
     let input_id = props.input_id.clone();
@@ -60,12 +66,13 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             let quality_val = *quality.read();
             let on_upload = props.on_upload;
             let input_id_for_clear = input_id_for_upload.clone();
+            let server_url = selected_server.read().clone();
 
             uploading.set(true);
             error.set(None);
 
             spawn(async move {
-                match blossom_store::upload_image(data, mime_type, quality_val).await {
+                match blossom_store::upload_image(data, mime_type, quality_val, Some(server_url)).await {
                     Ok(url) => {
                         log::info!("Upload successful: {}", url);
                         on_upload.call(url);
@@ -190,6 +197,37 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                             }
                         }
 
+                        // Server selector
+                        if show_server_selector {
+                            div {
+                                class: "space-y-2",
+                                label {
+                                    class: "block text-sm font-medium text-gray-700 dark:text-gray-300",
+                                    "Upload to"
+                                }
+                                select {
+                                    class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm",
+                                    disabled: *uploading.read(),
+                                    onchange: move |evt| {
+                                        selected_server.set(evt.value());
+                                    },
+                                    {
+                                        let servers = blossom_store::get_servers();
+                                        let current_server = selected_server.read().clone();
+                                        rsx! {
+                                            for server in servers.iter() {
+                                                option {
+                                                    value: "{server}",
+                                                    selected: *server == current_server,
+                                                    "{display_server_url(server)}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Upload button
                         button {
                             class: "w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition",
@@ -266,6 +304,14 @@ fn format_file_size(bytes: usize) -> String {
     } else {
         format!("{} bytes", bytes)
     }
+}
+
+/// Helper function to display server URL in a user-friendly format
+fn display_server_url(url: &str) -> String {
+    url.replace("https://", "")
+        .replace("http://", "")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Helper function to clear the file input element value
