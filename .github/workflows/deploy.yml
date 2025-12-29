@@ -56,7 +56,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Trunk
-        run: command -v trunk || cargo install trunk --locked
+        run: cargo install trunk --locked --force
 
       - name: Build with Trunk
         run: trunk build --release
