@@ -21,7 +21,6 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 pub fn RepoActionBar(
     repo: Repository,
     naddr: String,
-    #[props(default = false)] compact: bool,
 ) -> Element {
     let toast = consume_toast();
     let mut is_starred = use_signal(|| false);
@@ -98,14 +97,14 @@ pub fn RepoActionBar(
 
     // Star/Unstar handler
     let handle_star = {
-        let coord = coordinate.read().clone();
         move |_| {
             if !has_signer {
                 toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
                 return;
             }
 
-            if let Some(coord) = coord.clone() {
+            // Read coordinate fresh each time handler runs to avoid stale capture
+            if let Some(coord) = coordinate.read().clone() {
                 star_loading.set(true);
                 let currently_starred = *is_starred.read();
 
@@ -313,6 +312,8 @@ pub fn RepoActionBar(
                         MobileMenuItem {
                             icon: if *is_starred.read() { icons::STAR_FILLED } else { icons::STAR },
                             label: "{star_text} ({star_count})",
+                            loading: *star_loading.read(),
+                            disabled: !has_signer,
                             onclick: handle_star,
                         }
                         MobileMenuItem {
@@ -404,16 +405,46 @@ fn ActionButton(
 fn MobileMenuItem(
     icon: &'static str,
     label: String,
+    #[props(default = false)] disabled: bool,
+    #[props(default = false)] loading: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let is_disabled = disabled || loading;
+    let button_class = if is_disabled {
+        "w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground opacity-50 cursor-not-allowed text-left"
+    } else {
+        "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition text-left"
+    };
+
     rsx! {
         button {
-            class: "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition text-left",
-            onclick: move |e| onclick.call(e),
+            class: "{button_class}",
+            disabled: is_disabled,
+            onclick: move |e| {
+                if !is_disabled {
+                    onclick.call(e);
+                }
+            },
 
-            span {
-                class: "w-4 h-4",
-                dangerous_inner_html: "{icon}"
+            if loading {
+                // Loading spinner
+                svg {
+                    class: "w-4 h-4 animate-spin",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    circle { cx: "12", cy: "12", r: "10", stroke_opacity: "0.25" }
+                    path { d: "M12 2a10 10 0 0 1 10 10", stroke_opacity: "1" }
+                }
+            } else {
+                span {
+                    class: "w-4 h-4",
+                    dangerous_inner_html: "{icon}"
+                }
             }
             span { "{label}" }
         }

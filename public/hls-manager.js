@@ -244,9 +244,14 @@ window.hlsManager = window.hlsManager || {
                        ((data[offset + 6] & 0x7f) << 7) |
                        (data[offset + 7] & 0x7f);
             } else {
-                size = (data[offset + 4] << 24) | (data[offset + 5] << 16) | (data[offset + 6] << 8) | data[offset + 7];
+                // Use unsigned byte masking to prevent sign extension for values >= 128
+                size = ((data[offset + 4] & 0xff) << 24) |
+                       ((data[offset + 5] & 0xff) << 16) |
+                       ((data[offset + 6] & 0xff) << 8) |
+                       (data[offset + 7] & 0xff);
             }
-            if (size <= 0 || size > data.length - offset) break;
+            // Ensure size is positive and fits within remaining buffer (accounting for 10-byte frame header)
+            if (size <= 0 || size > data.length - offset - 10) break;
 
             offset += 10; // Skip frame header
 

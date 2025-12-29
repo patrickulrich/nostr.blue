@@ -5,7 +5,6 @@
 //! Styled to match gittr's readme-section.tsx pattern.
 
 use dioxus::prelude::*;
-use crate::utils::format::truncate_with_word_break;
 use crate::utils::markdown::render_markdown;
 
 /// README viewer with loading/error states
@@ -202,18 +201,13 @@ fn NoReadme() -> Element {
 }
 
 /// Inline README preview (for compact displays)
+/// Uses CSS line-clamp for visual truncation to avoid breaking markdown constructs
 #[component]
-pub fn ReadmePreview(
-    content: String,
-    #[props(default = 200)] max_chars: usize,
-) -> Element {
-    // Use UTF-8 safe truncation to avoid panic on multi-byte characters
-    let preview_text = truncate_with_word_break(&content, max_chars);
-
+pub fn ReadmePreview(content: String) -> Element {
     rsx! {
         div {
             class: "text-sm text-muted-foreground line-clamp-3",
-            dangerous_inner_html: "{render_markdown(&preview_text)}"
+            dangerous_inner_html: "{render_markdown(&content)}"
         }
     }
 }

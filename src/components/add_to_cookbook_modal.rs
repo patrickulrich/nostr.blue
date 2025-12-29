@@ -32,6 +32,8 @@ pub fn AddToCookbookModal(
     let mut new_title = use_signal(String::new);
     let mut new_description = use_signal(String::new);
     let mut new_image_url = use_signal(|| None::<String>);
+    // Track fetch errors for cookbooks loading
+    let mut fetch_error = use_signal(|| None::<String>);
 
     // Operation state
     let mut is_submitting = use_signal(|| false);
@@ -43,20 +45,33 @@ pub fn AddToCookbookModal(
     let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
     // Track created cookbook when pin fails - stores (naddr, a_tag) for retry
     let mut pending_pin_cookbook: Signal<Option<(String, String)>> = use_signal(|| None);
+    // Track whether cookbooks have been loaded to prevent repeated fetches
+    let mut has_loaded = use_signal(|| false);
 
-    // Fetch user's cookbooks on mount
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
+    // Fetch user's cookbooks when client is initialized and signer is available
+    // Create local reads of global signals for use_reactive! tracking
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
+    let has_signer = *HAS_SIGNER.read();
+
+    use_effect(use_reactive!(|(client_init, has_signer)| {
+        // Skip if already loaded
+        if *has_loaded.read() {
+            return;
+        }
+
+        if !client_init {
             cookbooks_loading.set(false);
             return;
         }
-        if !*HAS_SIGNER.read() {
+        if !has_signer {
             cookbooks_loading.set(false);
             needs_signin.set(true);
             return;
         }
         needs_signin.set(false);
+
+        // Mark as loaded before spawning to prevent duplicate fetches
+        has_loaded.set(true);
 
         spawn(async move {
             // Fetch user's own cookbooks
@@ -66,11 +81,12 @@ pub fn AddToCookbookModal(
                 }
                 Err(e) => {
                     log::error!("Failed to fetch user cookbooks: {}", e);
+                    fetch_error.set(Some("Failed to load cookbooks. Please try again.".to_string()));
                 }
             }
             cookbooks_loading.set(false);
         });
-    });
+    }));
 
     let recipe_naddr_for_add = recipe_naddr.clone();
     let recipe_naddr_for_create = recipe_naddr.clone();
@@ -478,6 +494,19 @@ pub fn AddToCookbookModal(
                                         span { class: "text-4xl mb-2 block", "🔑" }
                                         p { class: "text-sm text-muted-foreground mb-3", "Sign in to view and manage your cookbooks." }
                                         p { class: "text-xs text-muted-foreground", "You can still create a new cookbook below." }
+                                    }
+                                } else if let Some(ref err) = *fetch_error.read() {
+                                    // Show error when fetching cookbooks failed
+                                    div {
+                                        class: "text-center py-6",
+                                        span { class: "text-4xl mb-2 block", "⚠️" }
+                                        p { class: "text-sm text-red-600 dark:text-red-400 mb-3", "{err}" }
+                                        button {
+                                            r#type: "button",
+                                            class: "text-sm text-primary hover:underline",
+                                            onclick: move |_| create_new.set(true),
+                                            "Create a new cookbook instead →"
+                                        }
                                     }
                                 } else if cookbooks.read().is_empty() {
                                     div {

@@ -215,6 +215,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         )
     });
     let mut leaflet_loaded = use_signal(|| false);
+    let mut leaflet_error = use_signal(|| None::<String>);
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     let mut loading_geo = use_signal(|| false);
@@ -234,6 +235,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         spawn(async move {
             if let Err(e) = loadLeaflet().await {
                 log::error!("Failed to load Leaflet: {:?}", e);
+                leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
                 return;
             }
             leaflet_loaded.set(true);
@@ -275,7 +277,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 return;
             }
 
-            // Check if already loading
+            // Check if already loading - effect will re-run when loading completes
             if *loading_geo.read() {
                 return;
             }
@@ -326,6 +328,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
                 geocoded_events.set(results);
                 processed_event_ids.set(key_to_store);
+                // Setting loading to false triggers effect re-evaluation for any pending events
                 loading_geo.set(false);
             });
         }
@@ -383,8 +386,33 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 class: "bg-muted",
             }
 
+            // Error overlay
+            if let Some(ref err) = *leaflet_error.read() {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center bg-background/80",
+                    div {
+                        class: "text-center p-4",
+                        svg {
+                            class: "w-12 h-12 mx-auto text-red-500 mb-2",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "1.5",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                            }
+                        }
+                        p {
+                            class: "text-red-600 dark:text-red-400",
+                            "{err}"
+                        }
+                    }
+                }
             // Loading overlay
-            if !*leaflet_loaded.read() || *loading_geo.read() {
+            } else if !*leaflet_loaded.read() || *loading_geo.read() {
                 div {
                     class: "absolute inset-0 flex items-center justify-center bg-background/80",
                     div {

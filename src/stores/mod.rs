@@ -43,4 +43,5 @@ pub mod embedding_store;    // NKBIP-02 Embeddings (kind 1987)
 pub mod citation_store;     // NKBIP-03 Citations (kinds 30-33)
 pub mod directory_store;    // NKBIP-04 Directory System (kinds 30042-30045)
 pub mod podcast_subscription;  // NIP-51 Podcast Subscriptions (kind 30003)
+pub mod subscription_manager;  // SDK subscription auto-close helpers
 
