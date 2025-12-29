@@ -41,6 +41,8 @@ pub fn AddToCookbookModal(
     let mut needs_signin = use_signal(|| false);
     // Track pending navigation task for cancellation on modal close
     let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
+    // Track created cookbook when pin fails - stores (naddr, a_tag) for retry
+    let mut pending_pin_cookbook: Signal<Option<(String, String)>> = use_signal(|| None);
 
     // Fetch user's cookbooks on mount
     use_effect(move || {
@@ -162,6 +164,9 @@ pub fn AddToCookbookModal(
                         }
                     };
 
+                    // Clone a_tag for potential retry storage before moving into pin_input
+                    let board_a_tag_for_retry = board_a_tag.clone();
+
                     // Now add the recipe as a pin
                     let pin_input = PinInput {
                         board_addresses: vec![board_a_tag],
@@ -179,6 +184,7 @@ pub fn AddToCookbookModal(
                         Ok(_) => {
                             success.set(true);
                             is_submitting.set(false);
+                            pending_pin_cookbook.set(None);
                             // Navigate to the new cookbook after a short delay
                             // Store task handle so it can be cancelled if modal is closed
                             let task = spawn(async move {
@@ -188,15 +194,62 @@ pub fn AddToCookbookModal(
                             navigation_task.set(Some(task));
                         }
                         Err(e) => {
-                            // Cookbook created but pin failed - stay on modal to show error and allow retry
+                            // Cookbook created but pin failed - store cookbook info for retry
                             log::error!("Failed to add recipe to new cookbook: {}", e);
                             error.set(Some(format!("Cookbook created but failed to add recipe: {}", e)));
+                            pending_pin_cookbook.set(Some((cookbook_naddr, board_a_tag_for_retry)));
                             is_submitting.set(false);
                         }
                     }
                 }
                 Err(e) => {
                     error.set(Some(e));
+                    is_submitting.set(false);
+                }
+            }
+        });
+    };
+
+    // Handle retrying pin after cookbook was created but pin failed
+    let recipe_naddr_for_retry = recipe_naddr.clone();
+    let handle_retry_pin = move |_| {
+        let (cookbook_naddr, board_a_tag) = match pending_pin_cookbook.read().clone() {
+            Some(info) => info,
+            None => return,
+        };
+
+        let naddr = recipe_naddr_for_retry.clone();
+        error.set(None);
+        is_submitting.set(true);
+
+        spawn(async move {
+            let pin_input = PinInput {
+                board_addresses: vec![board_a_tag],
+                reference: PinReference::Coordinate {
+                    address: naddr,
+                    relay_hint: None,
+                },
+                title: None,
+                image: None,
+                content: String::new(),
+                tags: vec![],
+            };
+
+            match pin_boards_store::publish_pin(pin_input).await {
+                Ok(_) => {
+                    success.set(true);
+                    is_submitting.set(false);
+                    pending_pin_cookbook.set(None);
+                    // Navigate to the cookbook after a short delay
+                    let task = spawn(async move {
+                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                    });
+                    navigation_task.set(Some(task));
+                }
+                Err(e) => {
+                    log::error!("Failed to add recipe to cookbook (retry): {}", e);
+                    error.set(Some(format!("Failed to add recipe: {}", e)));
                     is_submitting.set(false);
                 }
             }
@@ -277,6 +330,87 @@ pub fn AddToCookbookModal(
                             span { class: "text-5xl mb-3", "✅" }
                             h3 { class: "text-lg font-semibold mb-1", "Recipe Added!" }
                             p { class: "text-sm text-muted-foreground", "The recipe has been added to your cookbook." }
+                        }
+                    } else if pending_pin_cookbook.read().is_some() {
+                        // Recovery state: cookbook created but pin failed
+                        div {
+                            class: "space-y-4",
+
+                            // Info message
+                            div {
+                                class: "p-4 bg-amber-100 dark:bg-amber-900/20 rounded-lg",
+                                div {
+                                    class: "flex items-start gap-3",
+                                    span { class: "text-2xl", "📚" }
+                                    div {
+                                        p {
+                                            class: "font-medium text-amber-800 dark:text-amber-200",
+                                            "Cookbook created successfully!"
+                                        }
+                                        p {
+                                            class: "text-sm text-amber-700 dark:text-amber-300 mt-1",
+                                            "However, adding the recipe failed. Click below to retry."
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Error message
+                            if let Some(ref err) = *error.read() {
+                                div {
+                                    class: "p-3 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm",
+                                    "{err}"
+                                }
+                            }
+
+                            // Recipe info
+                            if let Some(ref title) = recipe_title {
+                                div {
+                                    class: "p-3 bg-muted/50 rounded-lg",
+                                    p {
+                                        class: "text-sm text-muted-foreground",
+                                        "Recipe to add:"
+                                    }
+                                    p {
+                                        class: "font-medium truncate",
+                                        "{title}"
+                                    }
+                                }
+                            }
+
+                            // Retry button
+                            button {
+                                r#type: "button",
+                                class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                disabled: *is_submitting.read(),
+                                onclick: handle_retry_pin,
+                                if *is_submitting.read() {
+                                    span {
+                                        class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"
+                                    }
+                                    "Adding Recipe..."
+                                } else {
+                                    "Retry Adding Recipe"
+                                }
+                            }
+
+                            // Skip option - just go to the cookbook
+                            if let Some((ref naddr, _)) = *pending_pin_cookbook.read() {
+                                {
+                                    let naddr_for_link = naddr.clone();
+                                    rsx! {
+                                        div {
+                                            class: "text-center",
+                                            Link {
+                                                to: Route::PinBoardDetail { naddr: naddr_for_link },
+                                                class: "text-sm text-muted-foreground hover:text-primary transition",
+                                                onclick: move |_| on_close.call(()),
+                                                "Skip and view cookbook →"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } else {
                         // Recipe info
