@@ -84,6 +84,7 @@ pub fn AsciiDocContent(
                                 })
                                 .collect();
                             resolved_citations.set(resolved);
+                            citations_error.set(false);
                         }
                         Err(e) => {
                             crate::utils::log_fetch_error("citations for article", e);

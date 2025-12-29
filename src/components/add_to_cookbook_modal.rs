@@ -37,14 +37,22 @@ pub fn AddToCookbookModal(
     let mut is_submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
+    // Track whether sign-in is required (distinct from empty cookbooks)
+    let mut needs_signin = use_signal(|| false);
 
     // Fetch user's cookbooks on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized || !*HAS_SIGNER.read() {
+        if !client_initialized {
             cookbooks_loading.set(false);
             return;
         }
+        if !*HAS_SIGNER.read() {
+            cookbooks_loading.set(false);
+            needs_signin.set(true);
+            return;
+        }
+        needs_signin.set(false);
 
         spawn(async move {
             // Fetch user's own cookbooks
@@ -197,7 +205,12 @@ pub fn AddToCookbookModal(
         // Backdrop
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| {
+                // Prevent dismissing modal during submission
+                if !*is_submitting.read() {
+                    on_close.call(());
+                }
+            },
 
             // Modal
             div {
@@ -216,8 +229,18 @@ pub fn AddToCookbookModal(
 
                     button {
                         r#type: "button",
-                        class: "p-1.5 rounded-full hover:bg-muted transition",
-                        onclick: move |_| on_close.call(()),
+                        class: if *is_submitting.read() {
+                            "p-1.5 rounded-full opacity-50 cursor-not-allowed"
+                        } else {
+                            "p-1.5 rounded-full hover:bg-muted transition"
+                        },
+                        disabled: *is_submitting.read(),
+                        onclick: move |_| {
+                            // Prevent closing during submission
+                            if !*is_submitting.read() {
+                                on_close.call(());
+                            }
+                        },
                         svg {
                             class: "w-5 h-5",
                             fill: "none",
@@ -303,6 +326,14 @@ pub fn AddToCookbookModal(
                                     div {
                                         class: "text-sm text-muted-foreground italic py-4 text-center",
                                         "Loading your cookbooks..."
+                                    }
+                                } else if *needs_signin.read() {
+                                    // Show sign-in prompt when user is not authenticated
+                                    div {
+                                        class: "text-center py-6",
+                                        span { class: "text-4xl mb-2 block", "🔑" }
+                                        p { class: "text-sm text-muted-foreground mb-3", "Sign in to view and manage your cookbooks." }
+                                        p { class: "text-xs text-muted-foreground", "You can still create a new cookbook below." }
                                     }
                                 } else if cookbooks.read().is_empty() {
                                     div {

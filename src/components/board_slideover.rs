@@ -39,6 +39,11 @@ pub fn BoardSlideover(
     // State for pins (fetched separately)
     let mut pins = use_signal(Vec::<Pin>::new);
     let mut pins_loading = use_signal(|| true);
+    let mut pins_error = use_signal(|| None::<String>);
+    // Request counter for staleness check - prevents race conditions when board changes
+    let request_id = use_signal(|| 0u32);
+    // Manual retry trigger - incrementing this triggers a refetch
+    let retry_trigger = use_signal(|| 0u32);
 
     // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey.clone());
@@ -81,9 +86,13 @@ pub fn BoardSlideover(
     let owner_pubkey_for_pins = board.pubkey.clone();
 
     // Fetch pins when slideover opens
-    // Re-run when show, board, or collaborative status changes
+    // Re-run when show, board, collaborative status, or retry_trigger changes
     let show_signal = show;
-    use_effect(use_reactive!(|(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative)| {
+    let mut request_id_mut = request_id;
+    let mut retry_trigger_mut = retry_trigger;
+    use_effect(use_reactive!(|(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative, retry_trigger)| {
+        // Read retry_trigger to register dependency (value not used directly)
+        let _ = *retry_trigger.read();
         let shown = *show_signal.read();
         if !shown {
             return;
@@ -91,7 +100,13 @@ pub fn BoardSlideover(
 
         let a_tag = board_a_tag.clone();
         let owner_pk = owner_pubkey_for_pins.clone();
+
+        // Increment request counter and capture current value for staleness check
+        let current_request = request_id_mut.read().wrapping_add(1);
+        request_id_mut.set(current_request);
+
         pins_loading.set(true);
+        pins_error.set(None);
 
         spawn(async move {
             // If collaborative, fetch all pins; otherwise, only owner's pins
@@ -101,12 +116,20 @@ pub fn BoardSlideover(
                 fetch_pins_for_board_filtered(&a_tag, Some(&owner_pk), None).await
             };
 
+            // Check if this request is still current (not stale)
+            if *request_id_mut.read() != current_request {
+                // Stale request - discard results
+                return;
+            }
+
             match result {
                 Ok(fetched_pins) => {
                     pins.set(fetched_pins);
+                    pins_error.set(None);
                 }
                 Err(e) => {
                     log::error!("Failed to fetch pins: {}", e);
+                    pins_error.set(Some(format!("Failed to load pins: {}", e)));
                 }
             }
             pins_loading.set(false);
@@ -384,6 +407,33 @@ pub fn BoardSlideover(
                                         div { class: "h-3 bg-muted rounded w-3/4" }
                                     }
                                 }
+                            }
+                        }
+                    } else if let Some(ref err) = *pins_error.read() {
+                        // Error state with retry
+                        div {
+                            class: "text-center py-12",
+                            svg {
+                                class: "w-12 h-12 mx-auto mb-4 text-red-500/50",
+                                fill: "none",
+                                stroke: "currentColor",
+                                view_box: "0 0 24 24",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    stroke_width: "2",
+                                    d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                }
+                            }
+                            p { class: "text-red-500 mb-2", "{err}" }
+                            button {
+                                class: "px-4 py-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition",
+                                onclick: move |_| {
+                                    // Trigger refetch by incrementing retry_trigger
+                                    let current = *retry_trigger_mut.read();
+                                    retry_trigger_mut.set(current.wrapping_add(1));
+                                },
+                                "Retry"
                             }
                         }
                     } else if pins.read().is_empty() {

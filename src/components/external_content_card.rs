@@ -16,7 +16,6 @@ use crate::utils::format::format_sats_with_unit;
 #[component]
 pub fn ExternalContentCard(
     content: ExternalContentId,
-    #[props(default)] hint: Option<String>,
     #[props(default = false)] compact: bool,
 ) -> Element {
     match &content {
@@ -74,11 +73,10 @@ pub fn ExternalContentList(
     rsx! {
         div {
             class: "flex flex-wrap gap-2 mt-2",
-            for (content, hint) in contents {
+            for (content, _hint) in contents {
                 ExternalContentCard {
                     key: "{nip73::get_raw_identifier(&content)}",
                     content: content.clone(),
-                    hint: hint.clone(),
                     compact
                 }
             }
