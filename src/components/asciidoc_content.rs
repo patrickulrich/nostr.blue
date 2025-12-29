@@ -198,16 +198,16 @@ pub fn AsciiDocContentCollapsible(
     // Estimate if content is long based on character count
     let is_long_content = content.chars().count() > 800;
 
-    // Memoize rendered content - only recompute when content or enable_wikilinks changes
+    // Compute rendered content directly - props are not reactive so use_memo wouldn't recompute on changes
     // Sanitize to prevent XSS
-    let rendered = use_memo(move || {
+    let rendered = {
         let html = if enable_wikilinks {
             render_content_auto(&content)
         } else {
             render_asciidoc(&content)
         };
         sanitize_html(&html)
-    });
+    };
 
     if is_long_content {
         rsx! {
@@ -260,16 +260,14 @@ pub fn AsciiDocPreview(
     #[props(default = String::new())]
     class: String,
 ) -> Element {
-    // Memoize preview computation - only recompute when content or max_chars changes
-    let preview = use_memo(move || {
-        let plain = content_to_plain_text(&content);
-        if plain.chars().count() > max_chars {
-            let truncated: String = plain.chars().take(max_chars).collect();
-            format!("{}...", truncated.trim_end())
-        } else {
-            plain
-        }
-    });
+    // Compute preview directly - props are not reactive so use_memo wouldn't recompute on changes
+    let plain = content_to_plain_text(&content);
+    let preview = if plain.chars().count() > max_chars {
+        let truncated: String = plain.chars().take(max_chars).collect();
+        format!("{}...", truncated.trim_end())
+    } else {
+        plain
+    };
 
     rsx! {
         p {
@@ -288,18 +286,18 @@ pub fn WikilinksList(
     #[props(default = String::new())]
     class: String,
 ) -> Element {
-    // Hook must be called unconditionally - before any early returns (Dioxus hook rules)
-    let links = use_memo(move || extract_wikilinks(&content));
+    // Compute links directly - props are not reactive so use_memo wouldn't recompute on changes
+    let links = extract_wikilinks(&content);
 
-    // Early return now safe - after hook
-    if links.read().is_empty() {
+    // Early return if no links
+    if links.is_empty() {
         return rsx! {};
     }
 
     rsx! {
         div {
             class: "flex flex-wrap gap-2 {class}",
-            for link in links.read().iter() {
+            for link in links.iter() {
                 Link {
                     class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
                     to: Route::WikiDetail { identifier: link.target.clone() },

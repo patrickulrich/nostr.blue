@@ -99,11 +99,12 @@ pub fn PinMenu(props: PinMenuProps) -> Element {
                                 let pin_ref = pin_for_modal.reference.clone();
                                 let pin_title = pin_for_modal.title.clone();
                                 let content_type = pin_for_modal.content_type();
+                                let callback = on_pin_to_board;
                                 move |e: MouseEvent| {
                                     e.stop_propagation();
                                     is_open.set(false);
                                     // Use callback if provided, otherwise show internal modal
-                                    if let Some(ref handler) = on_pin_to_board {
+                                    if let Some(handler) = callback {
                                         handler.call(PinToBoardRequest {
                                             reference: pin_ref.clone(),
                                             content_type: content_type.clone(),

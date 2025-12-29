@@ -271,8 +271,17 @@ pub fn BoardSlideover(
 
                                 // Delete button
                                 button {
-                                    class: "p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition",
-                                    onclick: move |_| show_delete_confirm.set(true),
+                                    class: if *deleting.read() {
+                                        "p-2 rounded-lg text-red-500/50 cursor-not-allowed"
+                                    } else {
+                                        "p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition"
+                                    },
+                                    disabled: *deleting.read(),
+                                    onclick: move |_| {
+                                        if !*deleting.read() {
+                                            show_delete_confirm.set(true);
+                                        }
+                                    },
                                     title: "Delete",
                                     svg {
                                         class: "w-5 h-5",

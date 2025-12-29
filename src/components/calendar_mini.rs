@@ -187,11 +187,13 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                         rsx! {
                             button {
                                 key: "{date}",
-                                class: "w-7 h-7 text-xs rounded-full flex items-center justify-center relative transition",
-                                class: if is_selected { "bg-primary text-primary-foreground" }
-                                       else if is_today { "bg-accent font-bold" }
-                                       else if is_other_month { "text-muted-foreground/50" }
-                                       else { "hover:bg-accent" },
+                                class: format!(
+                                    "w-7 h-7 text-xs rounded-full flex items-center justify-center relative transition {}",
+                                    if is_selected { "bg-primary text-primary-foreground" }
+                                    else if is_today { "bg-accent font-bold" }
+                                    else if is_other_month { "text-muted-foreground/50" }
+                                    else { "hover:bg-accent" }
+                                ),
                                 onclick: {
                                     let date = date.clone();
                                     let handler = on_date_select_handler;

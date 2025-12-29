@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use crate::stores::pin_boards_store::{self, Pin, Pinboard, PinMetadata};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::auth_store;
-use crate::components::{PinMosaicGrid, PinBoardMosaicGrid};
+use crate::components::{PinMosaicGrid, PinBoardMosaicGrid, PinToBoardRequest};
+use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::routes::Route;
 
 /// Tab selection for the user pins page
@@ -32,6 +33,8 @@ pub fn UserPins() -> Element {
     let mut metadata_map = use_signal(HashMap::<String, PinMetadata>::new);
     let mut pins_loading = use_signal(|| true);
     let mut boards_loading = use_signal(|| true);
+    // Pin to board modal (lifted from PinCard to avoid overflow clipping)
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
 
     // Check if user is authenticated
     let is_authenticated = auth_store::get_pubkey().is_some();
@@ -257,6 +260,9 @@ pub fn UserPins() -> Element {
                                 pins: filtered_pins.clone(),
                                 metadata_map: metadata_map.read().clone(),
                                 loading: false,
+                                on_pin_to_board: move |req: PinToBoardRequest| {
+                                    pin_to_board_request.set(Some(req));
+                                },
                             }
                         }
                     },
@@ -291,6 +297,16 @@ pub fn UserPins() -> Element {
                         }
                     },
                 }
+            }
+        }
+
+        // Pin to Board Modal (lifted from PinCard to avoid overflow clipping)
+        if let Some(ref req) = *pin_to_board_request.read() {
+            PinToBoardModal {
+                reference: req.reference.clone(),
+                content_type: req.content_type.clone(),
+                title: req.title.clone(),
+                on_close: move |_| pin_to_board_request.set(None),
             }
         }
     }

@@ -39,6 +39,8 @@ pub fn AddToCookbookModal(
     let mut success = use_signal(|| false);
     // Track whether sign-in is required (distinct from empty cookbooks)
     let mut needs_signin = use_signal(|| false);
+    // Track pending navigation task for cancellation on modal close
+    let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
 
     // Fetch user's cookbooks on mount
     use_effect(move || {
@@ -178,12 +180,12 @@ pub fn AddToCookbookModal(
                             success.set(true);
                             is_submitting.set(false);
                             // Navigate to the new cookbook after a short delay
-                            // Close modal first to avoid race condition if user closes modal during delay
-                            spawn(async move {
+                            // Store task handle so it can be cancelled if modal is closed
+                            let task = spawn(async move {
                                 gloo_timers::future::TimeoutFuture::new(1500).await;
                                 navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
                             });
-                            // Note: Modal will close on navigation, so no explicit close needed
+                            navigation_task.set(Some(task));
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - stay on modal to show error and allow retry
@@ -208,6 +210,10 @@ pub fn AddToCookbookModal(
             onclick: move |_| {
                 // Prevent dismissing modal during submission
                 if !*is_submitting.read() {
+                    // Cancel any pending navigation task
+                    if let Some(task) = navigation_task.write().take() {
+                        task.cancel();
+                    }
                     on_close.call(());
                 }
             },
@@ -238,6 +244,10 @@ pub fn AddToCookbookModal(
                         onclick: move |_| {
                             // Prevent closing during submission
                             if !*is_submitting.read() {
+                                // Cancel any pending navigation task
+                                if let Some(task) = navigation_task.write().take() {
+                                    task.cancel();
+                                }
                                 on_close.call(());
                             }
                         },
