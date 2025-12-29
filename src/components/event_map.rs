@@ -215,12 +215,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
         )
     });
     let mut leaflet_loaded = use_signal(|| false);
+    let mut leaflet_error = use_signal(|| None::<String>);
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     let mut loading_geo = use_signal(|| false);
     let mut processed_event_ids = use_signal(String::new);
-    // Track if new events arrived while geocoding was in progress
-    let mut pending_events_key: Signal<Option<String>> = use_signal(|| None);
 
     // Memoize events to prevent unnecessary re-processing
     // Create a stable identifier for the current set of events
@@ -236,6 +235,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         spawn(async move {
             if let Err(e) = loadLeaflet().await {
                 log::error!("Failed to load Leaflet: {:?}", e);
+                leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
                 return;
             }
             leaflet_loaded.set(true);
@@ -277,15 +277,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 return;
             }
 
-            // Check if already loading - store as pending if so
+            // Check if already loading - effect will re-run when loading completes
             if *loading_geo.read() {
-                // Store the current key so we can re-run after current geocoding completes
-                pending_events_key.set(Some(events_key.clone()));
                 return;
             }
 
-            // Clear any pending key since we're starting fresh
-            pending_events_key.set(None);
             loading_geo.set(true);
             let key_to_store = events_key.clone();
             let events_to_process = events_for_geocode.clone();
@@ -391,8 +387,33 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 class: "bg-muted",
             }
 
+            // Error overlay
+            if let Some(ref err) = *leaflet_error.read() {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center bg-background/80",
+                    div {
+                        class: "text-center p-4",
+                        svg {
+                            class: "w-12 h-12 mx-auto text-red-500 mb-2",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            fill: "none",
+                            view_box: "0 0 24 24",
+                            stroke: "currentColor",
+                            stroke_width: "1.5",
+                            path {
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                d: "M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                            }
+                        }
+                        p {
+                            class: "text-red-600 dark:text-red-400",
+                            "{err}"
+                        }
+                    }
+                }
             // Loading overlay
-            if !*leaflet_loaded.read() || *loading_geo.read() {
+            } else if !*leaflet_loaded.read() || *loading_geo.read() {
                 div {
                     class: "absolute inset-0 flex items-center justify-center bg-background/80",
                     div {

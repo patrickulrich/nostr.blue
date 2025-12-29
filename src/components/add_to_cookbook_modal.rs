@@ -32,6 +32,8 @@ pub fn AddToCookbookModal(
     let mut new_title = use_signal(String::new);
     let mut new_description = use_signal(String::new);
     let mut new_image_url = use_signal(|| None::<String>);
+    // Track fetch errors for cookbooks loading
+    let mut fetch_error = use_signal(|| None::<String>);
 
     // Operation state
     let mut is_submitting = use_signal(|| false);
@@ -79,6 +81,7 @@ pub fn AddToCookbookModal(
                 }
                 Err(e) => {
                     log::error!("Failed to fetch user cookbooks: {}", e);
+                    fetch_error.set(Some("Failed to load cookbooks. Please try again.".to_string()));
                 }
             }
             cookbooks_loading.set(false);
@@ -491,6 +494,19 @@ pub fn AddToCookbookModal(
                                         span { class: "text-4xl mb-2 block", "🔑" }
                                         p { class: "text-sm text-muted-foreground mb-3", "Sign in to view and manage your cookbooks." }
                                         p { class: "text-xs text-muted-foreground", "You can still create a new cookbook below." }
+                                    }
+                                } else if let Some(ref err) = *fetch_error.read() {
+                                    // Show error when fetching cookbooks failed
+                                    div {
+                                        class: "text-center py-6",
+                                        span { class: "text-4xl mb-2 block", "⚠️" }
+                                        p { class: "text-sm text-red-600 dark:text-red-400 mb-3", "{err}" }
+                                        button {
+                                            r#type: "button",
+                                            class: "text-sm text-primary hover:underline",
+                                            onclick: move |_| create_new.set(true),
+                                            "Create a new cookbook instead →"
+                                        }
                                     }
                                 } else if cookbooks.read().is_empty() {
                                     div {

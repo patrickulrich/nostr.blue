@@ -10,6 +10,33 @@ use crate::stores::publication_store::{
 use crate::utils::nkbip08::BookReference;
 use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon};
 
+/// Validates that a URL is safe for use as an image source.
+/// Returns true only for https:// URLs with reasonable length.
+fn is_safe_image_url(url: &str) -> bool {
+    const MAX_URL_LENGTH: usize = 2048;
+
+    // Check length
+    if url.len() > MAX_URL_LENGTH {
+        return false;
+    }
+
+    // Only allow https:// scheme
+    let url_lower = url.to_lowercase();
+    if !url_lower.starts_with("https://") {
+        return false;
+    }
+
+    // Reject dangerous schemes that might be URL-encoded or obfuscated
+    let dangerous_patterns = ["javascript:", "data:", "file:", "vbscript:"];
+    for pattern in dangerous_patterns {
+        if url_lower.contains(pattern) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Book selection result
 #[derive(Clone, Debug)]
 pub struct BookSelection {
@@ -52,6 +79,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Loading state
     let mut loading = use_signal(|| false);
+    // Error state for fetch/search operations
+    let mut fetch_error = use_signal(|| None::<String>);
 
     // Load publications when modal opens
     use_effect(use_reactive(
@@ -59,9 +88,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         move |is_shown| {
             if is_shown {
                 loading.set(true);
+                fetch_error.set(None);
                 spawn(async move {
-                    if let Err(e) = fetch_publications(100, None).await {
-                        crate::utils::log_fetch_error("publications", e);
+                    match fetch_publications(100, None).await {
+                        Ok(_) => fetch_error.set(None),
+                        Err(e) => {
+                            crate::utils::log_fetch_error("publications", e.clone());
+                            fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                        }
                     }
                     loading.set(false);
                 });
@@ -105,9 +139,15 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                     // Double-check counter after async operation
                     if debounce_counter() == current_counter {
                         search_results.set(results);
+                        fetch_error.set(None);
                     }
                 }
-                Err(e) => log::warn!("Publication search failed: {}", e),
+                Err(e) => {
+                    log::warn!("Publication search failed: {}", e);
+                    if debounce_counter() == current_counter {
+                        fetch_error.set(Some(format!("Search failed: {}", e)));
+                    }
+                }
             }
 
             // Only clear searching state if this is still the current search
@@ -300,6 +340,18 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     class: "animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
                                 }
                             }
+                        } else if let Some(ref err) = *fetch_error.read() {
+                            div {
+                                class: "text-center py-8",
+                                p {
+                                    class: "text-red-600 dark:text-red-400",
+                                    "{err}"
+                                }
+                                p {
+                                    class: "text-sm mt-2 text-muted-foreground",
+                                    "Check your connection and try again"
+                                }
+                            }
                         } else if publications_to_display.read().is_empty() {
                             div {
                                 class: "text-center py-8 text-muted-foreground",
@@ -335,14 +387,18 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
                                                 div {
                                                     class: "flex items-start gap-3",
-                                                    // Cover image or placeholder
+                                                    // Cover image or placeholder (with URL validation)
                                                     div {
                                                         class: "w-12 h-16 flex-shrink-0 rounded bg-muted flex items-center justify-center",
                                                         if let Some(ref img) = publication.cover_image {
-                                                            img {
-                                                                class: "w-full h-full object-cover rounded",
-                                                                src: "{img}",
-                                                                alt: "",
+                                                            if is_safe_image_url(img) {
+                                                                img {
+                                                                    class: "w-full h-full object-cover rounded",
+                                                                    src: "{img}",
+                                                                    alt: "",
+                                                                }
+                                                            } else {
+                                                                BookOpenIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
                                                             }
                                                         } else {
                                                             BookOpenIcon { class: "w-6 h-6 text-muted-foreground".to_string() }
@@ -412,17 +468,19 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                 }
                                                 for (idx, section_ref) in pub_.section_addresses.iter().enumerate() {
                                                     {
-                                                        // Extract d-tag from address
-                                                        let section_name = section_ref.address
+                                                        // Extract d-tag from address (kind:pubkey:d-tag format)
+                                                        let d_tag = section_ref.address
                                                             .split(':')
-                                                            .next_back()
+                                                            .nth(2)
                                                             .unwrap_or(&section_ref.address);
-                                                        let chapter_num = (idx + 1).to_string();
+                                                        // Use d-tag as the chapter identifier for proper referencing
+                                                        // Display a user-friendly label with index for ordering
+                                                        let display_label = format!("{}. {}", idx + 1, d_tag);
                                                         rsx! {
                                                             option {
                                                                 key: "{section_ref.address}",
-                                                                value: "{chapter_num}",
-                                                                "Chapter {chapter_num}: {section_name}"
+                                                                value: "{d_tag}",
+                                                                "{display_label}"
                                                             }
                                                         }
                                                     }

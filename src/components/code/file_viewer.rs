@@ -360,37 +360,78 @@ pub fn RawFileButton(
                 move |_| {
                     let content = content.clone();
                     let filename = filename.clone();
-                    // Create blob and download
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            let blob = web_sys::Blob::new_with_str_sequence(
-                                &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&content))
-                            ).ok();
+                    // Create blob and download with error logging
+                    let Some(window) = web_sys::window() else {
+                        log::error!("Download failed for '{}': window object not available", filename);
+                        return;
+                    };
+                    let Some(document) = window.document() else {
+                        log::error!("Download failed for '{}': document object not available", filename);
+                        return;
+                    };
 
-                            if let Some(blob) = blob {
-                                let url = web_sys::Url::create_object_url_with_blob(&blob).ok();
-                                if let Some(url) = url {
-                                    if let Ok(a) = document.create_element("a") {
-                                        let _ = a.set_attribute("href", &url);
-                                        let _ = a.set_attribute("download", &filename);
-                                        if let Some(body) = document.body() {
-                                            let _ = body.append_child(&a);
-                                            if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
-                                                html_a.click();
-                                            }
-                                            let _ = body.remove_child(&a);
-                                        }
-                                        // Defer URL revocation to allow browser to start download
-                                        let url_to_revoke = url.clone();
-                                        spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(100).await;
-                                            let _ = web_sys::Url::revoke_object_url(&url_to_revoke);
-                                        });
-                                    }
-                                }
-                            }
+                    let blob = match web_sys::Blob::new_with_str_sequence(
+                        &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&content))
+                    ) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            log::error!("Download failed for '{}': blob creation error: {:?}", filename, e);
+                            return;
                         }
+                    };
+
+                    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            log::error!("Download failed for '{}': create_object_url error: {:?}", filename, e);
+                            return;
+                        }
+                    };
+
+                    let a = match document.create_element("a") {
+                        Ok(el) => el,
+                        Err(e) => {
+                            log::error!("Download failed for '{}': create_element error: {:?}", filename, e);
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = a.set_attribute("href", &url) {
+                        log::error!("Download failed for '{}': set href attribute error: {:?}", filename, e);
+                        return;
                     }
+                    if let Err(e) = a.set_attribute("download", &filename) {
+                        log::error!("Download failed for '{}': set download attribute error: {:?}", filename, e);
+                        return;
+                    }
+
+                    let Some(body) = document.body() else {
+                        log::error!("Download failed for '{}': document body not available", filename);
+                        return;
+                    };
+
+                    if let Err(e) = body.append_child(&a) {
+                        log::error!("Download failed for '{}': append_child error: {:?}", filename, e);
+                        return;
+                    }
+
+                    if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
+                        html_a.click();
+                    }
+
+                    if let Err(e) = body.remove_child(&a) {
+                        log::error!("Download cleanup for '{}': remove_child error: {:?}", filename, e);
+                    }
+
+                    // Defer URL revocation to allow browser to start download
+                    let url_to_revoke = url.clone();
+                    let filename_for_log = filename.clone();
+                    spawn(async move {
+                        gloo_timers::future::TimeoutFuture::new(100).await;
+                        if let Err(e) = web_sys::Url::revoke_object_url(&url_to_revoke) {
+                            log::error!("Download cleanup for '{}': revoke_object_url error: {:?}", filename_for_log, e);
+                        }
+                    });
                 }
             },
 

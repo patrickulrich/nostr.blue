@@ -307,6 +307,7 @@ pub fn CommunityPostComposerInline(
     let handle_submit = move |_| {
         let content_text = content.read().trim().to_string();
         if content_text.is_empty() {
+            error.set(Some("Post content cannot be empty".to_string()));
             return;
         }
 
