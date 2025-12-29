@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use dioxus::prelude::*;
 use crate::stores::pin_boards_store::{
-    self, Pinboard, Pin, PinMetadata, delete_pinboard, delete_pin,
+    self, Pinboard, Pin, PinMetadata, delete_pinboard,
     fetch_pinboard_reaction_count, fetch_pinboard_zap_total,
     has_user_reacted_to_pinboard, toggle_pinboard_reaction,
     fetch_pins_for_board_filtered, enrich_pins_metadata,
@@ -138,22 +138,12 @@ pub fn PinBoardDetail(naddr: String) -> Element {
         }
     });
 
-    // Handle pin removal
-    let handle_remove_pin = move |pin: Pin| {
-        let event_id = pin.event_id.clone();
-        spawn(async move {
-            match delete_pin(&event_id).await {
-                Ok(_) => {
-                    // Remove from local state
-                    pins.write().retain(|p| p.event_id != event_id);
-                    // Also clean up stale metadata
-                    pin_metadata.write().remove(&event_id);
-                }
-                Err(e) => {
-                    log::error!("Failed to delete pin: {}", e);
-                }
-            }
-        });
+    // Handle pin deletion (called after successful delete from PinMenu)
+    let handle_pin_deleted = move |event_id: String| {
+        // Remove from local state
+        pins.write().retain(|p| p.event_id != event_id);
+        // Also clean up stale metadata
+        pin_metadata.write().remove(&event_id);
     };
 
     // Handle board deletion
@@ -497,8 +487,8 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                     } else {
                         PinMosaicGrid {
                             pins: pins.read().clone(),
-                            show_remove: *is_owner.read(),
-                            on_remove: handle_remove_pin,
+                            is_owner: *is_owner.read(),
+                            on_delete: handle_pin_deleted,
                             metadata_map: pin_metadata.read().clone(),
                         }
                     }

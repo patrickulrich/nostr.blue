@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{FromBech32, ToBech32};
 
+use crate::components::PinMenu;
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinMetadata, PinReference};
 use crate::utils::validation::is_valid_http_url;
@@ -83,10 +84,11 @@ fn ContentTypeIcon(content_type: PinContentType) -> Element {
 #[component]
 pub fn PinCard(
     pin: Pin,
+    /// Whether the current user owns this pin (can delete)
     #[props(default = false)]
-    show_remove: bool,
+    is_owner: bool,
     #[props(default)]
-    on_remove: Option<EventHandler<Pin>>,
+    on_delete: Option<EventHandler<String>>,
     /// Optional content type override (from fetching the referenced event)
     /// Used when Kind 30023 needs to be distinguished between article/recipe
     #[props(default)]
@@ -115,7 +117,7 @@ pub fn PinCard(
         .and_then(|m| m.summary.clone())
         .or_else(|| if pin.content.is_empty() { None } else { Some(pin.content.clone()) });
 
-    let pin_for_remove = pin.clone();
+    let pin_for_menu = pin.clone();
 
     // Get display reference and determine link target
     let (display_ref, item_route) = match &pin.reference {
@@ -150,8 +152,6 @@ pub fn PinCard(
             (content.to_string(), None)
         }
     };
-
-    let should_show_remove = show_remove && on_remove.is_some();
 
     rsx! {
         div {
@@ -200,24 +200,26 @@ pub fn PinCard(
                 }
             }
 
-            // Remove button overlay (visible on hover for owners)
-            if should_show_remove {
-                RemoveButton {
-                    pin: pin_for_remove,
-                    on_remove: on_remove.unwrap(),
-                }
-            }
-
             // Content type badge
             div {
                 class: "absolute top-2 left-2 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm",
                 ContentTypeIcon { content_type: content_type.clone() }
             }
+
+            // Menu (visible on hover)
+            div {
+                class: "absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm rounded-full",
+                PinMenu {
+                    pin: pin_for_menu.clone(),
+                    is_owner: is_owner,
+                    on_delete: on_delete,
+                }
+            }
         }
     }
 }
 
-/// Internal remove button component
+/// Internal remove button component (kept for PinGrid backward compatibility)
 #[component]
 fn RemoveButton(
     pin: Pin,
@@ -449,10 +451,11 @@ use std::collections::HashMap;
 #[component]
 pub fn PinGrid(
     pins: Vec<Pin>,
+    /// Whether the current user owns these pins (can delete)
     #[props(default = false)]
-    show_remove: bool,
+    is_owner: bool,
     #[props(default)]
-    on_remove: Option<EventHandler<Pin>>,
+    on_delete: Option<EventHandler<String>>,
     #[props(default = false)]
     loading: bool,
     #[props(default = 8)]
@@ -481,8 +484,8 @@ pub fn PinGrid(
                         PinCard {
                             key: "{pin.event_id}",
                             pin: pin.clone(),
-                            show_remove: show_remove,
-                            on_remove: on_remove,
+                            is_owner: is_owner,
+                            on_delete: on_delete,
                             content_type_override: override_type,
                             metadata: meta,
                         }
@@ -509,10 +512,11 @@ pub fn PinGrid(
 #[component]
 pub fn PinCardMosaic(
     pin: Pin,
+    /// Whether the current user owns this pin (can delete)
     #[props(default = false)]
-    show_remove: bool,
+    is_owner: bool,
     #[props(default)]
-    on_remove: Option<EventHandler<Pin>>,
+    on_delete: Option<EventHandler<String>>,
     #[props(default)]
     content_type_override: Option<PinContentType>,
     #[props(default)]
@@ -542,7 +546,7 @@ pub fn PinCardMosaic(
         .and_then(|m| m.summary.clone())
         .or_else(|| if pin.content.is_empty() { None } else { Some(pin.content.clone()) });
 
-    let pin_for_remove = pin.clone();
+    let pin_for_menu = pin.clone();
 
     // Get display reference and determine link target
     let (display_ref, item_route) = match &pin.reference {
@@ -572,8 +576,6 @@ pub fn PinCardMosaic(
             (content.to_string(), None)
         }
     };
-
-    let should_show_remove = show_remove && on_remove.is_some();
 
     // Height class for placeholder when no image
     let placeholder_height = match size_variant.as_deref() {
@@ -630,18 +632,20 @@ pub fn PinCardMosaic(
                 }
             }
 
-            // Remove button overlay
-            if should_show_remove {
-                RemoveButton {
-                    pin: pin_for_remove,
-                    on_remove: on_remove.unwrap(),
-                }
-            }
-
             // Content type badge - top left
             div {
                 class: "absolute top-2 left-2 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm shadow-sm",
                 ContentTypeIcon { content_type: content_type.clone() }
+            }
+
+            // Menu (visible on hover) - top right
+            div {
+                class: "absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm rounded-full shadow-sm",
+                PinMenu {
+                    pin: pin_for_menu.clone(),
+                    is_owner: is_owner,
+                    on_delete: on_delete,
+                }
             }
         }
     }
@@ -794,10 +798,11 @@ const PIN_SIZE_VARIANTS: [&str; 3] = ["small", "medium", "large"];
 #[component]
 pub fn PinMosaicGrid(
     pins: Vec<Pin>,
+    /// Whether the current user owns these pins (can delete)
     #[props(default = false)]
-    show_remove: bool,
+    is_owner: bool,
     #[props(default)]
-    on_remove: Option<EventHandler<Pin>>,
+    on_delete: Option<EventHandler<String>>,
     #[props(default = false)]
     loading: bool,
     #[props(default = 8)]
@@ -832,8 +837,8 @@ pub fn PinMosaicGrid(
                         PinCardMosaic {
                             key: "{pin.event_id}",
                             pin: pin.clone(),
-                            show_remove: show_remove,
-                            on_remove: on_remove,
+                            is_owner: is_owner,
+                            on_delete: on_delete,
                             content_type_override: override_type,
                             metadata: meta,
                             // Assign size variant based on index for variety (only for cards without images)

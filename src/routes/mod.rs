@@ -94,6 +94,7 @@ pub mod pin_boards;
 pub mod pin_board_detail;
 pub mod pin_board_new;
 pub mod pin_new;
+pub mod user_pins;
 
 // Wiki (NIP-54 Kind 30818)
 pub mod wiki;
@@ -236,6 +237,7 @@ use pin_boards::PinBoardsHome;
 use pin_board_detail::PinBoardDetail;
 use pin_board_new::{PinBoardNew, PinBoardEdit};
 use pin_new::PinNew;
+use user_pins::UserPins;
 use wiki::WikiHome;
 use wiki_author::WikiAuthor;
 use wiki_detail::WikiDetail;
@@ -494,6 +496,9 @@ pub enum Route {
         #[route("/pinboards/pin/new")]
         PinNew {},
 
+        #[route("/pinboards/pins")]
+        UserPins {},
+
         #[route("/pinboards/:naddr")]
         PinBoardDetail { naddr: String },
 
@@ -718,7 +723,7 @@ fn Layout() -> Element {
         Route::RecipeFork { .. } | Route::RecipesByTag { .. } | Route::RecipeChef { .. }
     );
     let is_pin_boards_page = matches!(current_route,
-        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. } | Route::PinNew {}
+        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. } | Route::PinNew {} | Route::UserPins {}
     );
     let is_wiki_page = matches!(current_route,
         Route::WikiHome {} | Route::WikiDetail { .. } | Route::WikiNew {} | Route::WikiAuthor { .. }
