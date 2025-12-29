@@ -584,14 +584,14 @@ fn ConversationView(pubkey: String) -> Element {
         spawn(async move {
             match dms::send_dm(recipient, content).await {
                 Ok(result) => {
-                    message_input.set(String::new());
-                    log::info!("Message sent successfully");
+                    // Re-enable send button immediately after network call completes
+                    sending.set(false);
 
                     // Show feedback based on relay results using PublishResult methods
                     let rate = result.success_rate();
 
                     if !result.is_success() {
-                        // Complete failure
+                        // Complete failure - preserve message for retry
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
                         send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
@@ -602,7 +602,9 @@ fn ConversationView(pubkey: String) -> Element {
                             send_feedback.set(None);
                         }
                     } else if result.has_failures() {
-                        // Partial success - show warning with success rate
+                        // Partial success - clear message and show warning
+                        message_input.set(String::new());
+                        log::info!("Message sent successfully");
                         // Note: success_rate() already returns 0-100, don't multiply again
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
@@ -617,10 +619,15 @@ fn ConversationView(pubkey: String) -> Element {
                         if feedback_version() == current_version {
                             send_feedback.set(None);
                         }
+                    } else {
+                        // Full success: clear message, no feedback needed
+                        message_input.set(String::new());
+                        log::info!("Message sent successfully");
                     }
-                    // Full success: no feedback needed
                 }
                 Err(e) => {
+                    // Re-enable send button immediately after network call completes
+                    sending.set(false);
                     log::error!("Failed to send message: {}", e);
                     feedback_version.set(feedback_version() + 1);
                     let current_version = feedback_version();
@@ -633,7 +640,6 @@ fn ConversationView(pubkey: String) -> Element {
                     }
                 }
             }
-            sending.set(false);
         });
     };
 
@@ -769,13 +775,14 @@ fn ConversationView(pubkey: String) -> Element {
                                 spawn(async move {
                                     match dms::send_dm(recipient, content).await {
                                         Ok(result) => {
-                                            message_input.set(String::new());
-                                            log::info!("Message sent successfully");
+                                            // Re-enable send button immediately after network call completes
+                                            sending.set(false);
 
                                             // Show feedback based on relay results using PublishResult methods
                                             let rate = result.success_rate();
 
                                             if !result.is_success() {
+                                                // Complete failure - preserve message for retry
                                                 feedback_version.set(feedback_version() + 1);
                                                 let current_version = feedback_version();
                                                 send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
@@ -786,6 +793,9 @@ fn ConversationView(pubkey: String) -> Element {
                                                     send_feedback.set(None);
                                                 }
                                             } else if result.has_failures() {
+                                                // Partial success - clear message and show warning
+                                                message_input.set(String::new());
+                                                log::info!("Message sent successfully");
                                                 // Note: success_rate() already returns 0-100, don't multiply again
                                                 feedback_version.set(feedback_version() + 1);
                                                 let current_version = feedback_version();
@@ -800,10 +810,15 @@ fn ConversationView(pubkey: String) -> Element {
                                                 if feedback_version() == current_version {
                                                     send_feedback.set(None);
                                                 }
+                                            } else {
+                                                // Full success: clear message, no feedback needed
+                                                message_input.set(String::new());
+                                                log::info!("Message sent successfully");
                                             }
-                                            // Full success: no feedback needed
                                         }
                                         Err(e) => {
+                                            // Re-enable send button immediately after network call completes
+                                            sending.set(false);
                                             log::error!("Failed to send message: {}", e);
                                             feedback_version.set(feedback_version() + 1);
                                             let current_version = feedback_version();
@@ -816,7 +831,6 @@ fn ConversationView(pubkey: String) -> Element {
                                             }
                                         }
                                     }
-                                    sending.set(false);
                                 });
                             }
                         }

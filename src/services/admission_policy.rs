@@ -1,6 +1,8 @@
 #[cfg(target_arch = "wasm32")]
 use nostr_sdk::prelude::*;
 #[cfg(target_arch = "wasm32")]
+use nostr_sdk::FromBech32;
+#[cfg(target_arch = "wasm32")]
 use nostr_relay_pool::policy::{AdmitPolicy, AdmitStatus, PolicyError};
 #[cfg(target_arch = "wasm32")]
 use nostr::util::BoxedFuture;
@@ -63,9 +65,15 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
             // Protected events (with `-` tag) should only be accepted from the current user
             if event.is_protected() {
                 let current_pubkey = crate::stores::auth_store::get_pubkey();
-                let event_pubkey = event.pubkey.to_hex();
 
-                if current_pubkey.as_ref() != Some(&event_pubkey) {
+                // Parse stored pubkey (could be bech32 npub or hex format)
+                let current_pk: Option<PublicKey> = current_pubkey.and_then(|pk_str| {
+                    PublicKey::from_bech32(&pk_str)
+                        .or_else(|_| PublicKey::from_hex(&pk_str))
+                        .ok()
+                });
+
+                if current_pk.as_ref() != Some(&event.pubkey) {
                     log::debug!(
                         "Rejected protected event {} from {} (not current user)",
                         event.id,

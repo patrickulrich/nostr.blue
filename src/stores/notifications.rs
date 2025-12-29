@@ -334,7 +334,10 @@ pub async fn start_realtime_subscription() {
                     }
                 }
 
-                log::warn!("Notification listener loop ended - connection may have closed");
+                // Clear subscription ID when loop ends (timeout or disconnect)
+                // This allows future calls to start_realtime_subscription to succeed
+                log::warn!("Notification listener loop ended - clearing subscription for reconnect");
+                *SUBSCRIPTION_ID.write() = None;
             });
         }
         Err(e) => {

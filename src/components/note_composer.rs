@@ -71,14 +71,12 @@ pub fn NoteComposer() -> Element {
                             publish_feedback.set(None);
                         }
                     } else if success_count == 0 {
-                        // All failed
+                        // All failed - preserve draft for retry (mirror Err(e) behavior)
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
                         publish_feedback.set(Some((false, "Failed to publish to any relay".to_string())));
-
-                        content.set(String::new());
-                        show_image_uploader.set(false);
                         is_publishing.set(false);
+                        // DO NOT clear content or show_image_uploader - let user retry
 
                         // Auto-hide feedback after 3 seconds (only if version unchanged)
                         gloo_timers::future::TimeoutFuture::new(3000).await;
