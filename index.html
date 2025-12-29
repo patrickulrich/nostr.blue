@@ -38,6 +38,10 @@
     <link data-trunk rel="copy-file" href="public/sw.js">
     <link data-trunk rel="copy-file" href="public/manifest.json">
     <link data-trunk rel="copy-dir" href="public/icons">
+    <!-- SPA 404 redirect for GitHub Pages -->
+    <link data-trunk rel="copy-file" href="public/404.html">
+    <!-- Custom domain for GitHub Pages -->
+    <link data-trunk rel="copy-file" href="public/CNAME">
     <style>
         /* Hide scrollbar but keep scrolling functionality */
         .hide-scrollbar {
@@ -66,6 +70,19 @@
 </head>
 <body>
     <div id="main"></div>
+
+    <!-- SPA Redirect Handler for GitHub Pages 404 -->
+    <script>
+        (function() {
+            const redirect = sessionStorage.getItem('spa-redirect');
+            if (redirect) {
+                sessionStorage.removeItem('spa-redirect');
+                if (redirect !== '/' && redirect !== '/index.html') {
+                    history.replaceState(null, '', redirect);
+                }
+            }
+        })();
+    </script>
 
     <!-- Service Worker Registration with Update Notification -->
     <script>
