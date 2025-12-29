@@ -137,14 +137,20 @@ pub fn AddToCookbookModal(
             match pin_boards_store::publish_pinboard(cookbook_input, None).await {
                 Ok(cookbook_naddr) => {
                     // Convert naddr to a_tag (coordinate format) for board reference
-                    let board_a_tag = Coordinate::from_bech32(&cookbook_naddr)
-                        .map(|coord| format!(
+                    let board_a_tag = match Coordinate::from_bech32(&cookbook_naddr) {
+                        Ok(coord) => format!(
                             "{}:{}:{}",
                             coord.kind.as_u16(),
                             coord.public_key.to_hex(),
                             coord.identifier
-                        ))
-                        .unwrap_or_else(|_| cookbook_naddr.clone());
+                        ),
+                        Err(e) => {
+                            log::error!("Failed to parse cookbook naddr: {}", e);
+                            error.set(Some(format!("Invalid cookbook address: {}", e)));
+                            is_submitting.set(false);
+                            return;
+                        }
+                    };
 
                     // Now add the recipe as a pin
                     let pin_input = PinInput {

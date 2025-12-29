@@ -308,6 +308,7 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
             a {
                 href: "{mempool_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-full hover:bg-orange-500/20 transition font-mono",
                 span {
                     class: "w-3.5 h-3.5",
@@ -407,6 +408,7 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
                                 a {
                                     href: "{mempool_url}",
                                     target: "_blank",
+                                    rel: "noopener noreferrer",
                                     class: "flex items-center gap-1 text-primary hover:underline mt-2",
                                     "View on Mempool"
                                     span {
@@ -424,6 +426,7 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
                             a {
                                 href: "{mempool_url}",
                                 target: "_blank",
+                                rel: "noopener noreferrer",
                                 class: "flex items-center gap-1 text-primary hover:underline text-sm mt-2",
                                 "View on Mempool"
                                 span {
@@ -503,6 +506,7 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
             a {
                 href: "{mempool_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-full hover:bg-orange-500/20 transition font-mono",
                 span {
                     class: "w-3.5 h-3.5",
@@ -598,6 +602,7 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
                                     a {
                                         href: "{mempool_url}",
                                         target: "_blank",
+                                        rel: "noopener noreferrer",
                                         class: "flex items-center gap-1 text-primary hover:underline mt-2",
                                         "View on Mempool"
                                         span {
@@ -616,6 +621,7 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
                             a {
                                 href: "{mempool_url}",
                                 target: "_blank",
+                                rel: "noopener noreferrer",
                                 class: "flex items-center gap-1 text-primary hover:underline text-sm mt-2",
                                 "View on Mempool"
                                 span {
@@ -674,6 +680,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
             a {
                 href: "{podcast_index_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full hover:bg-purple-500/20 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -688,6 +695,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
         a {
             href: "{podcast_index_url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
@@ -738,6 +746,7 @@ fn GeohashCard(props: GeohashCardProps) -> Element {
             a {
                 href: "{geohash_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-green-500/10 text-green-600 dark:text-green-400 rounded-full hover:bg-green-500/20 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -752,6 +761,7 @@ fn GeohashCard(props: GeohashCardProps) -> Element {
         a {
             href: "{osm_url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
@@ -798,6 +808,7 @@ fn MovieCard(props: MovieCardProps) -> Element {
             a {
                 href: "{isan_url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-pink-500/10 text-pink-600 dark:text-pink-400 rounded-full hover:bg-pink-500/20 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -812,6 +823,7 @@ fn MovieCard(props: MovieCardProps) -> Element {
         a {
             href: "{isan_url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
@@ -859,6 +871,7 @@ fn GenericContentCard(props: GenericContentCardProps) -> Element {
             a {
                 href: "{props.url}",
                 target: "_blank",
+                rel: "noopener noreferrer",
                 class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-muted text-muted-foreground rounded-full hover:bg-muted/80 transition",
                 span {
                     class: "w-3.5 h-3.5",
@@ -873,6 +886,7 @@ fn GenericContentCard(props: GenericContentCardProps) -> Element {
         a {
             href: "{props.url}",
             target: "_blank",
+            rel: "noopener noreferrer",
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {

@@ -117,6 +117,10 @@ pub fn BoardSlideover(
     let nav = navigator();
     let on_close_for_delete = on_close;
     let handle_delete = move |_| {
+        // Guard against concurrent deletes
+        if *deleting.read() {
+            return;
+        }
         deleting.set(true);
         delete_error.set(None);
         let board_clone = board_for_delete.clone();

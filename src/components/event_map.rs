@@ -6,9 +6,13 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
+
+/// Global counter for unique EventMap container IDs
+static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ============================================================================
 // JS Interop for Leaflet
@@ -203,7 +207,13 @@ pub struct EventMapProps {
 /// Event Map component that displays events on a Leaflet map
 #[component]
 pub fn EventMap(props: EventMapProps) -> Element {
-    let container_id = use_signal(|| format!("event-map-{}", js_sys::Date::now() as u64));
+    let container_id = use_signal(|| {
+        format!(
+            "event-map-{}-{}",
+            js_sys::Date::now() as u64,
+            EVENT_MAP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
+    });
     let mut leaflet_loaded = use_signal(|| false);
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);

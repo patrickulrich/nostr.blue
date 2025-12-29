@@ -56,6 +56,7 @@ pub fn AsciiDocContent(
     // State for resolved citations
     let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> = use_signal(HashMap::new);
     let mut citations_loading = use_signal(|| false);
+    let mut citations_error = use_signal(|| false);
 
     // Track last notified citation metadata to prevent redundant callbacks
     let mut last_notified_metadata: Signal<Option<CitationMetadata>> = use_signal(|| None);
@@ -86,6 +87,7 @@ pub fn AsciiDocContent(
                         }
                         Err(e) => {
                             crate::utils::log_fetch_error("citations for article", e);
+                            citations_error.set(true);
                         }
                     }
                     citations_loading.set(false);
@@ -146,6 +148,14 @@ pub fn AsciiDocContent(
         div {
             class: "asciidoc-content prose prose-sm dark:prose-invert max-w-none {class}",
             dangerous_inner_html: "{rendered}",
+        }
+        // Show subtle error indicator if citations failed to load
+        if *citations_error.read() {
+            div {
+                class: "text-xs text-muted-foreground mt-2 flex items-center gap-1",
+                span { "⚠" }
+                span { "Some citations could not be loaded" }
+            }
         }
         // Render footnotes section if present (sanitized for XSS protection)
         if !footnotes_html.is_empty() {

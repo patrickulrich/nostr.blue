@@ -301,10 +301,17 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 is_open.set(false);
 
                                 let pubkey = author_pubkey_block.clone();
+                                let toast = toast;
                                 spawn(async move {
                                     match nostr_client::block_user(pubkey).await {
-                                        Ok(_) => log::info!("User blocked successfully"),
-                                        Err(e) => log::error!("Failed to block user: {}", e),
+                                        Ok(_) => {
+                                            log::info!("User blocked successfully");
+                                            toast.success("User blocked".to_string(), ToastOptions::new());
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to block user: {}", e);
+                                            toast.error(format!("Failed to block user: {}", e), ToastOptions::new());
+                                        }
                                     }
                                 });
                             },
