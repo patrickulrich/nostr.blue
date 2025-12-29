@@ -610,7 +610,7 @@ pub async fn publish_recipe(
         return Err("No signer attached".to_string());
     }
 
-    // Generate slug from title (zap.cooking compatible - only replaces spaces)
+    // Generate slug from title (compatible format - only replaces spaces)
     let slug = crate::utils::recipe_slug(title);
 
     // Build tags
@@ -618,7 +618,7 @@ pub async fn publish_recipe(
         Tag::identifier(&slug),
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
-        // Title-based hashtag for discoverability (zap.cooking compatible)
+        // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
@@ -633,7 +633,7 @@ pub async fn publish_recipe(
         ));
     }
 
-    // Add multiple images (zap.cooking compatible)
+    // Add multiple images
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
             event_tags.push(Tag::image(url, None));
@@ -671,7 +671,7 @@ pub async fn fork_recipe(
         return Err("No signer attached".to_string());
     }
 
-    // Generate new slug (zap.cooking compatible - only replaces spaces)
+    // Generate new slug (compatible format - only replaces spaces)
     let slug = crate::utils::recipe_slug(new_title);
 
     // Build tags - include reference to original
@@ -679,7 +679,7 @@ pub async fn fork_recipe(
         Tag::identifier(&slug),
         Tag::title(new_title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
-        // Title-based hashtag for discoverability (zap.cooking compatible)
+        // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
@@ -739,7 +739,7 @@ pub async fn update_recipe(
         Tag::identifier(original_slug),
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
-        // Title-based hashtag for discoverability (zap.cooking compatible)
+        // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, original_slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
@@ -754,7 +754,7 @@ pub async fn update_recipe(
         ));
     }
 
-    // Add multiple images (zap.cooking compatible)
+    // Add multiple images
     for img in image_urls {
         if let Ok(url) = Url::parse(img) {
             event_tags.push(Tag::image(url, None));

@@ -1,6 +1,6 @@
 //! Pinboard Card Component
 //! Displays a pinboard in a card format for listing pages
-//! Pinterest-style card with cover image gradient, title, and author
+//! Image-focused card with cover image gradient, title, and author
 
 use dioxus::prelude::*;
 
@@ -196,10 +196,10 @@ pub fn PinBoardCard(
 }
 
 // ============================================================================
-// Mosaic Card Component (Pinterest-style)
+// Mosaic Card Component
 // ============================================================================
 
-/// Pinterest-style mosaic card with hover-reveal effects
+/// Masonry-style mosaic card with hover-reveal effects
 /// Shows only image by default, reveals overlay with buttons and info on hover
 #[component]
 pub fn PinBoardCardMosaic(
@@ -467,7 +467,7 @@ pub fn PinBoardCardMosaicSkeleton(
 /// Size variants for visual variety in masonry layout
 const SIZE_VARIANTS: [&str; 3] = ["small", "medium", "large"];
 
-/// Pinterest-style masonry grid for pinboards
+/// Masonry grid layout for pinboards
 /// Uses CSS columns for true masonry layout with varied card heights
 #[component]
 pub fn PinBoardMosaicGrid(

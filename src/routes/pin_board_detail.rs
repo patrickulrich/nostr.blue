@@ -14,7 +14,7 @@ use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::auth_store;
 use crate::components::{
     ZapModal, ShareModal, ConfirmModal, HashtagBadge,
-    PinCardSkeleton, PinGrid,
+    PinCardMosaicSkeleton, PinMosaicGrid,
 };
 use crate::routes::Route;
 use crate::utils::truncate_pubkey;
@@ -477,9 +477,9 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                         }
                     }
 
-                    // Pins grid
+                    // Pins grid (masonry layout)
                     if *pins_loading.read() {
-                        PinGrid {
+                        PinMosaicGrid {
                             pins: vec![],
                             loading: true,
                             skeleton_count: 8,
@@ -493,7 +493,7 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                             }
                         }
                     } else {
-                        PinGrid {
+                        PinMosaicGrid {
                             pins: pins.read().clone(),
                             show_remove: *is_owner.read(),
                             on_remove: handle_remove_pin,
@@ -563,11 +563,11 @@ fn BoardDetailSkeleton() -> Element {
             div { class: "h-4 w-full bg-muted rounded" }
             div { class: "h-4 w-3/4 bg-muted rounded" }
 
-            // Pins grid skeleton
+            // Pins grid skeleton (masonry style)
             div {
-                class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                class: "columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3",
                 for i in 0..8 {
-                    PinCardSkeleton { key: "skeleton-{i}" }
+                    PinCardMosaicSkeleton { key: "skeleton-{i}" }
                 }
             }
         }

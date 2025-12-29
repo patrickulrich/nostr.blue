@@ -87,6 +87,7 @@ pub fn AddToCookbookModal(
                     relay_hint: None,
                 },
                 title: None, // Will use recipe's own title
+                image: None, // Will use recipe's own image
                 content: String::new(),
                 tags: vec![],
             };
@@ -153,6 +154,7 @@ pub fn AddToCookbookModal(
                             relay_hint: None,
                         },
                         title: None,
+                        image: None,
                         content: String::new(),
                         tags: vec![],
                     };

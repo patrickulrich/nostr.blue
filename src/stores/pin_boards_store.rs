@@ -334,6 +334,7 @@ pub struct PinInput {
     pub board_addresses: Vec<String>, // Can be empty for profile pins
     pub reference: PinReference,
     pub title: Option<String>,
+    pub image: Option<String>,        // Custom image URL for the pin
     pub content: String,
     pub tags: Vec<String>,
 }
@@ -1134,7 +1135,7 @@ pub async fn fetch_owner_pins_for_board(
 /// Fetch pins for a board with flexible author filtering
 ///
 /// Modes:
-/// - `owner_pubkey: Some(pk)` = Only owner's pins (Pinterest default mode)
+/// - `owner_pubkey: Some(pk)` = Only owner's pins (default mode)
 /// - `owner_pubkey: None` + `allowed_authors: Some(vec)` = Specific collaborators only
 /// - `owner_pubkey: None` + `allowed_authors: None` = All pins (full collaborative mode)
 pub async fn fetch_pins_for_board_filtered(
@@ -1441,6 +1442,14 @@ pub async fn publish_pin(input: PinInput) -> std::result::Result<String, String>
         tags.push(Tag::custom(
             TagKind::Custom("title".into()),
             vec![title.clone()],
+        ));
+    }
+
+    // Add image if provided
+    if let Some(ref image) = input.image {
+        tags.push(Tag::custom(
+            TagKind::Custom("image".into()),
+            vec![image.clone()],
         ));
     }
 
