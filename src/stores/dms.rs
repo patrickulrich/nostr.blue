@@ -301,11 +301,10 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
 
-    // Send to recipient's inbox relays using publish_event_to_relays
+    // Send pre-signed gift wrap to recipient's inbox relays (preserves original signature)
     log::info!("Sending receiver gift wrap to {} inbox relays", recipient_inbox_relays.len());
-    let receiver_result = nostr_client::publish_event_to_relays(
-        EventBuilder::new(receiver_gift_wrap.kind, &receiver_gift_wrap.content)
-            .tags(receiver_gift_wrap.tags.clone()),
+    let receiver_result = nostr_client::send_presigned_event_to_relays(
+        receiver_gift_wrap.clone(),
         recipient_inbox_relays.clone(),
     ).await;
 
@@ -328,11 +327,10 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         }
     };
 
-    // Send to sender's inbox relays using publish_event_to_relays
+    // Send pre-signed gift wrap to sender's inbox relays (preserves original signature)
     log::info!("Sending sender gift wrap to {} inbox relays", sender_inbox_relays.len());
-    let sender_result = nostr_client::publish_event_to_relays(
-        EventBuilder::new(sender_gift_wrap.kind, &sender_gift_wrap.content)
-            .tags(sender_gift_wrap.tags.clone()),
+    let sender_result = nostr_client::send_presigned_event_to_relays(
+        sender_gift_wrap.clone(),
         sender_inbox_relays.clone(),
     ).await;
 

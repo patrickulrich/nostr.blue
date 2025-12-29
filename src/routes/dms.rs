@@ -436,6 +436,8 @@ fn ConversationView(pubkey: String) -> Element {
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
     // Feedback toast for showing relay publish results
     let mut send_feedback = use_signal(|| Option::<(bool, String)>::None);
+    // Version counter to prevent stale timeout from clearing newer feedback
+    let mut feedback_version = use_signal(|| 0u32);
 
     // Polling task for real-time updates
     let mut poll_task = use_signal(|| None::<Task>);
@@ -590,30 +592,45 @@ fn ConversationView(pubkey: String) -> Element {
 
                     if !result.is_success() {
                         // Complete failure
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
                         send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            send_feedback.set(None);
+                        }
                     } else if result.has_failures() {
                         // Partial success - show warning with success rate
+                        // Note: success_rate() already returns 0-100, don't multiply again
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
                         send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
-                            rate * 100.0,
+                            rate,
                             result.success_count(),
                             result.total_attempted()
                         ))));
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            send_feedback.set(None);
+                        }
                     }
                     // Full success: no feedback needed
-
-                    // Auto-hide feedback after 3 seconds
-                    if send_feedback.peek().is_some() {
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
-                        send_feedback.set(None);
-                    }
                 }
                 Err(e) => {
                     log::error!("Failed to send message: {}", e);
+                    feedback_version.set(feedback_version() + 1);
+                    let current_version = feedback_version();
                     send_feedback.set(Some((false, format!("Error: {}", e))));
 
-                    // Auto-hide error after 5 seconds
+                    // Auto-hide error after 5 seconds (only if version unchanged)
                     gloo_timers::future::TimeoutFuture::new(5000).await;
-                    send_feedback.set(None);
+                    if feedback_version() == current_version {
+                        send_feedback.set(None);
+                    }
                 }
             }
             sending.set(false);
@@ -759,26 +776,44 @@ fn ConversationView(pubkey: String) -> Element {
                                             let rate = result.success_rate();
 
                                             if !result.is_success() {
+                                                feedback_version.set(feedback_version() + 1);
+                                                let current_version = feedback_version();
                                                 send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+
+                                                // Auto-hide feedback after 3 seconds (only if version unchanged)
+                                                gloo_timers::future::TimeoutFuture::new(3000).await;
+                                                if feedback_version() == current_version {
+                                                    send_feedback.set(None);
+                                                }
                                             } else if result.has_failures() {
+                                                // Note: success_rate() already returns 0-100, don't multiply again
+                                                feedback_version.set(feedback_version() + 1);
+                                                let current_version = feedback_version();
                                                 send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
-                                                    rate * 100.0,
+                                                    rate,
                                                     result.success_count(),
                                                     result.total_attempted()
                                                 ))));
-                                            }
 
-                                            // Auto-hide feedback
-                                            if send_feedback.peek().is_some() {
+                                                // Auto-hide feedback after 3 seconds (only if version unchanged)
                                                 gloo_timers::future::TimeoutFuture::new(3000).await;
-                                                send_feedback.set(None);
+                                                if feedback_version() == current_version {
+                                                    send_feedback.set(None);
+                                                }
                                             }
+                                            // Full success: no feedback needed
                                         }
                                         Err(e) => {
                                             log::error!("Failed to send message: {}", e);
+                                            feedback_version.set(feedback_version() + 1);
+                                            let current_version = feedback_version();
                                             send_feedback.set(Some((false, format!("Error: {}", e))));
+
+                                            // Auto-hide error after 5 seconds (only if version unchanged)
                                             gloo_timers::future::TimeoutFuture::new(5000).await;
-                                            send_feedback.set(None);
+                                            if feedback_version() == current_version {
+                                                send_feedback.set(None);
+                                            }
                                         }
                                     }
                                     sending.set(false);

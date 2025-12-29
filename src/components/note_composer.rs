@@ -13,6 +13,8 @@ pub fn NoteComposer() -> Element {
     let mut show_image_uploader = use_signal(|| false);
     let mut show_poll_modal = use_signal(|| false);
     let mut publish_feedback = use_signal(|| Option::<(bool, String)>::None);
+    // Version counter to prevent stale timeout from clearing newer feedback
+    let mut feedback_version = use_signal(|| 0u32);
 
     // Check if user is authenticated (can publish) using auth_store
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -55,31 +57,53 @@ pub fn NoteComposer() -> Element {
                     // Show feedback based on relay results
                     if result.has_failures() && success_count > 0 {
                         // Partial success
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
                         publish_feedback.set(Some((true, format!("Published to {}/{} relays", success_count, total))));
+
+                        content.set(String::new());
+                        show_image_uploader.set(false);
+                        is_publishing.set(false);
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            publish_feedback.set(None);
+                        }
                     } else if success_count == 0 {
                         // All failed
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
                         publish_feedback.set(Some((false, "Failed to publish to any relay".to_string())));
-                    }
-                    // Full success: no feedback needed, just clear
 
-                    content.set(String::new());
-                    show_image_uploader.set(false);
-                    is_publishing.set(false);
+                        content.set(String::new());
+                        show_image_uploader.set(false);
+                        is_publishing.set(false);
 
-                    // Auto-hide feedback after 3 seconds
-                    if publish_feedback.read().is_some() {
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
                         gloo_timers::future::TimeoutFuture::new(3000).await;
-                        publish_feedback.set(None);
+                        if feedback_version() == current_version {
+                            publish_feedback.set(None);
+                        }
+                    } else {
+                        // Full success: no feedback needed, just clear
+                        content.set(String::new());
+                        show_image_uploader.set(false);
+                        is_publishing.set(false);
                     }
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
+                    feedback_version.set(feedback_version() + 1);
+                    let current_version = feedback_version();
                     publish_feedback.set(Some((false, format!("Error: {}", e))));
                     is_publishing.set(false);
 
-                    // Auto-hide error after 5 seconds
+                    // Auto-hide error after 5 seconds (only if version unchanged)
                     gloo_timers::future::TimeoutFuture::new(5000).await;
-                    publish_feedback.set(None);
+                    if feedback_version() == current_version {
+                        publish_feedback.set(None);
+                    }
                 }
             }
         });

@@ -3078,18 +3078,15 @@ pub async fn publish_reaction_to_relays(
     Ok(result)
 }
 
-/// Publish any event builder to specific relays
+/// Send a pre-signed event to specific relays
 ///
-/// Generic function for advanced use cases where you have a custom EventBuilder.
-pub async fn publish_event_to_relays(
-    builder: EventBuilder,
+/// Takes an already-signed Event and sends it directly to the specified relays,
+/// preserving the original cryptographic signature.
+pub async fn send_presigned_event_to_relays(
+    event: nostr::Event,
     relay_urls: Vec<String>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
-
-    if !*HAS_SIGNER.read() {
-        return Err("No signer attached".to_string());
-    }
 
     let urls: Vec<nostr::RelayUrl> = relay_urls
         .iter()
@@ -3100,14 +3097,14 @@ pub async fn publish_event_to_relays(
         return Err("No valid relay URLs provided".to_string());
     }
 
-    let output = client.send_event_builder_to(urls, builder)
+    let output = client.send_event_to(urls, &event)
         .await
-        .map_err(|e| format!("Failed to publish: {}", e))?;
+        .map_err(|e| format!("Failed to send event: {}", e))?;
 
     let result = PublishResult::from_output(output);
 
     log::info!(
-        "Event published to specific relays: {} ({}/{} relays succeeded)",
+        "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)",
         result.event_id,
         result.success_count(),
         result.total_attempted()
