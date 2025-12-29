@@ -10,7 +10,7 @@ pub fn PollCreatorModal(
     on_poll_created: EventHandler<String>,
 ) -> Element {
     // Form state
-    let mut poll_question = use_signal(|| String::new());
+    let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
     let mut options = use_signal(|| vec![
         PollOptionData {
@@ -23,8 +23,8 @@ pub fn PollCreatorModal(
         },
     ]);
     let mut end_time_preset = use_signal(|| String::from("1day"));
-    let mut custom_end_time = use_signal(|| String::new());
-    let mut hashtags_input = use_signal(|| String::new());
+    let mut custom_end_time = use_signal(String::new);
+    let mut hashtags_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut show_advanced = use_signal(|| false);

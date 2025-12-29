@@ -7,7 +7,7 @@ const MAX_LENGTH: usize = 5000;
 
 #[component]
 pub fn NoteComposer() -> Element {
-    let mut content = use_signal(|| String::new());
+    let mut content = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut is_focused = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);

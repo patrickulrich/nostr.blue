@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client::publish_note, auth_store};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker};
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -9,8 +9,12 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     let navigator = navigator();
 
     // Initialize content with quote reference if provided
+    // Strip existing nostr: prefix to avoid double-prefix (nostr:nostr:...)
     let initial_content = quote.as_ref()
-        .map(|q| format!("\nnostr:{}", q))
+        .map(|q| {
+            let clean = q.strip_prefix("nostr:").unwrap_or(q);
+            format!("\nnostr:{}", clean)
+        })
         .unwrap_or_default();
 
     let mut content = use_signal(move || initial_content);
@@ -50,7 +54,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                 Ok(event_id) => {
                     log::info!("Note published successfully: {}", event_id);
                     is_publishing.set(false);
-                    navigator.push(crate::routes::Route::Home {});
+                    navigator.push(crate::routes::Route::Home { list: String::new() });
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
@@ -96,7 +100,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     // Redirect if not authenticated - effect must be called unconditionally
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 
@@ -150,13 +154,14 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                 div {
                     class: "p-4",
 
-                    // Textarea
-                    textarea {
-                        class: "w-full min-h-[200px] p-3 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500",
-                        placeholder: "What's on your mind?",
-                        value: "{content}",
-                        oninput: move |e| content.set(e.value()),
-                        autofocus: true,
+                    // Textarea with @ mention autocomplete
+                    MentionAutocomplete {
+                        content: content,
+                        on_input: move |new_value: String| content.set(new_value),
+                        placeholder: "What's on your mind?".to_string(),
+                        rows: 8,
+                        class: "w-full min-h-[200px] p-3 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500".to_string(),
+                        disabled: false,
                     }
 
                     // Character counter

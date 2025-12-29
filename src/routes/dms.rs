@@ -1,9 +1,52 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, dms, profiles};
+use dioxus_core::Task;
+use crate::stores::{auth_store, dms, nostr_client, profiles};
 use crate::stores::dms::ConversationMessage;
 use crate::routes::Route;
 use crate::utils::time;
-use wasm_bindgen::JsCast;
+use crate::utils::truncate_pubkey;
+use wasm_bindgen::prelude::*;
+
+/// Guard struct that cancels polling task on drop
+#[derive(Clone)]
+struct PollTaskGuard {
+    task: Signal<Option<Task>>,
+}
+
+impl Drop for PollTaskGuard {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.read().as_ref() {
+            task.cancel();
+        }
+    }
+}
+
+#[wasm_bindgen(inline_js = r#"
+export function scrollDMsToBottom(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.scrollTop = element.scrollHeight;
+    }
+}
+
+export function isDMsScrolledNearBottom(elementId, threshold) {
+    const element = document.getElementById(elementId);
+    if (!element) return true;
+    const scrollTop = element.scrollTop;
+    const scrollHeight = element.scrollHeight;
+    const clientHeight = element.clientHeight;
+    return scrollHeight - scrollTop - clientHeight < threshold;
+}
+
+export function isPageVisible() {
+    return !document.hidden;
+}
+"#)]
+extern "C" {
+    fn scrollDMsToBottom(element_id: &str);
+    fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
+    fn isPageVisible() -> bool;
+}
 
 #[component]
 pub fn DMs() -> Element {
@@ -13,10 +56,16 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
-    let _new_recipient = use_signal(|| String::new());
 
     // Load DMs on mount
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            log::debug!("Waiting for client initialization before loading DMs...");
+            return;
+        }
+
         if !auth_store::is_authenticated() {
             return;
         }
@@ -25,6 +74,7 @@ pub fn DMs() -> Element {
         error.set(None);
 
         spawn(async move {
+            // Load DMs
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs loaded successfully");
@@ -37,18 +87,20 @@ pub fn DMs() -> Element {
         });
     });
 
-    // Auto-refresh polling (60 seconds)
+    // Auto-refresh polling for conversation list (30 seconds)
     use_effect(move || {
-        if !auth_store::is_authenticated() {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
 
         spawn(async move {
             loop {
-                gloo_timers::future::sleep(std::time::Duration::from_secs(60)).await;
+                gloo_timers::future::sleep(std::time::Duration::from_secs(30)).await;
 
-                // Only refresh if user is authenticated
-                if auth_store::is_authenticated() {
+                // Only refresh if user is authenticated and page is visible
+                if auth_store::is_authenticated() && isPageVisible() {
                     log::debug!("Auto-refreshing DMs...");
                     let _ = dms::init_dms().await;
                 }
@@ -58,7 +110,7 @@ pub fn DMs() -> Element {
 
     // Manual refresh function
     let refresh_dms = move |_| {
-        if refreshing.read().clone() {
+        if *refreshing.read() {
             return;
         }
 
@@ -87,7 +139,7 @@ pub fn DMs() -> Element {
                     class: "px-4 py-3 flex items-center justify-between",
                     h2 {
                         class: "text-xl font-bold",
-                        "✉️ Direct Messages"
+                        "✉️ Messages"
                     }
                     div {
                         class: "flex items-center gap-2",
@@ -162,7 +214,7 @@ pub fn DMs() -> Element {
                     }
                 }
 
-                // Main DM interface
+                // Main interface
                 if !*loading.read() {
                     div {
                         class: "flex-1 flex overflow-hidden h-full",
@@ -222,7 +274,6 @@ pub fn DMs() -> Element {
                             class: "flex-1 flex flex-col overflow-hidden",
 
                             if *new_dm_mode.read() {
-                                // New DM composer
                                 NewDMComposer {
                                     on_cancel: move |_| new_dm_mode.set(false),
                                     on_send: move |recipient: String| {
@@ -231,14 +282,11 @@ pub fn DMs() -> Element {
                                     }
                                 }
                             } else if let Some(pubkey) = selected_conversation.read().as_ref() {
-                                // Show selected conversation
-                                // Use key to force re-render when conversation changes
                                 ConversationView {
                                     key: "{pubkey}",
                                     pubkey: pubkey.clone()
                                 }
                             } else {
-                                // Empty state
                                 div {
                                     class: "flex-1 flex items-center justify-center",
                                     div {
@@ -313,9 +361,7 @@ fn ConversationListItem(
 
     let display_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...{}",
-            &conversation.pubkey[..8],
-            &conversation.pubkey[conversation.pubkey.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&conversation.pubkey));
 
     let avatar_url = profile.read().as_ref()
         .map(|p| p.get_avatar_url())
@@ -382,12 +428,16 @@ fn ConversationListItem(
 
 #[component]
 fn ConversationView(pubkey: String) -> Element {
-    let mut message_input = use_signal(|| String::new());
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
-    let mut decrypted_messages = use_signal(|| Vec::<(ConversationMessage, String)>::new());
+    let mut decrypted_messages = use_signal(Vec::<(ConversationMessage, String)>::new);
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
+
+    // Polling task for real-time updates
+    let mut poll_task = use_signal(|| None::<Task>);
+    let mut is_first_load = use_signal(|| true);
 
     // Clone pubkey for different uses
     let pubkey_for_effect = pubkey.clone();
@@ -395,6 +445,7 @@ fn ConversationView(pubkey: String) -> Element {
     let pubkey_for_input = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
     let pubkey_for_profile = pubkey.clone();
+    let pubkey_for_poll = pubkey.clone();
 
     // Fetch profile on mount
     use_effect(move || {
@@ -406,6 +457,54 @@ fn ConversationView(pubkey: String) -> Element {
             }
         });
     });
+
+    // Real-time message polling (5-second interval)
+    use_effect(use_reactive((&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
+        // Cancel previous polling task when conversation changes
+        if let Some(task) = poll_task.peek().as_ref() {
+            task.cancel();
+        }
+
+        // Don't start polling if client not initialized
+        if !client_initialized {
+            return;
+        }
+
+        let pk_clone = pk.clone();
+        let new_task = spawn(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                // Skip if page not visible (battery/resource optimization)
+                if !isPageVisible() {
+                    continue;
+                }
+
+                // Refresh conversation data from relays
+                if let Err(e) = dms::init_dms().await {
+                    log::warn!("DM poll refresh failed: {}", e);
+                    continue;
+                }
+
+                // Get updated conversation and decrypt
+                if let Some(conversation) = dms::get_conversation(&pk_clone) {
+                    let mut decrypted = Vec::new();
+                    for msg in conversation.messages {
+                        match dms::decrypt_dm(&msg).await {
+                            Ok(content) => decrypted.push((msg, content)),
+                            Err(_) => decrypted.push((msg, "[Failed to decrypt]".to_string())),
+                        }
+                    }
+                    decrypted_messages.set(decrypted);
+                }
+            }
+        });
+
+        poll_task.set(Some(new_task));
+    }));
+
+    // Cleanup polling task on unmount
+    use_hook(move || PollTaskGuard { task: poll_task });
 
     // Decrypt messages when conversation loads
     use_effect(move || {
@@ -442,27 +541,30 @@ fn ConversationView(pubkey: String) -> Element {
         });
     });
 
-    // Auto-scroll to bottom when messages load or conversation changes
+    // Smart auto-scroll: only scroll if user is near bottom
     use_effect(move || {
+        let msg_count = decrypted_messages.read().len();
         let container_id = messages_container_id.read().clone();
         let loading = *decrypt_loading.read();
 
-        if !loading {
-            spawn(async move {
-                // Small delay to let DOM update
-                gloo_timers::future::sleep(std::time::Duration::from_millis(100)).await;
-
-                // Scroll to bottom using JavaScript
-                let window = web_sys::window().expect("no global window");
-                let document = window.document().expect("should have document");
-
-                if let Some(element) = document.get_element_by_id(&container_id) {
-                    if let Some(html_element) = element.dyn_ref::<web_sys::HtmlElement>() {
-                        html_element.set_scroll_top(html_element.scroll_height());
-                    }
-                }
-            });
+        if loading || msg_count == 0 {
+            return;
         }
+
+        spawn(async move {
+            // Small delay to let DOM update
+            gloo_timers::future::TimeoutFuture::new(50).await;
+
+            // On first load with messages, always scroll to bottom
+            if *is_first_load.peek() {
+                scrollDMsToBottom(&container_id);
+                is_first_load.set(false);
+            }
+            // Otherwise, only scroll if near bottom (within 100px)
+            else if isDMsScrolledNearBottom(&container_id, 100.0) {
+                scrollDMsToBottom(&container_id);
+            }
+        });
     });
 
     let send_message = move |_| {
@@ -490,9 +592,7 @@ fn ConversationView(pubkey: String) -> Element {
 
     let display_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...{}",
-            &pubkey_for_display[..8],
-            &pubkey_for_display[pubkey_for_display.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey_for_display));
 
     let avatar_url = profile.read().as_ref()
         .map(|p| p.get_avatar_url())
@@ -528,7 +628,7 @@ fn ConversationView(pubkey: String) -> Element {
                         }
                     }
                     Link {
-                        to: Route::Profile { pubkey: pubkey },
+                        to: Route::Profile { pubkey },
                         class: "text-xs text-blue-500 hover:underline",
                         "View profile"
                     }
@@ -562,6 +662,7 @@ fn ConversationView(pubkey: String) -> Element {
                             let my_pubkey = auth_store::get_pubkey().unwrap_or_default();
                             let is_mine = msg.sender().to_string() == my_pubkey;
                             let sender_pubkey = msg.sender().to_string();
+                            let enc_type = msg.encryption_type().to_string();
 
                             rsx! {
                                 MessageBubble {
@@ -569,7 +670,8 @@ fn ConversationView(pubkey: String) -> Element {
                                     content: content.clone(),
                                     is_mine: is_mine,
                                     timestamp: msg.created_at(),
-                                    sender_pubkey: sender_pubkey
+                                    sender_pubkey: sender_pubkey,
+                                    encryption_type: enc_type
                                 }
                             }
                         }
@@ -635,7 +737,9 @@ fn MessageBubble(
     content: String,
     is_mine: bool,
     timestamp: nostr_sdk::Timestamp,
-    sender_pubkey: String
+    sender_pubkey: String,
+    #[props(default = "NIP-17".to_string())]
+    encryption_type: String
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let sender_pk = sender_pubkey.clone();
@@ -670,8 +774,22 @@ fn MessageBubble(
 
     let time_ago = time::format_relative_time(timestamp);
     let alignment = if is_mine { "flex-row-reverse" } else { "flex-row" };
-    let bg_color = if is_mine { "bg-blue-500 text-white" } else { "bg-accent" };
+
+    // Different colors based on encryption type
+    let bg_color = if is_mine {
+        "bg-blue-500 text-white"
+    } else {
+        "bg-accent"
+    };
+
     let items_align = if is_mine { "items-end" } else { "items-start" };
+
+    // Encryption badge styling
+    let (badge_class, badge_icon) = match encryption_type.as_str() {
+        "NIP-04" => ("text-orange-500 dark:text-orange-400", "⚠️"),
+        "NIP-17" => ("text-blue-500 dark:text-blue-400", "🔒"),
+        _ => ("text-muted-foreground", ""),
+    };
 
     rsx! {
         div {
@@ -684,17 +802,26 @@ fn MessageBubble(
             }
             // Message bubble and timestamp
             div {
-                class: "flex flex-col gap-1 max-w-[70%] {items_align}",
+                class: "flex flex-col gap-1 max-w-[70%] min-w-0 {items_align}",
                 div {
-                    class: "{bg_color} rounded-2xl px-4 py-2 break-words",
+                    class: "{bg_color} rounded-2xl px-4 py-2 overflow-hidden",
                     p {
-                        class: "text-sm whitespace-pre-wrap",
+                        class: "text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
                         "{content}"
                     }
                 }
-                span {
-                    class: "text-xs text-muted-foreground px-2",
-                    "{time_ago}"
+                div {
+                    class: "flex items-center gap-2 px-2",
+                    span {
+                        class: "text-xs text-muted-foreground",
+                        "{time_ago}"
+                    }
+                    // Encryption type badge
+                    span {
+                        class: "text-xs {badge_class}",
+                        title: "{encryption_type}",
+                        "{badge_icon}"
+                    }
                 }
             }
         }
@@ -706,8 +833,8 @@ fn NewDMComposer(
     on_cancel: EventHandler<()>,
     on_send: EventHandler<String>
 ) -> Element {
-    let mut recipient_input = use_signal(|| String::new());
-    let mut message_input = use_signal(|| String::new());
+    let mut recipient_input = use_signal(String::new);
+    let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 

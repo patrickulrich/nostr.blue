@@ -16,7 +16,7 @@ pub fn MusicTrackNew() -> Element {
     let mut audio_url = use_signal(String::new);
     let mut image_url = use_signal(String::new);
     let mut duration = use_signal(|| None::<u32>);
-    let mut genres = use_signal(|| Vec::<String>::new());
+    let mut genres = use_signal(Vec::<String>::new);
     let mut genre_input = use_signal(String::new);
     let mut ai_generated = use_signal(|| false);
     let mut is_publishing = use_signal(|| false);
@@ -38,7 +38,7 @@ pub fn MusicTrackNew() -> Element {
                         "You need to sign in to publish tracks."
                     }
                     Link {
-                        to: Route::Home {},
+                        to: Route::Home { list: String::new() },
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                         "Go Home"
                     }

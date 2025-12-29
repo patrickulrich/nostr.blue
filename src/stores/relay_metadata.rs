@@ -1,8 +1,8 @@
-/// NIP-65: Relay List Metadata (kind 10002)
-/// NIP-17: Private Direct Message Relay Lists (kind 10050)
-///
-/// This module provides centralized relay management using Nostr-native relay lists.
-/// It implements the Outbox model for intelligent relay routing.
+//! NIP-65: Relay List Metadata (kind 10002)
+//! NIP-17: Private Direct Message Relay Lists (kind 10050)
+//!
+//! This module provides centralized relay management using Nostr-native relay lists.
+//! It implements the Outbox model for intelligent relay routing.
 
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
@@ -34,25 +34,47 @@ pub struct RelayListMetadata {
 pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> =
     Signal::global(|| None);
 
+/// Default NIP-65 relay URLs
+pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://relay.nostr.band",
+    "wss://nos.lol",
+];
+
+/// Default DM inbox relay URLs (NIP-17)
+pub const DEFAULT_DM_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://auth.nostr1.com",
+];
+
 /// Default relays to use when no kind 10002 is found
 pub fn default_relays() -> Vec<RelayConfig> {
-    vec![
-        RelayConfig {
-            url: "wss://relay.damus.io".to_string(),
-            read: true,
-            write: true,
-        },
-        RelayConfig {
-            url: "wss://relay.nostr.band".to_string(),
-            read: true,
-            write: true,
-        },
-        RelayConfig {
-            url: "wss://nos.lol".to_string(),
-            read: true,
-            write: true,
-        },
-    ]
+    DEFAULT_NIP65_RELAYS.iter().map(|url| RelayConfig {
+        url: url.to_string(),
+        read: true,
+        write: true,
+    }).collect()
+}
+
+/// Default DM relays to use when no kind 10050 is found
+pub fn default_dm_relays() -> Vec<String> {
+    DEFAULT_DM_RELAYS.iter().map(|s| s.to_string()).collect()
+}
+
+/// Reset general relays to defaults (local change only)
+pub fn reset_general_relays_to_default() {
+    let mut metadata = USER_RELAY_METADATA.write();
+    if let Some(m) = metadata.as_mut() {
+        m.relays = default_relays();
+    }
+}
+
+/// Reset DM relays to defaults (local change only)
+pub fn reset_dm_relays_to_default() {
+    let mut metadata = USER_RELAY_METADATA.write();
+    if let Some(m) = metadata.as_mut() {
+        m.dm_relays = default_dm_relays();
+    }
 }
 
 /// Parse relay list from kind 10002 event
@@ -64,32 +86,44 @@ pub fn parse_relay_list_event(event: &nostr_sdk::Event) -> Vec<RelayConfig> {
     let mut relays = Vec::new();
 
     for tag in event.tags.iter() {
-        // Try to extract relay URL from the tag
-        // For NIP-65, we're looking for tags like ["r", "wss://relay.url", "read"|"write"]
-        if let Some(standardized) = tag.as_standardized() {
-            // Check if this is a Relay tag
-            if let nostr_sdk::TagStandard::Relay(relay_url) = standardized {
-                log::debug!("Found relay tag: {}", relay_url);
-                relays.push(RelayConfig {
-                    url: relay_url.to_string(),
-                    read: true,
-                    write: true,
-                });
-                continue;
-            }
+        let slice = tag.as_slice();
+
+        // Check if this is an 'r' tag (NIP-65 relay list)
+        if slice.first().map(|s| s.as_str()) != Some("r") {
+            continue;
         }
 
-        // Fallback: try parsing as custom 'r' tag
-        if tag.kind() == TagKind::Custom("r".into()) {
-            if let Some(url) = tag.content() {
-                log::debug!("Found 'r' tag: {}", url);
-                relays.push(RelayConfig {
-                    url: url.to_string(),
-                    read: true,
-                    write: true,
-                });
+        // Get URL at index 1
+        let Some(url) = slice.get(1) else {
+            continue;
+        };
+
+        // Get optional marker at index 2 to determine read/write permissions
+        // No marker = both read and write
+        // "read" = read only
+        // "write" = write only
+        let marker = slice.get(2).map(|s| s.as_str());
+        let (read, write) = match marker {
+            None => (true, true),
+            Some("read") => (true, false),
+            Some("write") => (false, true),
+            Some(unknown) => {
+                log::warn!("Unknown relay marker '{}' for {}, skipping", unknown, url);
+                continue;
             }
-        }
+        };
+
+        log::debug!(
+            "Found relay tag: {} (read={}, write={})",
+            url,
+            read,
+            write
+        );
+        relays.push(RelayConfig {
+            url: url.to_string(),
+            read,
+            write,
+        });
     }
 
     log::info!("Parsed {} relays from event", relays.len());
@@ -303,7 +337,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
 
         let default = RelayListMetadata {
             relays: default_relays(),
-            dm_relays: vec!["wss://relay.damus.io".to_string()],
+            dm_relays: default_dm_relays(),
             updated_at: now_secs,
         };
 
