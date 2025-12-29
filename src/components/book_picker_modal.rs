@@ -179,6 +179,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         selected_publication.set(Some(publication));
         selected_chapter.set(None);
         selected_sections.set(String::new());
+        selected_version.set(String::new());
     };
 
     // Handle chapter selection

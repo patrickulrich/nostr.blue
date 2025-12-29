@@ -219,6 +219,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     let mut loading_geo = use_signal(|| false);
     let mut processed_event_ids = use_signal(String::new);
+    // Track if new events arrived while geocoding was in progress
+    let mut pending_events_key: Signal<Option<String>> = use_signal(|| None);
 
     // Memoize events to prevent unnecessary re-processing
     // Create a stable identifier for the current set of events
@@ -275,11 +277,15 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 return;
             }
 
-            // Check if already loading
+            // Check if already loading - store as pending if so
             if *loading_geo.read() {
+                // Store the current key so we can re-run after current geocoding completes
+                pending_events_key.set(Some(events_key.clone()));
                 return;
             }
 
+            // Clear any pending key since we're starting fresh
+            pending_events_key.set(None);
             loading_geo.set(true);
             let key_to_store = events_key.clone();
             let events_to_process = events_for_geocode.clone();
@@ -326,6 +332,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
                 geocoded_events.set(results);
                 processed_event_ids.set(key_to_store);
+                // Set loading to false - this will trigger the effect to re-run
+                // if pending_events_key was set, allowing the newer events to be processed
                 loading_geo.set(false);
             });
         }

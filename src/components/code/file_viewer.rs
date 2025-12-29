@@ -188,6 +188,12 @@ pub fn CodeFileViewer(
                         class: "text-xs text-muted-foreground px-2 py-0.5 bg-muted rounded",
                         "{language}"
                     }
+                    if !git_ref.is_empty() {
+                        span {
+                            class: "text-xs text-muted-foreground px-2 py-0.5 bg-muted rounded",
+                            "{git_ref}"
+                        }
+                    }
                     span {
                         class: "text-xs text-muted-foreground",
                         "{line_count} lines"

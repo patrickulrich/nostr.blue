@@ -43,20 +43,33 @@ pub fn AddToCookbookModal(
     let mut navigation_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
     // Track created cookbook when pin fails - stores (naddr, a_tag) for retry
     let mut pending_pin_cookbook: Signal<Option<(String, String)>> = use_signal(|| None);
+    // Track whether cookbooks have been loaded to prevent repeated fetches
+    let mut has_loaded = use_signal(|| false);
 
-    // Fetch user's cookbooks on mount
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
+    // Fetch user's cookbooks when client is initialized and signer is available
+    // Create local reads of global signals for use_reactive! tracking
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
+    let has_signer = *HAS_SIGNER.read();
+
+    use_effect(use_reactive!(|(client_init, has_signer)| {
+        // Skip if already loaded
+        if *has_loaded.read() {
+            return;
+        }
+
+        if !client_init {
             cookbooks_loading.set(false);
             return;
         }
-        if !*HAS_SIGNER.read() {
+        if !has_signer {
             cookbooks_loading.set(false);
             needs_signin.set(true);
             return;
         }
         needs_signin.set(false);
+
+        // Mark as loaded before spawning to prevent duplicate fetches
+        has_loaded.set(true);
 
         spawn(async move {
             // Fetch user's own cookbooks
@@ -70,7 +83,7 @@ pub fn AddToCookbookModal(
             }
             cookbooks_loading.set(false);
         });
-    });
+    }));
 
     let recipe_naddr_for_add = recipe_naddr.clone();
     let recipe_naddr_for_create = recipe_naddr.clone();

@@ -6,6 +6,7 @@ use crate::stores::community_store::{
     Community, CommunityPost, post_to_community, reply_to_post,
 };
 use crate::stores::nostr_client::HAS_SIGNER;
+use crate::components::RichContent;
 
 /// Post composer modal for communities
 #[component]
@@ -173,7 +174,7 @@ pub fn CommunityPostComposer(
                     }
                 }
 
-                // Reply context
+                // Reply context - use RichContent for proper Nostr formatting
                 if let Some(ref parent) = reply_to {
                     div {
                         class: "mb-4 p-3 border-l-2 border-blue-500 bg-accent/30 rounded-r",
@@ -181,9 +182,12 @@ pub fn CommunityPostComposer(
                             class: "text-sm text-muted-foreground mb-1",
                             "Replying to:"
                         }
-                        p {
+                        div {
                             class: "text-sm line-clamp-2",
-                            "{parent.content}"
+                            RichContent {
+                                content: parent.content.clone(),
+                                tags: parent.event.tags.iter().cloned().collect()
+                            }
                         }
                     }
                 }

@@ -98,14 +98,14 @@ pub fn RepoActionBar(
 
     // Star/Unstar handler
     let handle_star = {
-        let coord = coordinate.read().clone();
         move |_| {
             if !has_signer {
                 toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
                 return;
             }
 
-            if let Some(coord) = coord.clone() {
+            // Read coordinate fresh each time handler runs to avoid stale capture
+            if let Some(coord) = coordinate.read().clone() {
                 star_loading.set(true);
                 let currently_starred = *is_starred.read();
 

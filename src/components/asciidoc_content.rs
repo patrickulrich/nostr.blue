@@ -214,11 +214,9 @@ pub fn AsciiDocContentCollapsible(
             div {
                 class: "relative {class}",
                 div {
-                    class: if *is_expanded.read() {
-                        "asciidoc-content prose prose-sm dark:prose-invert max-w-none"
-                    } else {
-                        format!("asciidoc-content prose prose-sm dark:prose-invert max-w-none max-h-[{}rem] overflow-hidden", max_height)
-                    },
+                    class: "asciidoc-content prose prose-sm dark:prose-invert max-w-none overflow-hidden",
+                    // Use inline style for dynamic max-height since Tailwind can't detect format! classes
+                    style: if *is_expanded.read() { String::new() } else { format!("max-height: {}rem;", max_height) },
                     dangerous_inner_html: "{rendered}",
                 }
                 if !*is_expanded.read() {
