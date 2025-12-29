@@ -59,7 +59,7 @@ pub fn RepoHeader(
                 } else {
                     div {
                         class: "w-5 h-5 bg-muted flex items-center justify-center text-xs font-bold",
-                        "{owner_name.chars().next().unwrap_or('?').to_uppercase()}"
+                        "{owner_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
                     }
                 }
             }
