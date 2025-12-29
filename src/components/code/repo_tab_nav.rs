@@ -28,7 +28,7 @@ pub fn RepoTabNav(
     let mut show_overflow = use_signal(|| false);
 
     // Define all tabs
-    let tabs = vec![
+    let tabs = [
         TabConfig {
             id: "overview",
             label: "Overview",

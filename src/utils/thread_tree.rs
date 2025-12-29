@@ -8,9 +8,10 @@ use instant::{Duration, Instant};
 use crate::stores::pending_comments::{CommentStatus, PendingComment};
 
 /// Source of a thread node - distinguishes confirmed vs pending comments
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ThreadNodeSource {
     /// Confirmed event from relays
+    #[default]
     Confirmed,
     /// Pending local comment awaiting confirmation
     Pending {
@@ -19,12 +20,6 @@ pub enum ThreadNodeSource {
         /// Author's public key (stored explicitly since display event may have dummy pubkey)
         author_pubkey: PublicKey,
     },
-}
-
-impl Default for ThreadNodeSource {
-    fn default() -> Self {
-        Self::Confirmed
-    }
 }
 
 /// Represents a node in a threaded conversation tree

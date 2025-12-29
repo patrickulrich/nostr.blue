@@ -29,19 +29,14 @@ impl Default for VoicePlaybackState {
 }
 
 /// Voice recording state
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 #[allow(dead_code)]
 pub enum RecordingState {
+    #[default]
     Idle,
     Recording { started_at: f64, duration: f64 },
     Paused { duration: f64 },
     Completed { blob_url: String, duration: f64, waveform: Vec<u8> },
-}
-
-impl Default for RecordingState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 /// Global playback state signal
