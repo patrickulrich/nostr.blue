@@ -11,7 +11,7 @@ pub fn PhotoDetail(photo_id: String) -> Element {
     let mut photo_event = use_signal(|| None::<Event>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
 

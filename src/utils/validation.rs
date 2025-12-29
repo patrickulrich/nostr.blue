@@ -2,7 +2,53 @@
 
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::PublicKey;
+use url::Url;
 use crate::stores::signer::SIGNER_INFO;
+
+// ============================================================================
+// URL Validation Utilities
+// ============================================================================
+
+/// Check if a string is a valid HTTP or HTTPS URL.
+///
+/// Uses the `url` crate for proper URL parsing and validates that the scheme
+/// is either `http` or `https`. This prevents injection of other URL schemes
+/// like `javascript:`, `data:`, or `file:`.
+///
+/// # Arguments
+/// * `url_str` - The URL string to validate
+///
+/// # Returns
+/// * `true` if the URL is valid and uses http/https scheme
+/// * `false` otherwise
+///
+/// # Examples
+/// ```
+/// assert!(is_valid_http_url("https://example.com"));
+/// assert!(is_valid_http_url("http://localhost:3000/path"));
+/// assert!(!is_valid_http_url("javascript:alert(1)"));
+/// assert!(!is_valid_http_url("not a url"));
+/// ```
+pub fn is_valid_http_url(url_str: &str) -> bool {
+    parse_http_url(url_str).is_some()
+}
+
+/// Parse a string as an HTTP/HTTPS URL.
+///
+/// Returns `Some(Url)` if the string is a valid URL with http/https scheme,
+/// `None` otherwise. Use this when you need both validation and the parsed URL.
+///
+/// # Arguments
+/// * `url_str` - The URL string to parse
+///
+/// # Returns
+/// * `Some(Url)` - Valid parsed URL with http/https scheme
+/// * `None` - Invalid URL or non-http/https scheme
+pub fn parse_http_url(url_str: &str) -> Option<Url> {
+    Url::parse(url_str).ok().filter(|u| {
+        matches!(u.scheme(), "http" | "https")
+    })
+}
 
 /// Result type for signer validation operations
 pub enum SignerValidationResult {
@@ -40,4 +86,93 @@ pub fn try_get_current_user_pubkey() -> Option<PublicKey> {
         SignerValidationResult::Ok(pk) => Some(pk),
         _ => None,
     }
+}
+
+// ============================================================================
+// Lightning Invoice Validation
+// ============================================================================
+
+/// Sanitize and validate a Lightning invoice for safe embedding in HTML/JS.
+///
+/// Lightning invoices (BOLT11) should only contain bech32 characters:
+/// alphanumeric (excluding 1, b, i, o) but in practice invoices use
+/// a broader alphanumeric set. This function ensures the invoice is safe
+/// to embed in JavaScript strings to prevent XSS attacks.
+///
+/// # Arguments
+/// * `invoice` - The Lightning invoice string to validate
+///
+/// # Returns
+/// * `Some(String)` - Sanitized invoice (uppercase) if valid
+/// * `None` - If invoice contains invalid characters or format
+///
+/// # Examples
+/// ```
+/// // Valid invoice
+/// assert!(sanitize_lightning_invoice("lnbc100...").is_some());
+///
+/// // XSS attempt rejected
+/// assert!(sanitize_lightning_invoice("lnbc'; alert('xss')").is_none());
+/// ```
+pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
+    // Lightning invoices must start with ln prefix
+    let lower = invoice.to_lowercase();
+    if !lower.starts_with("lnbc")  // Mainnet
+        && !lower.starts_with("lntb")  // Testnet
+        && !lower.starts_with("lnbcrt") // Regtest
+        && !lower.starts_with("lnsb")  // Signet
+    {
+        return None;
+    }
+
+    // Only allow alphanumeric characters (bech32 charset)
+    // This prevents injection of quotes, brackets, or script tags
+    let valid = invoice.chars().all(|c| c.is_ascii_alphanumeric());
+    if !valid {
+        return None;
+    }
+
+    // Minimum reasonable length for a Lightning invoice
+    if invoice.len() < 50 {
+        return None;
+    }
+
+    Some(invoice.to_uppercase())
+}
+
+// ============================================================================
+// CSS URL Validation
+// ============================================================================
+
+/// Validate a URL for safe embedding in CSS `url()` context.
+///
+/// This function checks that:
+/// 1. The URL is a valid HTTP/HTTPS URL (prevents javascript: etc.)
+/// 2. The URL doesn't contain characters that could break out of CSS context
+///
+/// Use this when embedding user-provided URLs in inline styles.
+///
+/// # Arguments
+/// * `url` - The URL string to validate
+///
+/// # Returns
+/// * `Some(&str)` - The original URL if safe for CSS embedding
+/// * `None` - If URL is invalid or contains dangerous characters
+///
+/// # Examples
+/// ```
+/// assert!(css_safe_url("https://example.com/image.jpg").is_some());
+/// assert!(css_safe_url("'); background: url(javascript:").is_none());
+/// ```
+pub fn css_safe_url(url: &str) -> Option<&str> {
+    // Must be valid HTTP/HTTPS URL
+    if !is_valid_http_url(url) {
+        return None;
+    }
+    // Reject characters that could break out of CSS url() context
+    // Single/double quotes, parentheses, and backslash are dangerous
+    if url.contains(['\'', '"', ')', '(', '\\']) {
+        return None;
+    }
+    Some(url)
 }

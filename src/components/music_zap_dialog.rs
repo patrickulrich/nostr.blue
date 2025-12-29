@@ -5,6 +5,7 @@ use crate::stores::profiles;
 use crate::stores::nostr_client;
 use crate::services::wavlake::WavlakeAPI;
 use crate::services::lnurl;
+use crate::utils::podcast::ValueBlock;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use nostr_sdk::{PublicKey, RelayUrl};
@@ -57,23 +58,31 @@ pub fn MusicZapDialog() -> Element {
     }
 
     let track = track.unwrap();
-    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. });
+    // Nostr sources use NIP-57 zaps: Nostr music, NostrPodcast, and Radio stations
+    let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. } | TrackSource::Radio { .. });
+    // V4V sources use podcast value block payments: RSS podcasts and RSS music
+    let is_v4v_track = matches!(track.source, TrackSource::RssPodcast { .. } | TrackSource::RssMusic { .. });
 
     let mut amount = use_signal(|| 100u64);
-    let mut comment = use_signal(|| String::new());
+    let mut comment = use_signal(String::new);
     let mut invoice = use_signal(|| None::<String>);
     let mut is_generating = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
     let mut qr_code_url = use_signal(|| None::<String>);
     let mut artist_profile = use_signal(|| None::<profiles::Profile>);
 
-    let preset_amounts = vec![21, 100, 500, 1000, 2100];
+    let preset_amounts = [21, 100, 500, 1000, 2100];
 
-    // Fetch artist profile for nostr tracks
+    // Fetch artist profile for nostr tracks (including radio stations)
     let track_source_for_effect = track.source.clone();
     use_effect(move || {
-        if let TrackSource::Nostr { ref pubkey, .. } = track_source_for_effect {
-            let pubkey = pubkey.clone();
+        let pubkey_to_fetch = match &track_source_for_effect {
+            TrackSource::Nostr { pubkey, .. } => Some(pubkey.clone()),
+            TrackSource::Radio { pubkey, .. } => Some(pubkey.clone()),
+            TrackSource::NostrPodcast { pubkey, .. } => Some(pubkey.clone()),
+            _ => None,
+        };
+        if let Some(pubkey) = pubkey_to_fetch {
             spawn(async move {
                 if let Ok(profile) = profiles::fetch_profile(pubkey).await {
                     artist_profile.set(Some(profile));
@@ -85,10 +94,12 @@ pub fn MusicZapDialog() -> Element {
     // Generate invoice (handles both Wavlake and Nostr tracks)
     let track_id = track.id.clone();
     let track_source = track.source.clone();
+    let track_value_block = track.value_block.clone();
     let generate_invoice = move |e: Event<MouseData>| {
         e.stop_propagation();
         let track_id = track_id.clone();
         let track_source = track_source.clone();
+        let track_value_block = track_value_block.clone();
         let amount_value = *amount.read();
         let comment_value = comment.read().clone();
         let profile = artist_profile.read().clone();
@@ -104,6 +115,43 @@ pub fn MusicZapDialog() -> Element {
                 }
                 TrackSource::Nostr { ref pubkey, ref coordinate, .. } => {
                     // Use NIP-57 zap flow
+                    generate_nostr_zap_invoice(
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    ).await
+                }
+                TrackSource::NostrPodcast { ref pubkey, ref coordinate, .. } => {
+                    // Use NIP-57 zap flow for Nostr podcasts
+                    generate_nostr_zap_invoice(
+                        pubkey,
+                        Some(coordinate),
+                        profile.as_ref(),
+                        amount_value,
+                        &comment_value,
+                    ).await
+                }
+                TrackSource::RssPodcast { .. } => {
+                    // Use V4V payment flow for RSS podcasts
+                    // Check if track has value_block for V4V recipients
+                    if let Some(ref value_block) = track_value_block {
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                    } else {
+                        Err("This podcast doesn't have V4V payment info configured. Contact the podcast creator to enable Lightning payments.".to_string())
+                    }
+                }
+                TrackSource::RssMusic { .. } => {
+                    // Use V4V payment flow for RSS music
+                    if let Some(ref value_block) = track_value_block {
+                        generate_v4v_invoice(value_block, amount_value, &comment_value).await
+                    } else {
+                        Err("This music doesn't have V4V payment info configured. Contact the artist to enable Lightning payments.".to_string())
+                    }
+                }
+                TrackSource::Radio { ref pubkey, ref coordinate, .. } => {
+                    // Use NIP-57 zap flow for radio station owners
                     generate_nostr_zap_invoice(
                         pubkey,
                         Some(coordinate),
@@ -197,6 +245,11 @@ pub fn MusicZapDialog() -> Element {
                                     span {
                                         class: "text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400",
                                         "Nostr"
+                                    }
+                                } else if is_v4v_track {
+                                    span {
+                                        class: "text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400",
+                                        "V4V"
                                     }
                                 } else {
                                     span {
@@ -614,4 +667,141 @@ async fn generate_nostr_zap_invoice(
         .map_err(|e| format!("Failed to generate QR code: {}", e))?;
 
     Ok((invoice_response.pr, qr_code_url))
+}
+
+/// Generate invoice for V4V podcast payments
+/// Currently supports Lightning Address recipients only
+/// Keysend (node pubkey) requires a Lightning node connection
+async fn generate_v4v_invoice(
+    value_block: &ValueBlock,
+    amount_sats: u64,
+    comment: &str,
+) -> Result<(String, String), String> {
+    log::info!("Starting V4V payment flow for {} sats with {} recipients",
+        amount_sats, value_block.recipients.len());
+
+    if value_block.recipients.is_empty() {
+        return Err("No payment recipients configured for this podcast".to_string());
+    }
+
+    // Calculate total split for percentage calculation using checked arithmetic
+    let total_split: u32 = value_block.recipients.iter()
+        .try_fold(0u32, |acc, r| acc.checked_add(r.split))
+        .ok_or("Split values overflow - invalid podcast configuration")?;
+    if total_split == 0 {
+        return Err("Invalid split configuration - total is zero".to_string());
+    }
+
+    // Find the first recipient with a Lightning Address (lnaddress type)
+    // In the future, we could support multiple invoices or use a service that handles splits
+    let lnaddress_recipient = value_block.recipients.iter()
+        .find(|r| r.recipient_type == "lnaddress" || r.address.contains('@'));
+
+    let primary_recipient = lnaddress_recipient.or_else(|| {
+        log::debug!("[V4V] No lnaddress recipient found, falling back to first recipient");
+        value_block.recipients.first()
+    });
+
+    let recipient = primary_recipient
+        .ok_or_else(|| "No valid recipient found".to_string())?;
+
+    // Check if this is a Lightning Address
+    let is_lnaddress = recipient.recipient_type == "lnaddress" || recipient.address.contains('@');
+
+    if !is_lnaddress {
+        // For keysend recipients, we'd need a Lightning node or WebLN with keysend support
+        return Err(format!(
+            "Direct keysend payments to node {} not yet supported in browser. \
+            The podcast creator can add a Lightning Address for web payments.",
+            recipient.address
+        ));
+    }
+
+    let lnaddress = &recipient.address;
+
+    // Calculate this recipient's share using checked arithmetic to prevent overflow
+    // Formula: (a * b + c/2) / c rounds to nearest integer
+    // Minimum 1 sat to avoid zero payments
+    let recipient_share = amount_sats
+        .checked_mul(recipient.split as u64)
+        .and_then(|v| v.checked_add(total_split as u64 / 2))
+        .map(|v| v / total_split as u64)
+        .ok_or("Arithmetic overflow calculating recipient share")?
+        .max(1);
+    let recipient_name = recipient.name.as_deref().unwrap_or("Podcast Creator");
+
+    // Use floating point for accurate percentage display
+    let split_percentage = (recipient.split as f64 * 100.0) / total_split as f64;
+    log::info!("Generating invoice for {} ({}) - {} sats ({:.1}% split)",
+        recipient_name, lnaddress, recipient_share, split_percentage);
+
+    // Prepare the zap/payment comment
+    let full_comment = if comment.is_empty() {
+        format!("V4V boost to {}", recipient_name)
+    } else {
+        comment.to_string()
+    };
+
+    // Use LNURL to generate invoice for Lightning Address
+    let (pay_info, amount_msats) = lnurl::prepare_zap(Some(lnaddress), None, recipient_share).await
+        .map_err(|e| format!("Failed to resolve Lightning Address '{}': {}", lnaddress, e))?;
+
+    log::info!("Lightning Address resolved. Callback: {}", pay_info.callback);
+
+    // Build callback URL with amount
+    let mut callback_url = pay_info.callback.clone();
+    let separator = if callback_url.contains('?') { "&" } else { "?" };
+    callback_url.push_str(&format!("{}amount={}", separator, amount_msats));
+
+    // Add comment if allowed by endpoint (respects LUD-12 commentAllowed)
+    // Only send comment when comment_allowed is explicitly set (not defaulting to 500)
+    if !full_comment.is_empty() {
+        if let Some(max_comment) = pay_info.comment_allowed {
+            let max = max_comment as usize;
+            let char_count = full_comment.chars().count();
+            if char_count <= max {
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&full_comment)));
+            } else {
+                // Truncate to endpoint's max length (UTF-8 safe by character count)
+                let truncated: String = full_comment.chars().take(max).collect();
+                callback_url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
+            }
+        }
+    }
+
+    log::info!("Requesting invoice from: {}", callback_url);
+
+    // Request invoice
+    let response = Request::get(&callback_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to request invoice: {}", e))?;
+
+    let invoice_response: InvoiceResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse invoice response: {}", e))?;
+
+    // Check for errors
+    if let Some(error) = &invoice_response.error {
+        return Err(format!("Invoice generation failed: {}", error));
+    }
+    if let Some(status) = &invoice_response.status {
+        if status.to_uppercase() == "ERROR" {
+            let reason = invoice_response.reason.as_deref().unwrap_or("Unknown error");
+            return Err(format!("Invoice generation failed: {}", reason));
+        }
+    }
+
+    let pr = invoice_response.pr
+        .ok_or_else(|| "No invoice in response".to_string())?;
+
+    // Generate QR code
+    let qr_code_url = generate_qr_code(&pr)
+        .map_err(|e| format!("Failed to generate QR code: {}", e))?;
+
+    // Note: In the future, we could show a summary of how the payment will be split
+    // and handle multiple recipients or use services like Alby or Podverse that handle splits
+
+    Ok((pr, qr_code_url))
 }

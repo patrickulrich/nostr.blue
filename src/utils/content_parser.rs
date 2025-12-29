@@ -10,11 +10,13 @@ static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 /// Clean trailing punctuation from URLs that may have been captured by regex
 fn clean_url_trailing_punctuation(url: &str) -> &str {
-    url.trim_end_matches(|c| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '>'))
+    url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
 }
-static NOSTR_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"nostr:(npub1|note1|nevent1|nprofile1|naddr1)[a-zA-Z0-9]+")
-        .expect("Failed to compile nostr regex")
+// Nostr URI pattern - matches nostr: followed by valid NIP-19 prefixes
+// Permissive alphanumeric match; SDK validation via Nip19::from_bech32 handles bech32 correctness
+static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+        .expect("Failed to compile nostr URI regex")
 });
 static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
@@ -26,6 +28,49 @@ static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
 // strict regex validation while keeping detection simple.
 static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
+});
+
+// NIP-73 External Content ID patterns
+// ISBN: isbn:9780765382030 (10 or 13 digit ISBNs, with or without dashes)
+static ISBN_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"isbn:[\dXx-]{10,17}").expect("Failed to compile ISBN regex")
+});
+
+// DOI: doi:10.1000/182 (starts with 10., followed by registrant/suffix)
+static DOI_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"doi:10\.[^\s]+").expect("Failed to compile DOI regex")
+});
+
+// ISAN: isan:0000-0000-401A-0000-7 (optionally hyphenated 16-24 hex chars + check)
+static ISAN_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"isan:[0-9A-Fa-f-]{16,32}").expect("Failed to compile ISAN regex")
+});
+
+// Podcast feed GUID: podcast:guid:... (UUID or URL-safe string)
+static PODCAST_FEED_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"podcast:guid:[A-Za-z0-9_-]+").expect("Failed to compile podcast feed regex")
+});
+
+// Podcast episode GUID: podcast:item:guid:...
+static PODCAST_EPISODE_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"podcast:item:guid:[A-Za-z0-9_-]+").expect("Failed to compile podcast episode regex")
+});
+
+// Bitcoin transaction: bitcoin:tx:a1075db... (64 hex chars)
+static BITCOIN_TX_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"bitcoin:tx:[a-fA-F0-9]{64}").expect("Failed to compile bitcoin tx regex")
+});
+
+// Bitcoin address: bitcoin:address:... (various formats: legacy, segwit, taproot)
+// Legacy (P2PKH): 1..., P2SH: 3..., Native SegWit (P2WPKH/P2WSH): bc1q..., Taproot: bc1p...
+static BITCOIN_ADDRESS_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"bitcoin:address:(?:bc1[a-zA-HJ-NP-Z0-9]{39,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})")
+        .expect("Failed to compile bitcoin address regex")
+});
+
+// Geohash: geo:u4pruydqqvj (base32-encoded location, 1-12 chars)
+static GEOHASH_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex")
 });
 
 /// Represents different types of content tokens that can appear in a note
@@ -73,6 +118,15 @@ pub enum ContentToken {
     ZapStream(String),       // naddr from zap.stream URL
     // Cashu ecash tokens
     CashuToken(String),      // cashuA.../cashuB... token string
+    // NIP-73 External Content IDs
+    Isbn(String),            // isbn:9780765382030
+    Doi(String),             // doi:10.1000/182
+    Isan(String),            // isan:0000-0000-401A-0000-7
+    PodcastFeed(String),     // podcast:guid:...
+    PodcastEpisode(String),  // podcast:item:guid:...
+    BitcoinTx(String),       // bitcoin:tx:a1075db55d416d3ca...
+    BitcoinAddress(String),  // bitcoin:address:1HQ3Go3ggs8pF...
+    Geohash(String),         // geo:u4pruydqqvj
 }
 
 /// Parse note content into structured tokens
@@ -131,32 +185,23 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         matches.push((mat.start(), actual_end, token));
     }
 
-    // Find all nostr: mentions (using precompiled static regex)
-    for mat in NOSTR_PATTERN.find_iter(content) {
-        let mention = mat.as_str().to_string();
-        // Extract the bech32 part after "nostr:"
-        let bech32_part = mention.strip_prefix("nostr:").unwrap_or(&mention);
+    // Find all nostr: mentions using regex for position, SDK for validation
+    // This preserves the original URI string (NostrParser's to_nostr_uri re-encodes and may differ)
+    for mat in NOSTR_URI_PATTERN.find_iter(content) {
+        let uri = mat.as_str();
+        let identifier = uri.strip_prefix("nostr:").unwrap_or(uri);
 
-        // Use SDK's NIP-19 parser for type-safe detection
-        let token = match nostr_sdk::nips::nip19::Nip19::from_bech32(bech32_part) {
-            Ok(nip19) => match nip19 {
-                nostr_sdk::nips::nip19::Nip19::Pubkey(_) |
-                nostr_sdk::nips::nip19::Nip19::Profile(_) => ContentToken::Mention(mention),
-                nostr_sdk::nips::nip19::Nip19::EventId(_) |
-                nostr_sdk::nips::nip19::Nip19::Event(_) |
-                nostr_sdk::nips::nip19::Nip19::Coordinate(_) => ContentToken::EventMention(mention),
-                _ => ContentToken::Mention(mention), // Default for unknown types
-            },
-            Err(_) => {
-                // Fallback to string matching if parsing fails
-                if mention.contains("npub1") || mention.contains("nprofile1") {
-                    ContentToken::Mention(mention)
-                } else {
-                    ContentToken::EventMention(mention)
-                }
+        // Validate with rust-nostr SDK for proper bech32 validation
+        if let Ok(nip19) = Nip19::from_bech32(identifier) {
+            let content_token = match nip19 {
+                Nip19::Pubkey(_) | Nip19::Profile(_) => Some(ContentToken::Mention(uri.to_string())),
+                Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => Some(ContentToken::EventMention(uri.to_string())),
+                Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None, // Don't render secret keys as mentions
+            };
+            if let Some(token) = content_token {
+                matches.push((mat.start(), mat.end(), token));
             }
-        };
-        matches.push((mat.start(), mat.end(), token));
+        }
     }
 
     // Find all hashtags (using precompiled static regex)
@@ -169,6 +214,55 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     for mat in CASHU_PATTERN.find_iter(content) {
         let token_str = mat.as_str().to_string();
         matches.push((mat.start(), mat.end(), ContentToken::CashuToken(token_str)));
+    }
+
+    // Find all NIP-73 External Content IDs
+    // ISBN references
+    for mat in ISBN_PATTERN.find_iter(content) {
+        let isbn = mat.as_str().strip_prefix("isbn:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::Isbn(isbn)));
+    }
+
+    // DOI references
+    for mat in DOI_PATTERN.find_iter(content) {
+        let doi = mat.as_str().strip_prefix("doi:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::Doi(doi)));
+    }
+
+    // ISAN references (movies)
+    for mat in ISAN_PATTERN.find_iter(content) {
+        let isan = mat.as_str().strip_prefix("isan:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::Isan(isan)));
+    }
+
+    // Podcast feed GUIDs
+    for mat in PODCAST_FEED_PATTERN.find_iter(content) {
+        let guid = mat.as_str().strip_prefix("podcast:guid:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::PodcastFeed(guid)));
+    }
+
+    // Podcast episode GUIDs
+    for mat in PODCAST_EPISODE_PATTERN.find_iter(content) {
+        let guid = mat.as_str().strip_prefix("podcast:item:guid:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::PodcastEpisode(guid)));
+    }
+
+    // Bitcoin transactions
+    for mat in BITCOIN_TX_PATTERN.find_iter(content) {
+        let txid = mat.as_str().strip_prefix("bitcoin:tx:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::BitcoinTx(txid)));
+    }
+
+    // Bitcoin addresses
+    for mat in BITCOIN_ADDRESS_PATTERN.find_iter(content) {
+        let address = mat.as_str().strip_prefix("bitcoin:address:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::BitcoinAddress(address)));
+    }
+
+    // Geohash locations
+    for mat in GEOHASH_PATTERN.find_iter(content) {
+        let geohash = mat.as_str().strip_prefix("geo:").unwrap_or(mat.as_str()).to_string();
+        matches.push((mat.start(), mat.end(), ContentToken::Geohash(geohash)));
     }
 
     // Sort matches by position
@@ -828,5 +922,76 @@ mod tests {
         assert!(matches!(&tokens[0], ContentToken::Text(_)));
         assert!(matches!(&tokens[1], ContentToken::CashuToken(_)));
         assert!(matches!(&tokens[2], ContentToken::Text(_)));
+    }
+
+    // NIP-73 External Content ID tests
+    #[test]
+    fn test_parse_isbn() {
+        let tokens = parse_content("Check out isbn:9780765382030 for details", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "9780765382030")));
+    }
+
+    #[test]
+    fn test_parse_isbn_with_dashes() {
+        let tokens = parse_content("isbn:978-0-7653-8203-0", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "978-0-7653-8203-0")));
+    }
+
+    #[test]
+    fn test_parse_doi() {
+        let tokens = parse_content("Read the paper at doi:10.1000/182", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Doi(doi) if doi == "10.1000/182")));
+    }
+
+    #[test]
+    fn test_parse_isan() {
+        let tokens = parse_content("Watch isan:0000-0000-401A-0000-7", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isan(_))));
+    }
+
+    #[test]
+    fn test_parse_podcast_feed() {
+        let tokens = parse_content("Listen to podcast:guid:abc123-def456", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::PodcastFeed(guid) if guid == "abc123-def456")));
+    }
+
+    #[test]
+    fn test_parse_podcast_episode() {
+        let tokens = parse_content("podcast:item:guid:ep-001-intro", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::PodcastEpisode(guid) if guid == "ep-001-intro")));
+    }
+
+    #[test]
+    fn test_parse_bitcoin_tx() {
+        let txid = "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d";
+        let content = format!("Check tx bitcoin:tx:{}", txid);
+        let tokens = parse_content(&content, &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinTx(id) if id == txid)));
+    }
+
+    #[test]
+    fn test_parse_bitcoin_address_legacy() {
+        let tokens = parse_content("Send to bitcoin:address:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+    }
+
+    #[test]
+    fn test_parse_bitcoin_address_segwit() {
+        let tokens = parse_content("bitcoin:address:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+    }
+
+    #[test]
+    fn test_parse_geohash() {
+        let tokens = parse_content("Meet at geo:u4pruydqqvj", &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj")));
+    }
+
+    #[test]
+    fn test_parse_multiple_nip73() {
+        let content = "Book: isbn:9780765382030 Paper: doi:10.1000/182";
+        let tokens = parse_content(content, &[]);
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(_))));
+        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Doi(_))));
     }
 }

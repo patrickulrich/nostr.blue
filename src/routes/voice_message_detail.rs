@@ -11,7 +11,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
     let mut voice_event = use_signal(|| None::<Event>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut replies = use_signal(|| Vec::<Event>::new());
+    let mut replies = use_signal(Vec::<Event>::new);
     let mut loading_replies = use_signal(|| false);
     let mut show_voice_reply_composer = use_signal(|| false);
 

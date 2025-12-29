@@ -1,21 +1,28 @@
 use dioxus::prelude::*;
 use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::components::{NoteCard, NoteCardSkeleton};
+use crate::stores::nostr_client;
 use nostr_sdk::{Event as NostrEvent, EventId, PublicKey, Timestamp, Kind, Tag};
 use nostr::secp256k1::schnorr::Signature;
 
 #[component]
 pub fn Trending() -> Element {
     // State for feed events
-    let mut trending_notes = use_signal(|| Vec::<TrendingNote>::new());
-    let mut events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut trending_notes = use_signal(Vec::<TrendingNote>::new);
+    let mut events = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
 
-    // Load trending feed
+    // Load trending feed - wait for client initialization
     use_effect(move || {
         let _ = refresh_trigger.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Wait for client to initialize before fetching
+        if !client_initialized {
+            return;
+        }
 
         loading.set(true);
         error.set(None);

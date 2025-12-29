@@ -7,7 +7,7 @@ use crate::stores::pending_comments::{
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use crate::utils::{SignerValidationResult, get_current_user_pubkey};
+use crate::utils::{SignerValidationResult, get_current_user_pubkey, truncate_pubkey};
 use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use dioxus_core::spawn_forever;
@@ -21,10 +21,10 @@ pub fn ReplyComposer(
     on_close: EventHandler<()>,
     on_success: EventHandler<()>,
 ) -> Element {
-    let mut content = use_signal(|| String::new());
+    let mut content = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut show_media_uploader = use_signal(|| false);
-    let mut uploaded_media = use_signal(|| Vec::<String>::new());
+    let mut uploaded_media = use_signal(Vec::<String>::new);
     let mut show_poll_modal = use_signal(|| false);
     let toast = consume_toast();
 
@@ -57,11 +57,7 @@ pub fn ReplyComposer(
 
     // Get author info
     let author_pubkey = reply_to.pubkey.to_hex();
-    let short_author = if author_pubkey.len() > 16 {
-        format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-4..])
-    } else {
-        author_pubkey.clone()
-    };
+    let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_id = reply_to.id.to_hex();
@@ -166,7 +162,7 @@ pub fn ReplyComposer(
     };
 
     let handle_publish = {
-        let toast_api = toast.clone();
+        let toast_api = toast;
         move |_| {
             let mut content_value = content.read().clone();
 
@@ -176,7 +172,7 @@ pub fn ReplyComposer(
                     content_value.push_str("\n\n");
                 }
                 for url in uploaded_media.read().iter() {
-                    content_value.push_str(&url);
+                    content_value.push_str(url);
                     content_value.push('\n');
                 }
             }
@@ -349,7 +345,7 @@ pub fn ReplyComposer(
                 }
                 Err(e) => {
                     log::error!("Failed to publish reply: {}", e);
-                    update_pending_status(&local_id_clone, CommentStatus::Failed(format!("{}", e)));
+                    update_pending_status(&local_id_clone, CommentStatus::Failed(e.to_string()));
                 }
             }
         });
