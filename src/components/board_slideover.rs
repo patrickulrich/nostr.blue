@@ -1,5 +1,5 @@
 //! Board Slideover Modal Component
-//! Pinterest-style right-sliding panel for viewing board details
+//! Right-sliding panel for viewing board details
 //! Uses two-stage loading: board metadata first, then pins
 
 use dioxus::prelude::*;

@@ -13,7 +13,7 @@ use crate::stores::recipe_store::CachedRecipe;
 pub struct RecipeFormData {
     pub title: String,
     pub summary: String,
-    /// Multiple images supported (zap.cooking compatible)
+    /// Multiple images supported
     pub image_urls: Vec<String>,
     pub chef_notes: String,
     pub prep_time: String,
