@@ -57,6 +57,9 @@ pub fn AsciiDocContent(
     let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> = use_signal(HashMap::new);
     let mut citations_loading = use_signal(|| false);
 
+    // Track last notified citation metadata to prevent redundant callbacks
+    let mut last_notified_metadata: Signal<Option<CitationMetadata>> = use_signal(|| None);
+
     // Check if content has citations on mount and fetch them
     // Clone content for use in the effect - necessary because content is also used later in render logic
     let content_for_effect = content.clone();
@@ -126,11 +129,16 @@ pub fn AsciiDocContent(
     };
 
     // Notify parent of citation metadata if callback is provided
-    // Only re-run when citation_metadata changes (not every render) to avoid infinite loops
+    // Only call handler when metadata actually changes from previous call to avoid infinite loops
     let citation_metadata_for_effect = citation_metadata.clone();
     use_effect(use_reactive!(|citation_metadata_for_effect| {
         if let (Some(ref handler), Some(ref metadata)) = (&on_citations_loaded, &citation_metadata_for_effect) {
-            handler.call(metadata.clone());
+            // Only notify if metadata has changed from what we last notified
+            let should_notify = last_notified_metadata.read().as_ref() != Some(metadata);
+            if should_notify {
+                last_notified_metadata.set(Some(metadata.clone()));
+                handler.call(metadata.clone());
+            }
         }
     }));
 

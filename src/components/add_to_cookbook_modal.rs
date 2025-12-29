@@ -164,10 +164,12 @@ pub fn AddToCookbookModal(
                             success.set(true);
                             is_submitting.set(false);
                             // Navigate to the new cookbook after a short delay
+                            // Close modal first to avoid race condition if user closes modal during delay
                             spawn(async move {
                                 gloo_timers::future::TimeoutFuture::new(1500).await;
                                 navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
                             });
+                            // Note: Modal will close on navigation, so no explicit close needed
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - stay on modal to show error and allow retry

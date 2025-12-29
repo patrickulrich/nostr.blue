@@ -92,7 +92,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         spawn(async move {
             match add_person_to_list(&list.event, &pubkey, is_private).await {
                 Ok(_) => {
-                    log::info!("Added {} to list '{}' (private: {})", pubkey, list.name, is_private);
+                    log::info!("Added person to list '{}' (private: {})", list.name, is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
                     loading.set(false);
 
@@ -139,7 +139,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                         // Now add the person to the new list
                         match add_person_to_list(&event, &pubkey, is_private).await {
                             Ok(_) => {
-                                log::info!("Added {} to new list '{}'", pubkey, name);
+                                log::info!("Added person to new list '{}'", name);
                                 success_msg.set(Some(format!("Created \"{}\" and added", name)));
                                 loading.set(false);
 

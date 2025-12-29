@@ -26,10 +26,16 @@ pub fn BadgeDetailModal(
     on_reject: EventHandler<()>,
 ) -> Element {
     let mut processing = use_signal(|| false);
+    let mut processing_timeout: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
 
     // Reset processing state when is_accepted changes (operation completed by parent)
+    // Also reset any pending timeout since the operation completed
     use_effect(use_reactive!(|is_accepted| {
         processing.set(false);
+        // Cancel any pending timeout since operation completed
+        if let Some(task) = processing_timeout.write().take() {
+            task.cancel();
+        }
         // Suppress unused variable warning - we react to the value changing
         let _ = is_accepted;
     }));
@@ -261,6 +267,12 @@ pub fn BadgeDetailModal(
                                     disabled: *processing.read(),
                                     onclick: move |_| {
                                         processing.set(true);
+                                        // Set a timeout to reset processing if parent doesn't respond
+                                        let timeout_task = spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(10000).await;
+                                            processing.set(false);
+                                        });
+                                        processing_timeout.set(Some(timeout_task));
                                         on_reject.call(());
                                     },
                                     if *processing.read() {
@@ -276,6 +288,12 @@ pub fn BadgeDetailModal(
                                     disabled: *processing.read(),
                                     onclick: move |_| {
                                         processing.set(true);
+                                        // Set a timeout to reset processing if parent doesn't respond
+                                        let timeout_task = spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(10000).await;
+                                            processing.set(false);
+                                        });
+                                        processing_timeout.set(Some(timeout_task));
                                         on_reject.call(());
                                     },
                                     if *processing.read() {
@@ -290,6 +308,12 @@ pub fn BadgeDetailModal(
                                     disabled: *processing.read(),
                                     onclick: move |_| {
                                         processing.set(true);
+                                        // Set a timeout to reset processing if parent doesn't respond
+                                        let timeout_task = spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(10000).await;
+                                            processing.set(false);
+                                        });
+                                        processing_timeout.set(Some(timeout_task));
                                         on_accept.call(());
                                     },
                                     if *processing.read() {

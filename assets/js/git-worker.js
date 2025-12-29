@@ -71,11 +71,15 @@ function needsProxy(url) {
     const parsed = new URL(url);
     // GRASP servers don't need proxy
     if (graspServers.has(parsed.hostname)) return false;
+    // Check if hostname matches or is subdomain of blocked domains
+    // This prevents matching malicious subdomains like github.com.malicious.com
+    return NEEDS_PROXY.some(domain =>
+      parsed.hostname === domain || parsed.hostname.endsWith('.' + domain)
+    );
   } catch {
     // Invalid URL, use proxy as fallback
+    return true;
   }
-  // Known blocked domains need proxy
-  return NEEDS_PROXY.some((s) => url.includes(s));
 }
 
 /**

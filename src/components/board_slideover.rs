@@ -48,6 +48,7 @@ pub fn BoardSlideover(
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
+    let mut delete_error = use_signal(|| None::<String>);
 
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
@@ -117,6 +118,7 @@ pub fn BoardSlideover(
     let on_close_for_delete = on_close;
     let handle_delete = move |_| {
         deleting.set(true);
+        delete_error.set(None);
         let board_clone = board_for_delete.clone();
         let on_close = on_close_for_delete;
 
@@ -128,8 +130,9 @@ pub fn BoardSlideover(
                 }
                 Err(e) => {
                     log::error!("Failed to delete board: {}", e);
+                    delete_error.set(Some(format!("Failed to delete: {}", e)));
                     deleting.set(false);
-                    show_delete_confirm.set(false);
+                    // Keep modal open so user sees the error
                 }
             }
         });
@@ -430,11 +433,18 @@ pub fn BoardSlideover(
         if *show_delete_confirm.read() {
             ConfirmModal {
                 title: "Delete Board".to_string(),
-                message: "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string(),
-                confirm_text: Some("Delete".to_string()),
+                message: if let Some(ref err) = *delete_error.read() {
+                    format!("{}\n\nAre you sure you want to delete this board? This action cannot be undone.", err)
+                } else {
+                    "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string()
+                },
+                confirm_text: Some(if *deleting.read() { "Deleting..." } else { "Delete" }.to_string()),
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
-                on_cancel: move |_| show_delete_confirm.set(false),
+                on_cancel: move |_| {
+                    show_delete_confirm.set(false);
+                    delete_error.set(None);
+                },
             }
         }
     }

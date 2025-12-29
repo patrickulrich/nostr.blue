@@ -3247,7 +3247,6 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "sha1",
  "sha2",
  "strum",
  "thiserror 2.0.17",

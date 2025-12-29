@@ -263,6 +263,9 @@ window.hlsManager = window.hlsManager || {
                 } else if (encoding === 1) {
                     // UTF-16 with BOM
                     text = new TextDecoder('utf-16').decode(textData);
+                } else if (encoding === 2) {
+                    // UTF-16BE without BOM
+                    text = new TextDecoder('utf-16be').decode(textData);
                 }
 
                 if (text) {

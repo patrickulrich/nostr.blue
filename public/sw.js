@@ -95,15 +95,24 @@ self.addEventListener('fetch', (event) => {
       }
 
       // Not cached - fetch from network
-      return fetch(event.request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
+      return fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, clone);
+            });
+          }
+          return response;
+        })
+        .catch((err) => {
+          console.warn('[SW] Network fetch failed for uncached asset:', event.request.url, err);
+          // Return a basic error response instead of letting promise reject
+          return new Response('Resource unavailable offline', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' }
           });
-        }
-        return response;
-      });
+        });
     })
   );
 });
