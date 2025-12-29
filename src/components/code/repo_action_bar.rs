@@ -21,7 +21,6 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 pub fn RepoActionBar(
     repo: Repository,
     naddr: String,
-    #[props(default = false)] compact: bool,
 ) -> Element {
     let toast = consume_toast();
     let mut is_starred = use_signal(|| false);

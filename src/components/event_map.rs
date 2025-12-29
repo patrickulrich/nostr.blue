@@ -328,8 +328,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
                 geocoded_events.set(results);
                 processed_event_ids.set(key_to_store);
-                // Set loading to false - this will trigger the effect to re-run
-                // if pending_events_key was set, allowing the newer events to be processed
+                // Setting loading to false triggers effect re-evaluation for any pending events
                 loading_geo.set(false);
             });
         }

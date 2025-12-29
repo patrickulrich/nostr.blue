@@ -1,7 +1,7 @@
 //! Code File Viewer Component
 //!
-//! Displays file content with syntax highlighting and line numbers.
-//! Supports copy-to-clipboard and shows file metadata.
+//! Displays file content with language detection, line numbers, and copy-to-clipboard.
+//! Shows file metadata including detected language label.
 
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
