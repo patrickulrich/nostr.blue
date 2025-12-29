@@ -40,7 +40,7 @@ struct LeaderboardEntry {
 #[component]
 pub fn MusicLeaderboard() -> Element {
     let mut loading = use_signal(|| true);
-    let mut leaderboard = use_signal(|| Vec::<LeaderboardEntry>::new());
+    let mut leaderboard = use_signal(Vec::<LeaderboardEntry>::new);
     let mut error_msg = use_signal(|| None::<String>);
 
     // Fetch vote events and build leaderboard
@@ -310,7 +310,7 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     event.tags
                         .find(TagKind::single_letter(Alphabet::R, false))
                         .and_then(|t| t.content())
-                        .and_then(|url| url.split('/').last())
+                        .and_then(|url| url.split('/').next_back())
                         .map(|s| s.to_string())
                 });
 

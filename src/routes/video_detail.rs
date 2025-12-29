@@ -5,6 +5,7 @@ use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, Sh
 use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
 use crate::utils::format_sats_compact;
+use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -127,7 +128,7 @@ pub fn VideoDetail(video_id: String) -> Element {
 #[component]
 fn LandscapePlayer(event: Event) -> Element {
     let mut is_muted = use_signal(|| false);
-    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
     let event_id = event.id;
@@ -285,7 +286,7 @@ fn LandscapePlayer(event: Event) -> Element {
                             class: "flex items-center gap-2",
                             "📅"
                             span {
-                                "{format_time_ago(event.created_at.as_secs())}"
+                                {format_relative_time_or(event.created_at.as_secs(), "just now")}
                             }
                         }
                     }
@@ -422,7 +423,7 @@ fn LandscapePlayer(event: Event) -> Element {
 
 #[component]
 fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Option<Event>) -> Element {
-    let mut events = use_signal(|| Vec::<Event>::new());
+    let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut current_video_index = use_signal(|| 0usize);
     let mut is_muted = use_signal(|| false);
@@ -625,7 +626,7 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Op
                 }
 
                 // Down button
-                if events.read().len() > 0 && (*current_video_index.read() < events.read().len() - 1 || *has_more.read()) {
+                if !events.read().is_empty() && (*current_video_index.read() < events.read().len() - 1 || *has_more.read()) {
                     button {
                         class: "w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center text-white transition",
                         onclick: move |_| next_video(),
@@ -656,7 +657,7 @@ fn VerticalVideoPlayer(
     is_muted: bool,
     on_mute_toggle: EventHandler<()>,
 ) -> Element {
-    let video_id = format!("video-{}", event.id.to_hex()[..8].to_string());
+    let video_id = format!("video-{}", &event.id.to_hex()[..8]);
     let video_id_for_effect = video_id.clone();
     let video_meta = parse_video_meta(&event);
 
@@ -741,7 +742,7 @@ fn VideoInfo(
     let mut is_liking = use_signal(|| false);
     let mut show_comments_modal = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
-    let mut comments = use_signal(|| Vec::<Event>::new());
+    let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
 
@@ -909,11 +910,7 @@ fn VideoInfo(
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
-            if pk.len() > 16 {
-                format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-            } else {
-                pk
-            }
+            truncate_pubkey(&pk)
         });
 
     let profile_image = author_metadata.read().as_ref()
@@ -971,7 +968,7 @@ fn VideoInfo(
                     // Timestamp
                     p {
                         class: "text-white/60 text-xs mt-2",
-                        "{format_time_ago(event.created_at.as_secs())}"
+                        {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
 
@@ -1470,11 +1467,7 @@ fn AuthorInfo(pubkey: String) -> Element {
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
-            if pubkey.len() > 16 {
-                format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
-            } else {
-                pubkey.clone()
-            }
+            truncate_pubkey(&pubkey)
         });
 
     let profile_image = author_metadata.read().as_ref()
@@ -1558,19 +1551,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-// Format timestamp as "X ago"
-fn format_time_ago(timestamp: u64) -> String {
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", diff / 60),
-        3600..=86399 => format!("{}h ago", diff / 3600),
-        86400..=604799 => format!("{}d ago", diff / 86400),
-        _ => format!("{}w ago", diff / 604800),
-    }
-}
 
 // Format count with k/M suffixes
 fn format_count(count: usize) -> String {

@@ -79,9 +79,7 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
                 // Extract keyset ID from proof if available
                 // The proof's `id` field contains the keyset ID
                 if let Some(keyset_id) = extract_keyset_id_from_proof(proof) {
-                    if !existing_keyset_to_mint.contains_key(&keyset_id) {
-                        existing_keyset_to_mint.insert(keyset_id, token.mint.clone());
-                    }
+                    existing_keyset_to_mint.entry(keyset_id).or_insert_with(|| token.mint.clone());
                 }
             }
         }
@@ -664,6 +662,7 @@ pub async fn restore_proofs_from_mint(mint_url: &str) -> CashuResult<u64> {
 /// 2. Removes all tokens for the mint
 /// 3. Publishes deletion events
 /// 4. Updates wallet state
+///
 /// Returns (event_count, total_amount) on success.
 pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
     use nostr_sdk::signer::NostrSigner;
@@ -953,7 +952,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     // Convert new proofs to ProofData
     let proof_data: Vec<ProofData> = new_proofs.iter()
-        .map(|p| cdk_proof_to_proof_data(p))
+        .map(cdk_proof_to_proof_data)
         .collect();
 
     // Create extended proofs for NIP-60 event

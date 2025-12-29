@@ -336,10 +336,10 @@ pub fn extract_conditions_from_cdk(
 
     match conditions {
         SpendingConditions::P2PKConditions { data, conditions } => {
-            let mut ext = ExtendedConditions::default();
-
-            // Primary pubkey
-            ext.pubkeys = Some(vec![data.to_hex()]);
+            let mut ext = ExtendedConditions {
+                pubkeys: Some(vec![data.to_hex()]),
+                ..Default::default()
+            };
 
             // Additional conditions from inner conditions struct
             if let Some(cond) = conditions {

@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::wavlake::{WavlakeAPI, WavlakeSearchResult, WavlakeTrack, WavlakePlaylist};
+use crate::services::podcast_index;
 use crate::components::{TrackCard, ArtistCard, ArtistCardSkeleton, AlbumCard, AlbumCardSkeleton, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::components::icons::ArrowLeftIcon;
 use crate::stores::music_player::{self, MusicTrack};
@@ -37,22 +38,25 @@ pub fn MusicSearch(q: String) -> Element {
     let mut error = use_signal(|| None::<String>);
 
     // Separate track results to avoid race conditions during parallel search
-    let mut wavlake_tracks = use_signal(|| Vec::<MusicTrack>::new());
-    let mut nostr_tracks = use_signal(|| Vec::<MusicTrack>::new());
+    let mut wavlake_tracks = use_signal(Vec::<MusicTrack>::new);
+    let mut nostr_tracks = use_signal(Vec::<MusicTrack>::new);
+    let mut rss_music_tracks = use_signal(Vec::<MusicTrack>::new);
+    let mut rss_loading = use_signal(|| true);
     // Compute unified tracks reactively - no race condition
     let unified_tracks = use_memo(move || {
         let mut combined = wavlake_tracks.read().clone();
         combined.extend(nostr_tracks.read().iter().cloned());
+        combined.extend(rss_music_tracks.read().iter().cloned());
         combined
     });
     // Keep separate for Artists/Albums tabs
-    let mut artist_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
-    let mut nostr_artist_results = use_signal(|| Vec::<(String, profiles::Profile)>::new());
+    let mut artist_results = use_signal(Vec::<WavlakeSearchResult>::new);
+    let mut nostr_artist_results = use_signal(Vec::<(String, profiles::Profile)>::new);
     let mut nostr_artist_loading = use_signal(|| true);
-    let mut album_results = use_signal(|| Vec::<WavlakeSearchResult>::new());
+    let mut album_results = use_signal(Vec::<WavlakeSearchResult>::new);
 
     // Playlist state
-    let mut playlist_id_input = use_signal(|| String::new());
+    let mut playlist_id_input = use_signal(String::new);
     let mut playlist = use_signal(|| None::<WavlakePlaylist>);
     let mut playlist_loading = use_signal(|| false);
     let mut playlist_error = use_signal(|| None::<String>);
@@ -64,24 +68,28 @@ pub fn MusicSearch(q: String) -> Element {
         if search_query.is_empty() {
             wavlake_tracks.set(Vec::new());
             nostr_tracks.set(Vec::new());
+            rss_music_tracks.set(Vec::new());
             artist_results.set(Vec::new());
             nostr_artist_results.set(Vec::new());
             album_results.set(Vec::new());
             loading.set(false);
             nostr_loading.set(false);
             nostr_artist_loading.set(false);
+            rss_loading.set(false);
             return;
         }
 
         loading.set(true);
         nostr_loading.set(true);
         nostr_artist_loading.set(true);
+        rss_loading.set(true);
         error.set(None);
 
         // Clone for async moves
         let query_for_wavlake = search_query.clone();
         let query_for_nostr = search_query.clone();
         let query_for_nostr_artists = search_query.clone();
+        let query_for_rss = search_query.clone();
 
         // Spawn Wavlake search
         spawn(async move {
@@ -198,6 +206,34 @@ pub fn MusicSearch(q: String) -> Element {
                 }
             }
         });
+
+        // Spawn RSS Music search in parallel
+        spawn(async move {
+            log::info!("RSS music search for: {}", query_for_rss);
+
+            match podcast_index::search_music(&query_for_rss, Some(20)).await {
+                Ok(albums) => {
+                    log::info!("Found {} RSS music albums", albums.len());
+
+                    // Fetch tracks from each album and convert to MusicTrack
+                    let mut tracks = Vec::new();
+                    for album in albums.iter().take(10) {
+                        if let Ok(episodes) = podcast_index::get_episodes_by_feed_id(album.id, Some(3)).await {
+                            for ep in &episodes {
+                                tracks.push(MusicTrack::from_rss_music_track(ep, album));
+                            }
+                        }
+                    }
+
+                    rss_music_tracks.set(tracks);
+                    rss_loading.set(false);
+                }
+                Err(e) => {
+                    log::warn!("RSS music search failed: {}", e);
+                    rss_loading.set(false);
+                }
+            }
+        });
     }));
 
     let tabs = [
@@ -212,7 +248,7 @@ pub fn MusicSearch(q: String) -> Element {
     let artist_count = artist_results.read().len() + nostr_artist_results.read().len();
     let album_count = album_results.read().len();
     // Use OR so skeletons show while ANY source is still loading (when no tracks yet)
-    let either_loading = *loading.read() || *nostr_loading.read();
+    let either_loading = *loading.read() || *nostr_loading.read() || *rss_loading.read();
     let artists_loading = *loading.read() || *nostr_artist_loading.read();
 
     rsx! {
@@ -318,11 +354,12 @@ pub fn MusicSearch(q: String) -> Element {
                                 }
                             } else {
                                 // Show loading indicator if one source is still loading
-                                if *loading.read() || *nostr_loading.read() {
+                                if *loading.read() || *nostr_loading.read() || *rss_loading.read() {
                                     div {
                                         class: "text-sm text-muted-foreground py-2",
                                         if *loading.read() { "Loading Wavlake results..." }
-                                        else { "Loading Nostr results..." }
+                                        else if *nostr_loading.read() { "Loading Nostr results..." }
+                                        else { "Loading RSS Music results..." }
                                     }
                                 }
                                 for track in unified_tracks().iter() {
