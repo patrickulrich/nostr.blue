@@ -324,8 +324,24 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
     let builder = EventBuilder::bookmarks_set("bookmark", bookmarks_list);
 
     match client.send_event_builder(builder).await {
-        Ok(_) => {
-            log::info!("Bookmarks published successfully");
+        Ok(output) => {
+            let success_count = output.success.len();
+            let failed_count = output.failed.len();
+            let total = success_count + failed_count;
+
+            log::info!(
+                "Bookmarks published: {} ({}/{} relays succeeded)",
+                output.id().to_hex(),
+                success_count,
+                total
+            );
+
+            if !output.failed.is_empty() {
+                for (relay, error) in &output.failed {
+                    log::warn!("Relay {} failed: {}", relay, error);
+                }
+            }
+
             Ok(())
         }
         Err(e) => {

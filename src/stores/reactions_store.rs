@@ -225,10 +225,25 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
         .tag(Tag::identifier(REACTIONS_D_TAG));
 
     // Publish to relays
-    client.send_event_builder(builder).await
+    let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish reactions: {}", e))?;
 
-    log::info!("Reactions preferences saved to Nostr successfully");
+    let success_count = output.success.len();
+    let failed_count = output.failed.len();
+    let total = success_count + failed_count;
+
+    log::info!(
+        "Reactions preferences saved: {} ({}/{} relays succeeded)",
+        output.id().to_hex(),
+        success_count,
+        total
+    );
+
+    if !output.failed.is_empty() {
+        for (relay, error) in &output.failed {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
 
     // Update global state
     *PREFERRED_REACTIONS.write() = reactions;

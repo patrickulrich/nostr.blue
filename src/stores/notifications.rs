@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{Filter, Kind, SubscriptionId, PublicKey, FromBech32};
 use gloo_storage::{LocalStorage, Storage};
-use crate::stores::{auth_store, nostr_client, settings_store};
+use crate::stores::{auth_store, nostr_client, settings_store, subscription_manager};
 use crate::utils::notification_nip78;
 
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
@@ -281,9 +281,13 @@ pub async fn start_realtime_subscription() {
 
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
 
-    // With gossip, the client automatically routes to appropriate relays
-    let subscription_result = client.subscribe(filter.clone(), None).await
-        .map(|output| output.val);
+    // Use subscribe_realtime helper with 10-minute idle timeout
+    // The subscription will auto-close if no events for 10 minutes
+    let subscription_result = subscription_manager::subscribe_realtime(
+        &client,
+        filter.clone(),
+        Some(600), // 10 minute idle timeout
+    ).await;
 
     match subscription_result {
         Ok(sub_id) => {
@@ -346,7 +350,7 @@ pub async fn stop_realtime_subscription() {
     if let Some(id) = sub_id {
         if let Some(client) = nostr_client::get_client() {
             log::info!("Stopping real-time notification subscription: {:?}", id);
-            client.unsubscribe(&id).await;
+            subscription_manager::unsubscribe(&client, &id).await;
         }
         *SUBSCRIPTION_ID.write() = None;
     }

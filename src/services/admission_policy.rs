@@ -48,7 +48,34 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
                 return Ok(AdmitStatus::rejected("Invalid event signature"));
             }
 
-            // 3. Future enhancements could include:
+            // 3. Check for expired events (NIP-40)
+            // Events with an `expiration` tag should be rejected if past their expiration time
+            if event.is_expired() {
+                log::debug!(
+                    "Rejected expired event {} from {}",
+                    event.id,
+                    event.pubkey
+                );
+                return Ok(AdmitStatus::rejected("Event has expired (NIP-40)"));
+            }
+
+            // 4. Check for protected events from other users (NIP-70)
+            // Protected events (with `-` tag) should only be accepted from the current user
+            if event.is_protected() {
+                let current_pubkey = crate::stores::auth_store::get_pubkey();
+                let event_pubkey = event.pubkey.to_hex();
+
+                if current_pubkey.as_ref() != Some(&event_pubkey) {
+                    log::debug!(
+                        "Rejected protected event {} from {} (not current user)",
+                        event.id,
+                        event.pubkey
+                    );
+                    return Ok(AdmitStatus::rejected("Protected event from other user (NIP-70)"));
+                }
+            }
+
+            // 5. Future enhancements could include:
             // - Web of Trust filtering (check if author is in contact list or WoT graph)
             // - Content-based filtering (keywords, regex patterns)
             // - Rate limiting per pubkey

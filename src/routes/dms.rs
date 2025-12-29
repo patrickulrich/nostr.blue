@@ -434,6 +434,8 @@ fn ConversationView(pubkey: String) -> Element {
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
+    // Feedback toast for showing relay publish results
+    let mut send_feedback = use_signal(|| Option::<(bool, String)>::None);
 
     // Polling task for real-time updates
     let mut poll_task = use_signal(|| None::<Task>);
@@ -574,16 +576,44 @@ fn ConversationView(pubkey: String) -> Element {
         }
 
         sending.set(true);
+        send_feedback.set(None);
         let recipient = pubkey_for_send.clone();
 
         spawn(async move {
             match dms::send_dm(recipient, content).await {
-                Ok(_) => {
+                Ok(result) => {
                     message_input.set(String::new());
                     log::info!("Message sent successfully");
+
+                    // Show feedback based on relay results using PublishResult methods
+                    let rate = result.success_rate();
+
+                    if !result.is_success() {
+                        // Complete failure
+                        send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+                    } else if result.has_failures() {
+                        // Partial success - show warning with success rate
+                        send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
+                            rate * 100.0,
+                            result.success_count(),
+                            result.total_attempted()
+                        ))));
+                    }
+                    // Full success: no feedback needed
+
+                    // Auto-hide feedback after 3 seconds
+                    if send_feedback.peek().is_some() {
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        send_feedback.set(None);
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to send message: {}", e);
+                    send_feedback.set(Some((false, format!("Error: {}", e))));
+
+                    // Auto-hide error after 5 seconds
+                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    send_feedback.set(None);
                 }
             }
             sending.set(false);
@@ -679,6 +709,23 @@ fn ConversationView(pubkey: String) -> Element {
                 }
             }
 
+            // Feedback toast for relay results
+            if let Some((is_success, message)) = send_feedback.read().clone() {
+                div {
+                    class: if is_success {
+                        "mx-4 mb-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm flex items-center gap-2"
+                    } else {
+                        "mx-4 mb-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2"
+                    },
+                    span { "{message}" }
+                    button {
+                        class: "ml-auto text-current opacity-60 hover:opacity-100",
+                        onclick: move |_| send_feedback.set(None),
+                        "×"
+                    }
+                }
+            }
+
             // Message input
             div {
                 class: "flex-shrink-0 p-4 border-t border-border",
@@ -699,16 +746,39 @@ fn ConversationView(pubkey: String) -> Element {
                                 }
 
                                 sending.set(true);
+                                send_feedback.set(None);
                                 let recipient = pubkey_for_input.clone();
 
                                 spawn(async move {
                                     match dms::send_dm(recipient, content).await {
-                                        Ok(_) => {
+                                        Ok(result) => {
                                             message_input.set(String::new());
                                             log::info!("Message sent successfully");
+
+                                            // Show feedback based on relay results using PublishResult methods
+                                            let rate = result.success_rate();
+
+                                            if !result.is_success() {
+                                                send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+                                            } else if result.has_failures() {
+                                                send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
+                                                    rate * 100.0,
+                                                    result.success_count(),
+                                                    result.total_attempted()
+                                                ))));
+                                            }
+
+                                            // Auto-hide feedback
+                                            if send_feedback.peek().is_some() {
+                                                gloo_timers::future::TimeoutFuture::new(3000).await;
+                                                send_feedback.set(None);
+                                            }
                                         }
                                         Err(e) => {
                                             log::error!("Failed to send message: {}", e);
+                                            send_feedback.set(Some((false, format!("Error: {}", e))));
+                                            gloo_timers::future::TimeoutFuture::new(5000).await;
+                                            send_feedback.set(None);
                                         }
                                     }
                                     sending.set(false);

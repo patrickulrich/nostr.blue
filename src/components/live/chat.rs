@@ -56,6 +56,8 @@ extern "C" {
 pub fn LiveChat(
     stream_author_pubkey: String,
     stream_d_tag: String,
+    #[props(default)]
+    relays: Vec<String>,
 ) -> Element {
     let mut messages = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);

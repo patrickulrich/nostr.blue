@@ -334,8 +334,24 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
     let builder = EventBuilder::pinned_notes(event_ids);
 
     match client.send_event_builder(builder).await {
-        Ok(_) => {
-            log::info!("Pinned notes published successfully");
+        Ok(output) => {
+            let success_count = output.success.len();
+            let failed_count = output.failed.len();
+            let total = success_count + failed_count;
+
+            log::info!(
+                "Pinned notes published: {} ({}/{} relays succeeded)",
+                output.id().to_hex(),
+                success_count,
+                total
+            );
+
+            if !output.failed.is_empty() {
+                for (relay, error) in &output.failed {
+                    log::warn!("Relay {} failed: {}", relay, error);
+                }
+            }
+
             Ok(())
         }
         Err(e) => {

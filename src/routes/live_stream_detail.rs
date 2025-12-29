@@ -423,10 +423,13 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                             if let Some(_event) = stream_event.read().as_ref() {
                                 {
                                     let (author_pk, dtag) = parsed_naddr.peek().clone();
+                                    // Get stream relays for chat subscription
+                                    let stream_relays = meta.relays.clone();
                                     rsx! {
                                         LiveChat {
                                             stream_author_pubkey: author_pk,
-                                            stream_d_tag: dtag
+                                            stream_d_tag: dtag,
+                                            relays: stream_relays
                                         }
                                     }
                                 }

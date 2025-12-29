@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, nostr_client, subscription_manager};
 use crate::routes::Route;
 use crate::components::{NoteCard, NoteComposer, ArticleCard, ClientInitializing};
 use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
@@ -122,9 +122,7 @@ pub fn Home(list: String) -> Element {
                 spawn(async move {
                     if let Some(client) = nostr_client::get_client() {
                         log::info!("Cleaning up {} real-time subscriptions due to manual refresh", ids.len());
-                        for id in ids {
-                            let _ = client.unsubscribe(&id).await;
-                        }
+                        subscription_manager::unsubscribe_all(&client, &ids).await;
                     }
                 });
             }
@@ -330,9 +328,7 @@ pub fn Home(list: String) -> Element {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
                     log::info!("Cleaning up {} real-time subscriptions due to feed type change", ids.len());
-                    for id in ids {
-                        let _ = client.unsubscribe(&id).await;
-                    }
+                    subscription_manager::unsubscribe_all(&client, &ids).await;
                 }
             });
         }
