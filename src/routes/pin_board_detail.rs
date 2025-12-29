@@ -146,6 +146,8 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                 Ok(_) => {
                     // Remove from local state
                     pins.write().retain(|p| p.event_id != event_id);
+                    // Also clean up stale metadata
+                    pin_metadata.write().remove(&event_id);
                 }
                 Err(e) => {
                     log::error!("Failed to delete pin: {}", e);

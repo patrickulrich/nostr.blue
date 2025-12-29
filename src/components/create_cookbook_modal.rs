@@ -45,7 +45,7 @@ pub fn CreateCookbookModal(
 
         let input = PinboardInput {
             title: title.read().clone(),
-            description: if description.read().is_empty() { None } else { Some(description.read().clone()) },
+            description: if description.read().trim().is_empty() { None } else { Some(description.read().trim().to_string()) },
             image: image_url.read().clone(),
             tags,
             collaborative: false, // Cookbooks are not collaborative by default

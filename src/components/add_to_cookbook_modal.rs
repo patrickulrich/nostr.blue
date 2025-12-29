@@ -170,7 +170,7 @@ pub fn AddToCookbookModal(
                             });
                         }
                         Err(e) => {
-                            // Cookbook created but pin failed - still navigate
+                            // Cookbook created but pin failed - stay on modal to show error and allow retry
                             log::error!("Failed to add recipe to new cookbook: {}", e);
                             error.set(Some(format!("Cookbook created but failed to add recipe: {}", e)));
                             is_submitting.set(false);

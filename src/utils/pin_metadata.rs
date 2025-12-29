@@ -49,7 +49,9 @@ pub async fn fetch_event_preview(event_id_str: &str) -> Result<PinPreviewMetadat
 
 /// Fetch metadata for an addressable event (naddr1)
 pub async fn fetch_address_preview(naddr: &str) -> Result<PinPreviewMetadata, String> {
-    let coord = Coordinate::from_bech32(naddr)
+    // Strip nostr: prefix (NIP-21) if present
+    let normalized = naddr.trim().strip_prefix("nostr:").unwrap_or(naddr.trim());
+    let coord = Coordinate::from_bech32(normalized)
         .map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let filter = Filter::new()
@@ -68,21 +70,23 @@ pub async fn fetch_address_preview(naddr: &str) -> Result<PinPreviewMetadata, St
 /// Parse an event ID from various formats (note1, nevent1, hex)
 fn parse_event_id(input: &str) -> Result<EventId, String> {
     let trimmed = input.trim();
+    // Strip nostr: prefix (NIP-21) if present
+    let normalized = trimmed.strip_prefix("nostr:").unwrap_or(trimmed);
 
-    if trimmed.starts_with("nevent1") {
+    if normalized.starts_with("nevent1") {
         // Parse nevent to extract event_id
-        let nip19 = Nip19::from_bech32(trimmed)
+        let nip19 = Nip19::from_bech32(normalized)
             .map_err(|e| format!("Invalid nevent: {}", e))?;
         match nip19 {
             Nip19::Event(nip19_event) => Ok(nip19_event.event_id),
             _ => Err("Not an event reference".to_string()),
         }
-    } else if trimmed.starts_with("note1") {
-        EventId::from_bech32(trimmed)
+    } else if normalized.starts_with("note1") {
+        EventId::from_bech32(normalized)
             .map_err(|e| format!("Invalid note: {}", e))
     } else {
         // Assume hex event ID
-        EventId::from_hex(trimmed)
+        EventId::from_hex(normalized)
             .map_err(|e| format!("Invalid event ID: {}", e))
     }
 }
