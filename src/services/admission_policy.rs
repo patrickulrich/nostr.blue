@@ -66,20 +66,44 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
             if event.is_protected() {
                 let current_pubkey = crate::stores::auth_store::get_pubkey();
 
-                // Parse stored pubkey (could be bech32 npub or hex format)
-                let current_pk: Option<PublicKey> = current_pubkey.and_then(|pk_str| {
-                    PublicKey::from_bech32(&pk_str)
-                        .or_else(|_| PublicKey::from_hex(&pk_str))
-                        .ok()
-                });
+                // Check if user is authenticated
+                let Some(pk_str) = current_pubkey else {
+                    log::debug!(
+                        "Rejected protected event {} from {} (no authenticated user)",
+                        event.id,
+                        event.pubkey
+                    );
+                    return Ok(AdmitStatus::rejected(
+                        "Protected event requires authenticated user (NIP-70)",
+                    ));
+                };
 
-                if current_pk.as_ref() != Some(&event.pubkey) {
+                // Parse stored pubkey (could be bech32 npub or hex format)
+                let current_pk = match PublicKey::from_bech32(&pk_str)
+                    .or_else(|_| PublicKey::from_hex(&pk_str))
+                {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to parse stored pubkey '{}': {} - rejecting protected event {}",
+                            pk_str,
+                            e,
+                            event.id
+                        );
+                        return Ok(AdmitStatus::rejected("Invalid stored pubkey (NIP-70)"));
+                    }
+                };
+
+                // Check if event is from the current user
+                if current_pk != event.pubkey {
                     log::debug!(
                         "Rejected protected event {} from {} (not current user)",
                         event.id,
                         event.pubkey
                     );
-                    return Ok(AdmitStatus::rejected("Protected event from other user (NIP-70)"));
+                    return Ok(AdmitStatus::rejected(
+                        "Protected event from other user (NIP-70)",
+                    ));
                 }
             }
 

@@ -48,7 +48,7 @@ pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Store<BookmarkRollbackStore>> =
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Pending bookmark publish timeout (for debouncing)
-    static BOOKMARK_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = RefCell::new(None);
+    static BOOKMARK_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = const { RefCell::new(None) };
 }
 
 /// Initialize bookmarks by fetching from relays

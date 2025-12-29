@@ -173,7 +173,7 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
 
         // Second round for full 64 bytes
         let mut hasher = Sha256::new();
-        hasher.update(&hash);
+        hasher.update(hash);
         hasher.update(b"cashu-wallet-seed-v1-ext");
         let hash2 = hasher.finalize();
         seed[32..].copy_from_slice(&hash2);

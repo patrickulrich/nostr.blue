@@ -155,10 +155,8 @@ pub fn RepoActionBar(
 
                         if currently_watching {
                             watched.retain(|x| x != &repo_coord);
-                        } else {
-                            if !watched.contains(&repo_coord) {
-                                watched.push(repo_coord.clone());
-                            }
+                        } else if !watched.contains(&repo_coord) {
+                            watched.push(repo_coord.clone());
                         }
 
                         if let Ok(json) = serde_json::to_string(&watched) {

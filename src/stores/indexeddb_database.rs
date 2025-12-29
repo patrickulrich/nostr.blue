@@ -292,7 +292,7 @@ use std::future::IntoFuture;
 #[cfg(target_arch = "wasm32")]
 use std::str::FromStr;
 #[cfg(target_arch = "wasm32")]
-use std::sync::Arc;
+use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 #[cfg(target_arch = "wasm32")]
@@ -334,10 +334,9 @@ const STORE_SHOP_ORDERS: &str = "shop_orders";
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug)]
 pub struct IndexedDbDatabase {
-    db: Arc<IdbDatabase>,
+    db: Rc<IdbDatabase>,
 }
 
-#[cfg(target_arch = "wasm32")]
 // SAFETY: In WASM, there's only one thread, so Send + Sync are safe
 // even though IdbDatabase contains JsValue and closures
 #[cfg(target_arch = "wasm32")]
@@ -349,10 +348,7 @@ unsafe impl Sync for IndexedDbDatabase {}
 impl IndexedDbDatabase {
     /// Helper to create a database error from a string
     fn make_error(msg: String) -> database::Error {
-        database::Error::Database(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            msg,
-        )))
+        database::Error::Database(Box::new(std::io::Error::other(msg)))
     }
 
     /// Create a new IndexedDB database instance
@@ -416,7 +412,7 @@ impl IndexedDbDatabase {
 
         log::info!("IndexedDB initialized successfully");
 
-        Ok(Self { db: Arc::new(db) })
+        Ok(Self { db: Rc::new(db) })
     }
 
     /// Helper: Get a value from a store with JSON deserialization
@@ -794,10 +790,11 @@ impl WalletDatabase for IndexedDbDatabase {
             // Check STORE_MINTS
             let mints_store = tx.object_store(STORE_MINTS)
                 .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
-            if let Some(_) = mints_store.get(&new_key)
+            if mints_store.get(&new_key)
                 .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
                 .await
-                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+                .is_some() {
                 return Err(Self::make_error(format!(
                     "Cannot migrate: destination mint URL {} already exists in STORE_MINTS. \
                     This would overwrite existing mint data.",
@@ -808,10 +805,11 @@ impl WalletDatabase for IndexedDbDatabase {
             // Check STORE_KEYSETS
             let keysets_store = tx.object_store(STORE_KEYSETS)
                 .map_err(|e| Self::make_error(format!("Store error: {:?}", e)))?;
-            if let Some(_) = keysets_store.get(&new_key)
+            if keysets_store.get(&new_key)
                 .map_err(|e| Self::make_error(format!("Get error: {:?}", e)))?
                 .await
-                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))? {
+                .map_err(|e| Self::make_error(format!("Get await error: {:?}", e)))?
+                .is_some() {
                 return Err(Self::make_error(format!(
                     "Cannot migrate: destination mint URL {} already exists in STORE_KEYSETS. \
                     This would overwrite existing keyset data.",

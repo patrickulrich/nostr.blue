@@ -33,7 +33,7 @@ pub fn MusicHome() -> Element {
     let mut rss_loading = use_signal(|| true);
     let mut rss_error = use_signal(|| None::<String>);
 
-    let genres = vec![
+    let genres = [
         "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
         "Classical", "Blues", "Country", "Reggae", "Punk", "Metal"
     ];

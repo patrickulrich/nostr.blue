@@ -22,7 +22,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
     let on_close = props.on_close;
 
     // Report types from NIP-56
-    let report_types = vec![
+    let report_types = [
         ("spam", "Spam"),
         ("nudity", "Nudity / NSFW"),
         ("profanity", "Hateful Speech"),

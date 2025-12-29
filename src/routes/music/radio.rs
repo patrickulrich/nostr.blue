@@ -10,7 +10,7 @@ pub fn MusicRadio() -> Element {
     let mut loading = use_signal(|| false);
     let mut radio_started = use_signal(|| false);
 
-    let genres = vec![
+    let genres = [
         "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
         "Classical", "Blues", "Country", "Reggae", "Punk", "Metal",
         "R&B", "Alternative", "Indie", "Ambient"

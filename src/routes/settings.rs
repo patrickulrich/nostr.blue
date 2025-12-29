@@ -1161,14 +1161,15 @@ pub fn Settings() -> Element {
                                                         span { "↑ {format_bytes(relay.bytes_sent)}" }
                                                         if relay.connection_attempts > 0 {
                                                             span {
-                                                                class: if relay.success_rate > 0.8 {
+                                                                // success_rate is already 0-100, not 0.0-1.0
+                                                                class: if relay.success_rate > 80.0 {
                                                                     "text-green-600 dark:text-green-400"
-                                                                } else if relay.success_rate > 0.5 {
+                                                                } else if relay.success_rate > 50.0 {
                                                                     "text-yellow-600 dark:text-yellow-400"
                                                                 } else {
                                                                     "text-red-600 dark:text-red-400"
                                                                 },
-                                                                "{(relay.success_rate * 100.0) as u8}%"
+                                                                "{relay.success_rate as u8}%"
                                                             }
                                                         }
                                                     }

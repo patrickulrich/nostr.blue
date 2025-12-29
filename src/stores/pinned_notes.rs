@@ -50,7 +50,7 @@ pub static PINNED_ROLLBACK_STATE: GlobalSignal<Store<PinnedRollbackStore>> =
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Pending pinned notes publish timeout (for debouncing)
-    static PINNED_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = RefCell::new(None);
+    static PINNED_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = const { RefCell::new(None) };
 }
 
 /// Initialize pinned notes by fetching from relays for the current user

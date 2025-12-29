@@ -63,7 +63,7 @@ pub static PINNED_COMMUNITIES_ROLLBACK: GlobalSignal<Store<PinnedCommunitiesRoll
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Pending pinned communities publish timeout (for debouncing)
-    static PINNED_COMMUNITIES_TIMEOUT: RefCell<Option<Timeout>> = RefCell::new(None);
+    static PINNED_COMMUNITIES_TIMEOUT: RefCell<Option<Timeout>> = const { RefCell::new(None) };
 }
 
 /// Initialize pinned communities by fetching from relays for the current user

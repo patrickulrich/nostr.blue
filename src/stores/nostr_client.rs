@@ -250,7 +250,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         Client::builder()
             .database(database)
             .gossip(gossip)
-            .admit_policy(NostrBlueAdmissionPolicy::default())
+            .admit_policy(NostrBlueAdmissionPolicy)
             .build()
     };
 

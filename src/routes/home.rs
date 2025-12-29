@@ -432,7 +432,7 @@ pub fn Home(list: String) -> Element {
                     #[cfg(target_arch = "wasm32")]
                     {
                         use gloo_timers::future::TimeoutFuture;
-                        TimeoutFuture::new((batch_idx as u32 * BATCH_DELAY_MS as u32) as u32).await;
+                        TimeoutFuture::new(batch_idx as u32 * BATCH_DELAY_MS as u32).await;
                     }
 
                     #[cfg(not(target_arch = "wasm32"))]
