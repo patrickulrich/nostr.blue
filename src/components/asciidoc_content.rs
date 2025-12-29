@@ -145,10 +145,13 @@ pub fn AsciiDocContent(
         }
     }));
 
+    // Sanitize main content HTML to prevent XSS
+    let sanitized_content = sanitize_html(&rendered);
+
     rsx! {
         div {
             class: "asciidoc-content prose prose-sm dark:prose-invert max-w-none {class}",
-            dangerous_inner_html: "{rendered}",
+            dangerous_inner_html: "{sanitized_content}",
         }
         // Show subtle error indicator if citations failed to load
         if *citations_error.read() {
@@ -196,12 +199,14 @@ pub fn AsciiDocContentCollapsible(
     let is_long_content = content.chars().count() > 800;
 
     // Memoize rendered content - only recompute when content or enable_wikilinks changes
+    // Sanitize to prevent XSS
     let rendered = use_memo(move || {
-        if enable_wikilinks {
+        let html = if enable_wikilinks {
             render_content_auto(&content)
         } else {
             render_asciidoc(&content)
-        }
+        };
+        sanitize_html(&html)
     });
 
     if is_long_content {

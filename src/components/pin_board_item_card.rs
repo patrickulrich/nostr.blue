@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{FromBech32, ToBech32};
 
-use crate::components::PinMenu;
+use crate::components::{PinMenu, pin_menu::PinToBoardRequest};
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinMetadata, PinReference};
 use crate::utils::validation::is_valid_http_url;
@@ -96,6 +96,9 @@ pub fn PinCard(
     /// Optional metadata from the referenced event (title, image, summary)
     #[props(default)]
     metadata: Option<PinMetadata>,
+    /// Optional callback when "Pin to Board" is requested (lifts modal to parent)
+    #[props(default)]
+    on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     // Use metadata content type if available, then override, then infer
     let content_type = metadata.as_ref()
@@ -213,6 +216,7 @@ pub fn PinCard(
                     pin: pin_for_menu.clone(),
                     is_owner: is_owner,
                     on_delete: on_delete,
+                    on_pin_to_board: on_pin_to_board,
                 }
             }
         }
@@ -467,6 +471,9 @@ pub fn PinGrid(
     /// Full metadata by pin event_id (includes content_type, title, image, summary)
     #[props(default)]
     metadata_map: HashMap<String, PinMetadata>,
+    /// Optional callback when "Pin to Board" is requested (lifts modal to parent)
+    #[props(default)]
+    on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     rsx! {
         div {
@@ -488,6 +495,7 @@ pub fn PinGrid(
                             on_delete: on_delete,
                             content_type_override: override_type,
                             metadata: meta,
+                            on_pin_to_board: on_pin_to_board,
                         }
                     }
                 }
@@ -524,6 +532,9 @@ pub fn PinCardMosaic(
     /// Size variant for cards without images (small, medium, large)
     #[props(default)]
     size_variant: Option<String>,
+    /// Optional callback when "Pin to Board" is requested (lifts modal to parent)
+    #[props(default)]
+    on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     // Use metadata content type if available, then override, then infer
     let content_type = metadata.as_ref()
@@ -645,6 +656,7 @@ pub fn PinCardMosaic(
                     pin: pin_for_menu.clone(),
                     is_owner: is_owner,
                     on_delete: on_delete,
+                    on_pin_to_board: on_pin_to_board,
                 }
             }
         }
@@ -820,6 +832,9 @@ pub fn PinMosaicGrid(
     /// Whether currently loading more
     #[props(default = false)]
     loading_more: bool,
+    /// Optional callback when "Pin to Board" is requested (lifts modal to parent)
+    #[props(default)]
+    on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     rsx! {
         // CSS columns-based masonry layout
@@ -847,6 +862,7 @@ pub fn PinMosaicGrid(
                             } else {
                                 Some(PIN_SIZE_VARIANTS[idx % 3].to_string())
                             },
+                            on_pin_to_board: on_pin_to_board,
                         }
                     }
                 }

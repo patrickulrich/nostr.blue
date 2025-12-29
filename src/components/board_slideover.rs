@@ -11,6 +11,8 @@ use crate::stores::auth_store;
 use crate::utils::truncate_pubkey;
 use crate::components::pin_board_card::HashtagBadge;
 use crate::components::pin_board_item_card::PinCard;
+use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::pin_menu::PinToBoardRequest;
 use crate::components::{ZapModal, ShareModal, ConfirmModal};
 use crate::components::icons::PinIcon;
 use crate::routes::Route;
@@ -54,6 +56,8 @@ pub fn BoardSlideover(
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
     let mut delete_error = use_signal(|| None::<String>);
+    // Pin to board modal (lifted from PinCard to avoid overflow clipping)
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
 
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
@@ -457,6 +461,9 @@ pub fn BoardSlideover(
                                     pin: pin.clone(),
                                     is_owner: is_owner,
                                     on_delete: handle_pin_deleted,
+                                    on_pin_to_board: move |req: PinToBoardRequest| {
+                                        pin_to_board_request.set(Some(req));
+                                    },
                                 }
                             }
                         }
@@ -499,6 +506,16 @@ pub fn BoardSlideover(
                     show_delete_confirm.set(false);
                     delete_error.set(None);
                 },
+            }
+        }
+
+        // Pin to Board Modal (lifted from PinCard to avoid overflow clipping)
+        if let Some(ref req) = *pin_to_board_request.read() {
+            PinToBoardModal {
+                reference: req.reference.clone(),
+                content_type: req.content_type.clone(),
+                title: req.title.clone(),
+                on_close: move |_| pin_to_board_request.set(None),
             }
         }
     }

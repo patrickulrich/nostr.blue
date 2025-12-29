@@ -14,8 +14,9 @@ use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::auth_store;
 use crate::components::{
     ZapModal, ShareModal, ConfirmModal, HashtagBadge,
-    PinCardMosaicSkeleton, PinMosaicGrid,
+    PinCardMosaicSkeleton, PinMosaicGrid, PinToBoardRequest,
 };
+use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::routes::Route;
 use crate::utils::truncate_pubkey;
 
@@ -45,6 +46,8 @@ pub fn PinBoardDetail(naddr: String) -> Element {
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
+    // Pin to board modal (lifted from PinCard to avoid overflow clipping)
+    let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
 
     // Check if current user owns this board
     let is_owner = use_memo(move || {
@@ -490,6 +493,9 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                             is_owner: *is_owner.read(),
                             on_delete: handle_pin_deleted,
                             metadata_map: pin_metadata.read().clone(),
+                            on_pin_to_board: move |req: PinToBoardRequest| {
+                                pin_to_board_request.set(Some(req));
+                            },
                         }
                     }
                 }
@@ -527,6 +533,16 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
                 on_cancel: move |_| show_delete_confirm.set(false),
+            }
+        }
+
+        // Pin to Board Modal (lifted from PinCard to avoid overflow clipping)
+        if let Some(ref req) = *pin_to_board_request.read() {
+            PinToBoardModal {
+                reference: req.reference.clone(),
+                content_type: req.content_type.clone(),
+                title: req.title.clone(),
+                on_close: move |_| pin_to_board_request.set(None),
             }
         }
     }

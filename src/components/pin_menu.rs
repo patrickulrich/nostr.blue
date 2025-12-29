@@ -12,6 +12,14 @@ use nostr_sdk::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use std::time::Duration;
 
+/// Data passed when requesting to pin content to a board
+#[derive(Clone, Debug)]
+pub struct PinToBoardRequest {
+    pub reference: PinReference,
+    pub content_type: crate::stores::pin_boards_store::PinContentType,
+    pub title: Option<String>,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct PinMenuProps {
     /// The pin to show menu for
@@ -21,6 +29,10 @@ pub struct PinMenuProps {
     /// Optional callback when pin is deleted
     #[props(default)]
     pub on_delete: Option<EventHandler<String>>,
+    /// Optional callback when "Pin to Board" is requested
+    /// If provided, the modal won't be rendered internally - parent handles it
+    #[props(default)]
+    pub on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 }
 
 #[component]
@@ -42,6 +54,7 @@ pub fn PinMenu(props: PinMenuProps) -> Element {
     let pin_for_report = pin.clone();
     let is_owner = props.is_owner;
     let on_delete = props.on_delete;
+    let on_pin_to_board = props.on_pin_to_board;
 
     // Get the author pubkey from the referenced content for reporting
     let author_pubkey = pin.pubkey.clone();
@@ -82,10 +95,24 @@ pub fn PinMenu(props: PinMenuProps) -> Element {
                     if *HAS_SIGNER.read() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
-                            onclick: move |e: MouseEvent| {
-                                e.stop_propagation();
-                                show_pin_to_board_modal.set(true);
-                                is_open.set(false);
+                            onclick: {
+                                let pin_ref = pin_for_modal.reference.clone();
+                                let pin_title = pin_for_modal.title.clone();
+                                let content_type = pin_for_modal.content_type();
+                                move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    is_open.set(false);
+                                    // Use callback if provided, otherwise show internal modal
+                                    if let Some(ref handler) = on_pin_to_board {
+                                        handler.call(PinToBoardRequest {
+                                            reference: pin_ref.clone(),
+                                            content_type: content_type.clone(),
+                                            title: pin_title.clone(),
+                                        });
+                                    } else {
+                                        show_pin_to_board_modal.set(true);
+                                    }
+                                }
                             },
                             svg {
                                 class: "w-4 h-4",
@@ -390,8 +417,8 @@ pub fn PinMenu(props: PinMenuProps) -> Element {
             }
         }
 
-        // Pin to Board Modal
-        if *show_pin_to_board_modal.read() {
+        // Pin to Board Modal (only rendered if no external handler provided)
+        if on_pin_to_board.is_none() && *show_pin_to_board_modal.read() {
             PinToBoardModal {
                 reference: pin_for_modal.reference.clone(),
                 content_type: pin_for_modal.content_type(),
