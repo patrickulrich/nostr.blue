@@ -5,12 +5,12 @@ use crate::components::MarkdownEditor;
 #[component]
 pub fn ArticleNew() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut summary = use_signal(|| String::new());
-    let content = use_signal(|| String::new());
-    let mut identifier = use_signal(|| String::new());
-    let mut cover_image = use_signal(|| String::new());
-    let mut hashtags = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut summary = use_signal(String::new);
+    let content = use_signal(String::new);
+    let mut identifier = use_signal(String::new);
+    let mut cover_image = use_signal(String::new);
+    let mut hashtags = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
 
@@ -22,7 +22,7 @@ pub fn ArticleNew() -> Element {
     let content_chars = content.read().chars().count();
     let can_publish = title_chars > 0
         && content_chars > 0
-        && identifier.read().len() > 0
+        && !identifier.read().is_empty()
         && !*is_publishing.read();
 
     // Handle close
@@ -98,7 +98,7 @@ pub fn ArticleNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

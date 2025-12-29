@@ -8,11 +8,11 @@ use url::Url;
 #[component]
 pub fn LiveStreamNew() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut summary = use_signal(|| String::new());
-    let mut image_url = use_signal(|| String::new());
-    let mut stream_url = use_signal(|| String::new());
-    let mut hashtags = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut summary = use_signal(String::new);
+    let mut image_url = use_signal(String::new);
+    let mut stream_url = use_signal(String::new);
+    let mut hashtags = use_signal(String::new);
     let mut status = use_signal(|| "planned".to_string());
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -28,7 +28,7 @@ pub fn LiveStreamNew() -> Element {
 
         !title_val.is_empty()
             && !stream_url_val.is_empty()
-            && Url::parse(&*stream_url_val)
+            && Url::parse(&stream_url_val)
                 .map(|u| {
                     let scheme = u.scheme();
                     scheme == "http" || scheme == "https" || scheme == "rtmp" || scheme == "rtmps"
@@ -84,7 +84,7 @@ pub fn LiveStreamNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(Route::Home {});
+            navigator.push(Route::Home { list: String::new() });
         }
     });
 

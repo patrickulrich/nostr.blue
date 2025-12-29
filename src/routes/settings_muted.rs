@@ -4,7 +4,7 @@ use crate::routes::Route;
 
 #[component]
 pub fn SettingsMuted() -> Element {
-    let mut muted_posts = use_signal(|| Vec::<String>::new());
+    let mut muted_posts = use_signal(Vec::<String>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 

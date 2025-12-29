@@ -81,13 +81,14 @@ pub fn VoiceRecorder(
                                 // Monitor duration and auto-stop at 60 seconds
                                 // Clone signals and recorder_id for the monitoring loop
                                 let monitor_recorder_id = recorder_id.clone();
-                                let mut monitor_current_time = current_time.clone();
-                                let monitor_state = state.clone();
-                                let monitor_is_mounted = is_mounted.clone();
+                                let mut monitor_current_time = current_time;
+                                let monitor_state = state;
+                                let monitor_is_mounted = is_mounted;
 
                                 spawn(async move {
                                     let started_at = js_sys::Date::now() / 1000.0;
                                     log::info!("Monitoring loop started at: {}", started_at);
+                                    let mut last_logged_second: i32 = -1;
 
                                     loop {
                                         TimeoutFuture::new(100).await;
@@ -103,9 +104,11 @@ pub fn VoiceRecorder(
                                             let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
                                             monitor_current_time.set(elapsed);
 
-                                            // Log every second
-                                            if (elapsed * 10.0) as u32 % 10 == 0 {
-                                                log::debug!("Recording time: {:.1}s", elapsed);
+                                            // Log once per second (avoid duplicate logs from 100ms polling)
+                                            let current_second = elapsed as i32;
+                                            if current_second != last_logged_second {
+                                                log::debug!("Recording time: {}s", current_second);
+                                                last_logged_second = current_second;
                                             }
 
                                             if elapsed >= MAX_DURATION_SECONDS {
@@ -380,10 +383,9 @@ pub fn VoiceRecorder(
 
                                         // Extract waveform
                                         let waveform = if let Ok(wf_val) = Reflect::get(&result, &JsValue::from_str("waveform")) {
-                                            let arr = js_sys::Array::from(&wf_val).to_vec().into_iter()
+                                            js_sys::Array::from(&wf_val).to_vec().into_iter()
                                                 .map(|v| v.as_f64().unwrap_or(0.0) as u8)
-                                                .collect::<Vec<_>>();
-                                            arr
+                                                .collect::<Vec<_>>()
                                         } else {
                                             log::warn!("Failed to extract waveform, using placeholder");
                                             vec![0u8; 100]
@@ -517,7 +519,7 @@ pub fn VoiceRecorder(
                         }
                     },
                     RecorderState::Stopped { .. } => {
-                        let audio_src = blob_url.as_ref().map(|s| s.as_str()).unwrap_or("");
+                        let audio_src = blob_url.as_deref().unwrap_or("");
                         rsx! {
                             // Always render audio element, even if blob URL is not ready yet
                             audio {

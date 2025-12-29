@@ -66,7 +66,7 @@ pub use send::{
 };
 pub use send::{watch_sent_token_claims, extract_y_values_from_token};
 #[allow(unused_imports)] // receive_tokens is simpler API for future use
-pub use receive::{receive_tokens, receive_tokens_with_options, ReceiveTokensOptions};
+pub use receive::{receive_tokens, receive_tokens_with_options, ReceiveTokensOptions, preview_token, TokenPreview};
 pub use lightning::{
     create_mint_quote,
     check_mint_quote_status,

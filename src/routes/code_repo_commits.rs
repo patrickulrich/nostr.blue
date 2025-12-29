@@ -1,0 +1,321 @@
+//! Repository Commits Page
+//!
+//! View commit history for a repository.
+
+use dioxus::prelude::*;
+use crate::components::icons;
+use crate::routes::Route;
+use crate::services::git_hosting::{
+    fetch_repository,
+    github_import::{fetch_commits, parse_github_url, GitHubCommit},
+};
+use crate::stores::nostr_client;
+use crate::utils::nip34::Repository;
+
+/// Repository commits page component
+#[component]
+pub fn CodeRepoCommits(naddr: String) -> Element {
+    // Repository state
+    let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
+    let mut commits_result = use_signal(|| None::<Result<Vec<GitHubCommit>, String>>);
+
+    // Clone for effect
+    let naddr_for_effect = naddr.clone();
+
+    // Fetch repository - wait for client initialization
+    use_effect(move || {
+        let n = naddr_for_effect.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        spawn(async move {
+            let result = fetch_repository(&n).await;
+
+            // If repo loaded, try to fetch commits from GitHub
+            if let Ok(ref repo) = result {
+                for url in repo.clone.iter() {
+                    if let Some((owner, repo_name)) = parse_github_url(url) {
+                        let commits = fetch_commits(&owner, &repo_name, 30).await;
+                        commits_result.set(Some(commits));
+                        break;
+                    }
+                }
+                // If no GitHub URL found
+                if commits_result.read().is_none() {
+                    commits_result.set(Some(Err("No GitHub URL found for this repository".to_string())));
+                }
+            }
+
+            repo_result.set(Some(result));
+        });
+    });
+
+    let repo_name = match &*repo_result.read() {
+        Some(Ok(r)) => r.name.clone().unwrap_or_else(|| r.id.clone()),
+        _ => "Repository".to_string(),
+    };
+
+    rsx! {
+        div {
+            class: "min-h-screen",
+
+            // Header
+            div {
+                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div {
+                    class: "p-4 flex items-center gap-3",
+                    Link {
+                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        class: "text-muted-foreground hover:text-foreground",
+                        dangerous_inner_html: icons::ARROW_LEFT
+                    }
+                    div {
+                        h1 {
+                            class: "text-xl font-bold flex items-center gap-2",
+                            svg {
+                                class: "w-5 h-5",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                circle { cx: "12", cy: "12", r: "3" }
+                                line { x1: "3", y1: "12", x2: "9", y2: "12" }
+                                line { x1: "15", y1: "12", x2: "21", y2: "12" }
+                            }
+                            "Commits"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "{repo_name}"
+                        }
+                    }
+                }
+            }
+
+            // Content
+            div {
+                class: "p-4",
+
+                match &*commits_result.read() {
+                    Some(Ok(list)) if !list.is_empty() => rsx! {
+                        div {
+                            class: "space-y-3",
+                            p {
+                                class: "text-sm text-muted-foreground mb-4",
+                                "{list.len()} commits"
+                            }
+                            div {
+                                class: "border border-border rounded-lg divide-y divide-border",
+                                for commit in list.iter() {
+                                    CommitRow {
+                                        key: "{commit.sha}",
+                                        commit: commit.clone()
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Some(Ok(_)) => rsx! {
+                        EmptyCommits {}
+                    },
+                    Some(Err(e)) => rsx! {
+                        div {
+                            class: "text-center py-12",
+                            div {
+                                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+                                svg {
+                                    class: "w-8 h-8 text-destructive",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    circle { cx: "12", cy: "12", r: "10" }
+                                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
+                                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                }
+                            }
+                            h3 { class: "font-semibold text-lg mb-2", "Failed to load commits" }
+                            p { class: "text-muted-foreground text-sm", "{e}" }
+                        }
+                    },
+                    None => rsx! {
+                        LoadingSkeleton {}
+                    },
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn CommitRow(commit: GitHubCommit) -> Element {
+    // Parse commit message - first line is title, rest is body
+    let message = &commit.commit.message;
+    let (title, body) = match message.find('\n') {
+        Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
+        None => (message.as_str(), None),
+    };
+
+    // Format date
+    let date = &commit.commit.author.date;
+    let formatted_date = format_commit_date(date);
+
+    // Short SHA
+    let short_sha = if commit.sha.len() >= 7 {
+        &commit.sha[..7]
+    } else {
+        &commit.sha
+    };
+
+    rsx! {
+        div {
+            class: "p-4 hover:bg-muted/50 transition",
+
+            div {
+                class: "flex items-start justify-between gap-4",
+
+                // Commit info
+                div {
+                    class: "flex-1 min-w-0",
+                    // Title
+                    a {
+                        href: "{commit.html_url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        class: "font-medium hover:text-primary truncate block",
+                        "{title}"
+                    }
+
+                    // Body preview
+                    if let Some(b) = body {
+                        if !b.is_empty() {
+                            p {
+                                class: "text-sm text-muted-foreground mt-1 line-clamp-2",
+                                "{b}"
+                            }
+                        }
+                    }
+
+                    // Author and date
+                    div {
+                        class: "flex items-center gap-3 mt-2 text-sm text-muted-foreground",
+                        if let Some(author) = &commit.author {
+                            div {
+                                class: "flex items-center gap-2",
+                                img {
+                                    class: "w-5 h-5 rounded-full",
+                                    src: "{author.avatar_url}",
+                                    alt: "{author.login}"
+                                }
+                                span { "{author.login}" }
+                            }
+                        } else {
+                            div {
+                                class: "flex items-center gap-2",
+                                div {
+                                    class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs",
+                                    "{commit.commit.author.name.chars().next().unwrap_or('?')}"
+                                }
+                                span { "{commit.commit.author.name}" }
+                            }
+                        }
+                        span { "committed {formatted_date}" }
+                    }
+                }
+
+                // SHA badge
+                a {
+                    href: "{commit.html_url}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono hover:bg-accent transition",
+                    svg {
+                        class: "w-3 h-3 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "12", r: "3" }
+                    }
+                    "{short_sha}"
+                }
+            }
+        }
+    }
+}
+
+/// Format a commit date string to relative time
+fn format_commit_date(date_str: &str) -> String {
+    // Parse ISO 8601 date like "2024-01-15T10:30:00Z"
+    // For simplicity, just extract the date part
+    if let Some(date_part) = date_str.split('T').next() {
+        return date_part.to_string();
+    }
+    date_str.to_string()
+}
+
+#[component]
+fn EmptyCommits() -> Element {
+    rsx! {
+        div {
+            class: "text-center py-12",
+            div {
+                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
+                svg {
+                    class: "w-8 h-8 text-muted-foreground",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    circle { cx: "12", cy: "12", r: "3" }
+                    line { x1: "3", y1: "12", x2: "9", y2: "12" }
+                    line { x1: "15", y1: "12", x2: "21", y2: "12" }
+                }
+            }
+            h3 { class: "font-semibold text-lg mb-2", "No Commits" }
+            p { class: "text-muted-foreground text-sm", "This repository has no commits yet." }
+        }
+    }
+}
+
+#[component]
+fn LoadingSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "space-y-3 animate-pulse",
+            for i in 0..5 {
+                div {
+                    key: "{i}",
+                    class: "p-4 border border-border rounded-lg",
+                    div { class: "h-4 bg-muted rounded w-3/4 mb-3" }
+                    div { class: "flex items-center gap-3" }
+                    div { class: "h-5 w-5 bg-muted rounded-full" }
+                    div { class: "h-3 bg-muted rounded w-32" }
+                }
+            }
+        }
+    }
+}
