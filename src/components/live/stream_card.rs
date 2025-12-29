@@ -24,6 +24,8 @@ pub struct LiveStreamMeta {
     pub host_pubkey: Option<String>,
     /// Whether the host has a valid proof signature per NIP-53
     pub host_verified: bool,
+    /// Relay URLs from the stream event for chat subscriptions
+    pub relays: Vec<String>,
 }
 
 /// Parse NIP-53 Kind 30311 live streaming event into LiveStreamCard's meta format
@@ -59,6 +61,14 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
             .collect()
     };
 
+    // Extract relays from the stream event (used for chat subscriptions)
+    let relays: Vec<String> = live_event.relays
+        .iter()
+        .map(|url| url.to_string())
+        .collect();
+
+    log::debug!("Parsed stream relays: {:?}", relays);
+
     Some(LiveStreamMeta {
         d_tag: live_event.id,
         title: live_event.title,
@@ -71,6 +81,7 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         tags,
         host_pubkey,
         host_verified,
+        relays,
     })
 }
 

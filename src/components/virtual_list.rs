@@ -28,7 +28,7 @@ use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Track if a scroll update is pending (prevents flooding with rAF callbacks)
-    static SCROLL_UPDATE_PENDING: RefCell<bool> = RefCell::new(false);
+    static SCROLL_UPDATE_PENDING: RefCell<bool> = const { RefCell::new(false) };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -299,8 +299,8 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                         return;
                     }
 
-                    let mut state = virtual_state.clone();
-                    let container = container_element.clone();
+                    let mut state = virtual_state;
+                    let container = container_element;
 
                     // Schedule update on next animation frame
                     // Use once_into_js to convert closure to JsValue that owns it (prevents premature drop)
@@ -373,7 +373,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                                     // Measure using the mounted element directly (no global IDs)
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        let mut state = state.clone();
+                                        let mut state = state;
                                         spawn(async move {
                                             let element = _evt.data();
                                             if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {

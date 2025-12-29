@@ -434,6 +434,10 @@ fn ConversationView(pubkey: String) -> Element {
     let mut decrypt_loading = use_signal(|| true);
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let messages_container_id = use_signal(|| format!("messages-{}", uuid::Uuid::new_v4()));
+    // Feedback toast for showing relay publish results
+    let mut send_feedback = use_signal(|| Option::<(bool, String)>::None);
+    // Version counter to prevent stale timeout from clearing newer feedback
+    let mut feedback_version = use_signal(|| 0u32);
 
     // Polling task for real-time updates
     let mut poll_task = use_signal(|| None::<Task>);
@@ -574,19 +578,68 @@ fn ConversationView(pubkey: String) -> Element {
         }
 
         sending.set(true);
+        send_feedback.set(None);
         let recipient = pubkey_for_send.clone();
 
         spawn(async move {
             match dms::send_dm(recipient, content).await {
-                Ok(_) => {
-                    message_input.set(String::new());
-                    log::info!("Message sent successfully");
+                Ok(result) => {
+                    // Re-enable send button immediately after network call completes
+                    sending.set(false);
+
+                    // Show feedback based on relay results using PublishResult methods
+                    let rate = result.success_rate();
+
+                    if !result.is_success() {
+                        // Complete failure - preserve message for retry
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
+                        send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            send_feedback.set(None);
+                        }
+                    } else if result.has_failures() {
+                        // Partial success - clear message and show warning
+                        message_input.set(String::new());
+                        log::info!("Message sent successfully");
+                        // Note: success_rate() already returns 0-100, don't multiply again
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
+                        send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
+                            rate,
+                            result.success_count(),
+                            result.total_attempted()
+                        ))));
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            send_feedback.set(None);
+                        }
+                    } else {
+                        // Full success: clear message, no feedback needed
+                        message_input.set(String::new());
+                        log::info!("Message sent successfully");
+                    }
                 }
                 Err(e) => {
+                    // Re-enable send button immediately after network call completes
+                    sending.set(false);
                     log::error!("Failed to send message: {}", e);
+                    feedback_version.set(feedback_version() + 1);
+                    let current_version = feedback_version();
+                    send_feedback.set(Some((false, format!("Error: {}", e))));
+
+                    // Auto-hide error after 5 seconds (only if version unchanged)
+                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    if feedback_version() == current_version {
+                        send_feedback.set(None);
+                    }
                 }
             }
-            sending.set(false);
         });
     };
 
@@ -679,6 +732,23 @@ fn ConversationView(pubkey: String) -> Element {
                 }
             }
 
+            // Feedback toast for relay results
+            if let Some((is_success, message)) = send_feedback.read().clone() {
+                div {
+                    class: if is_success {
+                        "mx-4 mb-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm flex items-center gap-2"
+                    } else {
+                        "mx-4 mb-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2"
+                    },
+                    span { "{message}" }
+                    button {
+                        class: "ml-auto text-current opacity-60 hover:opacity-100",
+                        onclick: move |_| send_feedback.set(None),
+                        "×"
+                    }
+                }
+            }
+
             // Message input
             div {
                 class: "flex-shrink-0 p-4 border-t border-border",
@@ -699,19 +769,68 @@ fn ConversationView(pubkey: String) -> Element {
                                 }
 
                                 sending.set(true);
+                                send_feedback.set(None);
                                 let recipient = pubkey_for_input.clone();
 
                                 spawn(async move {
                                     match dms::send_dm(recipient, content).await {
-                                        Ok(_) => {
-                                            message_input.set(String::new());
-                                            log::info!("Message sent successfully");
+                                        Ok(result) => {
+                                            // Re-enable send button immediately after network call completes
+                                            sending.set(false);
+
+                                            // Show feedback based on relay results using PublishResult methods
+                                            let rate = result.success_rate();
+
+                                            if !result.is_success() {
+                                                // Complete failure - preserve message for retry
+                                                feedback_version.set(feedback_version() + 1);
+                                                let current_version = feedback_version();
+                                                send_feedback.set(Some((false, "Failed to send to any relay".to_string())));
+
+                                                // Auto-hide feedback after 3 seconds (only if version unchanged)
+                                                gloo_timers::future::TimeoutFuture::new(3000).await;
+                                                if feedback_version() == current_version {
+                                                    send_feedback.set(None);
+                                                }
+                                            } else if result.has_failures() {
+                                                // Partial success - clear message and show warning
+                                                message_input.set(String::new());
+                                                log::info!("Message sent successfully");
+                                                // Note: success_rate() already returns 0-100, don't multiply again
+                                                feedback_version.set(feedback_version() + 1);
+                                                let current_version = feedback_version();
+                                                send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
+                                                    rate,
+                                                    result.success_count(),
+                                                    result.total_attempted()
+                                                ))));
+
+                                                // Auto-hide feedback after 3 seconds (only if version unchanged)
+                                                gloo_timers::future::TimeoutFuture::new(3000).await;
+                                                if feedback_version() == current_version {
+                                                    send_feedback.set(None);
+                                                }
+                                            } else {
+                                                // Full success: clear message, no feedback needed
+                                                message_input.set(String::new());
+                                                log::info!("Message sent successfully");
+                                            }
                                         }
                                         Err(e) => {
+                                            // Re-enable send button immediately after network call completes
+                                            sending.set(false);
                                             log::error!("Failed to send message: {}", e);
+                                            feedback_version.set(feedback_version() + 1);
+                                            let current_version = feedback_version();
+                                            send_feedback.set(Some((false, format!("Error: {}", e))));
+
+                                            // Auto-hide error after 5 seconds (only if version unchanged)
+                                            gloo_timers::future::TimeoutFuture::new(5000).await;
+                                            if feedback_version() == current_version {
+                                                send_feedback.set(None);
+                                            }
                                         }
                                     }
-                                    sending.set(false);
                                 });
                             }
                         }

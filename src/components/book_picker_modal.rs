@@ -469,8 +469,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                 for (idx, section_ref) in pub_.section_addresses.iter().enumerate() {
                                                     {
                                                         // Extract d-tag from address (kind:pubkey:d-tag format)
+                                                        // Use splitn(3, ':') to handle d-tags that contain colons
                                                         let d_tag = section_ref.address
-                                                            .split(':')
+                                                            .splitn(3, ':')
                                                             .nth(2)
                                                             .unwrap_or(&section_ref.address);
                                                         // Use d-tag as the chapter identifier for proper referencing

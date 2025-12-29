@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_note, publish_repost, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note_tracked, publish_repost, get_client, HAS_SIGNER};
 use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
@@ -706,8 +706,19 @@ pub fn PhotoCard(event: Event) -> Element {
                                         vec!["p".to_string(), author_clone],
                                     ];
 
-                                    match publish_note(text, tags).await {
-                                        Ok(_) => {
+                                    match publish_note_tracked(text, tags).await {
+                                        Ok(result) => {
+                                            log::info!(
+                                                "Photo comment published: {} ({}/{} relays)",
+                                                result.event_id,
+                                                result.success_count(),
+                                                result.total_attempted()
+                                            );
+                                            if result.has_failures() {
+                                                for (relay, error) in &result.failed_relays {
+                                                    log::warn!("Relay {} failed: {}", relay, error);
+                                                }
+                                            }
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);
@@ -744,8 +755,19 @@ pub fn PhotoCard(event: Event) -> Element {
                                         vec!["p".to_string(), author_clone],
                                     ];
 
-                                    match publish_note(text, tags).await {
-                                        Ok(_) => {
+                                    match publish_note_tracked(text, tags).await {
+                                        Ok(result) => {
+                                            log::info!(
+                                                "Photo comment published: {} ({}/{} relays)",
+                                                result.event_id,
+                                                result.success_count(),
+                                                result.total_attempted()
+                                            );
+                                            if result.has_failures() {
+                                                for (relay, error) in &result.failed_relays {
+                                                    log::warn!("Relay {} failed: {}", relay, error);
+                                                }
+                                            }
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);
