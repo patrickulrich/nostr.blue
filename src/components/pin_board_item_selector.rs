@@ -80,6 +80,7 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
                 board_addresses: selected,
                 reference,
                 title,
+                image: None,
                 content: note,
                 tags: vec![],
             };

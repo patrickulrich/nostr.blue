@@ -20,6 +20,7 @@ pub mod data_state;
 pub mod timed_serializer;
 pub mod format;
 pub mod url_metadata;
+pub mod pin_metadata;
 pub mod profile_prefetch;
 pub mod repost;
 pub mod event;
@@ -81,10 +82,10 @@ pub fn slugify(input: &str) -> String {
         .join("-")
 }
 
-/// Generate a recipe slug matching zap.cooking format
+/// Generate a recipe slug for d-tag identifier
 ///
 /// Only replaces spaces with hyphens, preserves other characters.
-/// This ensures d-tags are compatible with zap.cooking/nostrcooking.
+/// This ensures d-tags are compatible with recipe apps using nostrcooking format.
 ///
 /// Example: "Grandma's Pie" -> "grandma's-pie"
 pub fn recipe_slug(input: &str) -> String {

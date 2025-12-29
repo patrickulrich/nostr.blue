@@ -93,6 +93,8 @@ pub mod recipe_chef;
 pub mod pin_boards;
 pub mod pin_board_detail;
 pub mod pin_board_new;
+pub mod pin_new;
+pub mod user_pins;
 
 // Wiki (NIP-54 Kind 30818)
 pub mod wiki;
@@ -234,6 +236,8 @@ use recipe_chef::RecipeChef;
 use pin_boards::PinBoardsHome;
 use pin_board_detail::PinBoardDetail;
 use pin_board_new::{PinBoardNew, PinBoardEdit};
+use pin_new::PinNew;
+use user_pins::UserPins;
 use wiki::WikiHome;
 use wiki_author::WikiAuthor;
 use wiki_detail::WikiDetail;
@@ -489,6 +493,12 @@ pub enum Route {
         #[route("/pinboards/new")]
         PinBoardNew {},
 
+        #[route("/pinboards/pin/new")]
+        PinNew {},
+
+        #[route("/pinboards/pins")]
+        UserPins {},
+
         #[route("/pinboards/:naddr")]
         PinBoardDetail { naddr: String },
 
@@ -670,7 +680,7 @@ pub enum Route {
 
 #[component]
 fn Layout() -> Element {
-    use crate::stores::{auth_store, notifications as notif_store};
+    use crate::stores::{auth_store, music_player::MUSIC_PLAYER, notifications as notif_store};
 
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
@@ -713,7 +723,7 @@ fn Layout() -> Element {
         Route::RecipeFork { .. } | Route::RecipesByTag { .. } | Route::RecipeChef { .. }
     );
     let is_pin_boards_page = matches!(current_route,
-        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. }
+        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. } | Route::PinNew {} | Route::UserPins {}
     );
     let is_wiki_page = matches!(current_route,
         Route::WikiHome {} | Route::WikiDetail { .. } | Route::WikiNew {} | Route::WikiAuthor { .. }
@@ -743,6 +753,12 @@ fn Layout() -> Element {
     // Check if we're on home page for home button styling
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
+
+    // Check if music player is visible to add bottom padding
+    let music_player_visible = {
+        let state = MUSIC_PLAYER.read();
+        state.is_visible && state.current_track.is_some()
+    };
 
     rsx! {
         div {
@@ -1170,10 +1186,14 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: if is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page {
-                        "w-full flex-1 border-r border-border"
-                    } else {
-                        "w-full max-w-[600px] flex-shrink flex-grow border-r border-border"
+                    class: {
+                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page;
+                        match (is_wide_page, music_player_visible) {
+                            (true, true) => "w-full flex-1 border-r border-border pb-24",
+                            (true, false) => "w-full flex-1 border-r border-border",
+                            (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
+                            (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
+                        }
                     },
 
                     // Mobile header

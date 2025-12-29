@@ -104,7 +104,7 @@ impl SidebarItem {
             SidebarItem::Events => "Events",
             SidebarItem::Calendar => "Calendar",
             SidebarItem::Recipes => "Recipes",
-            SidebarItem::PinBoards => "Pin Boards",
+            SidebarItem::PinBoards => "Pinboards",
             SidebarItem::Trending => "Trending",
             SidebarItem::Nips => "NIPs",
             SidebarItem::Badges => "Badges",
@@ -199,7 +199,7 @@ pub const DEFAULT_MAIN_SIDEBAR_SLOTS: usize = 12;
 /// Maximum items allowed in main sidebar
 pub const MAX_MAIN_SIDEBAR_SLOTS: usize = 20;
 
-/// Default sidebar configuration (all 22 items in standard order)
+/// Default sidebar configuration (22 items in standard order)
 pub fn default_sidebar_items() -> Vec<SidebarItem> {
     vec![
         // Main sidebar (first 12)
@@ -207,26 +207,25 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Explore,
         SidebarItem::Articles,
         SidebarItem::Music,
+        SidebarItem::Podcasts,
         SidebarItem::Photos,
         SidebarItem::Videos,
-        SidebarItem::Live,
+        SidebarItem::Events,
+        SidebarItem::Lists,
         SidebarItem::Notifications,
         SidebarItem::Messages,
-        SidebarItem::Bookmarks,
         SidebarItem::Profile,
-        SidebarItem::Settings,
-        // More menu (remaining 11)
+        // More menu (remaining 10)
+        SidebarItem::P2PTrading,
         SidebarItem::VoiceMessages,
         SidebarItem::Polls,
-        SidebarItem::WebBookmarks,
-        SidebarItem::Podcasts,
-        SidebarItem::Radio,
-        SidebarItem::Wallet,
-        SidebarItem::P2PTrading,
         SidebarItem::Communities,
-        SidebarItem::Events,
-        SidebarItem::Calendar,
+        SidebarItem::Radio,
+        SidebarItem::PinBoards,
+        SidebarItem::Wiki,
         SidebarItem::Recipes,
+        SidebarItem::Shop,
+        SidebarItem::Settings,
     ]
 }
 

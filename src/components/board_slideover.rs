@@ -1,12 +1,12 @@
 //! Board Slideover Modal Component
-//! Pinterest-style right-sliding panel for viewing board details
+//! Right-sliding panel for viewing board details
 //! Uses two-stage loading: board metadata first, then pins
 
 use dioxus::prelude::*;
 
 use crate::hooks::use_author_metadata;
 use crate::stores::nostr_client::HAS_SIGNER;
-use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered, delete_pin};
+use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered};
 use crate::stores::auth_store;
 use crate::utils::truncate_pubkey;
 use crate::components::pin_board_card::HashtagBadge;
@@ -48,7 +48,6 @@ pub fn BoardSlideover(
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut deleting = use_signal(|| false);
-    let mut pending_pin_removal = use_signal(|| None::<Pin>);
 
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
@@ -136,27 +135,10 @@ pub fn BoardSlideover(
         });
     };
 
-    // Handle pin removal - show confirmation modal
-    let handle_pin_remove = move |pin: Pin| {
-        pending_pin_removal.set(Some(pin));
-    };
-
-    // Handle confirmed pin removal
-    let handle_pin_remove_confirmed = move |_| {
-        if let Some(pin) = pending_pin_removal.take() {
-            let event_id = pin.event_id.clone();
-            spawn(async move {
-                match delete_pin(&event_id).await {
-                    Ok(_) => {
-                        // Remove from local state
-                        pins.write().retain(|p| p.event_id != event_id);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to delete pin: {}", e);
-                    }
-                }
-            });
-        }
+    // Handle pin deletion (called after successful delete from PinMenu)
+    let handle_pin_deleted = move |event_id: String| {
+        // Remove from local state
+        pins.write().retain(|p| p.event_id != event_id);
     };
 
     // Don't render if not shown (early return before expensive signal reads)
@@ -416,8 +398,8 @@ pub fn BoardSlideover(
                                 PinCard {
                                     key: "{pin.event_id}",
                                     pin: pin.clone(),
-                                    show_remove: is_owner,
-                                    on_remove: handle_pin_remove,
+                                    is_owner: is_owner,
+                                    on_delete: handle_pin_deleted,
                                 }
                             }
                         }
@@ -453,17 +435,6 @@ pub fn BoardSlideover(
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
                 on_cancel: move |_| show_delete_confirm.set(false),
-            }
-        }
-
-        if pending_pin_removal.read().is_some() {
-            ConfirmModal {
-                title: "Remove Pin".to_string(),
-                message: "Remove this pin from the board?".to_string(),
-                confirm_text: Some("Remove".to_string()),
-                cancel_text: Some("Cancel".to_string()),
-                on_confirm: handle_pin_remove_confirmed,
-                on_cancel: move |_| pending_pin_removal.set(None),
             }
         }
     }

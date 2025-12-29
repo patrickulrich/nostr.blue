@@ -2,18 +2,19 @@
 //! View a pin board with its pins, engagement, and actions
 //! Uses two-stage loading: board metadata first, then pins
 
+use std::collections::HashMap;
 use dioxus::prelude::*;
 use crate::stores::pin_boards_store::{
-    self, Pinboard, Pin, delete_pinboard, delete_pin,
+    self, Pinboard, Pin, PinMetadata, delete_pinboard,
     fetch_pinboard_reaction_count, fetch_pinboard_zap_total,
     has_user_reacted_to_pinboard, toggle_pinboard_reaction,
-    fetch_pins_for_board_filtered,
+    fetch_pins_for_board_filtered, enrich_pins_metadata,
 };
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::auth_store;
 use crate::components::{
     ZapModal, ShareModal, ConfirmModal, HashtagBadge,
-    PinCardSkeleton, PinGrid,
+    PinCardMosaicSkeleton, PinMosaicGrid,
 };
 use crate::routes::Route;
 use crate::utils::truncate_pubkey;
@@ -29,6 +30,9 @@ pub fn PinBoardDetail(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut pins_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+
+    // Enriched metadata for pins (includes content type, title, image, summary)
+    let mut pin_metadata = use_signal(HashMap::<String, PinMetadata>::new);
 
     // Engagement state
     let mut reaction_count = use_signal(|| 0usize);
@@ -101,6 +105,10 @@ pub fn PinBoardDetail(naddr: String) -> Element {
 
                 match result {
                     Ok(fetched_pins) => {
+                        // Enrich pins with metadata from referenced events (image, title, content type)
+                        let metadata = enrich_pins_metadata(&fetched_pins).await;
+                        pin_metadata.set(metadata);
+
                         pins.set(fetched_pins);
                     }
                     Err(e) => {
@@ -130,20 +138,12 @@ pub fn PinBoardDetail(naddr: String) -> Element {
         }
     });
 
-    // Handle pin removal
-    let handle_remove_pin = move |pin: Pin| {
-        let event_id = pin.event_id.clone();
-        spawn(async move {
-            match delete_pin(&event_id).await {
-                Ok(_) => {
-                    // Remove from local state
-                    pins.write().retain(|p| p.event_id != event_id);
-                }
-                Err(e) => {
-                    log::error!("Failed to delete pin: {}", e);
-                }
-            }
-        });
+    // Handle pin deletion (called after successful delete from PinMenu)
+    let handle_pin_deleted = move |event_id: String| {
+        // Remove from local state
+        pins.write().retain(|p| p.event_id != event_id);
+        // Also clean up stale metadata
+        pin_metadata.write().remove(&event_id);
     };
 
     // Handle board deletion
@@ -469,9 +469,9 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                         }
                     }
 
-                    // Pins grid
+                    // Pins grid (masonry layout)
                     if *pins_loading.read() {
-                        PinGrid {
+                        PinMosaicGrid {
                             pins: vec![],
                             loading: true,
                             skeleton_count: 8,
@@ -485,10 +485,11 @@ pub fn PinBoardDetail(naddr: String) -> Element {
                             }
                         }
                     } else {
-                        PinGrid {
+                        PinMosaicGrid {
                             pins: pins.read().clone(),
-                            show_remove: *is_owner.read(),
-                            on_remove: handle_remove_pin,
+                            is_owner: *is_owner.read(),
+                            on_delete: handle_pin_deleted,
+                            metadata_map: pin_metadata.read().clone(),
                         }
                     }
                 }
@@ -554,11 +555,11 @@ fn BoardDetailSkeleton() -> Element {
             div { class: "h-4 w-full bg-muted rounded" }
             div { class: "h-4 w-3/4 bg-muted rounded" }
 
-            // Pins grid skeleton
+            // Pins grid skeleton (masonry style)
             div {
-                class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                class: "columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-3",
                 for i in 0..8 {
-                    PinCardSkeleton { key: "skeleton-{i}" }
+                    PinCardMosaicSkeleton { key: "skeleton-{i}" }
                 }
             }
         }

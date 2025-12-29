@@ -61,7 +61,7 @@ pub fn DvmSelectorModal(
                         div {
                             div {
                                 class: "font-medium",
-                                "Default (Snort's DVM)"
+                                "Default DVM"
                             }
                             div {
                                 class: "text-xs text-muted-foreground",

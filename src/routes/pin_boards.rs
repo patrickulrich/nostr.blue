@@ -1,5 +1,5 @@
 //! Pinboards Explore Page
-//! Browse and discover pinboards (Pinterest-style)
+//! Browse and discover pinboards with masonry layout
 
 use dioxus::prelude::*;
 use nostr_sdk::prelude::NostrDatabaseExt;
@@ -240,12 +240,20 @@ pub fn PinBoardsHome() -> Element {
                             span { class: "text-2xl", "📌" }
                             "Pinboards"
                         }
-                        // Create Board button (only if signed in)
+                        // Create buttons (only if signed in)
                         if *HAS_SIGNER.read() {
-                            Link {
-                                to: Route::PinBoardNew {},
-                                class: "px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition",
-                                "+ New Board"
+                            div {
+                                class: "flex items-center gap-2",
+                                Link {
+                                    to: Route::PinNew {},
+                                    class: "px-4 py-2 border border-primary text-primary hover:bg-primary/10 rounded-lg font-medium transition",
+                                    "+ New Pin"
+                                }
+                                Link {
+                                    to: Route::PinBoardNew {},
+                                    class: "px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition",
+                                    "+ New Board"
+                                }
                             }
                         }
                     }

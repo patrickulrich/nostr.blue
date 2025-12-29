@@ -331,7 +331,7 @@ pub fn get_upload_servers() -> Vec<(String, String)> {
     if blossom_server != crate::stores::blossom_store::DEFAULT_SERVER {
         servers.push(("Custom Blossom".to_string(), blossom_server));
     } else {
-        servers.push(("Blossom (Primal)".to_string(), blossom_server));
+        servers.push(("Default Blossom".to_string(), blossom_server));
     }
 
     servers

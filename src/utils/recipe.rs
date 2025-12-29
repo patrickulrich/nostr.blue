@@ -32,7 +32,7 @@ pub struct ParsedRecipe {
 pub struct RecipeMetadata {
     pub title: String,
     pub summary: Option<String>,
-    /// All images from the recipe (supports multiple images like zap.cooking)
+    /// All images from the recipe (supports multiple images)
     pub images: Vec<String>,
     pub identifier: Option<String>,
     pub published_at: u64,
