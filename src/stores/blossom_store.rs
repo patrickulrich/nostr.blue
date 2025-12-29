@@ -151,8 +151,8 @@ pub async fn upload_image(
     let is_video = content_type.starts_with("video/");
     let media_type = if is_video { "video" } else { "image" };
 
-    log::info!("Uploading {}: {} bytes{}", media_type, data.len(),
-        if is_video { "" } else { &format!(", quality: {}%", quality) });
+    let quality_str = if is_video { String::new() } else { format!(", quality: {}%", quality) };
+    log::info!("Uploading {}: {} bytes{}", media_type, data.len(), quality_str);
 
     // Reset progress
     UPLOAD_PROGRESS.write().replace(0.0);
