@@ -426,7 +426,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                     rsx! {
                                         LiveChat {
                                             stream_author_pubkey: author_pk,
-                                            stream_d_tag: dtag
+                                            stream_d_tag: dtag,
                                         }
                                     }
                                 }

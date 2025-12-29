@@ -141,6 +141,68 @@ pub struct RelayPoolStore {
 
 pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> = Signal::global(|| Store::new(RelayPoolStore::default()));
 
+/// Result of publishing an event, including relay success/failure tracking
+/// Enables debugging which relays accepted/rejected events
+#[derive(Clone, Debug)]
+pub struct PublishResult {
+    /// The event ID that was published
+    pub event_id: String,
+    /// URLs of relays that successfully accepted the event
+    pub successful_relays: Vec<String>,
+    /// URLs of relays that failed to accept the event (with error messages)
+    pub failed_relays: Vec<(String, String)>,
+}
+
+impl PublishResult {
+    /// Create from SDK Output
+    pub fn from_output(output: nostr_relay_pool::Output<nostr::EventId>) -> Self {
+        let successful: Vec<String> = output.success
+            .iter()
+            .map(|url| url.to_string())
+            .collect();
+        let failed: Vec<(String, String)> = output.failed
+            .iter()
+            .map(|(url, reason)| (url.to_string(), reason.clone()))
+            .collect();
+
+        Self {
+            event_id: output.id().to_hex(),
+            successful_relays: successful,
+            failed_relays: failed,
+        }
+    }
+
+    /// Get total number of relays attempted
+    pub fn total_attempted(&self) -> usize {
+        self.successful_relays.len() + self.failed_relays.len()
+    }
+
+    /// Get number of successful relays
+    pub fn success_count(&self) -> usize {
+        self.successful_relays.len()
+    }
+
+    /// Check if publish was at least partially successful
+    pub fn is_success(&self) -> bool {
+        !self.successful_relays.is_empty()
+    }
+
+    /// Check if any relays failed
+    pub fn has_failures(&self) -> bool {
+        !self.failed_relays.is_empty()
+    }
+
+    /// Get success rate as percentage (0.0 - 100.0)
+    pub fn success_rate(&self) -> f32 {
+        let total = self.total_attempted();
+        if total == 0 {
+            0.0
+        } else {
+            (self.successful_relays.len() as f32 / total as f32) * 100.0
+        }
+    }
+}
+
 /// Default relays to connect to
 const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -621,8 +683,9 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
     tags
 }
 
-/// Publish a text note (kind 1 event)
-pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::result::Result<String, String> {
+/// Publish a text note (kind 1 event) with relay feedback
+/// Returns PublishResult with success/failure tracking per relay
+pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -724,20 +787,42 @@ pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::resul
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Note published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    // Log relay feedback
+    log::info!(
+        "Note published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Publish a reaction (kind 7 event) to another event
+/// Publish a text note (kind 1 event)
+/// For relay feedback, use publish_note_tracked instead
+pub async fn publish_note(content: String, tags: Vec<Vec<String>>) -> std::result::Result<String, String> {
+    publish_note_tracked(content, tags)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a reaction (kind 7 event) with relay feedback
 /// NIP-25: https://github.com/nostr-protocol/nips/blob/master/25.md
 /// NIP-30: Custom emoji support via emoji_tag parameter
-pub async fn publish_reaction(
+pub async fn publish_reaction_tracked(
     event_id: String,
     event_author: String,
     content: String,
     emoji_tag: Option<(String, String)>, // (shortcode, url) for custom emoji reactions
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -805,9 +890,35 @@ pub async fn publish_reaction(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish reaction: {}", e))?;
 
-    let reaction_id = output.id().to_hex();
-    log::info!("Reaction published successfully: {}", reaction_id);
-    Ok(reaction_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Reaction published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a reaction (kind 7 event) to another event
+/// For relay feedback, use publish_reaction_tracked instead
+pub async fn publish_reaction(
+    event_id: String,
+    event_author: String,
+    content: String,
+    emoji_tag: Option<(String, String)>,
+) -> std::result::Result<String, String> {
+    publish_reaction_tracked(event_id, event_author, content, emoji_tag)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Fetch a user's contact list (kind 3 event)
@@ -888,9 +999,9 @@ async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Ve
     }
 }
 
-/// Publish a contact list (kind 3 event)
+/// Publish a contact list (kind 3 event) with relay feedback
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
-pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<String, String> {
+pub async fn publish_contacts_tracked(contacts: Vec<String>) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -919,17 +1030,33 @@ pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<Stri
     // This allows for relay URLs and petnames (aliases) to be added in the future
     let builder = nostr::EventBuilder::contact_list(contact_list);
 
-    match client.send_event_builder(builder).await {
-        Ok(output) => {
-            let event_id = output.id().to_string();
-            log::info!("Contact list published successfully: {}", event_id);
-            Ok(event_id)
-        }
-        Err(e) => {
-            log::error!("Failed to publish contact list: {}", e);
-            Err(format!("Failed to publish contact list: {}", e))
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish contact list: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Contact list published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
         }
     }
+
+    Ok(result)
+}
+
+/// Publish a contact list (kind 3 event)
+/// For relay feedback, use publish_contacts_tracked instead
+pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<String, String> {
+    publish_contacts_tracked(contacts)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Follow a user (adds to contact list and publishes)
@@ -1514,13 +1641,13 @@ pub async fn report_post(
     }
 }
 
-/// Publish a repost (kind 6 event) of another event
+/// Publish a repost (kind 6 event) with relay feedback
 /// NIP-18: https://github.com/nostr-protocol/nips/blob/master/18.md
-pub async fn publish_repost(
+pub async fn publish_repost_tracked(
     event_id: String,
     _event_author: String,
     relay_url: Option<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1555,9 +1682,34 @@ pub async fn publish_repost(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish repost: {}", e))?;
 
-    let repost_id = output.id().to_hex();
-    log::info!("Repost published successfully: {}", repost_id);
-    Ok(repost_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Repost published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a repost (kind 6 event) of another event
+/// For relay feedback, use publish_repost_tracked instead
+pub async fn publish_repost(
+    event_id: String,
+    event_author: String,
+    relay_url: Option<String>,
+) -> std::result::Result<String, String> {
+    publish_repost_tracked(event_id, event_author, relay_url)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Delete a repost event (Kind 6) using NIP-9 Event Deletion
@@ -1713,10 +1865,10 @@ pub async fn fetch_event_by_coordinate_with_relays(
     }
 }
 
-/// Publish profile metadata (Kind 0)
+/// Publish profile metadata (Kind 0) with relay feedback
 ///
 /// Updates the user's Nostr profile with the provided metadata
-pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String, String> {
+pub async fn publish_metadata_tracked(metadata: Metadata) -> std::result::Result<PublishResult, String> {
     let client = NOSTR_CLIENT.read();
     let client = client.as_ref().ok_or("Client not initialized")?;
 
@@ -1732,10 +1884,30 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish metadata: {}", e))?;
 
-    log::info!("Metadata published successfully");
+    let result = PublishResult::from_output(output);
 
-    // Return event ID
-    Ok(output.id().to_hex())
+    log::info!(
+        "Metadata published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish profile metadata (Kind 0)
+/// For relay feedback, use publish_metadata_tracked instead
+pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String, String> {
+    publish_metadata_tracked(metadata)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Update just the profile picture
@@ -1786,16 +1958,16 @@ pub async fn update_profile_banner(url: String) -> std::result::Result<(), Strin
     Ok(())
 }
 
-/// Publish a long-form article (Kind 30023)
+/// Publish a long-form article (Kind 30023) with relay feedback
 /// NIP-23: https://github.com/nostr-protocol/nips/blob/master/23.md
-pub async fn publish_article(
+pub async fn publish_article_tracked(
     title: String,
     summary: String,
     content: String,
     identifier: String,
     cover_image: String,
     hashtags: Vec<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1823,7 +1995,7 @@ pub async fn publish_article(
 
     let mut tags = vec![
         Tag::identifier(identifier.clone()),
-        Tag::title(title),
+        Tag::title(title.clone()),
         // Add 'a' tag for addressable event: <kind>:<pubkey>:<d-identifier>
         Tag::coordinate(
             Coordinate::new(
@@ -1877,9 +2049,38 @@ pub async fn publish_article(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish article: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Article published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Article '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a long-form article (Kind 30023)
+/// For relay feedback, use publish_article_tracked instead
+pub async fn publish_article(
+    title: String,
+    summary: String,
+    content: String,
+    identifier: String,
+    cover_image: String,
+    hashtags: Vec<String>,
+) -> std::result::Result<String, String> {
+    publish_article_tracked(title, summary, content, identifier, cover_image, hashtags)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Detect MIME type from URL file extension
@@ -1917,15 +2118,15 @@ fn detect_mime_type(url: &str) -> Option<String> {
     }
 }
 
-/// Publish a picture post (Kind 20)
+/// Publish a picture post (Kind 20) with relay feedback
 /// NIP-68: https://github.com/nostr-protocol/nips/blob/master/68.md
-pub async fn publish_picture(
+pub async fn publish_picture_tracked(
     title: String,
     caption: String,
     image_urls: Vec<String>,
     hashtags: Vec<String>,
     location: String,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -1941,7 +2142,7 @@ pub async fn publish_picture(
     // Build tags
     use nostr::Tag;
     let mut tags = vec![
-        Tag::title(title),
+        Tag::title(title.clone()),
     ];
 
     // Add imeta tags for each image
@@ -1981,21 +2182,49 @@ pub async fn publish_picture(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish picture: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Picture published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Picture '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait)
+/// Publish a picture post (Kind 20)
+/// For relay feedback, use publish_picture_tracked instead
+pub async fn publish_picture(
+    title: String,
+    caption: String,
+    image_urls: Vec<String>,
+    hashtags: Vec<String>,
+    location: String,
+) -> std::result::Result<String, String> {
+    publish_picture_tracked(title, caption, image_urls, hashtags, location)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait) with relay feedback
 /// NIP-71: https://github.com/nostr-protocol/nips/blob/master/71.md
-pub async fn publish_video(
+pub async fn publish_video_tracked(
     title: String,
     description: String,
     video_url: String,
     thumbnail_url: String,
     hashtags: Vec<String>,
     is_portrait: bool,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2060,20 +2289,49 @@ pub async fn publish_video(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish video: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Video published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Video '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Publish a voice message (Kind 1222)
+/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait)
+/// For relay feedback, use publish_video_tracked instead
+pub async fn publish_video(
+    title: String,
+    description: String,
+    video_url: String,
+    thumbnail_url: String,
+    hashtags: Vec<String>,
+    is_portrait: bool,
+) -> std::result::Result<String, String> {
+    publish_video_tracked(title, description, video_url, thumbnail_url, hashtags, is_portrait)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a voice message (Kind 1222) with relay feedback
 /// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
-pub async fn publish_voice_message(
+pub async fn publish_voice_message_tracked(
     audio_url: String,
     duration: f64,
     waveform: Vec<u8>,
     hashtags: Vec<String>,
     mime_type: Option<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2128,21 +2386,48 @@ pub async fn publish_voice_message(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish voice message: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Voice message published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Voice message published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Publish a voice message reply (Kind 1244) following NIP-22
+/// Publish a voice message (Kind 1222)
+/// For relay feedback, use publish_voice_message_tracked instead
+pub async fn publish_voice_message(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    hashtags: Vec<String>,
+    mime_type: Option<String>,
+) -> std::result::Result<String, String> {
+    publish_voice_message_tracked(audio_url, duration, waveform, hashtags, mime_type)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a voice message reply (Kind 1244) with relay feedback
 /// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
 /// NIP-22: https://github.com/nostr-protocol/nips/blob/master/22.md
-pub async fn publish_voice_message_reply(
+pub async fn publish_voice_message_reply_tracked(
     audio_url: String,
     duration: f64,
     waveform: Vec<u8>,
     reply_to: nostr::Event,
     mime_type: Option<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2300,9 +2585,36 @@ pub async fn publish_voice_message_reply(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Voice message reply published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Voice message reply published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a voice message reply (Kind 1244) following NIP-22
+/// For relay feedback, use publish_voice_message_reply_tracked instead
+pub async fn publish_voice_message_reply(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    reply_to: nostr::Event,
+    mime_type: Option<String>,
+) -> std::result::Result<String, String> {
+    publish_voice_message_reply_tracked(audio_url, duration, waveform, reply_to, mime_type)
+        .await
+        .map(|result| result.event_id)
 }
 
 /// Get the current user's public key
@@ -2312,14 +2624,14 @@ pub async fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
         .map_err(|e| format!("Failed to get public key: {}", e))
 }
 
-/// Publish a poll vote (Kind 1018) following NIP-88
+/// Publish a poll vote (Kind 1018) with relay feedback
 /// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
 /// Votes are published to the relays specified in the poll event
-pub async fn publish_poll_vote(
+pub async fn publish_poll_vote_tracked(
     poll_id: nostr::EventId,
     response: nostr::nips::nip88::PollResponse,
     poll_relays: Vec<nostr::RelayUrl>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2406,21 +2718,46 @@ pub async fn publish_poll_vote(
             .map_err(|e| format!("Failed to publish poll vote: {}", e))?
     };
 
-    let event_id = output.id().to_hex();
-    log::info!("Poll vote published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Poll vote published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Publish a poll (Kind 1068) following NIP-88
+/// Publish a poll vote (Kind 1018) following NIP-88
+/// For relay feedback, use publish_poll_vote_tracked instead
+pub async fn publish_poll_vote(
+    poll_id: nostr::EventId,
+    response: nostr::nips::nip88::PollResponse,
+    poll_relays: Vec<nostr::RelayUrl>,
+) -> std::result::Result<String, String> {
+    publish_poll_vote_tracked(poll_id, response, poll_relays)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a poll (Kind 1068) with relay feedback
 /// NIP-88: https://github.com/nostr-protocol/nips/blob/master/88.md
-pub async fn publish_poll(
+pub async fn publish_poll_tracked(
     title: String,
     poll_type: nostr::nips::nip88::PollType,
     options: Vec<nostr::nips::nip88::PollOption>,
     relays: Vec<String>,
     ends_at: Option<nostr::Timestamp>,
     hashtags: Vec<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -2450,7 +2787,7 @@ pub async fn publish_poll(
 
     // Build poll struct
     let poll = nostr::nips::nip88::Poll {
-        title,
+        title: title.clone(),
         r#type: poll_type,
         options,
         relays: relay_urls,
@@ -2470,9 +2807,38 @@ pub async fn publish_poll(
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish poll: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Poll published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Poll '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a poll (Kind 1068) following NIP-88
+/// For relay feedback, use publish_poll_tracked instead
+pub async fn publish_poll(
+    title: String,
+    poll_type: nostr::nips::nip88::PollType,
+    options: Vec<nostr::nips::nip88::PollOption>,
+    relays: Vec<String>,
+    ends_at: Option<nostr::Timestamp>,
+    hashtags: Vec<String>,
+) -> std::result::Result<String, String> {
+    publish_poll_tracked(title, poll_type, options, relays, ends_at, hashtags)
+        .await
+        .map(|result| result.event_id)
 }
 
 // =============================================================================
@@ -2528,13 +2894,13 @@ pub async fn fetch_custom_nip_by_naddr(
     }
 }
 
-/// Publish a custom NIP as a kind 30817 addressable event
-pub async fn publish_custom_nip(
+/// Publish a custom NIP as a kind 30817 addressable event with relay tracking
+pub async fn publish_custom_nip_tracked(
     title: String,
     content: String,
     identifier: String,
     related_kinds: Vec<u32>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     use nostr::{EventBuilder, Kind, Tag, SingleLetterTag, Alphabet};
@@ -2556,9 +2922,273 @@ pub async fn publish_custom_nip(
         .await
         .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Custom NIP published successfully: {}", event_id);
-    Ok(event_id)
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Custom NIP published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a custom NIP as a kind 30817 addressable event
+pub async fn publish_custom_nip(
+    title: String,
+    content: String,
+    identifier: String,
+    related_kinds: Vec<u32>,
+) -> std::result::Result<String, String> {
+    publish_custom_nip_tracked(title, content, identifier, related_kinds)
+        .await
+        .map(|result| result.event_id)
+}
+
+// ============================================================================
+// Relay-Specific Publishing Functions
+// Note: With NIP-65 gossip routing, SDK handles relay selection automatically.
+// These functions are available for advanced use cases but not typically needed.
+// ============================================================================
+
+/// Publish a note to specific relays only
+///
+/// Useful for privacy-conscious publishing or targeting specific relay groups.
+#[allow(dead_code)]
+pub async fn publish_note_to_relays(
+    content: String,
+    tags: Vec<Vec<String>>,
+    relay_urls: Vec<String>,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached".to_string());
+    }
+
+    // Convert raw tags to nostr::Tag format
+    let nostr_tags: Vec<nostr::Tag> = tags.iter()
+        .filter_map(|tag| {
+            if tag.is_empty() {
+                return None;
+            }
+            Some(nostr::Tag::custom(
+                nostr::TagKind::Custom(std::borrow::Cow::Owned(tag[0].clone())),
+                tag[1..].to_vec(),
+            ))
+        })
+        .collect();
+
+    let builder = nostr::EventBuilder::text_note(&content)
+        .tags(nostr_tags);
+
+    // Parse relay URLs
+    let urls: Vec<nostr::RelayUrl> = relay_urls
+        .iter()
+        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .collect();
+
+    if urls.is_empty() {
+        return Err("No valid relay URLs provided".to_string());
+    }
+
+    let output = client.send_event_builder_to(urls.clone(), builder)
+        .await
+        .map_err(|e| format!("Failed to publish: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Note published to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a reaction to specific relays only
+#[allow(dead_code)]
+pub async fn publish_reaction_to_relays(
+    event_id: String,
+    event_pubkey: String,
+    reaction: String,
+    relay_urls: Vec<String>,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached".to_string());
+    }
+
+    use nostr::nips::nip25::ReactionTarget;
+
+    let target_event_id = nostr::EventId::from_hex(&event_id)
+        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_pubkey = PublicKey::from_hex(&event_pubkey)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    // Create reaction target
+    let target = ReactionTarget {
+        event_id: target_event_id,
+        public_key: target_pubkey,
+        coordinate: None,
+        kind: None,
+        relay_hint: None,
+    };
+
+    let builder = EventBuilder::reaction(target, reaction);
+
+    let urls: Vec<nostr::RelayUrl> = relay_urls
+        .iter()
+        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .collect();
+
+    if urls.is_empty() {
+        return Err("No valid relay URLs provided".to_string());
+    }
+
+    let output = client.send_event_builder_to(urls, builder)
+        .await
+        .map_err(|e| format!("Failed to publish reaction: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Reaction published to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    Ok(result)
+}
+
+/// Send a pre-signed event to specific relays
+///
+/// Takes an already-signed Event and sends it directly to the specified relays,
+/// preserving the original cryptographic signature.
+pub async fn send_presigned_event_to_relays(
+    event: nostr::Event,
+    relay_urls: Vec<String>,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let urls: Vec<nostr::RelayUrl> = relay_urls
+        .iter()
+        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .collect();
+
+    if urls.is_empty() {
+        return Err("No valid relay URLs provided".to_string());
+    }
+
+    let output = client.send_event_to(urls, &event)
+        .await
+        .map_err(|e| format!("Failed to send event: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Pre-signed event sent to specific relays: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    Ok(result)
+}
+
+// ============================================================================
+// Progressive Loading / Streaming Functions
+// ============================================================================
+
+/// Stream events progressively with a callback for each event
+///
+/// Unlike fetch_events which waits for all events, this function calls the
+/// provided callback as each event arrives, enabling progressive UI updates.
+///
+/// # Arguments
+/// * `filter` - The filter to use for the subscription
+/// * `timeout` - Maximum duration to wait for events
+/// * `on_event` - Callback invoked for each event received
+///
+/// # Returns
+/// Total count of events received
+#[allow(dead_code)]
+pub async fn stream_events_with_callback<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    mut on_event: F,
+) -> std::result::Result<usize, String>
+where
+    F: FnMut(nostr::Event) + Send,
+{
+    use futures::StreamExt;
+
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let mut stream = client.stream_events(filter, timeout)
+        .await
+        .map_err(|e| format!("Failed to create event stream: {}", e))?;
+
+    let mut count = 0;
+
+    while let Some(event) = stream.next().await {
+        on_event(event);
+        count += 1;
+    }
+
+    log::info!("Stream completed: received {} events", count);
+    Ok(count)
+}
+
+/// Stream events and collect them into a Vec
+///
+/// This is a convenience wrapper that collects all streamed events
+/// into a vector with deduplication and sorting.
+#[allow(dead_code)]
+pub async fn stream_events_collected(
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    use futures::StreamExt;
+
+    let client = get_client().ok_or("Client not initialized")?;
+
+    let mut stream = client.stream_events(filter, timeout)
+        .await
+        .map_err(|e| format!("Failed to create event stream: {}", e))?;
+
+    let mut events = Vec::new();
+
+    while let Some(event) = stream.next().await {
+        events.push(event);
+    }
+
+    // Deduplicate by event ID (events may come from multiple relays)
+    events.sort_by(|a, b| a.id.cmp(&b.id));
+    events.dedup_by(|a, b| a.id == b.id);
+
+    // Sort by created_at descending (newest first)
+    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    log::info!("Stream completed: collected {} unique events", events.len());
+    Ok(events)
 }
 
 /// Generate an naddr for a custom NIP event
@@ -2606,6 +3236,9 @@ pub struct RelayDisplayInfo {
     pub bytes_received: usize,
     pub has_read: bool,
     pub has_write: bool,
+    // Enhanced stats from SDK
+    pub success_rate: f64,
+    pub connection_attempts: usize,
 }
 
 /// Get display info for all connected relays (for Connections tab in settings)
@@ -2639,6 +3272,9 @@ pub async fn get_relay_display_info() -> Vec<RelayDisplayInfo> {
             bytes_received: stats.bytes_received(),
             has_read: flags.has_read(),
             has_write: flags.has_write(),
+            // Enhanced stats from SDK (latency not available in WASM)
+            success_rate: stats.success_rate(),
+            connection_attempts: stats.attempts(),
         });
     }
 

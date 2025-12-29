@@ -1159,6 +1159,18 @@ pub fn Settings() -> Element {
                                                         class: "flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400",
                                                         span { "↓ {format_bytes(relay.bytes_received)}" }
                                                         span { "↑ {format_bytes(relay.bytes_sent)}" }
+                                                        if relay.connection_attempts > 0 {
+                                                            span {
+                                                                class: if relay.success_rate > 0.8 {
+                                                                    "text-green-600 dark:text-green-400"
+                                                                } else if relay.success_rate > 0.5 {
+                                                                    "text-yellow-600 dark:text-yellow-400"
+                                                                } else {
+                                                                    "text-red-600 dark:text-red-400"
+                                                                },
+                                                                "{(relay.success_rate * 100.0) as u8}%"
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use std::time::Duration;
-use crate::stores::nostr_client::{publish_note, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
 use crate::stores::pending_comments::{
     PendingComment, CommentStatus, add_pending_comment, update_pending_status,
 };
@@ -319,9 +319,20 @@ pub fn ReplyComposer(
                 }
             }
 
-            match publish_note(content_for_publish, tags).await {
-                Ok(published_event_id) => {
-                    log::info!("Reply published successfully: {}", published_event_id);
+            match publish_note_tracked(content_for_publish, tags).await {
+                Ok(result) => {
+                    log::info!(
+                        "Reply published: {} ({}/{} relays)",
+                        result.event_id,
+                        result.success_count(),
+                        result.total_attempted()
+                    );
+
+                    if result.has_failures() {
+                        for (relay, error) in &result.failed_relays {
+                            log::warn!("Relay {} failed for reply: {}", relay, error);
+                        }
+                    }
 
                     // Invalidate thread tree cache to ensure fresh data on next view
                     if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
@@ -330,12 +341,12 @@ pub fn ReplyComposer(
                     }
 
                     // Update pending comment status
-                    match EventId::from_hex(&published_event_id) {
+                    match EventId::from_hex(&result.event_id) {
                         Ok(event_id_parsed) => {
                             update_pending_status(&local_id_clone, CommentStatus::Confirmed(event_id_parsed));
                         }
                         Err(e) => {
-                            log::error!("Failed to parse published event ID '{}': {}", published_event_id, e);
+                            log::error!("Failed to parse published event ID '{}': {}", result.event_id, e);
                             update_pending_status(&local_id_clone, CommentStatus::Failed("Event ID parse error".to_string()));
                         }
                     }

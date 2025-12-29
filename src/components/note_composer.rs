@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::{nostr_client::publish_note, auth_store};
+use crate::stores::{nostr_client::publish_note_tracked, auth_store};
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 
@@ -12,6 +12,9 @@ pub fn NoteComposer() -> Element {
     let mut is_focused = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| false);
     let mut show_poll_modal = use_signal(|| false);
+    let mut publish_feedback = use_signal(|| Option::<(bool, String)>::None);
+    // Version counter to prevent stale timeout from clearing newer feedback
+    let mut feedback_version = use_signal(|| 0u32);
 
     // Check if user is authenticated (can publish) using auth_store
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -41,18 +44,64 @@ pub fn NoteComposer() -> Element {
         }
 
         is_publishing.set(true);
+        publish_feedback.set(None);
 
         spawn(async move {
-            match publish_note(content_value, Vec::new()).await {
-                Ok(event_id) => {
-                    log::info!("Note published successfully: {}", event_id);
-                    content.set(String::new());
-                    show_image_uploader.set(false);
-                    is_publishing.set(false);
+            match publish_note_tracked(content_value, Vec::new()).await {
+                Ok(result) => {
+                    let success_count = result.success_count();
+                    let total = result.total_attempted();
+
+                    log::info!("Note published: {} ({}/{} relays)", result.event_id, success_count, total);
+
+                    // Show feedback based on relay results
+                    if result.has_failures() && success_count > 0 {
+                        // Partial success
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
+                        publish_feedback.set(Some((true, format!("Published to {}/{} relays", success_count, total))));
+
+                        content.set(String::new());
+                        show_image_uploader.set(false);
+                        is_publishing.set(false);
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            publish_feedback.set(None);
+                        }
+                    } else if success_count == 0 {
+                        // All failed - preserve draft for retry (mirror Err(e) behavior)
+                        feedback_version.set(feedback_version() + 1);
+                        let current_version = feedback_version();
+                        publish_feedback.set(Some((false, "Failed to publish to any relay".to_string())));
+                        is_publishing.set(false);
+                        // DO NOT clear content or show_image_uploader - let user retry
+
+                        // Auto-hide feedback after 3 seconds (only if version unchanged)
+                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        if feedback_version() == current_version {
+                            publish_feedback.set(None);
+                        }
+                    } else {
+                        // Full success: no feedback needed, just clear
+                        content.set(String::new());
+                        show_image_uploader.set(false);
+                        is_publishing.set(false);
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
+                    feedback_version.set(feedback_version() + 1);
+                    let current_version = feedback_version();
+                    publish_feedback.set(Some((false, format!("Error: {}", e))));
                     is_publishing.set(false);
+
+                    // Auto-hide error after 5 seconds (only if version unchanged)
+                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    if feedback_version() == current_version {
+                        publish_feedback.set(None);
+                    }
                 }
             }
         });
@@ -136,6 +185,23 @@ pub fn NoteComposer() -> Element {
                     p { "Sign in to create posts" }
                 }
             } else {
+                // Publish feedback toast
+                if let Some((is_success, message)) = publish_feedback.read().clone() {
+                    div {
+                        class: if is_success {
+                            "mb-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm flex items-center gap-2"
+                        } else {
+                            "mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm flex items-center gap-2"
+                        },
+                        span { "{message}" }
+                        button {
+                            class: "ml-auto text-current opacity-60 hover:opacity-100",
+                            onclick: move |_| publish_feedback.set(None),
+                            "×"
+                        }
+                    }
+                }
+
                 // Composer area
                 div {
                     class: "w-full",
