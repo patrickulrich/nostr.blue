@@ -60,6 +60,8 @@ pub fn MusicZapDialog() -> Element {
     let track = track.unwrap();
     // Nostr sources use NIP-57 zaps: Nostr music, NostrPodcast, and Radio stations
     let is_nostr_track = matches!(track.source, TrackSource::Nostr { .. } | TrackSource::NostrPodcast { .. } | TrackSource::Radio { .. });
+    // V4V sources use podcast value block payments: RSS podcasts and RSS music
+    let is_v4v_track = matches!(track.source, TrackSource::RssPodcast { .. } | TrackSource::RssMusic { .. });
 
     let mut amount = use_signal(|| 100u64);
     let mut comment = use_signal(String::new);
@@ -243,6 +245,11 @@ pub fn MusicZapDialog() -> Element {
                                     span {
                                         class: "text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400",
                                         "Nostr"
+                                    }
+                                } else if is_v4v_track {
+                                    span {
+                                        class: "text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400",
+                                        "V4V"
                                     }
                                 } else {
                                     span {

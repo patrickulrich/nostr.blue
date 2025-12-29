@@ -542,6 +542,17 @@ pub fn products_filter(limit: usize) -> Filter {
         .limit(limit)
 }
 
+/// Build filter for fetching products with pagination (cursor-based using `until`)
+pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {
+    let mut filter = Filter::new()
+        .kind(Kind::Custom(KIND_PRODUCT))
+        .limit(limit);
+    if let Some(ts) = until {
+        filter = filter.until(Timestamp::from(ts));
+    }
+    filter
+}
+
 /// Build filter for fetching products by author (merchant)
 pub fn products_filter_by_author(pubkey: PublicKey, limit: usize) -> Filter {
     Filter::new()
@@ -596,6 +607,25 @@ pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
     }
 }
 
+/// Fetch products with pagination support
+pub async fn fetch_products_paginated(limit: usize, until: Option<u64>) -> Result<Vec<Product>> {
+    let filter = products_filter_paginated(limit, until);
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
+            .await;
+
+    match result {
+        Ok(events) => {
+            cache_product_events(&events);
+            let products: Vec<Product> = events
+                .iter()
+                .filter_map(|e| parse_product(e).ok())
+                .collect();
+            Ok(products)
+        }
+        Err(e) => Err(e),
+    }
+}
 
 /// Fetch products by merchant
 pub async fn fetch_products_by_merchant(pubkey: &str, limit: usize) -> Result<Vec<Product>> {

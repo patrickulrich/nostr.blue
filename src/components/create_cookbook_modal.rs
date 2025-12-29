@@ -25,11 +25,25 @@ pub fn CreateCookbookModal(
     let handle_submit = move |evt: Event<FormData>| {
         evt.prevent_default();
 
-        // Validate title
-        if title.read().trim().is_empty() {
+        // Validate and sanitize title
+        let title_trimmed = title.read().trim().to_string();
+        if title_trimmed.is_empty() {
             error.set(Some("Title is required".to_string()));
             return;
         }
+        if title_trimmed.chars().count() > 100 {
+            error.set(Some("Title must be 100 characters or less".to_string()));
+            return;
+        }
+
+        // Sanitize description (truncate if over limit)
+        let description_trimmed = description.read().trim().to_string();
+        let description_value = if description_trimmed.is_empty() {
+            None
+        } else {
+            let truncated: String = description_trimmed.chars().take(1000).collect();
+            Some(truncated)
+        };
 
         error.set(None);
         is_submitting.set(true);
@@ -44,8 +58,8 @@ pub fn CreateCookbookModal(
         tags.extend(additional);
 
         let input = PinboardInput {
-            title: title.read().clone(),
-            description: if description.read().trim().is_empty() { None } else { Some(description.read().trim().to_string()) },
+            title: title_trimmed,
+            description: description_value,
             image: image_url.read().clone(),
             tags,
             collaborative: false, // Cookbooks are not collaborative by default

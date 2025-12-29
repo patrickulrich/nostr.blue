@@ -5,7 +5,7 @@
   "scripts": {
     "tailwind:watch": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --watch",
     "tailwind:build": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --minify",
-    "git-worker:build": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020",
+    "git-worker:build": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --minify",
     "git-worker:watch": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --watch",
     "build:all": "npm run tailwind:build && npm run git-worker:build"
   },

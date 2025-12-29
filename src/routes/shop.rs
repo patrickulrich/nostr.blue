@@ -1,14 +1,16 @@
 //! Shop Home - Browse marketplace products (NIP-99)
 
 use dioxus::prelude::*;
+use std::collections::HashSet;
 use crate::routes::Route;
 use crate::utils::nip99::{Product, ProductFormat};
 use crate::stores::shop_store::{
-    fetch_products, get_cart_count,
+    fetch_products, fetch_products_paginated, get_cart_count,
     ShopFilterState, filter_products, sort_products, ProductSortBy,
 };
 use crate::stores::nostr_client::{fetch_contacts, get_user_pubkey};
 use crate::components::shop::{ProductCard, ProductCardSkeleton, CategorySelector};
+use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 
 /// Shop browse page - displays product grid with filters
 #[component]
@@ -16,6 +18,11 @@ pub fn ShopHome() -> Element {
     let mut products = use_signal(Vec::<Product>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+
+    // Pagination states for infinite scroll
+    let mut loading_more = use_signal(|| false);
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
 
     // Filter states
     let mut show_filters = use_signal(|| false);
@@ -46,7 +53,13 @@ pub fn ShopHome() -> Element {
             loading.set(true);
             error.set(None);
             match fetch_products(50).await {
-                Ok(p) => products.set(p),
+                Ok(p) => {
+                    // Set oldest_timestamp for pagination
+                    if let Some(oldest) = p.iter().map(|prod| prod.created_at).min() {
+                        oldest_timestamp.set(Some(oldest));
+                    }
+                    products.set(p);
+                }
                 Err(e) => {
                     log::error!("Failed to fetch products: {}", e);
                     error.set(Some(e));
@@ -98,6 +111,47 @@ pub fn ShopHome() -> Element {
 
     let has_filters = !filter_state.is_empty() || *wot_enabled.read();
     let cart_count = get_cart_count();
+
+    // Infinite scroll: load more products when sentinel comes into view
+    let load_more = {
+        move || {
+            spawn(async move {
+                if *loading_more.peek() || !*has_more.peek() {
+                    return;
+                }
+                loading_more.set(true);
+
+                let until = *oldest_timestamp.peek();
+                match fetch_products_paginated(50, until).await {
+                    Ok(new_products) => {
+                        if new_products.is_empty() {
+                            has_more.set(false);
+                        } else {
+                            // Deduplicate against existing products
+                            let existing_ids: HashSet<_> = products.peek().iter().map(|p| p.naddr.clone()).collect();
+                            let unique: Vec<_> = new_products.into_iter()
+                                .filter(|p| !existing_ids.contains(&p.naddr))
+                                .collect();
+
+                            if unique.is_empty() {
+                                has_more.set(false);
+                            } else {
+                                // Update oldest_timestamp for next pagination
+                                if let Some(oldest) = unique.iter().map(|p| p.created_at).min() {
+                                    oldest_timestamp.set(Some(oldest));
+                                }
+                                products.write().extend(unique);
+                            }
+                        }
+                    }
+                    Err(e) => log::error!("Failed to load more products: {}", e),
+                }
+                loading_more.set(false);
+            });
+        }
+    };
+
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
 
     rsx! {
         div { class: "min-h-screen",
@@ -421,6 +475,18 @@ pub fn ShopHome() -> Element {
                                 product: product.clone(),
                                 show_add_to_cart: true
                             }
+                        }
+                    }
+
+                    // Infinite scroll sentinel
+                    if *has_more.read() {
+                        div { id: "{sentinel_id}", class: "h-4" }
+                    }
+
+                    // Loading spinner for pagination
+                    if *loading_more.read() {
+                        div { class: "flex justify-center py-4",
+                            div { class: "animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" }
                         }
                     }
                 }
