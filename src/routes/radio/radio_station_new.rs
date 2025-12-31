@@ -461,8 +461,6 @@ pub fn RadioStationNew() -> Element {
 /// Publish a radio station event (Kind 31237)
 /// Uses wavefunc-compatible tag format for interoperability
 async fn publish_station(form: StationFormData) -> std::result::Result<String, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let StationFormData {
         name,
         description,
@@ -482,11 +480,8 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         .collect::<String>()
         .replace(' ', "-");
 
-    // Add timestamp suffix to ensure uniqueness
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // Add timestamp suffix to ensure uniqueness (WASM-compatible)
+    let timestamp = (js_sys::Date::now() / 1000.0) as u64;
     let d_tag = format!("{}-{}", d_tag, timestamp % 10000);
 
     // Build tags using wavefunc-compatible format

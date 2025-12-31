@@ -1696,10 +1696,7 @@ pub async fn submit_join_request(
         community_a_tag: community.a_tag.clone(),
         user_pubkey: current_pubkey,
         reason: reason.map(|s| s.to_string()),
-        created_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        created_at: (js_sys::Date::now() / 1000.0) as u64,
         event: None, // Event not available when self-submitted
     };
     USER_PENDING_REQUESTS.write().insert(community.a_tag.clone(), request);

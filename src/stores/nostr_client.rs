@@ -2022,14 +2022,8 @@ pub async fn publish_article_tracked(
         ));
     }
 
-    // Add published_at timestamp
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|e| {
-            log::error!("Failed to get system time: {}", e);
-            "0".to_string()
-        });
+    // Add published_at timestamp (WASM-compatible)
+    let timestamp = ((js_sys::Date::now() / 1000.0) as u64).to_string();
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("published_at".into()),
