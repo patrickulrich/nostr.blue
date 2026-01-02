@@ -587,11 +587,8 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
     let event_id = output.id().to_string();
 
-    // Build naddr
-    let pubkey = client.signer().await
-        .map_err(|e| format!("Failed to get signer: {}", e))?
-        .get_public_key().await
-        .map_err(|e| format!("Failed to get public key: {}", e))?;
+    // Build naddr (use cached pubkey - no signer call needed)
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     let coordinate = Coordinate::new(Kind::from(31237), pubkey)
         .identifier(d_tag);

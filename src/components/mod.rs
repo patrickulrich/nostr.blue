@@ -135,6 +135,16 @@ pub use music_source_tabs::{DiscoveryTabs, DiscoveryTab};
 pub use unified_track_card::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
 pub use client_initializing::ClientInitializing;
 pub use media_uploader::MediaUploader;
+pub mod article_cover_uploader;
+pub use article_cover_uploader::ArticleCoverUploader;
+pub mod publish_confirm_dialog;
+pub use publish_confirm_dialog::{PublishConfirmDialog, PublishConfig};
+pub mod markdown_toolbar;
+pub use markdown_toolbar::{MarkdownToolbar, MarkdownFormat, apply_markdown_format, set_textarea_cursor, get_textarea_cursor};
+pub mod nostr_mention_dialog;
+pub use nostr_mention_dialog::{NostrMentionDialog, MentionSelection, MentionType};
+pub mod image_upload_dialog;
+pub use image_upload_dialog::{ImageUploadDialog, ImageInsertData};
 pub use profile_editor_modal::ProfileEditorModal;
 pub use emoji_picker::EmojiPicker;
 pub use reaction_picker::InlineReactionPicker;
@@ -173,6 +183,8 @@ pub use people_list_members_modal::PeopleListMembersModal;
 pub use poll_creator_modal::PollCreatorModal;
 pub use dvm_selector_modal::DvmSelectorModal;
 pub mod dialog;
+pub mod modal;
+pub use modal::{Modal, ModalHeader, ModalBody, ModalFooter};
 pub mod toast;
 
 // Podcast components

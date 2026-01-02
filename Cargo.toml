@@ -74,6 +74,8 @@ web-sys = { version = "0.3", features = [
     "FileReader",
     "Event",
     "EventTarget",
+    # BeforeUnload for unsaved changes warning
+    "BeforeUnloadEvent",
     # MediaRecorder API for voice messages
     "MediaStream",
     "MediaRecorder",

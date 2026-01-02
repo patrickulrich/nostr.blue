@@ -10,7 +10,8 @@ pub fn DialogRoot(props: DialogRootProps) -> Element {
         dialog::DialogRoot {
             class: "dialog-backdrop",
             id: props.id,
-            is_modal: props.is_modal,
+            // Always use modal behavior for proper centering and backdrop
+            is_modal: true,
             open: props.open,
             default_open: props.default_open,
             on_open_change: props.on_open_change,

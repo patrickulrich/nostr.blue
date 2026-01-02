@@ -2611,11 +2611,23 @@ pub async fn publish_voice_message_reply(
         .map(|result| result.event_id)
 }
 
-/// Get the current user's public key
+/// Get user's public key from cache (no signer call needed)
+///
+/// This is much faster than calling signer().get_public_key() especially for:
+/// - NIP-46 remote signers (avoids network roundtrip)
+/// - Browser extensions (avoids extension API call)
+///
+/// Use this when you just need the pubkey, not for signing operations.
+pub fn get_cached_pubkey() -> std::result::Result<PublicKey, String> {
+    let pubkey_str = crate::stores::auth_store::get_pubkey()
+        .ok_or("Not logged in")?;
+    PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid cached pubkey: {}", e))
+}
+
+/// Get the current user's public key (uses cache, no signer call)
 pub async fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
-    let signer = get_signer().ok_or("No signer available")?;
-    signer.public_key().await
-        .map_err(|e| format!("Failed to get public key: {}", e))
+    get_cached_pubkey()
 }
 
 /// Publish a poll vote (Kind 1018) with relay feedback

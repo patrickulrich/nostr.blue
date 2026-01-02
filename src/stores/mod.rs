@@ -44,4 +44,5 @@ pub mod citation_store;     // NKBIP-03 Citations (kinds 30-33)
 pub mod directory_store;    // NKBIP-04 Directory System (kinds 30042-30045)
 pub mod podcast_subscription;  // NIP-51 Podcast Subscriptions (kind 30003)
 pub mod subscription_manager;  // SDK subscription auto-close helpers
+pub mod draft_store;           // NIP-37 Draft Wraps (kind 31234) + Private Relays (kind 10013)
 
