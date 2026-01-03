@@ -5,13 +5,14 @@ use dioxus_primitives::dialog::{
 
 #[component]
 pub fn DialogRoot(props: DialogRootProps) -> Element {
+    // Use the caller's is_modal value; defaults to true via DialogRootProps
+    // Modal dialogs get proper centering and backdrop styling via CSS
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("./style.css") }
         dialog::DialogRoot {
             class: "dialog-backdrop",
             id: props.id,
-            // Always use modal behavior for proper centering and backdrop
-            is_modal: true,
+            is_modal: props.is_modal,
             open: props.open,
             default_open: props.default_open,
             on_open_change: props.on_open_change,

@@ -26,12 +26,16 @@ pub struct UseUnsavedChanges {
 
 impl UseUnsavedChanges {
     /// Mark current state as saved (updates hash, clears dirty flag)
+    /// Kept for future manual save control integration
+    #[allow(dead_code)]
     pub fn mark_saved(&mut self, current_hash: u64) {
         self.last_saved_hash.set(Some(current_hash));
         self.is_dirty.set(false);
     }
 
     /// Reset to clean state (no saved hash)
+    /// Kept for future "New Article" button that resets dirty state
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.last_saved_hash.set(None);
         self.is_dirty.set(false);
@@ -115,6 +119,8 @@ fn calculate_empty_hash() -> u64 {
 }
 
 /// Calculate hash for arbitrary content
+/// Kept for future single-field hash calculations
+#[allow(dead_code)]
 pub fn calculate_hash<T: Hash>(content: &T) -> u64 {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
@@ -136,6 +142,7 @@ pub fn calculate_multi_hash(fields: &[&str]) -> u64 {
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
+    #[allow(clippy::type_complexity)]
     static BEFOREUNLOAD_CLOSURE: std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -183,6 +190,8 @@ fn register_beforeunload(is_dirty: Signal<bool>) {
 }
 
 /// Unregister the beforeunload handler (call on component unmount if needed)
+/// Kept for future explicit cleanup when needed
+#[allow(dead_code)]
 #[cfg(target_arch = "wasm32")]
 pub fn unregister_beforeunload() {
     let window = match web_sys::window() {
@@ -200,6 +209,7 @@ pub fn unregister_beforeunload() {
     });
 }
 
+#[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn unregister_beforeunload() {
     // No-op on non-WASM targets
@@ -210,6 +220,8 @@ pub fn unregister_beforeunload() {
 // ============================================================================
 
 /// State for showing a leave confirmation dialog
+/// Kept for future in-app navigation warning implementation
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct LeaveConfirmation {
     /// Whether to show the confirmation dialog
@@ -223,6 +235,8 @@ pub struct LeaveConfirmation {
 /// Use this alongside `use_unsaved_changes` for in-app navigation warnings.
 /// The browser's beforeunload handles browser close/refresh, while this
 /// handles in-app route changes.
+/// Kept for future in-app navigation warning implementation
+#[allow(dead_code)]
 pub fn use_leave_confirmation() -> Signal<LeaveConfirmation> {
     use_signal(LeaveConfirmation::default)
 }

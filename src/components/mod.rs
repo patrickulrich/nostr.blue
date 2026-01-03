@@ -140,8 +140,12 @@ pub use article_cover_uploader::ArticleCoverUploader;
 pub mod publish_confirm_dialog;
 pub use publish_confirm_dialog::{PublishConfirmDialog, PublishConfig};
 pub mod markdown_toolbar;
+// Re-export toolbar and formatting utilities (some kept for future programmatic formatting features)
+#[allow(unused_imports)]
 pub use markdown_toolbar::{MarkdownToolbar, MarkdownFormat, apply_markdown_format, set_textarea_cursor, get_textarea_cursor};
 pub mod nostr_mention_dialog;
+// MentionType kept for future mention type differentiation in UI
+#[allow(unused_imports)]
 pub use nostr_mention_dialog::{NostrMentionDialog, MentionSelection, MentionType};
 pub mod image_upload_dialog;
 pub use image_upload_dialog::{ImageUploadDialog, ImageInsertData};
@@ -184,6 +188,8 @@ pub use poll_creator_modal::PollCreatorModal;
 pub use dvm_selector_modal::DvmSelectorModal;
 pub mod dialog;
 pub mod modal;
+// Modal components kept for future dialog refactoring
+#[allow(unused_imports)]
 pub use modal::{Modal, ModalHeader, ModalBody, ModalFooter};
 pub mod toast;
 

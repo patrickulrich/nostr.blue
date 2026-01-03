@@ -73,6 +73,17 @@ pub fn ArticleNew() -> Element {
     let mut is_dirty = unsaved.is_dirty;
     let mut last_saved_hash = unsaved.last_saved_hash;
 
+    // Update draft status to Dirty when content changes (but not while saving)
+    use_effect(move || {
+        let dirty = *is_dirty.read();
+        let current_status = draft_status.read().clone();
+
+        // Only set to Dirty if we have unsaved changes and aren't currently saving
+        if dirty && !matches!(current_status, DraftStatus::Saving) {
+            draft_status.set(DraftStatus::Dirty);
+        }
+    });
+
     // Check if user is authenticated
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
 
@@ -578,11 +589,53 @@ pub fn ArticleNew() -> Element {
                     div {
                         class: "flex items-center gap-3",
 
-                        // Save Draft button
-                        button {
-                            class: "px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-accent transition",
-                            onclick: handle_save_draft,
-                            "Save Draft"
+                        // Save Draft button - prominent when dirty, subtle otherwise
+                        {
+                            let is_saving = matches!(*draft_status.read(), DraftStatus::Saving);
+                            let has_unsaved = matches!(*draft_status.read(), DraftStatus::Dirty);
+                            let can_save = !title.read().is_empty() && !identifier.read().is_empty();
+
+                            rsx! {
+                                button {
+                                    class: if has_unsaved && can_save {
+                                        "px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition flex items-center gap-2"
+                                    } else if is_saving {
+                                        "px-4 py-2 text-sm font-medium rounded-lg border border-border bg-muted text-muted-foreground cursor-wait flex items-center gap-2"
+                                    } else {
+                                        "px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-accent transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    },
+                                    disabled: is_saving || !can_save,
+                                    onclick: handle_save_draft,
+
+                                    if is_saving {
+                                        svg {
+                                            class: "w-4 h-4 animate-spin",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            view_box: "0 0 24 24",
+                                            circle {
+                                                class: "opacity-25",
+                                                cx: "12",
+                                                cy: "12",
+                                                r: "10",
+                                                stroke: "currentColor",
+                                                stroke_width: "4",
+                                            }
+                                            path {
+                                                class: "opacity-75",
+                                                fill: "currentColor",
+                                                d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                            }
+                                        }
+                                        "Saving..."
+                                    } else if has_unsaved {
+                                        "Save Draft"
+                                    } else {
+                                        "Save Draft"
+                                    }
+                                }
+                            }
                         }
 
                         // Publish button

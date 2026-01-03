@@ -55,6 +55,8 @@ pub struct ArticleDraft {
 
 impl ArticleDraft {
     /// Create a new draft with current timestamp
+    /// Kept for future programmatic draft creation
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let now = current_timestamp();
         Self {
@@ -180,7 +182,11 @@ impl Default for DraftStatus {
 #[derive(Clone, Debug)]
 pub struct LoadedDraft {
     pub draft: ArticleDraft,
+    /// Event ID of the draft wrap - kept for future draft deletion by event ID
+    #[allow(dead_code)]
     pub event_id: String,
+    /// Identifier for direct access - kept for future deep linking to drafts
+    #[allow(dead_code)]
     pub identifier: String,
 }
 
@@ -448,6 +454,8 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
 }
 
 /// Load a specific draft by identifier
+/// Kept for future deep linking to specific drafts via URL parameter
+#[allow(dead_code)]
 pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
@@ -527,6 +535,8 @@ fn current_timestamp() -> u64 {
 }
 
 /// Calculate content hash for dirty state tracking
+/// Kept for future draft-level change detection
+#[allow(dead_code)]
 pub fn calculate_draft_hash(draft: &ArticleDraft) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

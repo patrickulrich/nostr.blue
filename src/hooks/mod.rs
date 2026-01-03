@@ -11,4 +11,6 @@ pub use use_author_metadata::use_author_metadata;
 pub use use_infinite_scroll::use_infinite_scroll;
 pub use use_lists::{use_user_lists, delete_list, UserList};
 pub use use_reaction::{use_reaction, UseReaction, ReactionState, ReactionEmoji, format_count};
+// UseUnsavedChanges struct and calculate_hash kept for future manual save controls
+#[allow(unused_imports)]
 pub use use_unsaved_changes::{use_unsaved_changes, UseUnsavedChanges, calculate_hash, calculate_multi_hash};

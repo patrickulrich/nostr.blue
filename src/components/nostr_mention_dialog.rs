@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 
-use crate::components::icons::{SearchIcon, XIcon};
+use crate::components::icons::SearchIcon;
 use crate::components::modal::{Modal, ModalHeader};
 use crate::services::content_search::{search_articles, search_text_notes, ContentSearchResult};
 use crate::services::profile_search::{
@@ -20,9 +20,11 @@ use crate::stores::profiles::PROFILE_CACHE;
 pub struct MentionSelection {
     /// The nostr: URI to insert (e.g., "nostr:npub1...")
     pub uri: String,
-    /// Display text (for preview purposes)
+    /// Display text (for preview purposes) - kept for future mention preview feature
+    #[allow(dead_code)]
     pub display_text: String,
-    /// Type of mention
+    /// Type of mention - kept for future mention type differentiation in UI
+    #[allow(dead_code)]
     pub mention_type: MentionType,
 }
 

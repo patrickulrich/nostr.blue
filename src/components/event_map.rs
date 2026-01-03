@@ -220,6 +220,13 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     let mut loading_geo = use_signal(|| false);
     let mut processed_event_ids = use_signal(String::new);
+    // Cancellation flag for geocoding task - set to true on unmount
+    let mut geocode_cancelled = use_signal(|| false);
+
+    // Cancel geocoding task on unmount
+    use_drop(move || {
+        geocode_cancelled.set(true);
+    });
 
     // Memoize events to prevent unnecessary re-processing
     // Create a stable identifier for the current set of events
@@ -284,13 +291,27 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
             loading_geo.set(true);
             let key_to_store = events_key.clone();
+            // Clone events once for the spawned task
             let events_to_process = events_for_geocode.clone();
 
             spawn(async move {
                 let mut results = Vec::new();
+                const BATCH_SIZE: usize = 5;
+                const BATCH_DELAY_MS: u32 = 200;
 
-                for event in events_to_process.iter() {
-                    // Try geohash first
+                for (idx, event) in events_to_process.iter().enumerate() {
+                    // Check cancellation before processing each event
+                    if *geocode_cancelled.read() {
+                        log::debug!("Geocoding cancelled, stopping processing");
+                        return;
+                    }
+
+                    // Rate limiting: pause between batches of geocoding requests
+                    if idx > 0 && idx % BATCH_SIZE == 0 {
+                        gloo_timers::future::TimeoutFuture::new(BATCH_DELAY_MS).await;
+                    }
+
+                    // Try geohash first (no network request needed)
                     if let Some(geohash) = event.geohash() {
                         if let Some((lat, lon)) = geohash_to_coords(geohash) {
                             results.push(GeocodedEvent {
@@ -317,13 +338,27 @@ pub fn EventMap(props: EventMapProps) -> Element {
                             continue;
                         }
 
-                        if let Ok(Some(loc)) = geocode(location_str).await {
-                            results.push(GeocodedEvent {
-                                event: event.clone(),
-                                location: loc,
-                            });
+                        match geocode(location_str).await {
+                            Ok(Some(loc)) => {
+                                results.push(GeocodedEvent {
+                                    event: event.clone(),
+                                    location: loc,
+                                });
+                            }
+                            Ok(None) => {
+                                log::debug!("Geocoding returned no results for: {}", location_str);
+                            }
+                            Err(e) => {
+                                log::warn!("Geocoding failed for '{}': {}", location_str, e);
+                            }
                         }
                     }
+                }
+
+                // Check cancellation before updating signals
+                if *geocode_cancelled.read() {
+                    log::debug!("Geocoding cancelled, not updating signals");
+                    return;
                 }
 
                 geocoded_events.set(results);
