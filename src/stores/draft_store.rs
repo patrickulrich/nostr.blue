@@ -465,6 +465,16 @@ pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String
     let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
+    // Get private relays and add them to the client for fetching
+    let private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
+
+    // Add private relays to client so we can fetch drafts from them
+    for relay_url in &private_relays {
+        if let Err(e) = client.add_relay(relay_url.as_str()).await {
+            log::debug!("Could not add private relay {}: {}", relay_url, e);
+        }
+    }
+
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(KIND_DRAFT))
