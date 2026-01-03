@@ -1003,10 +1003,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             mint: mint_url.clone(),
             unit: "sat".to_string(),
             proofs: proof_data,
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+            created_at: (js_sys::Date::now() / 1000.0) as u64,
         });
     }
 

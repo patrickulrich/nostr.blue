@@ -461,8 +461,6 @@ pub fn RadioStationNew() -> Element {
 /// Publish a radio station event (Kind 31237)
 /// Uses wavefunc-compatible tag format for interoperability
 async fn publish_station(form: StationFormData) -> std::result::Result<String, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let StationFormData {
         name,
         description,
@@ -482,12 +480,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         .collect::<String>()
         .replace(' ', "-");
 
-    // Add timestamp suffix to ensure uniqueness
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let d_tag = format!("{}-{}", d_tag, timestamp % 10000);
+    // Add high-entropy suffix for uniqueness (millisecond timestamp + UUID fragment)
+    let timestamp_ms = js_sys::Date::now() as u64;
+    let random_component = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("").to_string();
+    let d_tag = format!("{}-{}-{}", d_tag, timestamp_ms, random_component);
 
     // Build tags using wavefunc-compatible format
     let mut tags: Vec<Tag> = vec![
@@ -592,11 +588,8 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
     let event_id = output.id().to_string();
 
-    // Build naddr
-    let pubkey = client.signer().await
-        .map_err(|e| format!("Failed to get signer: {}", e))?
-        .get_public_key().await
-        .map_err(|e| format!("Failed to get public key: {}", e))?;
+    // Build naddr (use cached pubkey - no signer call needed)
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     let coordinate = Coordinate::new(Kind::from(31237), pubkey)
         .identifier(d_tag);

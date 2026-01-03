@@ -7,6 +7,7 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{Client, EventBuilder, Filter, Kind, PublicKey, Tag, TagKind};
+use super::nostr_client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -278,8 +279,8 @@ pub async fn publish_dm_relay_list(dm_relays: Vec<String>, client: Arc<Client>) 
 
 /// Sync relay lists on login - compares timestamps and updates if remote is newer
 pub async fn sync_relay_lists_on_login(client: Arc<Client>) -> Result<(), String> {
-    let signer = client.signer().await.map_err(|_| "No signer attached")?;
-    let user_pubkey = signer.get_public_key().await.map_err(|e| format!("Failed to get pubkey: {}", e))?;
+    // Use cached pubkey - no signer call needed
+    let user_pubkey = nostr_client::get_cached_pubkey().map_err(|_| "No signer attached")?;
 
     log::info!("Syncing relay lists on login for {}", user_pubkey.to_hex());
 

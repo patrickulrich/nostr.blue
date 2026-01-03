@@ -6,6 +6,7 @@ use crate::routes::Route;
 use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use nostr_sdk::nips::nip19::Nip19;
 use crate::stores::nostr_client;
+use crate::stores::profiles;
 use crate::services::wavlake::WavlakeAPI;
 use crate::services::podcast_index;
 use crate::stores::music_player::{self, MusicTrack};
@@ -316,26 +317,39 @@ fn MentionRenderer(mention: String) -> Element {
             _ => None, // Not a profile reference
         });
 
+    // Check cache synchronously first - this makes most mentions instant
+    let cached_metadata = pubkey_result
+        .as_ref()
+        .and_then(|pk| profiles::get_profile(&pk.to_hex()));
+
     // Always call hooks unconditionally
-    let mut metadata = use_signal(|| None::<Metadata>);
+    let mut metadata = use_signal(move || cached_metadata);
 
-    // Fetch profile metadata
+    // Only fetch from relays if not in cache
     use_effect(move || {
-        if let Some(pubkey) = pubkey_result {
-            spawn(async move {
-                let metadata_filter = Filter::new()
-                    .author(pubkey)
-                    .kind(Kind::Metadata)
-                    .limit(1);
+        // Skip fetch if we already have metadata from cache
+        if metadata.read().is_some() {
+            return;
+        }
 
-                if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                    metadata_filter,
-                    std::time::Duration::from_secs(5)
-                ).await {
-                    if let Some(metadata_event) = metadata_events.into_iter().next() {
-                        if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                            metadata.set(Some(meta));
+        if let Some(pubkey) = pubkey_result {
+            let pubkey_hex = pubkey.to_hex();
+            spawn(async move {
+                // Use the profiles store fetch which handles caching properly
+                match profiles::fetch_profile(pubkey_hex).await {
+                    Ok(profile) => {
+                        // Convert Profile to Metadata
+                        let mut meta = Metadata::new();
+                        if let Some(name) = profile.name {
+                            meta = meta.name(&name);
                         }
+                        if let Some(display_name) = profile.display_name {
+                            meta = meta.display_name(&display_name);
+                        }
+                        metadata.set(Some(meta));
+                    }
+                    Err(e) => {
+                        log::debug!("Failed to fetch profile for mention: {}", e);
                     }
                 }
             });

@@ -197,7 +197,8 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     size: Some(file_size),
                                     blurhash: None,
                                     alt: Some(caption_text.clone()),
-                                    summary: Some(caption_text),
+                                    summary: Some(caption_text.clone()),
+                                    description: Some(caption_text),
                                     created_at: nostr_sdk::Timestamp::now(),
                                 };
 

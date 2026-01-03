@@ -297,8 +297,9 @@ pub async fn load_sidebar_preferences() {
         }
     };
 
-    let auth = auth_store::AUTH_STATE.read();
-    let pubkey = match auth.pubkey.as_ref() {
+    // Extract pubkey immediately and drop the read guard to avoid holding it across await points
+    let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone();
+    let pubkey = match pubkey_str.as_ref() {
         Some(pk_str) => {
             match nostr_sdk::PublicKey::from_bech32(pk_str)
                 .or_else(|_| nostr_sdk::PublicKey::from_hex(pk_str))

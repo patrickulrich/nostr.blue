@@ -524,12 +524,8 @@ pub async fn accept_badge(
         return Err("No signer available".to_string());
     }
 
-    // Get current user's pubkey
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
-        .map_err(|e| format!("Failed to get pubkey: {}", e))?;
+    // Get current user's pubkey (use cached - no signer call needed)
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Fetch existing profile badges
     let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
@@ -586,12 +582,8 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
         return Err("No signer available".to_string());
     }
 
-    // Get current user's pubkey
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
-        .map_err(|e| format!("Failed to get pubkey: {}", e))?;
+    // Get current user's pubkey (use cached - no signer call needed)
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Fetch existing profile badges
     let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
