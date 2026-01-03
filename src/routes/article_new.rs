@@ -180,11 +180,13 @@ pub fn ArticleNew() -> Element {
         // Capture hash before spawn to avoid stale read after await
         let saved_hash = *content_hash.read();
 
+        // Update throttle timestamp immediately to prevent overlapping saves
+        last_auto_save.set(now);
         draft_status.set(DraftStatus::Saving);
+
         spawn(async move {
             match save_draft(&draft).await {
                 Ok(event_id) => {
-                    last_auto_save.set(now);
                     loaded_draft_id.set(Some(draft.identifier.clone()));
                     // Use captured hash (not stale memo read)
                     last_saved_hash.set(Some(saved_hash));

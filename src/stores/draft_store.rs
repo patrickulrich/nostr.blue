@@ -158,9 +158,10 @@ impl ArticleDraft {
 }
 
 /// Draft save status for UI feedback
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DraftStatus {
     /// No changes since last save (or new empty draft)
+    #[default]
     Clean,
     /// Content has changed, needs saving
     Dirty,
@@ -170,12 +171,6 @@ pub enum DraftStatus {
     Saved { event_id: String, saved_at: u64 },
     /// Save failed
     Error(String),
-}
-
-impl Default for DraftStatus {
-    fn default() -> Self {
-        Self::Clean
-    }
 }
 
 /// A loaded draft with metadata
