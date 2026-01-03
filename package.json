@@ -1,12 +1,21 @@
 {
   "name": "nostrblue",
-  "version": "0.6.7",
+  "version": "0.7.0",
   "description": "Nostr.blue Rust client",
   "scripts": {
     "tailwind:watch": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --watch",
-    "tailwind:build": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --minify"
+    "tailwind:build": "tailwindcss -i ./assets/tailwind.css -o ./public/tailwind.css --minify",
+    "git-worker:build": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --minify",
+    "git-worker:watch": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --watch",
+    "build:all": "npm run tailwind:build && npm run git-worker:build"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.1"
+    "esbuild": "^0.27.2",
+    "tailwindcss": "^3.4.19"
+  },
+  "dependencies": {
+    "isomorphic-git": "^1.36.1",
+    "@isomorphic-git/lightning-fs": "^4.6.2",
+    "buffer": "^6.0.3"
   }
 }

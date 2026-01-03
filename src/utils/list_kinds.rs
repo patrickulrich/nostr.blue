@@ -1,7 +1,7 @@
-/// Nostr List Event Kinds and Utilities
-///
-/// NIP-51: Lists
-/// Reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+//! Nostr List Event Kinds and Utilities
+//!
+//! NIP-51: Lists
+//! Reference: https://github.com/nostr-protocol/nips/blob/master/51.md
 
 /// NIP-51 List kinds (parameterized replaceable events)
 pub const NAMED_PEOPLE: u16 = 30000;     // People list

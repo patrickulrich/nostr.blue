@@ -156,7 +156,7 @@ pub async fn estimate_p2pk_send_fee(
     let witness_fee = if witness_size > 0 {
         // Estimate 1 sat per 100 bytes of witness data per proof
         // Use ceiling division: (n + 99) / 100 rounds up
-        let fee_per_proof = ((witness_size + 99) / 100).max(1) as u64;
+        let fee_per_proof = witness_size.div_ceil(100).max(1) as u64;
         fee_per_proof * proof_count as u64
     } else {
         0
@@ -209,7 +209,7 @@ pub async fn estimate_p2pk_receive_fee(
         // Assume single-sig P2PK if witness present
         // Use ceiling division: (n + 99) / 100 rounds up
         let witness_size = P2PK_WITNESS_OVERHEAD;
-        ((witness_size + 99) / 100).max(1) as u64 * proof_count as u64
+        witness_size.div_ceil(100).max(1) as u64 * proof_count as u64
     } else {
         0
     };

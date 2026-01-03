@@ -132,7 +132,7 @@ pub async fn execute_swap(
         .swap(
             amount,
             split_target,
-            cdk_proofs.into(),
+            cdk_proofs,
             options.conditions,
             options.include_fee,
         )

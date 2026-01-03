@@ -21,8 +21,14 @@ pub struct AppSettings {
     pub sync_notifications: bool, // Sync notification read status across devices via NIP-78
     #[serde(default)]
     pub payment_method_preference: String, // "nwc_first", "webln_first", "manual_only", "always_ask"
+    #[serde(default = "default_mempool_endpoint")]
+    pub mempool_endpoint: String, // Custom mempool.space API endpoint
     #[serde(default)]
     pub version: u32, // Settings schema version
+}
+
+fn default_mempool_endpoint() -> String {
+    crate::services::mempool::DEFAULT_ENDPOINT.to_string()
 }
 
 impl Default for AppSettings {
@@ -33,7 +39,8 @@ impl Default for AppSettings {
             blossom_servers: vec![blossom_store::DEFAULT_SERVER.to_string()],
             sync_notifications: false, // Privacy-first: opt-in by default
             payment_method_preference: "nwc_first".to_string(), // Default to NWC if connected
-            version: 3, // Incremented for payment_method_preference addition
+            mempool_endpoint: default_mempool_endpoint(),
+            version: 4, // Incremented for mempool_endpoint addition
         }
     }
 }
@@ -176,7 +183,7 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
 #[allow(dead_code)] // Called from theme_store.rs
 pub async fn update_theme(theme: theme_store::Theme) {
     // Apply theme locally (using internal function to avoid recursion)
-    theme_store::set_theme_internal(theme.clone());
+    theme_store::set_theme_internal(theme);
 
     // Update settings
     let mut settings = SETTINGS.read().clone();
@@ -212,4 +219,35 @@ pub async fn update_payment_method_preference(preference: String) {
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save payment method preference: {}", e);
     }
+}
+
+/// Get current mempool endpoint (returns default if empty)
+pub fn get_mempool_endpoint() -> String {
+    let settings = SETTINGS.read();
+    if settings.mempool_endpoint.is_empty() {
+        default_mempool_endpoint()
+    } else {
+        settings.mempool_endpoint.clone()
+    }
+}
+
+/// Update mempool endpoint and save to Nostr
+pub async fn update_mempool_endpoint(endpoint: String) {
+    let mut settings = SETTINGS.read().clone();
+    settings.mempool_endpoint = if endpoint.is_empty() {
+        default_mempool_endpoint()
+    } else {
+        // Ensure endpoint doesn't have trailing slash
+        endpoint.trim_end_matches('/').to_string()
+    };
+
+    // Save to Nostr
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save mempool endpoint: {}", e);
+    }
+}
+
+/// Reset mempool endpoint to default
+pub async fn reset_mempool_endpoint() {
+    update_mempool_endpoint(default_mempool_endpoint()).await;
 }

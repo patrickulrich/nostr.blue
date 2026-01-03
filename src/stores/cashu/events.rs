@@ -303,12 +303,12 @@ pub async fn fetch_tokens() -> Result<(), String> {
     // Build deletion filter with since if incremental
     let deletion_filter = if is_incremental {
         Filter::new()
-            .author(pubkey.clone())
+            .author(pubkey)
             .kind(Kind::from(5))
             .since(Timestamp::from(last_sync_ts))
     } else {
         Filter::new()
-            .author(pubkey.clone())
+            .author(pubkey)
             .kind(Kind::from(5))
     };
 

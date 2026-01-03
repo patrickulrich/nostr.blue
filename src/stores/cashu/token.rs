@@ -95,7 +95,7 @@ pub fn get_token_info(token_str: &str) -> Result<TokenInfo, String> {
 
     let value = token.value()
         .ok()
-        .map(|a| u64::from(a));
+        .map(u64::from);
 
     let unit = token.unit()
         .map(|u| u.to_string());
@@ -140,7 +140,7 @@ pub fn create_token(
     // CDK's Token::new() creates V4 format by default
     let token = Token::new(
         mint_url,
-        proofs.into(),
+        proofs,
         memo,
         CurrencyUnit::Sat,
     );
