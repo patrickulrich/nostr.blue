@@ -223,11 +223,8 @@ impl DisplayEpisode {
     pub fn from_podcast_index_live_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
         let mut ep = Self::from_podcast_index_episode(episode, feed);
         ep.is_live = true;
-        // For live episodes, use current time as created_at to sort to top
-        ep.created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        // For live episodes, use current time as created_at to sort to top (WASM-compatible)
+        ep.created_at = (js_sys::Date::now() / 1000.0) as u64;
         ep
     }
 

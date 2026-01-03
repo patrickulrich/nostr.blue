@@ -52,7 +52,7 @@ pub use format::{format_sats_with_separator, format_sats_compact, truncate_pubke
 // date_helpers are used via crate::utils::date_helpers::* by calendar components
 pub use repost::{FeedItem, extract_reposted_event};
 pub use validation::{SignerValidationResult, get_current_user_pubkey, is_valid_http_url, css_safe_url};
-pub use time::safe_duration_millis;
+pub use time::{safe_duration_millis, format_time_ago};
 pub use error::log_fetch_error;
 
 /// Generate a random alphanumeric ID (9 characters)

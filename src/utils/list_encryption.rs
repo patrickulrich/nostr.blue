@@ -65,10 +65,8 @@ pub async fn encrypt_private_tags(tags: &[Tag]) -> Result<String, String> {
 
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
-    let pubkey = signer
-        .get_public_key()
-        .await
-        .map_err(|e| format!("Failed to get pubkey: {}", e))?;
+    // Use cached pubkey - no need to call signer.get_public_key()
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Convert tags to JSON array format: [["p", "pubkey"], ["p", "pubkey2"], ...]
     let tag_arrays: Vec<Vec<String>> = tags

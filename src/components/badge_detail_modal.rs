@@ -260,66 +260,57 @@ pub fn BadgeDetailModal(
                         div {
                             class: "flex gap-3 mt-6",
 
-                            if is_accepted {
-                                // Already accepted - show remove option
-                                button {
-                                    class: "flex-1 px-4 py-2 rounded-lg border border-destructive text-destructive hover:bg-destructive/10 transition disabled:opacity-50",
-                                    disabled: *processing.read(),
-                                    onclick: move |_| {
-                                        processing.set(true);
-                                        // Set a timeout to reset processing if parent doesn't respond
-                                        let timeout_task = spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(10000).await;
-                                            processing.set(false);
-                                        });
-                                        processing_timeout.set(Some(timeout_task));
-                                        on_reject.call(());
-                                    },
-                                    if *processing.read() {
-                                        "Removing..."
-                                    } else {
-                                        "Remove from Profile"
-                                    }
-                                }
-                            } else {
-                                // Not accepted - show accept/reject options
-                                button {
-                                    class: "flex-1 px-4 py-2 rounded-lg border border-border hover:bg-accent transition disabled:opacity-50",
-                                    disabled: *processing.read(),
-                                    onclick: move |_| {
-                                        processing.set(true);
-                                        // Set a timeout to reset processing if parent doesn't respond
-                                        let timeout_task = spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(10000).await;
-                                            processing.set(false);
-                                        });
-                                        processing_timeout.set(Some(timeout_task));
-                                        on_reject.call(());
-                                    },
-                                    if *processing.read() {
-                                        "Declining..."
-                                    } else {
-                                        "Decline"
-                                    }
-                                }
+                            // Helper to start processing with timeout reset
+                            {
+                                let mut start_processing = move |handler: EventHandler<()>| {
+                                    processing.set(true);
+                                    // Set a timeout to reset processing if parent doesn't respond
+                                    let timeout_task = spawn(async move {
+                                        gloo_timers::future::TimeoutFuture::new(10000).await;
+                                        processing.set(false);
+                                    });
+                                    processing_timeout.set(Some(timeout_task));
+                                    handler.call(());
+                                };
 
-                                button {
-                                    class: "flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50",
-                                    disabled: *processing.read(),
-                                    onclick: move |_| {
-                                        processing.set(true);
-                                        // Set a timeout to reset processing if parent doesn't respond
-                                        let timeout_task = spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(10000).await;
-                                            processing.set(false);
-                                        });
-                                        processing_timeout.set(Some(timeout_task));
-                                        on_accept.call(());
-                                    },
-                                    if *processing.read() {
-                                        "Accepting..."
-                                    } else {
-                                        "Accept Badge"
+                                if is_accepted {
+                                    // Already accepted - show remove option
+                                    rsx! {
+                                        button {
+                                            class: "flex-1 px-4 py-2 rounded-lg border border-destructive text-destructive hover:bg-destructive/10 transition disabled:opacity-50",
+                                            disabled: *processing.read(),
+                                            onclick: move |_| start_processing(on_reject),
+                                            if *processing.read() {
+                                                "Removing..."
+                                            } else {
+                                                "Remove from Profile"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Not accepted - show accept/reject options
+                                    rsx! {
+                                        button {
+                                            class: "flex-1 px-4 py-2 rounded-lg border border-border hover:bg-accent transition disabled:opacity-50",
+                                            disabled: *processing.read(),
+                                            onclick: move |_| start_processing(on_reject),
+                                            if *processing.read() {
+                                                "Declining..."
+                                            } else {
+                                                "Decline"
+                                            }
+                                        }
+
+                                        button {
+                                            class: "flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50",
+                                            disabled: *processing.read(),
+                                            onclick: move |_| start_processing(on_accept),
+                                            if *processing.read() {
+                                                "Accepting..."
+                                            } else {
+                                                "Accept Badge"
+                                            }
+                                        }
                                     }
                                 }
                             }

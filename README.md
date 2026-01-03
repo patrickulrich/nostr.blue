@@ -2,7 +2,7 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.7.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.77+-orange)
 ![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
@@ -17,7 +17,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Encrypted Messaging** - Full DM support with NIP-04 (legacy), NIP-17 (private), and NIP-44 (versioned encryption)
 - **Lightning Zaps** - Send and receive Bitcoin micropayments (NIP-57) with NWC integration (NIP-47)
 - **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0), Podcasts
-- **Long-form Content** - Articles (NIP-23), Photos (NIP-68), Videos (NIP-71)
+- **Long-form Content** - Articles (NIP-23) with encrypted drafts (NIP-37), Photos (NIP-68), Videos (NIP-71)
 - **Wiki & Publications** - NIP-54 wiki pages with wikilinks, NKBIP-01 curated publications with AsciiDoc
 - **External Content** - NIP-73 support for books (ISBN), papers (DOI), Bitcoin transactions/addresses
 - **P2P Trading** - View NIP-69 peer-to-peer Bitcoin orders with depth charts and market data
@@ -373,7 +373,7 @@ Production builds are optimized with:
 | [NIP-34](https://github.com/nostr-protocol/nips/blob/master/34.md) | Git stuff | ✅ |
 | [NIP-35](https://github.com/nostr-protocol/nips/blob/master/35.md) | Torrents | ❌ |
 | [NIP-36](https://github.com/nostr-protocol/nips/blob/master/36.md) | Sensitive Content | ❌ |
-| [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ❌ |
+| [NIP-37](https://github.com/nostr-protocol/nips/blob/master/37.md) | Draft Events | ✅ |
 | [NIP-38](https://github.com/nostr-protocol/nips/blob/master/38.md) | User Statuses | ✅ |
 | [NIP-39](https://github.com/nostr-protocol/nips/blob/master/39.md) | External Identities | ❌ |
 | [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp | ❌ |
