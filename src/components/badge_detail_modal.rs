@@ -13,6 +13,7 @@ use crate::stores::profiles;
 use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 
 /// Processing state for accept/decline buttons
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -173,20 +174,27 @@ pub fn BadgeDetailModal(
                         }
                     }
 
-                    // Badge image
-                    if let Some(image) = badge.get_image() {
-                        img {
-                            src: "{image}",
-                            alt: "{badge.get_display_name()}",
-                            class: "w-32 h-32 rounded-lg object-contain"
-                        }
-                    } else {
-                        // Placeholder
-                        div {
-                            class: "w-32 h-32 rounded-lg bg-primary/30 flex items-center justify-center",
-                            span {
-                                class: "text-4xl font-bold text-primary",
-                                "{badge.id.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                    // Badge image - validate URL before rendering
+                    {
+                        let valid_image = badge.get_image().filter(|url| is_valid_http_url(url));
+                        if let Some(image) = valid_image {
+                            rsx! {
+                                img {
+                                    src: "{image}",
+                                    alt: "{badge.get_display_name()}",
+                                    class: "w-32 h-32 rounded-lg object-contain"
+                                }
+                            }
+                        } else {
+                            // Placeholder
+                            rsx! {
+                                div {
+                                    class: "w-32 h-32 rounded-lg bg-primary/30 flex items-center justify-center",
+                                    span {
+                                        class: "text-4xl font-bold text-primary",
+                                        "{badge.id.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                                    }
+                                }
                             }
                         }
                     }

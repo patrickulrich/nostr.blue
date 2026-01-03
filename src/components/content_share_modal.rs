@@ -95,10 +95,13 @@ pub fn ContentShareModal(
                     Ok(_) => {
                         copied.set(true);
                         log::info!("Link copied to clipboard");
-                        spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                            copied.set(false);
-                        });
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            spawn(async move {
+                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                copied.set(false);
+                            });
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to copy to clipboard: {:?}", e);

@@ -18,6 +18,8 @@ pub fn AddToCookbookModal(
     recipe_title: Option<String>,
     on_close: EventHandler<()>,
 ) -> Element {
+    // Navigator is only used in wasm cfg blocks for delayed navigation
+    #[allow(unused_variables)]
     let navigator = use_navigator();
 
     // Mode: existing cookbook or create new
@@ -82,6 +84,7 @@ pub fn AddToCookbookModal(
                 Err(e) => {
                     log::error!("Failed to fetch user cookbooks: {}", e);
                     fetch_error.set(Some("Failed to load cookbooks. Please try again.".to_string()));
+                    has_loaded.set(false); // Allow retry
                 }
             }
             cookbooks_loading.set(false);
@@ -203,11 +206,14 @@ pub fn AddToCookbookModal(
                             pending_pin_cookbook.set(None);
                             // Navigate to the new cookbook after a short delay
                             // Store task handle so it can be cancelled if modal is closed
-                            let task = spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(1500).await;
-                                navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
-                            });
-                            navigation_task.set(Some(task));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                let task = spawn(async move {
+                                    gloo_timers::future::TimeoutFuture::new(1500).await;
+                                    navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                                });
+                                navigation_task.set(Some(task));
+                            }
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - store cookbook info for retry
@@ -228,6 +234,7 @@ pub fn AddToCookbookModal(
 
     // Handle retrying pin after cookbook was created but pin failed
     let recipe_naddr_for_retry = recipe_naddr.clone();
+    #[allow(unused_variables)]
     let handle_retry_pin = move |_| {
         let (cookbook_naddr, board_a_tag) = match pending_pin_cookbook.read().clone() {
             Some(info) => info,
@@ -257,11 +264,14 @@ pub fn AddToCookbookModal(
                     is_submitting.set(false);
                     pending_pin_cookbook.set(None);
                     // Navigate to the cookbook after a short delay
-                    let task = spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
-                        navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
-                    });
-                    navigation_task.set(Some(task));
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let task = spawn(async move {
+                            gloo_timers::future::TimeoutFuture::new(1500).await;
+                            navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                        });
+                        navigation_task.set(Some(task));
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to add recipe to cookbook (retry): {}", e);
@@ -501,11 +511,23 @@ pub fn AddToCookbookModal(
                                         class: "text-center py-6",
                                         span { class: "text-4xl mb-2 block", "⚠️" }
                                         p { class: "text-sm text-red-600 dark:text-red-400 mb-3", "{err}" }
-                                        button {
-                                            r#type: "button",
-                                            class: "text-sm text-primary hover:underline",
-                                            onclick: move |_| create_new.set(true),
-                                            "Create a new cookbook instead →"
+                                        div {
+                                            class: "flex gap-3 justify-center",
+                                            button {
+                                                r#type: "button",
+                                                class: "text-sm text-primary hover:underline",
+                                                onclick: move |_| {
+                                                    fetch_error.set(None);
+                                                    has_loaded.set(false);
+                                                },
+                                                "Retry"
+                                            }
+                                            button {
+                                                r#type: "button",
+                                                class: "text-sm text-muted-foreground hover:underline",
+                                                onclick: move |_| create_new.set(true),
+                                                "Create new cookbook instead"
+                                            }
                                         }
                                     }
                                 } else if cookbooks.read().is_empty() {

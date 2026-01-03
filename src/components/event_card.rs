@@ -285,28 +285,38 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
             to: detail_route,
             class: "flex items-center gap-3 p-3 hover:bg-accent/50 rounded-lg transition",
 
-            // Thumbnail or date box
-            if let Some(image_url) = event.image() {
-                img {
-                    src: "{image_url}",
-                    alt: "{event.title()}",
-                    class: "w-12 h-12 rounded object-cover flex-shrink-0",
-                    loading: "lazy",
-                }
-            } else {
-                div {
-                    class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0",
-                    svg {
-                        class: "w-6 h-6 text-primary",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        fill: "none",
-                        view_box: "0 0 24 24",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+            // Thumbnail or date box - validate URL before rendering
+            {
+                let safe_image_url = event.image().filter(|url| {
+                    url.starts_with("http://") || url.starts_with("https://")
+                });
+
+                if let Some(image_url) = safe_image_url {
+                    rsx! {
+                        img {
+                            src: "{image_url}",
+                            alt: "{event.title()}",
+                            class: "w-12 h-12 rounded object-cover flex-shrink-0",
+                            loading: "lazy",
+                        }
+                    }
+                } else {
+                    rsx! {
+                        div {
+                            class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0",
+                            svg {
+                                class: "w-6 h-6 text-primary",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                }
+                            }
                         }
                     }
                 }
