@@ -2,6 +2,49 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use nostr_sdk::Timestamp;
 
 // ============================================================================
+// Simple Relative Time (WASM-compatible, u64 input)
+// ============================================================================
+
+/// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago")
+///
+/// This version takes a raw `u64` timestamp and is WASM-compatible,
+/// using `js_sys::Date::now()` in WASM and `std::time::SystemTime` otherwise.
+///
+/// # Examples
+/// - Recent: "just now"
+/// - Minutes: "5m ago"
+/// - Hours: "2h ago"
+/// - Days: "3d ago"
+/// - Weeks: "2w ago"
+/// - Months: "3mo ago"
+pub fn format_time_ago(timestamp: u64) -> String {
+    #[cfg(target_family = "wasm")]
+    let now = (js_sys::Date::now() / 1000.0) as u64;
+
+    #[cfg(not(target_family = "wasm"))]
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let diff = now.saturating_sub(timestamp);
+
+    if diff < 60 {
+        "just now".to_string()
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else if diff < 604800 {
+        format!("{}d ago", diff / 86400)
+    } else if diff < 2592000 {
+        format!("{}w ago", diff / 604800)
+    } else {
+        format!("{}mo ago", diff / 2592000)
+    }
+}
+
+// ============================================================================
 // Duration Safety Utilities
 // ============================================================================
 

@@ -14,6 +14,7 @@ use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles,
 };
 use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::format_time_ago;
 
 /// Selection result from the mention dialog
 #[derive(Clone, Debug)]
@@ -827,37 +828,5 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
                 }
             }
         }
-    }
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/// Format timestamp as relative time (e.g., "2h ago", "3d ago")
-fn format_time_ago(timestamp: u64) -> String {
-    #[cfg(target_family = "wasm")]
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-
-    #[cfg(not(target_family = "wasm"))]
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
-    } else if diff < 604800 {
-        format!("{}d ago", diff / 86400)
-    } else if diff < 2592000 {
-        format!("{}w ago", diff / 604800)
-    } else {
-        format!("{}mo ago", diff / 2592000)
     }
 }

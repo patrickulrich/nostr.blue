@@ -15,6 +15,7 @@ use crate::stores::auth_store;
 use crate::stores::draft_store::{
     delete_draft, load_drafts, save_draft, ArticleDraft, DraftStatus, LoadedDraft,
 };
+use crate::utils::format_time_ago;
 
 /// Draft selection modal for when there are existing drafts
 #[derive(Clone, Copy, PartialEq)]
@@ -829,31 +830,5 @@ pub fn ArticleNew() -> Element {
                 on_insert: handle_inline_image_uploaded,
             }
         }
-    }
-}
-
-/// Format timestamp as relative time
-fn format_time_ago(timestamp: u64) -> String {
-    #[cfg(target_family = "wasm")]
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-
-    #[cfg(not(target_family = "wasm"))]
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
-    } else if diff < 604800 {
-        format!("{}d ago", diff / 86400)
-    } else {
-        format!("{}w ago", diff / 604800)
     }
 }
