@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::calendar_store::UnifiedEvent;
@@ -231,11 +233,14 @@ pub fn EventMap(props: EventMapProps) -> Element {
     });
 
     // Memoize events to prevent unnecessary re-processing
-    // Create a stable identifier for the current set of events
-    let events_key = props.events.iter()
-        .map(|e| e.coordinate())
-        .collect::<Vec<_>>()
-        .join(",");
+    // Create a stable identifier using hash to avoid collision risks from comma-joining
+    let events_key = {
+        let mut hasher = DefaultHasher::new();
+        for e in props.events.iter() {
+            e.coordinate().hash(&mut hasher);
+        }
+        hasher.finish().to_string()
+    };
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
 
@@ -266,6 +271,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
             if initMap(&id, 20.0, 0.0, 2) {
                 map_initialized.set(true);
                 log::info!("Map initialized: {}", id);
+            } else {
+                log::error!("Failed to initialize map container: {}", id);
+                leaflet_error.set(Some("Failed to initialize map. Please refresh the page.".to_string()));
             }
         });
     });

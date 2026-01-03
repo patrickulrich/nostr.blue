@@ -59,17 +59,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Track whether to hide the "Posted!" badge after timeout
     let mut hide_confirmed_badge = use_signal(|| false);
+    let mut badge_timer_started = use_signal(|| false);
 
     // Auto-hide "Posted!" badge after 3 seconds
-    {
-        let is_confirmed = matches!(pending_status.as_ref(), Some(CommentStatus::Confirmed(_)));
-        use_effect(move || {
-            if is_confirmed && !*hide_confirmed_badge.read() {
-                spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(3_000).await;
-                    hide_confirmed_badge.set(true);
-                });
-            }
+    // Check during render (not in effect) to avoid stale closure captures
+    let is_confirmed = matches!(pending_status.as_ref(), Some(CommentStatus::Confirmed(_)));
+    if is_confirmed && !*badge_timer_started.read() {
+        badge_timer_started.set(true);
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(3_000).await;
+            hide_confirmed_badge.set(true);
         });
     }
 

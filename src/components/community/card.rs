@@ -123,6 +123,7 @@ pub fn JoinButton(
 pub fn PinCommunityButton(a_tag: String) -> Element {
     let mut is_pinned = use_signal(|| is_community_pinned(&a_tag));
     let mut is_loading = use_signal(|| false);
+    let mut pin_error: Signal<Option<String>> = use_signal(|| None);
     let is_logged_in = auth_store::get_pubkey().is_some();
 
     let a_tag_for_click = a_tag.clone();
@@ -137,6 +138,7 @@ pub fn PinCommunityButton(a_tag: String) -> Element {
         let a_tag = a_tag_for_click.clone();
         let current_pinned = *is_pinned.read();
         is_loading.set(true);
+        pin_error.set(None);
 
         spawn(async move {
             let result = if current_pinned {
@@ -149,9 +151,11 @@ pub fn PinCommunityButton(a_tag: String) -> Element {
                 Ok(_) => {
                     // Toggle the state
                     is_pinned.set(!current_pinned);
+                    pin_error.set(None);
                 }
                 Err(e) => {
                     log::error!("Failed to toggle pin: {}", e);
+                    pin_error.set(Some("Failed to update pin".to_string()));
                 }
             }
             is_loading.set(false);
@@ -163,14 +167,23 @@ pub fn PinCommunityButton(a_tag: String) -> Element {
     }
 
     rsx! {
-        button {
-            class: "p-1.5 rounded hover:bg-accent transition",
-            class: if *is_pinned.read() { "text-primary" } else { "text-muted-foreground hover:text-foreground" },
-            title: if *is_pinned.read() { "Unpin community" } else { "Pin community" },
-            onclick: on_click,
-            PinIcon {
-                class: "w-4 h-4".to_string(),
-                filled: *is_pinned.read()
+        div {
+            class: "relative",
+            button {
+                class: "p-1.5 rounded hover:bg-accent transition",
+                class: if *is_pinned.read() { "text-primary" } else { "text-muted-foreground hover:text-foreground" },
+                title: if *is_pinned.read() { "Unpin community" } else { "Pin community" },
+                onclick: on_click,
+                PinIcon {
+                    class: "w-4 h-4".to_string(),
+                    filled: *is_pinned.read()
+                }
+            }
+            if pin_error.read().is_some() {
+                span {
+                    class: "absolute top-full right-0 mt-1 text-xs text-destructive whitespace-nowrap",
+                    "Pin failed"
+                }
             }
         }
     }
