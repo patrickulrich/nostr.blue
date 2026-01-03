@@ -350,15 +350,26 @@ pub fn ArticleNew() -> Element {
 
     // Handle loading a draft
     let mut handle_load_draft = move |draft: LoadedDraft| {
+        // Compute hash directly from draft content to avoid stale memo read
+        let hashtags_str = draft.draft.hashtags.join(", ");
+        let hash = calculate_multi_hash(&[
+            &draft.draft.title,
+            &draft.draft.summary,
+            &draft.draft.content,
+            &draft.draft.identifier,
+            &draft.draft.cover_image,
+            &hashtags_str,
+        ]);
+
         title.set(draft.draft.title);
         summary.set(draft.draft.summary);
         content.set(draft.draft.content);
         identifier.set(draft.draft.identifier.clone());
         cover_image.set(draft.draft.cover_image);
-        hashtags.set(draft.draft.hashtags.join(", "));
+        hashtags.set(hashtags_str);
         loaded_draft_id.set(Some(draft.draft.identifier));
-        // Mark as saved using extracted signals
-        last_saved_hash.set(Some(*content_hash.read()));
+        // Mark as saved using computed hash (not stale memo)
+        last_saved_hash.set(Some(hash));
         is_dirty.set(false);
         editor_state.set(EditorState::Editing);
     };

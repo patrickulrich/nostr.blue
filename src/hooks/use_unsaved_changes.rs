@@ -74,23 +74,24 @@ impl UseUnsavedChanges {
 /// ```
 pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
     let mut is_dirty = use_signal(|| false);
-    let last_saved_hash = use_signal(|| None::<u64>);
+    let mut last_saved_hash = use_signal(|| None::<u64>);
 
     // Track dirty state when content changes
     use_effect(move || {
         let current = *content_hash.read();
+        // Copy the saved hash to avoid borrow conflict when mutating
+        let saved_hash = *last_saved_hash.read();
 
-        match *last_saved_hash.read() {
+        match saved_hash {
             Some(saved) => {
                 // Has been saved before - compare with saved state
                 is_dirty.set(current != saved);
             }
             None => {
-                // Never saved - dirty if there's any content
-                // (hash of empty content would be consistent, so > 0 check isn't reliable)
-                // Instead, we check if hash differs from initial empty state
-                let empty_hash = calculate_empty_hash();
-                is_dirty.set(current != empty_hash);
+                // First observation - set current hash as baseline (not dirty)
+                // This correctly handles multi-field content hashes
+                last_saved_hash.set(Some(current));
+                is_dirty.set(false);
             }
         }
     });
@@ -109,13 +110,6 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
         is_dirty,
         last_saved_hash,
     }
-}
-
-/// Calculate hash for empty state comparison
-fn calculate_empty_hash() -> u64 {
-    let mut hasher = DefaultHasher::new();
-    "".hash(&mut hasher);
-    hasher.finish()
 }
 
 /// Calculate hash for arbitrary content
@@ -263,12 +257,5 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
-    }
-
-    #[test]
-    fn test_empty_hash_consistent() {
-        let empty1 = calculate_empty_hash();
-        let empty2 = calculate_empty_hash();
-        assert_eq!(empty1, empty2);
     }
 }

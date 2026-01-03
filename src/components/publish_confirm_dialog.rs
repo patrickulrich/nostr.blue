@@ -57,8 +57,9 @@ pub fn PublishConfirmDialog(props: PublishConfirmDialogProps) -> Element {
     // Generate content preview (first 500 chars of rendered markdown)
     let content_preview = use_memo(move || {
         let content = &content_for_preview;
-        if content.len() > 500 {
-            let truncated = &content[..500.min(content.len())];
+        if content.chars().count() > 500 {
+            // Use char-based truncation to avoid panic on multi-byte UTF-8
+            let truncated: String = content.chars().take(500).collect();
             // Try to end at a word boundary
             let end = truncated.rfind(' ').unwrap_or(truncated.len());
             format!("{}...", render_markdown(&truncated[..end]))

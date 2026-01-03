@@ -480,9 +480,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         .collect::<String>()
         .replace(' ', "-");
 
-    // Add timestamp suffix to ensure uniqueness (WASM-compatible)
-    let timestamp = (js_sys::Date::now() / 1000.0) as u64;
-    let d_tag = format!("{}-{}", d_tag, timestamp % 10000);
+    // Add high-entropy suffix for uniqueness (millisecond timestamp + UUID fragment)
+    let timestamp_ms = js_sys::Date::now() as u64;
+    let random_component = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("").to_string();
+    let d_tag = format!("{}-{}-{}", d_tag, timestamp_ms, random_component);
 
     // Build tags using wavefunc-compatible format
     let mut tags: Vec<Tag> = vec![

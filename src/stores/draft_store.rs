@@ -386,12 +386,16 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
-    // Get private relays to fetch from (TODO: use these instead of main client)
-    let _private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
+    // Get private relays and add them to the client for fetching
+    let private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
 
-    // Create a temporary client for private relays
-    // Note: This is a simplified approach - in production you might want
-    // a dedicated client pool for private relay connections
+    // Add private relays to client so we can fetch drafts from them
+    for relay_url in &private_relays {
+        if let Err(e) = client.add_relay(relay_url.as_str()).await {
+            log::debug!("Could not add private relay {}: {}", relay_url, e);
+        }
+    }
+
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(KIND_DRAFT))
