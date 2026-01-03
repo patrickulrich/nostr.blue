@@ -29,7 +29,7 @@ impl Drop for ScrollListenerGuard {
 
 #[component]
 pub fn VideosLiveTag(tag: String) -> Element {
-    let mut stream_events = use_signal(|| Vec::<Event>::new());
+    let mut stream_events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut refresh_trigger = use_signal(|| 0);
     let mut has_more = use_signal(|| true);

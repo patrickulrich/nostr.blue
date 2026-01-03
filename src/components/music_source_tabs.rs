@@ -55,7 +55,7 @@ pub fn MusicSourceTabs(props: MusicSourceTabsProps) -> Element {
     }
 }
 
-/// Discovery section tabs (Trending, New, Playlists, Following)
+/// Discovery section tabs (Trending, New, Playlists, Following, Rss)
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum DiscoveryTab {
     #[default]
@@ -63,6 +63,7 @@ pub enum DiscoveryTab {
     New,
     Playlists,
     Following,
+    Rss,
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -82,12 +83,14 @@ pub fn DiscoveryTabs(props: DiscoveryTabsProps) -> Element {
             (DiscoveryTab::New, "New"),
             (DiscoveryTab::Playlists, "Playlists"),
             (DiscoveryTab::Following, "Following"),
+            (DiscoveryTab::Rss, "RSS"),
         ]
     } else {
         vec![
             (DiscoveryTab::Trending, "Trending"),
             (DiscoveryTab::New, "New"),
             (DiscoveryTab::Playlists, "Playlists"),
+            (DiscoveryTab::Rss, "RSS"),
         ]
     };
 

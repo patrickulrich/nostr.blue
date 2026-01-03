@@ -13,12 +13,13 @@
 //! - NIP-98: https://github.com/nostr-protocol/nips/blob/master/98.md
 
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip98;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{FormData, Request, RequestInit, Response};
 
-use crate::stores::nostr_client;
+use crate::utils::nip98 as nip98_utils;
 
 // Disambiguate Result type
 type Result<T, E> = std::result::Result<T, E>;
@@ -144,29 +145,24 @@ pub async fn upload_to_nip96(
     // Reset progress
     *NIP96_UPLOAD_PROGRESS.write() = Some(0.0);
 
-    // Get signer for NIP-98 authentication
-    let signer = match nostr_client::get_signer() {
-        Some(s) => s,
-        None => {
-            *NIP96_UPLOAD_PROGRESS.write() = None;
-            return Err("Not authenticated. Please sign in to upload files.".to_string());
-        }
-    };
-
-    *NIP96_UPLOAD_PROGRESS.write() = Some(10.0);
-
     // Calculate SHA-256 hash of file
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
     hasher.update(&file_data);
     let file_hash = hasher.finalize();
-    let file_hash_hex = hex::encode(file_hash);
 
-    log::info!("File hash: {}", file_hash_hex);
+    log::info!("File hash calculated");
     *NIP96_UPLOAD_PROGRESS.write() = Some(20.0);
 
-    // Create NIP-98 authorization header
-    let authorization = match create_nip98_auth(&signer, NOSTR_BUILD_API_URL, &file_hash_hex).await {
+    // Create NIP-98 authorization header using shared utility
+    use nostr_sdk::hashes::Hash;
+    let payload_hash = nostr_sdk::hashes::sha256::Hash::from_slice(&file_hash)
+        .map_err(|e| format!("Hash conversion error: {}", e))?;
+    let auth_result = match nip98_utils::create_auth_header_with_payload(
+        NOSTR_BUILD_API_URL,
+        nip98::HttpMethod::POST,
+        payload_hash,
+    ).await {
         Ok(auth) => auth,
         Err(e) => {
             *NIP96_UPLOAD_PROGRESS.write() = None;
@@ -178,12 +174,14 @@ pub async fn upload_to_nip96(
     *NIP96_UPLOAD_PROGRESS.write() = Some(30.0);
 
     // Upload using web_sys fetch API with FormData
+    // Use the signed_url from auth_result to ensure URL consistency with NIP-98 event
     let metadata = match upload_with_fetch(
         file_data,
         mime_type,
         caption,
         alt,
-        authorization,
+        auth_result.header,
+        &auth_result.signed_url,
     ).await {
         Ok(m) => m,
         Err(e) => {
@@ -212,40 +210,6 @@ pub async fn upload_to_nip96(
     Ok(metadata)
 }
 
-/// Create NIP-98 authorization header
-async fn create_nip98_auth(
-    signer: &crate::stores::signer::SignerType,
-    api_url: &str,
-    _file_hash: &str,
-) -> Result<String, String> {
-    use nostr_sdk::prelude::*;
-
-    let url = Url::parse(api_url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-    // Create HTTP data for NIP-98
-    // Note: payload hash is optional per NIP-98 spec
-    let http_data = nip98::HttpData::new(url, nip98::HttpMethod::POST);
-
-    // Generate authorization header based on signer type
-    let authorization = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            http_data.to_authorization(keys).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            http_data.to_authorization(browser_signer.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            http_data.to_authorization(nostr_connect.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
-    };
-
-    Ok(authorization)
-}
-
 /// Upload file using web_sys Fetch API with FormData (for WASM compatibility)
 async fn upload_with_fetch(
     file_data: Vec<u8>,
@@ -253,6 +217,7 @@ async fn upload_with_fetch(
     caption: String,
     alt: String,
     authorization: String,
+    upload_url: &str,
 ) -> Result<UploadedFileMetadata, String> {
     let window = web_sys::window().ok_or("No window object")?;
 
@@ -293,7 +258,8 @@ async fn upload_with_fetch(
     opts.set_body(&form_data);
 
     // Create request with Authorization header
-    let request = Request::new_with_str_and_init(NOSTR_BUILD_API_URL, &opts)
+    // Use the signed URL to ensure consistency with NIP-98 event
+    let request = Request::new_with_str_and_init(upload_url, &opts)
         .map_err(|e| format!("Failed to create request: {:?}", e))?;
 
     request.headers().set("Authorization", &authorization)
@@ -365,7 +331,7 @@ pub fn get_upload_servers() -> Vec<(String, String)> {
     if blossom_server != crate::stores::blossom_store::DEFAULT_SERVER {
         servers.push(("Custom Blossom".to_string(), blossom_server));
     } else {
-        servers.push(("Blossom (Primal)".to_string(), blossom_server));
+        servers.push(("Default Blossom".to_string(), blossom_server));
     }
 
     servers

@@ -15,14 +15,14 @@ enum StatusFilter {
 #[component]
 pub fn VideosLive() -> Element {
     // Following streams state
-    let mut following_streams = use_signal(|| Vec::<Event>::new());
+    let mut following_streams = use_signal(Vec::<Event>::new);
     let mut loading_following = use_signal(|| false);
     let mut has_more_following = use_signal(|| true);
     let mut oldest_timestamp_following = use_signal(|| None::<u64>);
     let mut error_following = use_signal(|| None::<String>);
 
     // Global streams state
-    let mut global_streams = use_signal(|| Vec::<Event>::new());
+    let mut global_streams = use_signal(Vec::<Event>::new);
     let mut loading_global = use_signal(|| false);
     let mut has_more_global = use_signal(|| true);
     let mut oldest_timestamp_global = use_signal(|| None::<u64>);

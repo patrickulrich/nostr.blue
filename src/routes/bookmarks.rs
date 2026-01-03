@@ -7,7 +7,7 @@ use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn Bookmarks() -> Element {
     let auth = auth_store::AUTH_STATE.read();
-    let mut bookmarked_events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut bookmarked_events = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
