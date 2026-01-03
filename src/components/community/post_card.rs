@@ -488,15 +488,9 @@ pub fn CommunityPostCard(
             // Zap modal
             if *show_zap_modal.read() {
                 {
-                    let author_profile = get_cached_profile(&post.pubkey);
-                    let recipient_name = author_profile
-                        .as_ref()
-                        .and_then(|p| p.display_name.clone().or(p.name.clone()))
-                        .unwrap_or_else(|| {
-                            let truncated: String = post.pubkey.chars().take(8).collect();
-                            format!("{}...", truncated)
-                        });
-                    let lud16 = author_profile.as_ref().and_then(|p| p.lud16.clone());
+                    // Reuse author_name and profile already computed at top of component
+                    let recipient_name = author_name.clone();
+                    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
                     let lud06: Option<String> = None; // lud06 not commonly used
 
                     rsx! {

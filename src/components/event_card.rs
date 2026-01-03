@@ -9,6 +9,13 @@ use crate::stores::calendar_store::{UnifiedEvent, get_rsvp_count};
 use crate::utils::time::format_relative_time;
 use crate::utils::nip52::is_online_location;
 
+// ============================================================================
+// Module-level Constants
+// ============================================================================
+
+const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 /// Build route based on event type
 /// - Livestreams (30311) go to /videos/live/:naddr
 /// - Calendar events (31922/31923) go to /calendar/:naddr
@@ -18,6 +25,40 @@ fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
         Route::LiveStreamDetail { note_id: event.naddr().to_string() }
     } else {
         Route::CalendarEventDetail { naddr: event.naddr().to_string(), from }
+    }
+}
+
+/// Render live and private badges for event cards
+fn render_badges(event: &UnifiedEvent) -> Element {
+    rsx! {
+        // Live badge
+        if event.is_live() {
+            div {
+                class: "absolute top-2 left-2 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded animate-pulse",
+                "LIVE"
+            }
+        }
+
+        // Private badge
+        if event.is_private() {
+            div {
+                class: "absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded flex items-center gap-1",
+                svg {
+                    class: "w-3 h-3",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    fill: "none",
+                    view_box: "0 0 24 24",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    path {
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    }
+                }
+                "Private"
+            }
+        }
     }
 }
 
@@ -57,34 +98,8 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                         loading: "lazy",
                     }
 
-                    // Live badge
-                    if event.is_live() {
-                        div {
-                            class: "absolute top-2 left-2 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded animate-pulse",
-                            "LIVE"
-                        }
-                    }
-
-                    // Private badge
-                    if event.is_private() {
-                        div {
-                            class: "absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded flex items-center gap-1",
-                            svg {
-                                class: "w-3 h-3",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                fill: "none",
-                                view_box: "0 0 24 24",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                path {
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                                }
-                            }
-                            "Private"
-                        }
-                    }
+                    // Live and private badges
+                    {render_badges(&event)}
                 }
             } else {
                 // Placeholder for events without image
@@ -104,34 +119,8 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                         }
                     }
 
-                    // Live badge on placeholder
-                    if event.is_live() {
-                        div {
-                            class: "absolute top-2 left-2 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded animate-pulse",
-                            "LIVE"
-                        }
-                    }
-
-                    // Private badge on placeholder
-                    if event.is_private() {
-                        div {
-                            class: "absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded flex items-center gap-1",
-                            svg {
-                                class: "w-3 h-3",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                fill: "none",
-                                view_box: "0 0 24 24",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                path {
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                                }
-                            }
-                            "Private"
-                        }
-                    }
+                    // Live and private badges
+                    {render_badges(&event)}
                 }
             }
 
@@ -432,9 +421,6 @@ fn format_event_time(event: &UnifiedEvent) -> String {
 
     if event.is_all_day() {
         // All-day event - just show date
-        const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
         let month = date.get_month() as usize;
         let day = date.get_date();
         let weekday = date.get_day() as usize;
@@ -445,8 +431,6 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         format!("{}, {} {}", weekday_name, month_name, day)
     } else {
         // Time-based event - show date and time
-        const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
         let month = date.get_month() as usize;
         let day = date.get_date();
         let hours = date.get_hours();
@@ -477,10 +461,9 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
     } else {
         // Farther out, use date
         let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-        let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         let month = date.get_month() as usize;
         let day = date.get_date();
-        let month_str = month_names.get(month).unwrap_or(&"");
+        let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
         format!("{} {}", month_str, day)
     }
 }

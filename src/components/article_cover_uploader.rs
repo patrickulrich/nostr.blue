@@ -77,13 +77,15 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
             div {
                 class: "flex gap-2",
 
-                // URL input field
-                input {
-                    class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm",
-                    r#type: "url",
-                    placeholder: "https://example.com/image.jpg",
-                    value: "{props.cover_url}",
-                    oninput: handle_url_change,
+                // URL input field (only shown if show_url_input is true)
+                if props.show_url_input {
+                    input {
+                        class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        r#type: "url",
+                        placeholder: "https://example.com/image.jpg",
+                        value: "{props.cover_url}",
+                        oninput: handle_url_change,
+                    }
                 }
 
                 // Upload button

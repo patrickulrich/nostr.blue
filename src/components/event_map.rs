@@ -196,8 +196,10 @@ pub struct GeocodedEvent {
 pub struct EventMapProps {
     /// Events to display on map
     pub events: Vec<UnifiedEvent>,
-    /// Callback when marker is clicked
+    /// Callback when marker is clicked (receives the event's naddr)
+    /// TODO: Connect this to Leaflet marker click events via JS interop
     #[props(default)]
+    #[allow(dead_code)]
     pub on_marker_click: Option<EventHandler<String>>,
     /// CSS height for the map container
     #[props(default = "400px".to_string())]
