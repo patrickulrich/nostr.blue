@@ -148,7 +148,11 @@ pub struct SectionReference {
     pub event_id: Option<String>,
 }
 
-/// Publication Section/Chapter (from Kind 30041)
+/// Publication Section/Chapter (from Kind 30041 or nested Kind 30040)
+///
+/// This struct can represent either:
+/// - Kind 30041: Content sections with actual text content
+/// - Kind 30040: Nested publication indexes (e.g., books within a Bible)
 #[derive(Clone, Debug, PartialEq)]
 pub struct PublicationSection {
     pub event: NostrEvent,
@@ -160,6 +164,11 @@ pub struct PublicationSection {
     pub wikilinks: Vec<String>,
     /// NKBIP-06 MIME type information
     pub mime_type: Option<NostrMimeType>,
+    /// True if this is a nested index (kind 30040) rather than content (kind 30041)
+    /// Nested indexes may have child sections that should be loaded
+    pub is_index: bool,
+    /// Child section addresses (only populated for nested indexes)
+    pub child_addresses: Vec<SectionReference>,
 }
 
 /// Tree node for navigating publication structure
@@ -329,6 +338,52 @@ pub fn clear_cache() {
 // Parsing Functions
 // ============================================================================
 
+/// Convert a d-tag to a human-readable title
+///
+/// Handles common patterns like:
+/// - "bible-douay-rheims-version-ot-the-bk-genesis" -> "Genesis"
+/// - "chapter-1" -> "Chapter 1"
+/// - "my-article-title" -> "My Article Title"
+fn format_d_tag_as_title(d_tag: &str) -> String {
+    // Try to extract meaningful last segment (common pattern for nested content)
+    // e.g., "bible-douay-rheims-version-ot-the-bk-genesis" -> "genesis"
+    let segments: Vec<&str> = d_tag.split('-').collect();
+
+    // If we have a long d-tag, try to find meaningful suffix
+    if segments.len() > 3 {
+        // Look for common separators like "bk-" (book), "ch-" (chapter), etc.
+        if let Some(pos) = segments.iter().position(|&s| s == "bk" || s == "book") {
+            let title_parts: Vec<&str> = segments[pos + 1..].to_vec();
+            if !title_parts.is_empty() {
+                return title_parts
+                    .iter()
+                    .map(|s| {
+                        let mut chars = s.chars();
+                        match chars.next() {
+                            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+        }
+    }
+
+    // Default: capitalize each segment
+    segments
+        .iter()
+        .map(|s| {
+            let mut chars = s.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Parse a Kind 30040 event into a PublicationIndex
 pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
     if event.kind.as_u16() != KIND_INDEX {
@@ -447,16 +502,27 @@ pub fn parse_publication_index(event: &NostrEvent) -> Option<PublicationIndex> {
     })
 }
 
-/// Parse a Kind 30041 event into a PublicationSection
+/// Parse a Kind 30041 (content) or Kind 30040 (nested index) event into a PublicationSection
+///
+/// According to NKBIP-01/NIP-62:
+/// > Referenced events SHOULD be kind 30041 sections or nested kind 30040 indices
+/// > Additional event kinds MAY be supported
+///
+/// This function handles both:
+/// - Kind 30041: Publication content sections with actual content
+/// - Kind 30040: Nested publication indexes (e.g., books within a Bible)
 pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSection> {
-    if event.kind.as_u16() != KIND_CONTENT {
+    let event_kind = event.kind.as_u16();
+
+    // Accept both content sections (30041) and nested indexes (30040)
+    if event_kind != KIND_CONTENT && event_kind != KIND_INDEX {
         return None;
     }
 
     // Get d-tag (required)
     let d_tag = event.tags.identifier()?;
 
-    // Get title (required)
+    // Get title (required for 30041, strongly recommended for 30040)
     let title = event.tags.iter()
         .find_map(|tag| {
             let slice = tag.as_slice();
@@ -465,11 +531,19 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
             } else {
                 None
             }
+        })
+        // For 30040 without title tag, try to derive from d-tag
+        .or_else(|| {
+            if event_kind == KIND_INDEX {
+                Some(format_d_tag_as_title(d_tag))
+            } else {
+                None
+            }
         })?;
 
-    // Build a_tag and naddr
-    let a_tag = format!("{}:{}:{}", KIND_CONTENT, event.pubkey.to_hex(), d_tag);
-    let naddr = Coordinate::new(Kind::Custom(KIND_CONTENT), event.pubkey)
+    // Build a_tag and naddr using the actual event kind
+    let a_tag = format!("{}:{}:{}", event_kind, event.pubkey.to_hex(), d_tag);
+    let naddr = Coordinate::new(Kind::Custom(event_kind), event.pubkey)
         .identifier(d_tag)
         .to_bech32()
         .ok()?;
@@ -489,6 +563,28 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
     // Extract NKBIP-06 MIME type information
     let mime_type = extract_mime_from_event(event);
 
+    // Check if this is a nested index (kind 30040)
+    let is_index = event_kind == KIND_INDEX;
+
+    // For nested indexes, extract child section addresses from a-tags
+    let child_addresses: Vec<SectionReference> = if is_index {
+        event.tags.iter()
+            .filter_map(|tag| {
+                let slice = tag.as_slice();
+                if slice.first().map(|s| s.as_str()) == Some("a") {
+                    let address = slice.get(1)?.to_string();
+                    let relay_hint = slice.get(2).map(|s| s.to_string());
+                    let event_id = slice.get(3).map(|s| s.to_string());
+                    Some(SectionReference { address, relay_hint, event_id })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
     Some(PublicationSection {
         event: event.clone(),
         naddr,
@@ -498,6 +594,8 @@ pub fn parse_publication_section(event: &NostrEvent) -> Option<PublicationSectio
         content: event.content.clone(),
         wikilinks,
         mime_type,
+        is_index,
+        child_addresses,
     })
 }
 

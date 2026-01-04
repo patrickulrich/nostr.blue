@@ -168,6 +168,8 @@ pub fn AddToCookbookModal(
             match pin_boards_store::publish_pinboard(cookbook_input, None).await {
                 Ok(cookbook_naddr) => {
                     // Convert naddr to a_tag (coordinate format) for board reference
+                    // Preserve cookbook_naddr before parsing so we can recover if parse fails
+                    let saved_naddr = cookbook_naddr.clone();
                     let board_a_tag = match Coordinate::from_bech32(&cookbook_naddr) {
                         Ok(coord) => format!(
                             "{}:{}:{}",
@@ -176,8 +178,13 @@ pub fn AddToCookbookModal(
                             coord.identifier
                         ),
                         Err(e) => {
-                            log::error!("Failed to parse cookbook naddr: {}", e);
-                            error.set(Some(format!("Invalid cookbook address: {}", e)));
+                            log::error!("Failed to parse cookbook naddr {}: {}", saved_naddr, e);
+                            error.set(Some(format!(
+                                "Cookbook created but failed to add recipe. Your cookbook address: {}",
+                                saved_naddr
+                            )));
+                            // Store the naddr for potential manual recovery
+                            pending_pin_cookbook.set(Some((saved_naddr, String::new())));
                             is_submitting.set(false);
                             return;
                         }

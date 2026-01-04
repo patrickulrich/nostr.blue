@@ -4,8 +4,14 @@
 use nostr::Event;
 use regex::Regex;
 
-/// Base tag prefix for recipe filtering
+/// Base tag prefix for recipe filtering (used when publishing)
 pub const RECIPE_TAG_PREFIX: &str = "nostrcooking";
+
+/// Alternative tag prefix (zap.cooking uses this)
+pub const RECIPE_TAG_PREFIX_ALT: &str = "zapcooking";
+
+/// All supported recipe tag prefixes for reading/filtering
+pub const RECIPE_TAG_PREFIXES: &[&str] = &[RECIPE_TAG_PREFIX, RECIPE_TAG_PREFIX_ALT];
 
 /// Recipe details extracted from the Details section
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -285,25 +291,32 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or_else(|| event.created_at.as_secs());
 
-    // Recipe-specific tags (filter nostrcooking- prefix)
+    // Recipe-specific tags (filter nostrcooking- or zapcooking- prefix)
     meta.tags = event
         .tags
         .hashtags()
-        .filter(|tag| tag.starts_with(RECIPE_TAG_PREFIX) && *tag != RECIPE_TAG_PREFIX)
+        .filter(|tag| {
+            RECIPE_TAG_PREFIXES.iter().any(|prefix| {
+                tag.starts_with(prefix) && *tag != *prefix
+            })
+        })
         .map(|tag| {
-            // Remove prefix to get clean tag name
-            tag.strip_prefix(&format!("{}-", RECIPE_TAG_PREFIX))
-                .unwrap_or(tag)
-                .to_string()
+            // Remove prefix to get clean tag name (try all prefixes)
+            for prefix in RECIPE_TAG_PREFIXES {
+                if let Some(stripped) = tag.strip_prefix(&format!("{}-", prefix)) {
+                    return stripped.to_string();
+                }
+            }
+            tag.to_string()
         })
         .collect();
 
     meta
 }
 
-/// Check if an event is a recipe (has nostrcooking tag)
+/// Check if an event is a recipe (has nostrcooking or zapcooking tag)
 pub fn is_recipe_event(event: &Event) -> bool {
-    event.tags.hashtags().any(|tag| tag == RECIPE_TAG_PREFIX)
+    event.tags.hashtags().any(|tag| RECIPE_TAG_PREFIXES.contains(&tag))
 }
 
 #[cfg(test)]

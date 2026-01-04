@@ -16,7 +16,7 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 
 use crate::utils::recipe::{
-    RECIPE_TAG_PREFIX, ParsedRecipe, RecipeMetadata,
+    RECIPE_TAG_PREFIX, RECIPE_TAG_PREFIXES, ParsedRecipe, RecipeMetadata,
     parse_recipe, extract_metadata, is_recipe_event
 };
 
@@ -178,45 +178,60 @@ pub fn parse_recipe_event(event: &NostrEvent) -> Option<CachedRecipe> {
 // Filter Builders
 // ============================================================================
 
-/// Build filter for all recipes (with optional limit)
-pub fn recipes_filter(limit: usize) -> Filter {
-    Filter::new()
-        .kind(Kind::LongFormTextNote)
-        .hashtag(RECIPE_TAG_PREFIX)
-        .limit(limit)
+/// Build filters for all recipes (one per supported prefix)
+pub fn recipes_filters(limit: usize) -> Vec<Filter> {
+    RECIPE_TAG_PREFIXES
+        .iter()
+        .map(|prefix| {
+            Filter::new()
+                .kind(Kind::LongFormTextNote)
+                .hashtag(*prefix)
+                .limit(limit)
+        })
+        .collect()
 }
 
-/// Build filter for recipes by category tag
-/// e.g., category = "italian" -> #t = "nostrcooking-italian"
-pub fn recipes_by_tag_filter(tag: &str, limit: usize, until: Option<u64>) -> Filter {
+/// Build filters for recipes by category tag (one per supported prefix)
+/// e.g., category = "italian" -> #t = "nostrcooking-italian" and #t = "zapcooking-italian"
+pub fn recipes_by_tag_filters(tag: &str, limit: usize, until: Option<u64>) -> Vec<Filter> {
     let tag_slug = tag.to_lowercase().replace(' ', "-");
-    let nostr_tag = format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug);
 
-    let mut filter = Filter::new()
-        .kind(Kind::LongFormTextNote)
-        .hashtag(&nostr_tag)
-        .limit(limit);
+    RECIPE_TAG_PREFIXES
+        .iter()
+        .map(|prefix| {
+            let hashtag = format!("{}-{}", prefix, tag_slug);
+            let mut filter = Filter::new()
+                .kind(Kind::LongFormTextNote)
+                .hashtag(&hashtag)
+                .limit(limit);
 
-    if let Some(ts) = until {
-        filter = filter.until(Timestamp::from(ts));
-    }
+            if let Some(ts) = until {
+                filter = filter.until(Timestamp::from(ts));
+            }
 
-    filter
+            filter
+        })
+        .collect()
 }
 
-/// Build filter for recipes by author
-pub fn recipes_by_author_filter(pubkey: PublicKey, limit: usize, until: Option<u64>) -> Filter {
-    let mut filter = Filter::new()
-        .kind(Kind::LongFormTextNote)
-        .author(pubkey)
-        .hashtag(RECIPE_TAG_PREFIX)
-        .limit(limit);
+/// Build filters for recipes by author (one per supported prefix)
+pub fn recipes_by_author_filters(pubkey: PublicKey, limit: usize, until: Option<u64>) -> Vec<Filter> {
+    RECIPE_TAG_PREFIXES
+        .iter()
+        .map(|prefix| {
+            let mut filter = Filter::new()
+                .kind(Kind::LongFormTextNote)
+                .author(pubkey)
+                .hashtag(*prefix)
+                .limit(limit);
 
-    if let Some(ts) = until {
-        filter = filter.until(Timestamp::from(ts));
-    }
+            if let Some(ts) = until {
+                filter = filter.until(Timestamp::from(ts));
+            }
 
-    filter
+            filter
+        })
+        .collect()
 }
 
 /// Build filter for a specific recipe by coordinate
@@ -251,42 +266,80 @@ pub fn recipe_zaps_filter(a_tag: &str, limit: usize) -> Filter {
         .limit(limit)
 }
 
-/// Build filter for recent recipes (for discover section)
-pub fn recent_recipes_filter(limit: usize, until: Option<u64>) -> Filter {
-    let mut filter = Filter::new()
-        .kind(Kind::LongFormTextNote)
-        .hashtag(RECIPE_TAG_PREFIX)
-        .limit(limit);
+/// Build filters for recent recipes (for discover section, one per supported prefix)
+pub fn recent_recipes_filters(limit: usize, until: Option<u64>) -> Vec<Filter> {
+    RECIPE_TAG_PREFIXES
+        .iter()
+        .map(|prefix| {
+            let mut filter = Filter::new()
+                .kind(Kind::LongFormTextNote)
+                .hashtag(*prefix)
+                .limit(limit);
 
-    if let Some(ts) = until {
-        filter = filter.until(Timestamp::from(ts));
-    }
+            if let Some(ts) = until {
+                filter = filter.until(Timestamp::from(ts));
+            }
 
-    filter
+            filter
+        })
+        .collect()
 }
 
 // ============================================================================
 // Fetch Functions
 // ============================================================================
 
+/// Helper to fetch events from multiple filters and deduplicate by event id
+async fn fetch_with_multiple_filters(
+    filters: Vec<Filter>,
+    timeout: Duration,
+) -> StdResult<Vec<NostrEvent>, String> {
+    use std::collections::HashSet;
+
+    let mut all_events = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    // Fetch from all filters concurrently
+    let results = futures::future::join_all(
+        filters.into_iter().map(|filter| {
+            crate::stores::nostr_client::fetch_events_aggregated(filter, timeout)
+        })
+    ).await;
+
+    // Merge and deduplicate
+    for events in results.into_iter().flatten() {
+        for event in events {
+            if seen_ids.insert(event.id) {
+                all_events.push(event);
+            }
+        }
+    }
+
+    // Sort by created_at descending (newest first)
+    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(all_events)
+}
+
 /// Fetch all recipes with pagination
 pub async fn fetch_recipes(limit: usize, until: Option<u64>) -> StdResult<Vec<CachedRecipe>, String> {
     *LOADING_RECIPES.write() = true;
 
-    let filter = recent_recipes_filter(limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15)
-    ).await;
+    let filters = recent_recipes_filters(limit, until);
+    let result = fetch_with_multiple_filters(filters, Duration::from_secs(15)).await;
 
     *LOADING_RECIPES.write() = false;
 
     match result {
         Ok(events) => {
-            let recipes: Vec<CachedRecipe> = events
+            let mut recipes: Vec<CachedRecipe> = events
                 .iter()
                 .filter_map(parse_recipe_event)
                 .collect();
+
+            // Sort by created_at and limit
+            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.truncate(limit);
 
             cache_recipes(&recipes);
             *RECIPE_STORE_INITIALIZED.write() = true;
@@ -305,20 +358,21 @@ pub async fn fetch_recipes(limit: usize, until: Option<u64>) -> StdResult<Vec<Ca
 pub async fn fetch_recipes_by_tag(tag: &str, limit: usize, until: Option<u64>) -> StdResult<Vec<CachedRecipe>, String> {
     *LOADING_RECIPES.write() = true;
 
-    let filter = recipes_by_tag_filter(tag, limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15)
-    ).await;
+    let filters = recipes_by_tag_filters(tag, limit, until);
+    let result = fetch_with_multiple_filters(filters, Duration::from_secs(15)).await;
 
     *LOADING_RECIPES.write() = false;
 
     match result {
         Ok(events) => {
-            let recipes: Vec<CachedRecipe> = events
+            let mut recipes: Vec<CachedRecipe> = events
                 .iter()
                 .filter_map(parse_recipe_event)
                 .collect();
+
+            // Sort by created_at and limit
+            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.truncate(limit);
 
             cache_recipes(&recipes);
             log::info!("Fetched {} recipes for tag '{}'", recipes.len(), tag);
@@ -338,20 +392,22 @@ pub async fn fetch_recipes_by_author(pubkey_hex: &str, limit: usize, until: Opti
 
     *LOADING_RECIPES.write() = true;
 
-    let filter = recipes_by_author_filter(pubkey, limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15)
+    let filters = recipes_by_author_filters(pubkey, limit, until);
+    let result = fetch_with_multiple_filters(filters, Duration::from_secs(15)
     ).await;
 
     *LOADING_RECIPES.write() = false;
 
     match result {
         Ok(events) => {
-            let recipes: Vec<CachedRecipe> = events
+            let mut recipes: Vec<CachedRecipe> = events
                 .iter()
                 .filter_map(parse_recipe_event)
                 .collect();
+
+            // Sort by created_at and limit
+            recipes.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
+            recipes.truncate(limit);
 
             cache_recipes(&recipes);
             log::info!("Fetched {} recipes by author", recipes.len());
@@ -445,11 +501,8 @@ pub async fn fetch_popular_chefs(limit: usize) -> StdResult<Vec<PopularChef>, St
     *LOADING_CHEFS.write() = true;
 
     // Fetch a large batch of recipes to count authors
-    let filter = recipes_filter(500);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(20)
-    ).await;
+    let filters = recipes_filters(500);
+    let result = fetch_with_multiple_filters(filters, Duration::from_secs(20)).await;
 
     *LOADING_CHEFS.write() = false;
 
@@ -988,12 +1041,8 @@ pub const STATIC_COLLECTIONS: &[(&str, &str, &str, &str)] = &[
 
 /// Fetch a sample recipe image for a collection tag
 pub async fn fetch_collection_image(tag: &str) -> StdResult<Option<String>, String> {
-    let filter = recipes_by_tag_filter(tag, 5, None);
-
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(3)
-    ).await?;
+    let filters = recipes_by_tag_filters(tag, 5, None);
+    let events = fetch_with_multiple_filters(filters, Duration::from_secs(3)).await?;
 
     // Find first recipe with an image
     for event in events {
@@ -1029,29 +1078,28 @@ pub async fn fetch_collections_with_images() -> Vec<Collection> {
 
 /// Compute popular tags with counts
 pub async fn compute_popular_tags(limit: usize) -> StdResult<Vec<TagWithCount>, String> {
-    // Fetch a large batch of recipes
-    let filter = recipes_filter(500);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15)
-    ).await?;
+    // Fetch a large batch of recipes from all supported prefixes
+    let filters = recipes_filters(500);
+    let events = fetch_with_multiple_filters(filters, Duration::from_secs(15)).await?;
 
     // Count tag usage
     let mut tag_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let prefix = format!("{}-", crate::utils::recipe::RECIPE_TAG_PREFIX);
+    let prefixes: Vec<String> = RECIPE_TAG_PREFIXES.iter().map(|p| format!("{}-", p)).collect();
 
     for event in &events {
         if !is_recipe_event(event) {
             continue;
         }
 
-        // Count each hashtag that starts with nostrcooking-
+        // Count each hashtag that starts with nostrcooking- or zapcooking-
         for tag in event.tags.iter() {
             if tag.kind() == TagKind::t() {
                 if let Some(content) = tag.content() {
-                    if content.starts_with(&prefix) {
-                        // Extract the tag name (after "nostrcooking-")
-                        let tag_name = content.strip_prefix(&prefix).unwrap_or(content);
+                    // Try to strip any of the supported prefixes
+                    let tag_name = prefixes.iter()
+                        .find_map(|prefix| content.strip_prefix(prefix.as_str()));
+
+                    if let Some(tag_name) = tag_name {
                         // Convert to title case
                         let display_name = tag_name
                             .split('-')
