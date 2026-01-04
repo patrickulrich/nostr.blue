@@ -116,6 +116,8 @@ pub enum ContentToken {
     Tidal(String),           // Embed URL
     // Zap.stream - Nostr live streaming
     ZapStream(String),       // naddr from zap.stream URL
+    // Zap.cooking - Nostr recipe sharing
+    ZapCookingRecipe(String), // naddr from zap.cooking/recipe/naddr1...
     // Cashu ecash tokens
     CashuToken(String),      // cashuA.../cashuB... token string
     // NIP-73 External Content IDs
@@ -179,6 +181,8 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             ContentToken::Tidal(embed_url)
         } else if let Some(naddr) = extract_zapstream(&url) {
             ContentToken::ZapStream(naddr)
+        } else if let Some(naddr) = extract_zapcooking(&url) {
+            ContentToken::ZapCookingRecipe(naddr)
         } else {
             ContentToken::Link(url)
         };
@@ -824,12 +828,57 @@ fn extract_tidal(url: &str) -> Option<String> {
     None
 }
 
+/// Check if URL host is a valid zap.stream domain
+fn is_zapstream_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "zap.stream" || h.ends_with(".zap.stream"))
+        .unwrap_or(false)
+}
+
 /// Extract naddr from zap.stream URL
 /// Supports: zap.stream/naddr1...
 fn extract_zapstream(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
+    // Validate host to prevent substring spoofing (e.g., fakezap.stream.evil.com)
+    if !is_zapstream_host(url) {
+        return None;
+    }
 
-    if !lower.contains("zap.stream") {
+    // Extract naddr from URL
+    if let Some(naddr_start) = url.find("naddr1") {
+        let naddr = &url[naddr_start..];
+        // Extract just the naddr (stop at query params or hash)
+        let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
+        // Validate the extracted string still starts with naddr1 and has reasonable length
+        if naddr.starts_with("naddr1") && naddr.len() > 10 {
+            return Some(naddr.to_string());
+        }
+    }
+
+    None
+}
+
+/// Check if URL host is a valid zap.cooking domain
+fn is_zapcooking_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "zap.cooking" || h.ends_with(".zap.cooking"))
+        .unwrap_or(false)
+}
+
+/// Extract naddr from zap.cooking recipe URL
+/// Supports: zap.cooking/recipe/naddr1...
+fn extract_zapcooking(url: &str) -> Option<String> {
+    // Validate host to prevent substring spoofing (e.g., fakezap.cooking.evil.com)
+    if !is_zapcooking_host(url) {
+        return None;
+    }
+
+    // Check for /recipe/ path
+    let lower = url.to_lowercase();
+    if !lower.contains("/recipe/") {
         return None;
     }
 

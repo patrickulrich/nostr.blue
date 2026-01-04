@@ -623,10 +623,11 @@ pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> (usize, usize)
 }
 
 // ============================================================================
-// UTF-8/UTF-16 conversion utilities (copied from mention_autocomplete for isolation)
+// UTF-8/UTF-16 conversion utilities (used by wasm code paths)
 // ============================================================================
 
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
+#[cfg(target_arch = "wasm32")]
 fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
@@ -643,6 +644,7 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
 }
 
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
+#[cfg(target_arch = "wasm32")]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;

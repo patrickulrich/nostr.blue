@@ -98,40 +98,55 @@ pub fn RepoActionBar(
     // Star/Unstar handler
     let handle_star = {
         move |_| {
+            // Prevent concurrent star operations - set loading immediately after check
+            // to close TOCTOU race window
+            if *star_loading.read() {
+                return;
+            }
+            star_loading.set(true);
+
             if !has_signer {
+                star_loading.set(false);
                 toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
                 return;
             }
 
             // Read coordinate fresh each time handler runs to avoid stale capture
-            if let Some(coord) = coordinate.read().clone() {
-                star_loading.set(true);
+            let coord = match coordinate.read().clone() {
+                Some(c) => c,
+                None => {
+                    star_loading.set(false);
+                    return;
+                }
+            };
+
+            spawn(async move {
+                // Read current state inside async block for fresh values
                 let currently_starred = *is_starred.read();
 
-                spawn(async move {
-                    let result = if currently_starred {
-                        remove_star(&coord).await
-                    } else {
-                        publish_star(&coord).await.map(|_| ())
-                    };
+                let result = if currently_starred {
+                    remove_star(&coord).await
+                } else {
+                    publish_star(&coord).await.map(|_| ())
+                };
 
-                    match result {
-                        Ok(_) => {
-                            is_starred.set(!currently_starred);
-                            let current = *star_count.read();
-                            if currently_starred {
-                                star_count.set(current.saturating_sub(1));
-                            } else {
-                                star_count.set(current.saturating_add(1));
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Star action failed: {}", e);
+                match result {
+                    Ok(_) => {
+                        is_starred.set(!currently_starred);
+                        // Read fresh count after operation succeeds
+                        let current = *star_count.read();
+                        if currently_starred {
+                            star_count.set(current.saturating_sub(1));
+                        } else {
+                            star_count.set(current.saturating_add(1));
                         }
                     }
-                    star_loading.set(false);
-                });
-            }
+                    Err(e) => {
+                        log::error!("Star action failed: {}", e);
+                    }
+                }
+                star_loading.set(false);
+            });
         }
     };
 

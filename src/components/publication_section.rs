@@ -1,10 +1,12 @@
 //! Publication Section Component
-//! Renders individual publication sections (NKBIP-01 Kind 30041)
+//! Renders individual publication sections (NKBIP-01 Kind 30041 or nested Kind 30040)
 
 use dioxus::prelude::*;
-use crate::stores::publication_store::PublicationSection;
+use std::time::Duration;
+use crate::stores::publication_store::{PublicationSection, sections_by_addresses_filter, parse_publication_section};
+use crate::stores::nostr_client;
 use crate::components::{AsciiDocContent, CitationMetadata};
-use crate::components::icons::{ArrowLeftIcon, FileVideoIcon, ClockIcon};
+use crate::components::icons::{ArrowLeftIcon, FileVideoIcon, ClockIcon, ChevronDownIcon, BookOpenIcon};
 
 /// Publication section content renderer
 #[component]
@@ -20,7 +22,132 @@ pub fn PublicationSectionContent(
     /// Callback when citation metadata is available
     #[props(default = None)]
     on_citations_loaded: Option<EventHandler<CitationMetadata>>,
+    /// Callback when a child section is selected (for nested indexes)
+    #[props(default = None)]
+    on_child_select: Option<EventHandler<String>>,
 ) -> Element {
+    // If this is a nested index, show child sections instead of content
+    if section.is_index && !section.child_addresses.is_empty() {
+        rsx! {
+            NestedIndexContent {
+                section: section,
+                show_header: show_header,
+                on_child_select: on_child_select,
+            }
+        }
+    } else {
+        rsx! {
+            article {
+                class: "publication-section",
+
+                // Section header
+                if show_header {
+                    header {
+                        class: "mb-6 pb-4 border-b border-border",
+                        h1 {
+                            class: "text-2xl font-bold text-foreground",
+                            "{section.title}"
+                        }
+                    }
+                }
+
+                // Section content
+                AsciiDocContent {
+                    content: section.content.clone(),
+                    enable_wikilinks: true,
+                    enable_book_links: enable_book_links,
+                    on_citations_loaded: on_citations_loaded,
+                }
+            }
+        }
+    }
+}
+
+/// Component for displaying nested index content (kind 30040 with children)
+#[component]
+fn NestedIndexContent(
+    section: PublicationSection,
+    show_header: bool,
+    on_child_select: Option<EventHandler<String>>,
+) -> Element {
+    let mut child_sections = use_signal(Vec::<PublicationSection>::new);
+    let mut loading = use_signal(|| true);
+    let mut fetch_error = use_signal(|| None::<String>);
+    // Store fetch task handle for cancellation to prevent stale responses
+    let mut fetch_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
+    // Track current addresses to detect stale responses
+    let mut current_addresses: Signal<Vec<String>> = use_signal(Vec::new);
+
+    // Clone addresses once for dependency tracking
+    let child_addresses = section.child_addresses.clone();
+    let addresses_key: Vec<String> = child_addresses.iter().map(|a| a.address.clone()).collect();
+
+    // Fetch child sections - only re-run when addresses actually change
+    use_effect(use_reactive!(|addresses_key| {
+        // Cancel any existing fetch task before starting new one
+        if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel();
+        }
+
+        // Update tracked addresses for stale detection
+        current_addresses.set(addresses_key.clone());
+        let expected_addresses = addresses_key.clone();
+
+        let addresses = child_addresses.clone();
+        let task = spawn(async move {
+            loading.set(true);
+            fetch_error.set(None);
+            let filters = sections_by_addresses_filter(&addresses);
+            let mut loaded_sections = Vec::new();
+            let mut errors = Vec::new();
+
+            for filter in filters {
+                match nostr_client::fetch_events_aggregated(
+                    filter,
+                    Duration::from_secs(10),
+                ).await {
+                    Ok(events) => {
+                        for event in events {
+                            if let Some(section) = parse_publication_section(&event) {
+                                loaded_sections.push(section);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                    }
+                }
+            }
+
+            // Check if addresses changed during fetch (stale response)
+            if *current_addresses.read() != expected_addresses {
+                log::debug!("Discarding stale publication section fetch");
+                return;
+            }
+
+            // Deduplicate by a_tag (keep first occurrence)
+            let mut seen = std::collections::HashSet::new();
+            loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
+
+            // Sort by the order in child_addresses
+            let address_order: std::collections::HashMap<_, _> = addresses.iter()
+                .enumerate()
+                .map(|(i, a)| (a.address.clone(), i))
+                .collect();
+            loaded_sections.sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
+
+            child_sections.set(loaded_sections);
+
+            // Report errors if any occurred but we got some results
+            if !errors.is_empty() {
+                log::warn!("Some section fetches failed: {:?}", errors);
+            }
+
+            loading.set(false);
+        });
+        fetch_task.set(Some(task));
+    }));
+
     rsx! {
         article {
             class: "publication-section",
@@ -33,15 +160,96 @@ pub fn PublicationSectionContent(
                         class: "text-2xl font-bold text-foreground",
                         "{section.title}"
                     }
+                    p {
+                        class: "text-muted-foreground mt-2",
+                        "{section.child_addresses.len()} chapters"
+                    }
                 }
             }
 
-            // Section content
-            AsciiDocContent {
-                content: section.content.clone(),
-                enable_wikilinks: true,
-                enable_book_links: enable_book_links,
-                on_citations_loaded: on_citations_loaded,
+            // Child sections list
+            if *loading.read() {
+                div {
+                    class: "space-y-3",
+                    for _ in 0..5 {
+                        div {
+                            class: "h-14 bg-muted/50 rounded-lg animate-pulse"
+                        }
+                    }
+                }
+            } else if child_sections.read().is_empty() {
+                div {
+                    class: "text-center py-8 text-muted-foreground",
+                    BookOpenIcon { class: "w-12 h-12 mx-auto mb-3 opacity-50" }
+                    p { "No chapters found" }
+                }
+            } else {
+                div {
+                    class: "space-y-2",
+                    for (idx, child) in child_sections.read().iter().enumerate() {
+                        ChildSectionCard {
+                            key: "{child.a_tag}",
+                            section: child.clone(),
+                            index: idx,
+                            on_select: on_child_select,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Card component for a child section
+#[component]
+fn ChildSectionCard(
+    section: PublicationSection,
+    index: usize,
+    on_select: Option<EventHandler<String>>,
+) -> Element {
+    let a_tag = section.a_tag.clone();
+    let has_content = !section.content.is_empty();
+    let is_nested = section.is_index;
+    let child_count = section.child_addresses.len();
+
+    rsx! {
+        button {
+            class: "w-full flex items-center gap-4 p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors text-left group",
+            onclick: move |_| {
+                if let Some(handler) = &on_select {
+                    handler.call(a_tag.clone());
+                }
+            },
+
+            // Chapter number
+            div {
+                class: "w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium flex-shrink-0",
+                "{index + 1}"
+            }
+
+            // Title and metadata
+            div {
+                class: "flex-1 min-w-0",
+                h3 {
+                    class: "font-medium text-foreground truncate",
+                    "{section.title}"
+                }
+                if is_nested && child_count > 0 {
+                    p {
+                        class: "text-sm text-muted-foreground",
+                        "{child_count} sections"
+                    }
+                } else if has_content {
+                    p {
+                        class: "text-sm text-muted-foreground",
+                        "{estimate_word_count(&section.content)} words"
+                    }
+                }
+            }
+
+            // Arrow indicator (rotated chevron for "right" direction)
+            ChevronDownIcon {
+                class: "w-5 h-5 -rotate-90 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0"
             }
         }
     }
