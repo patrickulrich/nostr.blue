@@ -59,7 +59,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Track whether to hide the "Posted!" badge after timeout
     let mut hide_confirmed_badge = use_signal(|| false);
-    let mut badge_timer_started = use_signal(|| false);
+    // Store timer task handle for cancellation to prevent stale timers
+    let mut badge_timer_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
 
     // Convert pending_status prop to a signal so effects can react to changes
     // Props aren't automatically reactive in Dioxus - we need an explicit signal
@@ -75,22 +76,24 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Auto-hide "Posted!" badge after 3 seconds using use_effect
     // Now reads from the reactive signal so the effect re-runs on status changes
-    // Also resets timer state when status changes away from Confirmed (e.g., on retry)
+    // Cancels any existing timer when status changes to prevent stale callbacks
     use_effect(move || {
         let status = pending_status_signal.read();
         let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
 
-        if is_confirmed && !*badge_timer_started.read() {
+        if is_confirmed && badge_timer_task.read().is_none() {
             // Start timer for confirmed status
-            badge_timer_started.set(true);
-            spawn(async move {
+            let task = spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(3_000).await;
                 hide_confirmed_badge.set(true);
             });
-        } else if !is_confirmed && *badge_timer_started.read() {
-            // Reset timer state when status changes away from Confirmed (retry scenario)
-            // This allows the badge to show again if the comment is re-confirmed
-            badge_timer_started.set(false);
+            badge_timer_task.set(Some(task));
+        } else if !is_confirmed && badge_timer_task.read().is_some() {
+            // Cancel existing timer and reset state when status changes away from Confirmed
+            // This prevents stale timer from incorrectly hiding badge on re-confirmation
+            if let Some(task) = badge_timer_task.write().take() {
+                task.cancel();
+            }
             hide_confirmed_badge.set(false);
         }
     });

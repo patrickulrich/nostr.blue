@@ -16,6 +16,11 @@ use crate::utils::nip52::is_online_location;
 const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/// Check if URL is a valid HTTP/HTTPS URL for safe image rendering
+fn is_valid_image_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
 /// Build route based on event type
 /// - Livestreams (30311) go to /videos/live/:naddr
 /// - Calendar events (31922/31923) go to /calendar/:naddr
@@ -89,9 +94,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
 
             // Event image - only render safe http/https URLs, show placeholder otherwise
             {
-                let safe_image_url = event.image().filter(|url| {
-                    url.starts_with("http://") || url.starts_with("https://")
-                });
+                let safe_image_url = event.image().filter(|url| is_valid_image_url(url));
 
                 if let Some(image_url) = safe_image_url {
                     rsx! {
@@ -287,9 +290,7 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
 
             // Thumbnail or date box - validate URL before rendering
             {
-                let safe_image_url = event.image().filter(|url| {
-                    url.starts_with("http://") || url.starts_with("https://")
-                });
+                let safe_image_url = event.image().filter(|url| is_valid_image_url(url));
 
                 if let Some(image_url) = safe_image_url {
                     rsx! {

@@ -72,28 +72,62 @@ fn NestedIndexContent(
 ) -> Element {
     let mut child_sections = use_signal(Vec::<PublicationSection>::new);
     let mut loading = use_signal(|| true);
-    let child_addresses = section.child_addresses.clone();
+    let mut fetch_error = use_signal(|| None::<String>);
+    // Store fetch task handle for cancellation to prevent stale responses
+    let mut fetch_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
+    // Track current addresses to detect stale responses
+    let mut current_addresses: Signal<Vec<String>> = use_signal(Vec::new);
 
-    // Fetch child sections
-    use_effect(move || {
+    // Clone addresses once for dependency tracking
+    let child_addresses = section.child_addresses.clone();
+    let addresses_key: Vec<String> = child_addresses.iter().map(|a| a.address.clone()).collect();
+
+    // Fetch child sections - only re-run when addresses actually change
+    use_effect(use_reactive!(|addresses_key| {
+        // Cancel any existing fetch task before starting new one
+        if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel();
+        }
+
+        // Update tracked addresses for stale detection
+        current_addresses.set(addresses_key.clone());
+        let expected_addresses = addresses_key.clone();
+
         let addresses = child_addresses.clone();
-        spawn(async move {
+        let task = spawn(async move {
             loading.set(true);
+            fetch_error.set(None);
             let filters = sections_by_addresses_filter(&addresses);
             let mut loaded_sections = Vec::new();
+            let mut errors = Vec::new();
 
             for filter in filters {
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
+                match nostr_client::fetch_events_aggregated(
                     filter,
                     Duration::from_secs(10),
                 ).await {
-                    for event in events {
-                        if let Some(section) = parse_publication_section(&event) {
-                            loaded_sections.push(section);
+                    Ok(events) => {
+                        for event in events {
+                            if let Some(section) = parse_publication_section(&event) {
+                                loaded_sections.push(section);
+                            }
                         }
+                    }
+                    Err(e) => {
+                        errors.push(e);
                     }
                 }
             }
+
+            // Check if addresses changed during fetch (stale response)
+            if *current_addresses.read() != expected_addresses {
+                log::debug!("Discarding stale publication section fetch");
+                return;
+            }
+
+            // Deduplicate by a_tag (keep first occurrence)
+            let mut seen = std::collections::HashSet::new();
+            loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
 
             // Sort by the order in child_addresses
             let address_order: std::collections::HashMap<_, _> = addresses.iter()
@@ -103,9 +137,16 @@ fn NestedIndexContent(
             loaded_sections.sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
 
             child_sections.set(loaded_sections);
+
+            // Report errors if any occurred but we got some results
+            if !errors.is_empty() {
+                log::warn!("Some section fetches failed: {:?}", errors);
+            }
+
             loading.set(false);
         });
-    });
+        fetch_task.set(Some(task));
+    }));
 
     rsx! {
         article {

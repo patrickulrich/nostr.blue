@@ -141,6 +141,10 @@ fn DynamicTocList(
                 return;
             }
 
+            // Deduplicate by a_tag (keep first occurrence)
+            let mut seen = std::collections::HashSet::new();
+            found_sections.retain(|s| seen.insert(s.a_tag.clone()));
+
             // Sort by the order in addresses
             let address_order: std::collections::HashMap<_, _> = addrs.iter()
                 .enumerate()
