@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::calendar_store::UnifiedEvent;
@@ -217,6 +219,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         )
     });
     let mut leaflet_loaded = use_signal(|| false);
+    let mut leaflet_loading = use_signal(|| false);
     let mut leaflet_error = use_signal(|| None::<String>);
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
@@ -231,23 +234,34 @@ pub fn EventMap(props: EventMapProps) -> Element {
     });
 
     // Memoize events to prevent unnecessary re-processing
-    // Create a stable identifier for the current set of events
-    let events_key = props.events.iter()
-        .map(|e| e.coordinate())
-        .collect::<Vec<_>>()
-        .join(",");
+    // Create a stable identifier using hash to avoid collision risks from comma-joining
+    let events_key = {
+        let mut hasher = DefaultHasher::new();
+        for e in props.events.iter() {
+            e.coordinate().hash(&mut hasher);
+        }
+        hasher.finish().to_string()
+    };
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
 
-    // Load Leaflet on mount
+    // Load Leaflet on mount (with guard to prevent duplicate loads)
     use_effect(move || {
+        // Guard: skip if already loaded, loading, or errored
+        if *leaflet_loaded.read() || *leaflet_loading.read() || leaflet_error.read().is_some() {
+            return;
+        }
+
+        leaflet_loading.set(true);
         spawn(async move {
             if let Err(e) = loadLeaflet().await {
                 log::error!("Failed to load Leaflet: {:?}", e);
                 leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
+                leaflet_loading.set(false);
                 return;
             }
             leaflet_loaded.set(true);
+            leaflet_loading.set(false);
         });
     });
 
@@ -266,6 +280,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
             if initMap(&id, 20.0, 0.0, 2) {
                 map_initialized.set(true);
                 log::info!("Map initialized: {}", id);
+            } else {
+                log::error!("Failed to initialize map container: {}", id);
+                leaflet_error.set(Some("Failed to initialize map. Please refresh the page.".to_string()));
             }
         });
     });

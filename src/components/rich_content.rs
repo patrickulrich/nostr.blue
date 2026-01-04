@@ -255,6 +255,11 @@ fn render_token(token: &ContentToken) -> Element {
             ZapStreamRenderer { naddr: naddr.clone() }
         },
 
+        // Zap.cooking recipe - fetch and display as recipe card
+        ContentToken::ZapCookingRecipe(naddr) => rsx! {
+            ZapCookingRecipeRenderer { naddr: naddr.clone() }
+        },
+
         // Cashu ecash token
         ContentToken::CashuToken(token) => rsx! {
             CashuTokenCard { token: token.clone() }
@@ -3387,6 +3392,122 @@ fn ZapStreamRenderer(naddr: String) -> Element {
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     LiveStreamCard {
                         event: ev.clone()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Renders a zap.cooking recipe as a recipe minicard
+#[component]
+fn ZapCookingRecipeRenderer(naddr: String) -> Element {
+    let mut event = use_signal(|| None::<Event>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+
+    let naddr_for_effect = naddr.clone();
+    let naddr_for_render = naddr.clone();
+
+    // Fetch the recipe event by naddr
+    use_effect(move || {
+        let naddr_clone = naddr_for_effect.clone();
+        spawn(async move {
+            match Nip19::from_bech32(&naddr_clone) {
+                Ok(Nip19::Coordinate(coord)) => {
+                    let relay_hints: Vec<String> = coord.relays.iter()
+                        .map(|r| r.to_string())
+                        .collect();
+
+                    match nostr_client::fetch_event_by_coordinate_with_relays(
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier.clone(),
+                        relay_hints,
+                    ).await {
+                        Ok(Some(e)) => {
+                            event.set(Some(e));
+                        }
+                        Ok(None) => {
+                            error.set(Some("Recipe not found".to_string()));
+                        }
+                        Err(e) => {
+                            error.set(Some(e));
+                        }
+                    }
+                    loading.set(false);
+                }
+                Ok(_) => {
+                    error.set(Some("Invalid recipe address format".to_string()));
+                    loading.set(false);
+                }
+                Err(e) => {
+                    error.set(Some(format!("Failed to parse recipe address: {}", e)));
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    rsx! {
+        div {
+            class: "my-2",
+            if *loading.read() {
+                // Loading skeleton matching recipe minicard style
+                div {
+                    class: "flex items-center gap-2 p-2 border border-border rounded-lg animate-pulse",
+                    div {
+                        class: "w-12 h-12 bg-muted rounded flex-shrink-0"
+                    }
+                    div {
+                        class: "flex-1",
+                        div {
+                            class: "h-4 bg-muted rounded w-32 mb-2"
+                        }
+                        div {
+                            class: "h-3 bg-muted rounded w-24"
+                        }
+                    }
+                }
+            } else if let Some(err) = error.read().as_ref() {
+                // Error state with fallback link
+                Link {
+                    to: Route::RecipeDetail { naddr: naddr_for_render.clone() },
+                    class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    div {
+                        class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center flex-shrink-0",
+                        span { class: "text-lg", "🍳" }
+                    }
+                    div {
+                        class: "flex-1 min-w-0",
+                        p { class: "font-medium text-sm", "🍽️ View Recipe" }
+                        p { class: "text-xs text-muted-foreground truncate", "{err}" }
+                    }
+                }
+            } else if let Some(ev) = event.read().as_ref() {
+                // Render recipe minicard
+                div {
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
+                    if is_recipe_event(ev) {
+                        {
+                            let recipe_meta = extract_recipe_metadata(ev);
+                            render_recipe_minicard(&recipe_meta, &naddr_for_render, ev)
+                        }
+                    } else {
+                        // Fallback for non-recipe events
+                        Link {
+                            to: Route::RecipeDetail { naddr: naddr_for_render.clone() },
+                            class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                            div {
+                                class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center flex-shrink-0",
+                                span { class: "text-lg", "🍳" }
+                            }
+                            div {
+                                class: "flex-1 min-w-0",
+                                p { class: "font-medium text-sm", "🍽️ View Recipe" }
+                            }
+                        }
                     }
                 }
             }

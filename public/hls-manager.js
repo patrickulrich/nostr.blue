@@ -47,7 +47,15 @@ window.hlsManager = window.hlsManager || {
      * Check if URL is an HLS stream
      */
     isHlsUrl(url) {
-        return url && url.includes('.m3u8');
+        if (!url) return false;
+        try {
+            const parsed = new URL(url, window.location.origin);
+            // Case-insensitive check to match fallback behavior
+            return parsed.pathname.toLowerCase().endsWith('.m3u8');
+        } catch {
+            // Fallback for invalid URLs: check if path portion ends with .m3u8
+            return /\.m3u8(\?|#|$)/i.test(url);
+        }
     },
 
     /**

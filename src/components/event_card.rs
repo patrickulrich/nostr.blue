@@ -87,40 +87,50 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
             to: detail_route,
             class: "block rounded-lg border border-border bg-card overflow-hidden hover:shadow-md transition group",
 
-            // Event image (if available)
-            if let Some(image_url) = event.image() {
-                div {
-                    class: "relative h-40 overflow-hidden bg-muted",
-                    img {
-                        src: "{image_url}",
-                        alt: "{event.title()}",
-                        class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-                        loading: "lazy",
-                    }
+            // Event image - only render safe http/https URLs, show placeholder otherwise
+            {
+                let safe_image_url = event.image().filter(|url| {
+                    url.starts_with("http://") || url.starts_with("https://")
+                });
 
-                    // Live and private badges
-                    {render_badges(&event)}
-                }
-            } else {
-                // Placeholder for events without image
-                div {
-                    class: "relative h-24 bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center",
-                    svg {
-                        class: "w-12 h-12 text-muted-foreground/50",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        fill: "none",
-                        view_box: "0 0 24 24",
-                        stroke: "currentColor",
-                        stroke_width: "1.5",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+                if let Some(image_url) = safe_image_url {
+                    rsx! {
+                        div {
+                            class: "relative h-40 overflow-hidden bg-muted",
+                            img {
+                                src: "{image_url}",
+                                alt: "{event.title()}",
+                                class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
+                                loading: "lazy",
+                            }
+
+                            // Live and private badges
+                            {render_badges(&event)}
                         }
                     }
+                } else {
+                    // Placeholder for events without image or with unsafe URLs
+                    rsx! {
+                        div {
+                            class: "relative h-24 bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center",
+                            svg {
+                                class: "w-12 h-12 text-muted-foreground/50",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "1.5",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+                                }
+                            }
 
-                    // Live and private badges
-                    {render_badges(&event)}
+                            // Live and private badges
+                            {render_badges(&event)}
+                        }
+                    }
                 }
             }
 
@@ -275,28 +285,38 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
             to: detail_route,
             class: "flex items-center gap-3 p-3 hover:bg-accent/50 rounded-lg transition",
 
-            // Thumbnail or date box
-            if let Some(image_url) = event.image() {
-                img {
-                    src: "{image_url}",
-                    alt: "{event.title()}",
-                    class: "w-12 h-12 rounded object-cover flex-shrink-0",
-                    loading: "lazy",
-                }
-            } else {
-                div {
-                    class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0",
-                    svg {
-                        class: "w-6 h-6 text-primary",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        fill: "none",
-                        view_box: "0 0 24 24",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        path {
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            d: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+            // Thumbnail or date box - validate URL before rendering
+            {
+                let safe_image_url = event.image().filter(|url| {
+                    url.starts_with("http://") || url.starts_with("https://")
+                });
+
+                if let Some(image_url) = safe_image_url {
+                    rsx! {
+                        img {
+                            src: "{image_url}",
+                            alt: "{event.title()}",
+                            class: "w-12 h-12 rounded object-cover flex-shrink-0",
+                            loading: "lazy",
+                        }
+                    }
+                } else {
+                    rsx! {
+                        div {
+                            class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0",
+                            svg {
+                                class: "w-6 h-6 text-primary",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                }
+                            }
                         }
                     }
                 }

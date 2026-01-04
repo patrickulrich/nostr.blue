@@ -13,6 +13,17 @@ use crate::stores::profiles;
 use crate::utils::nip58::{BadgeAward, BadgeDefinition};
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
+
+/// Processing state for accept/decline buttons
+#[derive(Clone, Copy, PartialEq, Default)]
+enum ProcessingState {
+    #[default]
+    Idle,
+    Accepting,
+    Declining,
+    Removing,
+}
 
 /// Badge detail modal component
 #[component]
@@ -25,13 +36,13 @@ pub fn BadgeDetailModal(
     on_accept: EventHandler<()>,
     on_reject: EventHandler<()>,
 ) -> Element {
-    let mut processing = use_signal(|| false);
+    let mut processing_state = use_signal(ProcessingState::default);
     let mut processing_timeout: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
 
     // Reset processing state when is_accepted changes (operation completed by parent)
     // Also reset any pending timeout since the operation completed
     use_effect(use_reactive!(|is_accepted| {
-        processing.set(false);
+        processing_state.set(ProcessingState::Idle);
         // Cancel any pending timeout since operation completed
         if let Some(task) = processing_timeout.write().take() {
             task.cancel();
@@ -163,20 +174,27 @@ pub fn BadgeDetailModal(
                         }
                     }
 
-                    // Badge image
-                    if let Some(image) = badge.get_image() {
-                        img {
-                            src: "{image}",
-                            alt: "{badge.get_display_name()}",
-                            class: "w-32 h-32 rounded-lg object-contain"
-                        }
-                    } else {
-                        // Placeholder
-                        div {
-                            class: "w-32 h-32 rounded-lg bg-primary/30 flex items-center justify-center",
-                            span {
-                                class: "text-4xl font-bold text-primary",
-                                "{badge.id.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                    // Badge image - validate URL before rendering
+                    {
+                        let valid_image = badge.get_image().filter(|url| is_valid_http_url(url));
+                        if let Some(image) = valid_image {
+                            rsx! {
+                                img {
+                                    src: "{image}",
+                                    alt: "{badge.get_display_name()}",
+                                    class: "w-32 h-32 rounded-lg object-contain"
+                                }
+                            }
+                        } else {
+                            // Placeholder
+                            rsx! {
+                                div {
+                                    class: "w-32 h-32 rounded-lg bg-primary/30 flex items-center justify-center",
+                                    span {
+                                        class: "text-4xl font-bold text-primary",
+                                        "{badge.id.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                                    }
+                                }
                             }
                         }
                     }
@@ -262,25 +280,27 @@ pub fn BadgeDetailModal(
 
                             // Helper to start processing with timeout reset
                             {
-                                let mut start_processing = move |handler: EventHandler<()>| {
-                                    processing.set(true);
+                                let mut start_processing = move |state: ProcessingState, handler: EventHandler<()>| {
+                                    processing_state.set(state);
                                     // Set a timeout to reset processing if parent doesn't respond
                                     let timeout_task = spawn(async move {
                                         gloo_timers::future::TimeoutFuture::new(10000).await;
-                                        processing.set(false);
+                                        processing_state.set(ProcessingState::Idle);
                                     });
                                     processing_timeout.set(Some(timeout_task));
                                     handler.call(());
                                 };
+
+                                let is_processing = *processing_state.read() != ProcessingState::Idle;
 
                                 if is_accepted {
                                     // Already accepted - show remove option
                                     rsx! {
                                         button {
                                             class: "flex-1 px-4 py-2 rounded-lg border border-destructive text-destructive hover:bg-destructive/10 transition disabled:opacity-50",
-                                            disabled: *processing.read(),
-                                            onclick: move |_| start_processing(on_reject),
-                                            if *processing.read() {
+                                            disabled: is_processing,
+                                            onclick: move |_| start_processing(ProcessingState::Removing, on_reject),
+                                            if *processing_state.read() == ProcessingState::Removing {
                                                 "Removing..."
                                             } else {
                                                 "Remove from Profile"
@@ -292,9 +312,9 @@ pub fn BadgeDetailModal(
                                     rsx! {
                                         button {
                                             class: "flex-1 px-4 py-2 rounded-lg border border-border hover:bg-accent transition disabled:opacity-50",
-                                            disabled: *processing.read(),
-                                            onclick: move |_| start_processing(on_reject),
-                                            if *processing.read() {
+                                            disabled: is_processing,
+                                            onclick: move |_| start_processing(ProcessingState::Declining, on_reject),
+                                            if *processing_state.read() == ProcessingState::Declining {
                                                 "Declining..."
                                             } else {
                                                 "Decline"
@@ -303,9 +323,9 @@ pub fn BadgeDetailModal(
 
                                         button {
                                             class: "flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50",
-                                            disabled: *processing.read(),
-                                            onclick: move |_| start_processing(on_accept),
-                                            if *processing.read() {
+                                            disabled: is_processing,
+                                            onclick: move |_| start_processing(ProcessingState::Accepting, on_accept),
+                                            if *processing_state.read() == ProcessingState::Accepting {
                                                 "Accepting..."
                                             } else {
                                                 "Accept Badge"

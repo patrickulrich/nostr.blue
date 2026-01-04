@@ -291,7 +291,7 @@ pub use board_slideover::BoardSlideover;
 // Publication component exports (NKBIP-01)
 pub use asciidoc_content::{AsciiDocContent, WikilinksList, CitationMetadata};
 pub use publication_card::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
-pub use publication_toc::{PublicationToc, PublicationTocHorizontal, PublicationProgress, PublicationTocSkeleton};
+pub use publication_toc::{PublicationTocHorizontal, PublicationProgress, PublicationTocSkeleton, PublicationTocDynamic};
 pub use publication_section::{PublicationSectionContent, SectionNavigation, PublicationSectionSkeleton, SectionMetadata, SectionOutline};
 
 // Wiki component exports (NIP-54)

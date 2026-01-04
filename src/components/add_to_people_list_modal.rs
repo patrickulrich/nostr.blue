@@ -43,7 +43,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     let mut new_list_private = use_signal(|| false);
 
     // Fetch user's lists
-    let (all_lists, lists_loading, _lists_error, _) = use_user_lists();
+    let (all_lists, lists_loading, lists_error, _) = use_user_lists();
 
     // Filter to only people lists
     let people_lists = use_memo(move || {
@@ -233,6 +233,17 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 div {
                                     class: "text-center py-8 text-muted-foreground",
                                     "Loading your lists..."
+                                }
+                            }
+                            // Error loading lists
+                            else if let Some(err) = lists_error.read().as_ref() {
+                                div {
+                                    class: "text-center py-8",
+                                    div { class: "text-4xl mb-2", "⚠️" }
+                                    p {
+                                        class: "text-red-500",
+                                        "Failed to load lists: {err}"
+                                    }
                                 }
                             }
                             // No lists
