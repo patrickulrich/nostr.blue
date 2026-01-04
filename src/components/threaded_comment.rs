@@ -62,8 +62,10 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut badge_timer_started = use_signal(|| false);
 
     // Auto-hide "Posted!" badge after 3 seconds using use_effect
-    let is_confirmed = matches!(pending_status.as_ref(), Some(CommentStatus::Confirmed(_)));
+    // Check pending_status inside the effect so it reacts to changes
+    let pending_status_clone = pending_status.clone();
     use_effect(move || {
+        let is_confirmed = matches!(pending_status_clone.as_ref(), Some(CommentStatus::Confirmed(_)));
         if is_confirmed && !*badge_timer_started.read() {
             badge_timer_started.set(true);
             spawn(async move {

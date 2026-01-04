@@ -62,7 +62,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
     };
 
     // Handle section selection from sidebar - also updates TOC parent for nested indexes
-    let handle_section_select = move |address: String| {
+    let mut handle_section_select = move |address: String| {
         // First, check if this address corresponds to a nested index
         // If so, we should update the TOC parent to drill into it
         let section_opt = tree.read().as_ref().and_then(|t| t.sections.get(&address).cloned());
@@ -104,6 +104,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
             if !in_tree && !in_dynamic {
                 // Need to fetch this section
                 let addr_for_log = addr.clone();
+                let addr_for_check = addr.clone();
                 spawn(async move {
                     // Parse address: "kind:pubkey:d-tag"
                     let parts: Vec<&str> = addr.split(':').collect();
@@ -125,6 +126,18 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                     std::time::Duration::from_secs(10),
                                 ).await {
                                     Ok(events) => {
+                                        // Check if selection changed while fetching - avoid stale updates
+                                        let current_sel = selected_section.read().clone();
+                                        if current_sel != Some(addr_for_check.clone()) {
+                                            log::debug!("Dropping stale section fetch result for addr={} (selection changed)", addr_for_log);
+                                            return;
+                                        }
+
+                                        // Also check if already inserted (e.g., by another concurrent fetch)
+                                        if dynamic_sections.read().contains_key(&addr_for_check) {
+                                            return;
+                                        }
+
                                         if let Some(event) = events.first() {
                                             if let Some(section) = publication_store::parse_publication_section(event) {
                                                 dynamic_sections.write().insert(addr, section);
@@ -454,8 +467,8 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                             citation_count.set(metadata.count);
                                         },
                                         on_child_select: move |child_address: String| {
-                                            // Just select the child - breadcrumbs are managed by the effect
-                                            selected_section.set(Some(child_address));
+                                            // Use handle_section_select to update breadcrumbs for nested indexes
+                                            handle_section_select(child_address);
                                         },
                                     }
 
