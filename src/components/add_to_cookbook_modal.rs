@@ -369,20 +369,33 @@ pub fn AddToCookbookModal(
                         div {
                             class: "space-y-4",
 
-                            // Info message
-                            div {
-                                class: "p-4 bg-amber-100 dark:bg-amber-900/20 rounded-lg",
-                                div {
-                                    class: "flex items-start gap-3",
-                                    span { class: "text-2xl", "📚" }
+                            // Info message - varies based on whether retry is available
+                            {
+                                let has_valid_a_tag = pending_pin_cookbook.read()
+                                    .as_ref()
+                                    .map(|(_, a_tag)| !a_tag.is_empty())
+                                    .unwrap_or(false);
+
+                                rsx! {
                                     div {
-                                        p {
-                                            class: "font-medium text-amber-800 dark:text-amber-200",
-                                            "Cookbook created successfully!"
-                                        }
-                                        p {
-                                            class: "text-sm text-amber-700 dark:text-amber-300 mt-1",
-                                            "However, adding the recipe failed. Click below to retry."
+                                        class: "p-4 bg-amber-100 dark:bg-amber-900/20 rounded-lg",
+                                        div {
+                                            class: "flex items-start gap-3",
+                                            span { class: "text-2xl", "📚" }
+                                            div {
+                                                p {
+                                                    class: "font-medium text-amber-800 dark:text-amber-200",
+                                                    "Cookbook created successfully!"
+                                                }
+                                                p {
+                                                    class: "text-sm text-amber-700 dark:text-amber-300 mt-1",
+                                                    if has_valid_a_tag {
+                                                        "However, adding the recipe failed. Click below to retry."
+                                                    } else {
+                                                        "However, adding the recipe failed. Visit your cookbook to add it manually."
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -411,19 +424,28 @@ pub fn AddToCookbookModal(
                                 }
                             }
 
-                            // Retry button
-                            button {
-                                r#type: "button",
-                                class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
-                                disabled: *is_submitting.read(),
-                                onclick: handle_retry_pin,
-                                if *is_submitting.read() {
-                                    span {
-                                        class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"
+                            // Retry button - only show if we have a valid a_tag
+                            // (a_tag is empty when Coordinate::from_bech32 failed)
+                            if pending_pin_cookbook.read().as_ref().map(|(_, a_tag)| !a_tag.is_empty()).unwrap_or(false) {
+                                button {
+                                    r#type: "button",
+                                    class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                    disabled: *is_submitting.read(),
+                                    onclick: handle_retry_pin,
+                                    if *is_submitting.read() {
+                                        span {
+                                            class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"
+                                        }
+                                        "Adding Recipe..."
+                                    } else {
+                                        "Retry Adding Recipe"
                                     }
-                                    "Adding Recipe..."
-                                } else {
-                                    "Retry Adding Recipe"
+                                }
+                            } else {
+                                // No valid a_tag - show message to manually add recipe
+                                p {
+                                    class: "text-sm text-muted-foreground text-center",
+                                    "You can add the recipe manually from your cookbook."
                                 }
                             }
 
