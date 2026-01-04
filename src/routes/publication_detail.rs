@@ -103,31 +103,52 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
             if !in_tree && !in_dynamic {
                 // Need to fetch this section
+                let addr_for_log = addr.clone();
                 spawn(async move {
                     // Parse address: "kind:pubkey:d-tag"
                     let parts: Vec<&str> = addr.split(':').collect();
                     if parts.len() >= 3 {
-                        if let (Ok(kind), Ok(pubkey)) = (
-                            parts[0].parse::<u16>(),
-                            nostr_sdk::prelude::PublicKey::from_hex(parts[1])
-                        ) {
-                            let d_tag = parts[2..].join(":");
-                            let filter = nostr_sdk::prelude::Filter::new()
-                                .kind(nostr_sdk::prelude::Kind::Custom(kind))
-                                .author(pubkey)
-                                .identifier(&d_tag);
+                        let kind_result = parts[0].parse::<u16>();
+                        let pubkey_result = nostr_sdk::prelude::PublicKey::from_hex(parts[1]);
 
-                            if let Ok(events) = nostr_client::fetch_events_aggregated(
-                                filter,
-                                std::time::Duration::from_secs(10),
-                            ).await {
-                                if let Some(event) = events.first() {
-                                    if let Some(section) = publication_store::parse_publication_section(event) {
-                                        dynamic_sections.write().insert(addr, section);
+                        match (kind_result, pubkey_result) {
+                            (Ok(kind), Ok(pubkey)) => {
+                                let d_tag = parts[2..].join(":");
+                                let filter = nostr_sdk::prelude::Filter::new()
+                                    .kind(nostr_sdk::prelude::Kind::Custom(kind))
+                                    .author(pubkey)
+                                    .identifier(&d_tag);
+
+                                let start = instant::Instant::now();
+                                match nostr_client::fetch_events_aggregated(
+                                    filter,
+                                    std::time::Duration::from_secs(10),
+                                ).await {
+                                    Ok(events) => {
+                                        if let Some(event) = events.first() {
+                                            if let Some(section) = publication_store::parse_publication_section(event) {
+                                                dynamic_sections.write().insert(addr, section);
+                                            } else {
+                                                log::warn!("Failed to parse publication section for addr={}", addr_for_log);
+                                            }
+                                        } else {
+                                            log::warn!("No events found for section addr={} (took {:?})", addr_for_log, start.elapsed());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to fetch section addr={}: {} (took {:?})", addr_for_log, e, start.elapsed());
                                     }
                                 }
                             }
+                            (Err(e), _) => {
+                                log::warn!("Failed to parse kind from addr={}: {}", addr_for_log, e);
+                            }
+                            (_, Err(e)) => {
+                                log::warn!("Failed to parse pubkey from addr={}: {}", addr_for_log, e);
+                            }
                         }
+                    } else {
+                        log::warn!("Invalid address format (expected kind:pubkey:d-tag): {}", addr_for_log);
                     }
                 });
             }

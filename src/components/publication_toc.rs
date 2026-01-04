@@ -105,6 +105,8 @@ fn DynamicTocList(
     if addresses_key != *last_key.read() {
         last_key.set(addresses_key.clone());
         let addrs = addresses.clone();
+        // Capture the current key to detect stale fetches
+        let captured_key = addresses_key.clone();
 
         spawn(async move {
             loading.set(true);
@@ -132,6 +134,11 @@ fn DynamicTocList(
                         }
                     }
                 }
+            }
+
+            // Check if a newer fetch has started - if so, abort without updating state
+            if captured_key != *last_key.read() {
+                return;
             }
 
             // Sort by the order in addresses

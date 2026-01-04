@@ -828,12 +828,20 @@ fn extract_tidal(url: &str) -> Option<String> {
     None
 }
 
+/// Check if URL host is a valid zap.stream domain
+fn is_zapstream_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "zap.stream" || h.ends_with(".zap.stream"))
+        .unwrap_or(false)
+}
+
 /// Extract naddr from zap.stream URL
 /// Supports: zap.stream/naddr1...
 fn extract_zapstream(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
-
-    if !lower.contains("zap.stream") {
+    // Validate host to prevent substring spoofing (e.g., fakezap.stream.evil.com)
+    if !is_zapstream_host(url) {
         return None;
     }
 
@@ -851,13 +859,26 @@ fn extract_zapstream(url: &str) -> Option<String> {
     None
 }
 
+/// Check if URL host is a valid zap.cooking domain
+fn is_zapcooking_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| h == "zap.cooking" || h.ends_with(".zap.cooking"))
+        .unwrap_or(false)
+}
+
 /// Extract naddr from zap.cooking recipe URL
 /// Supports: zap.cooking/recipe/naddr1...
 fn extract_zapcooking(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
+    // Validate host to prevent substring spoofing (e.g., fakezap.cooking.evil.com)
+    if !is_zapcooking_host(url) {
+        return None;
+    }
 
-    // Check for zap.cooking domain with /recipe/ path
-    if !lower.contains("zap.cooking") || !lower.contains("/recipe/") {
+    // Check for /recipe/ path
+    let lower = url.to_lowercase();
+    if !lower.contains("/recipe/") {
         return None;
     }
 

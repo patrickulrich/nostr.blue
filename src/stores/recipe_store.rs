@@ -298,6 +298,7 @@ async fn fetch_with_multiple_filters(
 
     let mut all_events = Vec::new();
     let mut seen_ids = HashSet::new();
+    let mut errors: Vec<String> = Vec::new();
 
     // Fetch from all filters concurrently
     let results = futures::future::join_all(
@@ -306,13 +307,31 @@ async fn fetch_with_multiple_filters(
         })
     ).await;
 
-    // Merge and deduplicate
-    for events in results.into_iter().flatten() {
-        for event in events {
-            if seen_ids.insert(event.id) {
-                all_events.push(event);
+    // Merge and deduplicate, tracking errors
+    for result in results {
+        match result {
+            Ok(events) => {
+                for event in events {
+                    if seen_ids.insert(event.id) {
+                        all_events.push(event);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Recipe fetch error: {}", e);
+                errors.push(e);
             }
         }
+    }
+
+    // If all requests failed, return an aggregated error
+    if all_events.is_empty() && !errors.is_empty() {
+        return Err(format!("All recipe fetches failed: {}", errors.join("; ")));
+    }
+
+    // Log partial failures if some succeeded but others failed
+    if !errors.is_empty() {
+        log::warn!("Partial recipe fetch failures ({}): {}", errors.len(), errors.join("; "));
     }
 
     // Sort by created_at descending (newest first)
