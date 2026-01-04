@@ -45,7 +45,7 @@ pub fn sanitize_html(html: &str) -> String {
         // Allow specific attributes on specific tags
         // Note: "rel" is NOT in the "a" attributes because link_rel() handles it automatically
         .tag_attributes(hashmap![
-            "a" => hashset!["href", "title", "target"],
+            "a" => hashset!["href", "title", "target", "class", "data-target"],
             "img" => hashset!["src", "alt", "title", "width", "height"],
             "code" => hashset!["class"],
             "pre" => hashset!["class"],
@@ -53,6 +53,12 @@ pub fn sanitize_html(html: &str) -> String {
             "span" => hashset!["class"],
             "th" => hashset!["align"],
             "td" => hashset!["align"],
+            "h1" => hashset!["id"],
+            "h2" => hashset!["id"],
+            "h3" => hashset!["id"],
+            "h4" => hashset!["id"],
+            "h5" => hashset!["id"],
+            "h6" => hashset!["id"],
         ])
         // Allow all http(s) URL schemes
         .url_schemes(hashset!["http", "https", "mailto"])

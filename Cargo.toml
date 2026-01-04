@@ -1,31 +1,32 @@
 [package]
 name = "nostrblue"
-version = "0.6.7"
+version = "0.7.1"
 edition = "2021"
+rust-version = "1.82"
 authors = ["Patrick Ulrich"]
 description = "A decentralized social network client built on the Nostr protocol using Rust and Dioxus"
 license = "MIT"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.7.1", features = ["web", "router"] }
-dioxus-stores = "0.7.1"
+dioxus = { version = "0.7.2", default-features = false, features = ["web", "router", "launch", "logger", "lib"] }
+dioxus-stores = "0.7.2"
 
 # Nostr protocol
-nostr = { version = "0.44", default-features = false, features = ["nip47", "nip57", "nip60", "nip98"] }
-nostr-sdk = { version = "0.44", default-features = false, features = ["nip44", "nip59", "nip57"] }
-nostr-database = { version = "0.44", default-features = false }
-nostr-indexeddb = { version = "0.44" }
-nostr-browser-signer = { version = "0.44" }
-nostr-blossom = { version = "0.44" }
-nostr-connect = { version = "0.44" }
-nostr-gossip-memory = { version = "0.44" }
-nostr-relay-pool = { version = "0.44" }
-nwc = { version = "0.44" }
+nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip60", "nip98"] }
+nostr-sdk = { version = "0.44.1", default-features = false, features = ["nip44", "nip59", "nip57"] }
+nostr-database = { version = "0.44.0", default-features = false }
+nostr-indexeddb = { version = "0.44.0" }
+nostr-browser-signer = { version = "0.44.1" }
+nostr-blossom = { version = "0.44.0" }
+nostr-connect = { version = "0.44.0" }
+nostr-gossip-memory = { version = "0.44.0" }
+nostr-relay-pool = { version = "0.44.0" }
+nwc = { version = "0.44.0" }
 
 # Cashu ecash protocol
-cdk = { version = "0.13.4", default-features = false, features = ["wallet", "auth"] }
-cdk-common = { version = "0.13.4", default-features = false, features = ["wallet", "auth"] }
+cdk = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
+cdk-common = { version = "0.14.2", default-features = false, features = ["wallet", "auth"] }
 
 # Image processing for Blossom uploads
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -73,6 +74,8 @@ web-sys = { version = "0.3", features = [
     "FileReader",
     "Event",
     "EventTarget",
+    # BeforeUnload for unsaved changes warning
+    "BeforeUnloadEvent",
     # MediaRecorder API for voice messages
     "MediaStream",
     "MediaRecorder",
@@ -127,17 +130,22 @@ qrcode = "0.14"
 base64 = "0.22"
 ciborium = "0.2"
 hex = "0.4"
-lru = "0.12"
+lru = "0.16"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 rand = { version = "0.8", features = ["getrandom"] }
 getrandom = { version = "0.2", features = ["js"] }
 once_cell = "1.19"
+thiserror = "2.0"
 
 # Markdown rendering
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 ammonia = "4.0"
 maplit = "1.0"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
+
+# RSS feed parsing and podcast support
+quick-xml = "0.37"
+strum = { version = "0.27.2", features = ["derive"] }
 
 [profile.release]
 opt-level = "z"

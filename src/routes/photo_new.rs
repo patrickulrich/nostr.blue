@@ -5,11 +5,11 @@ use crate::components::MediaUploader;
 #[component]
 pub fn PhotoNew() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut caption = use_signal(|| String::new());
-    let mut image_urls = use_signal(|| Vec::<String>::new());
-    let mut hashtags = use_signal(|| String::new());
-    let mut location = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut caption = use_signal(String::new);
+    let mut image_urls = use_signal(Vec::<String>::new);
+    let mut hashtags = use_signal(String::new);
+    let mut location = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| true);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -19,7 +19,7 @@ pub fn PhotoNew() -> Element {
 
     // Validation
     let can_publish = title.read().chars().count() > 0
-        && image_urls.read().len() > 0
+        && !image_urls.read().is_empty()
         && !*is_publishing.read();
 
     // Handle close
@@ -90,7 +90,7 @@ pub fn PhotoNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 
@@ -166,7 +166,7 @@ pub fn PhotoNew() -> Element {
                         }
 
                         // Display uploaded images
-                        if image_urls.read().len() > 0 {
+                        if !image_urls.read().is_empty() {
                             div {
                                 class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
                                 for (index , url) in image_urls.read().iter().enumerate() {

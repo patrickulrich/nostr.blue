@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
 
-use crate::stores::nostr_client::{get_client, publish_reaction, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
 use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 
@@ -354,14 +354,21 @@ pub fn use_reaction(
         let content_str = content.to_string();
 
         spawn(async move {
-            match publish_reaction(event_id_clone.clone(), event_author_clone, content_str, None).await {
-                Ok(reaction_id) => {
+            match publish_reaction_tracked(event_id_clone.clone(), event_author_clone, content_str, None).await {
+                Ok(result) => {
                     log::info!(
-                        "{} event {}, reaction ID: {}",
+                        "{} event {}, reaction ID: {} ({}/{} relays)",
                         if was_liked { "Unliked" } else { "Liked" },
                         event_id_clone,
-                        reaction_id
+                        result.event_id,
+                        result.success_count(),
+                        result.total_attempted()
                     );
+                    if result.has_failures() {
+                        for (relay, error) in &result.failed_relays {
+                            log::warn!("Relay {} failed for reaction: {}", relay, error);
+                        }
+                    }
                     state.set(ReactionState::Success);
 
                     // Invalidate cache so next fetch gets fresh data
@@ -450,14 +457,21 @@ pub fn use_reaction(
         let event_author_clone = event_author_react.clone();
 
         spawn(async move {
-            match publish_reaction(event_id_clone.clone(), event_author_clone, content.clone(), emoji_tag).await {
-                Ok(reaction_id) => {
+            match publish_reaction_tracked(event_id_clone.clone(), event_author_clone, content.clone(), emoji_tag).await {
+                Ok(result) => {
                     log::info!(
-                        "Reacted to event {} with '{}', reaction ID: {}",
+                        "Reacted to event {} with '{}', reaction ID: {} ({}/{} relays)",
                         event_id_clone,
                         content,
-                        reaction_id
+                        result.event_id,
+                        result.success_count(),
+                        result.total_attempted()
                     );
+                    if result.has_failures() {
+                        for (relay, error) in &result.failed_relays {
+                            log::warn!("Relay {} failed for reaction: {}", relay, error);
+                        }
+                    }
                     state.set(ReactionState::Success);
 
                     // Invalidate cache so next fetch gets fresh data

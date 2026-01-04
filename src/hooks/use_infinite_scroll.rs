@@ -2,6 +2,10 @@ use dioxus::prelude::*;
 use std::rc::Rc;
 use std::cell::RefCell;
 
+/// Type alias for the IntersectionObserver handles (observer + closure)
+#[cfg(target_family = "wasm")]
+type ObserverHandles = Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>>>;
+
 /// Infinite scroll hook that automatically triggers loading when sentinel element enters viewport
 ///
 /// Returns a unique ID that should be assigned to a sentinel element at the bottom of your scrollable content.
@@ -95,7 +99,7 @@ where
         // Create a cleanup guard with a shared cleanup flag
         #[derive(Clone)]
         struct ObserverCleanup {
-            handles: Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>>>,
+            handles: ObserverHandles,
             cleaned: Rc<RefCell<bool>>,
         }
 
@@ -161,10 +165,10 @@ where
             log::info!("[InfiniteScroll] Setting up IntersectionObserver (has_more became true)");
 
             let id = id_for_effect.clone();
-            let mut trigger_clone = trigger.clone();
+            let mut trigger_clone = trigger;
             let observer_handles_clone = observer_handles.clone();
-            let mut last_check_for_callback = last_check.clone();
-            let mut observer_setup_done_for_reset = observer_setup_done.clone();
+            let mut last_check_for_callback = last_check;
+            let mut observer_setup_done_for_reset = observer_setup_done;
 
             spawn(async move {
                 log::info!("[InfiniteScroll] Async task started");
@@ -216,7 +220,7 @@ where
                     log::debug!("[InfiniteScroll] IntersectionObserver callback fired, checking {} entries", entries.length());
                     // Check if any entry is intersecting
                     for i in 0..entries.length() {
-                        if let Some(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>().ok() {
+                        if let Ok(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>() {
                             let is_intersecting = entry.is_intersecting();
                             log::debug!("[InfiniteScroll] Entry {} intersecting: {}", i, is_intersecting);
 

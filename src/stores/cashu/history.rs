@@ -100,7 +100,7 @@ pub async fn fetch_history() -> Result<(), String> {
 
                                 for pair in pairs {
                                     // Use safe indexing with .get() for defensive parsing
-                                    let key = match pair.get(0) {
+                                    let key = match pair.first() {
                                         Some(k) => k.as_str(),
                                         None => continue,
                                     };

@@ -2,6 +2,8 @@ use dioxus::prelude::*;
 use crate::stores::auth_store;
 use crate::hooks::{use_user_lists, delete_list, UserList};
 use crate::utils::{get_list_type_name, get_list_icon, get_item_count};
+use crate::utils::list_kinds::NAMED_PEOPLE;
+use crate::components::{CreateListModal, PeopleListMembersModal};
 
 #[component]
 pub fn Lists() -> Element {
@@ -12,6 +14,19 @@ pub fn Lists() -> Element {
     let mut delete_confirm_open = use_signal(|| false);
     let mut list_to_delete = use_signal(|| None::<UserList>);
     let mut deleting = use_signal(|| false);
+
+    // Create list modal state
+    let mut show_create_modal = use_signal(|| false);
+
+    // Manage members modal state (for people lists)
+    let mut show_members_modal = use_signal(|| false);
+    let mut list_to_manage = use_signal(|| None::<UserList>);
+
+    // Open members modal for a list
+    let mut manage_list = move |list: UserList| {
+        list_to_manage.set(Some(list));
+        show_members_modal.set(true);
+    };
 
     // Handle delete confirmation
     let handle_delete = move |_| {
@@ -54,6 +69,16 @@ pub fn Lists() -> Element {
                     h1 {
                         class: "text-xl font-bold px-4 py-3 flex items-center gap-2",
                         "📋 Lists"
+                    }
+
+                    // Create List button (only when authenticated)
+                    if auth.is_authenticated {
+                        button {
+                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2",
+                            onclick: move |_| show_create_modal.set(true),
+                            span { "+" }
+                            "Create List"
+                        }
                     }
                 }
             }
@@ -227,7 +252,8 @@ pub fn Lists() -> Element {
                             ListCard {
                                 key: "{list.id}",
                                 list: list.clone(),
-                                on_delete: move |list: UserList| confirm_delete(list)
+                                on_delete: move |list: UserList| confirm_delete(list),
+                                on_manage: move |list: UserList| manage_list(list),
                             }
                         }
                     }
@@ -282,16 +308,53 @@ pub fn Lists() -> Element {
                     }
                 }
             }
+
+            // Create List Modal
+            if *show_create_modal.read() {
+                CreateListModal {
+                    on_close: move |_| show_create_modal.set(false),
+                    on_created: move |_| {
+                        show_create_modal.set(false);
+                        refresh_trigger.with_mut(|v| *v = v.wrapping_add(1));
+                    }
+                }
+            }
+
+            // People List Members Modal
+            if *show_members_modal.read() {
+                if let Some(list) = list_to_manage.read().clone() {
+                    PeopleListMembersModal {
+                        list: list,
+                        on_close: move |_| {
+                            show_members_modal.set(false);
+                            list_to_manage.set(None);
+                        },
+                        on_modified: move |_| {
+                            // Refresh lists when a member is removed
+                            refresh_trigger.with_mut(|v| *v = v.wrapping_add(1));
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 /// List card component
 #[component]
-fn ListCard(list: UserList, on_delete: EventHandler<UserList>) -> Element {
+fn ListCard(
+    list: UserList,
+    on_delete: EventHandler<UserList>,
+    on_manage: EventHandler<UserList>,
+) -> Element {
     let navigator = use_navigator();
     let item_count = get_item_count(&list.tags);
     let list_clone = list.clone();
+    let list_for_nav = list.clone();
+    let list_for_manage = list.clone();
+
+    // Check if this is a people list for navigation
+    let is_people_list = list.kind == NAMED_PEOPLE;
 
     rsx! {
         div {
@@ -307,6 +370,14 @@ fn ListCard(list: UserList, on_delete: EventHandler<UserList>) -> Element {
                         "{get_list_icon(list.kind)}"
                     }
                     "{list.name}"
+                    // Privacy indicator for lists with encrypted content
+                    if list.has_private_content {
+                        span {
+                            class: "text-sm",
+                            title: "This list has encrypted private members",
+                            "🔒"
+                        }
+                    }
                 }
                 p {
                     class: "text-xs text-muted-foreground mt-1",
@@ -331,10 +402,24 @@ fn ListCard(list: UserList, on_delete: EventHandler<UserList>) -> Element {
                 button {
                     class: "flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors",
                     onclick: move |_| {
-                        // Navigate to list detail page
-                        navigator.push(format!("/lists/{}", list.identifier));
+                        if is_people_list {
+                            // People lists navigate to home feed with list filter
+                            navigator.push(format!("/?list={}", list_for_nav.identifier));
+                        } else {
+                            // Other list types use detail page (future implementation)
+                            navigator.push(format!("/lists/{}", list_for_nav.identifier));
+                        }
                     },
-                    "View"
+                    if is_people_list { "View Feed" } else { "View" }
+                }
+                // Manage button for people lists
+                if is_people_list {
+                    button {
+                        class: "px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors",
+                        onclick: move |_| on_manage.call(list_for_manage.clone()),
+                        title: "Manage members",
+                        "👥"
+                    }
                 }
                 button {
                     class: "px-4 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg transition-colors",

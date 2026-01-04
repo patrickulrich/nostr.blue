@@ -8,7 +8,7 @@ use std::time::Duration;
 #[component]
 pub fn Hashtag(tag: String) -> Element {
     // State for feed events
-    let mut events = use_signal(|| Vec::<Event>::new());
+    let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
