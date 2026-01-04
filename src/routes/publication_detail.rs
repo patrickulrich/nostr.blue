@@ -33,6 +33,10 @@ pub fn PublicationDetail(naddr: String) -> Element {
     // Current parent section for TOC navigation (None = root level)
     let mut current_toc_parent = use_signal(|| None::<PublicationSection>);
 
+    // Flag to suppress auto-parent updates after explicit back navigation
+    // This prevents the effect from fighting with handle_toc_back
+    let mut suppress_auto_parent = use_signal(|| false);
+
     let auth = auth_store::AUTH_STATE.read();
     let _is_logged_in = auth.pubkey.is_some();
 
@@ -220,6 +224,12 @@ pub fn PublicationDetail(naddr: String) -> Element {
     // Update TOC parent for dynamically loaded sections (not in tree.sections)
     // Main forward navigation is handled by handle_section_select
     use_effect(move || {
+        // Skip if suppressed (after explicit back navigation)
+        if *suppress_auto_parent.read() {
+            suppress_auto_parent.set(false);
+            return;
+        }
+
         if let Some(ref section) = *current_section.read() {
             // Only handle dynamically loaded sections that are nested indexes
             // Skip if this is the root
@@ -265,7 +275,8 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
                 if is_direct_child_of_root {
                     // Go back to root level - only reset TOC parent, don't change selected section
-                    // This prevents the effect from immediately re-setting the TOC parent
+                    // Suppress auto-parent effect to prevent it from fighting with this navigation
+                    suppress_auto_parent.set(true);
                     current_toc_parent.set(None);
                     // Don't change selected_section - keep current content visible
                     // User can click a different section in the now-visible root TOC
