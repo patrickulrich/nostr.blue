@@ -89,6 +89,11 @@ pub fn PublicationDetail(naddr: String) -> Element {
         )
     });
 
+    // Cleanup effect to clear cache on component unmount
+    use_drop(move || {
+        dynamic_sections.write().clear();
+    });
+
     // Error state for section loading (addr -> error message)
     let mut section_load_errors = use_signal(std::collections::HashMap::<String, String>::new);
     // Loading state for sections being fetched

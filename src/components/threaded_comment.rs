@@ -75,15 +75,23 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Auto-hide "Posted!" badge after 3 seconds using use_effect
     // Now reads from the reactive signal so the effect re-runs on status changes
+    // Also resets timer state when status changes away from Confirmed (e.g., on retry)
     use_effect(move || {
         let status = pending_status_signal.read();
         let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
+
         if is_confirmed && !*badge_timer_started.read() {
+            // Start timer for confirmed status
             badge_timer_started.set(true);
             spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(3_000).await;
                 hide_confirmed_badge.set(true);
             });
+        } else if !is_confirmed && *badge_timer_started.read() {
+            // Reset timer state when status changes away from Confirmed (retry scenario)
+            // This allows the badge to show again if the comment is re-confirmed
+            badge_timer_started.set(false);
+            hide_confirmed_badge.set(false);
         }
     });
 
