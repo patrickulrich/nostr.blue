@@ -18,6 +18,8 @@ pub fn AddToCookbookModal(
     recipe_title: Option<String>,
     on_close: EventHandler<()>,
 ) -> Element {
+    // Navigator is only used in wasm cfg blocks for delayed navigation
+    #[allow(unused_variables)]
     let navigator = use_navigator();
 
     // Mode: existing cookbook or create new
@@ -82,6 +84,7 @@ pub fn AddToCookbookModal(
                 Err(e) => {
                     log::error!("Failed to fetch user cookbooks: {}", e);
                     fetch_error.set(Some("Failed to load cookbooks. Please try again.".to_string()));
+                    has_loaded.set(false); // Allow retry
                 }
             }
             cookbooks_loading.set(false);
@@ -165,6 +168,8 @@ pub fn AddToCookbookModal(
             match pin_boards_store::publish_pinboard(cookbook_input, None).await {
                 Ok(cookbook_naddr) => {
                     // Convert naddr to a_tag (coordinate format) for board reference
+                    // Preserve cookbook_naddr before parsing so we can recover if parse fails
+                    let saved_naddr = cookbook_naddr.clone();
                     let board_a_tag = match Coordinate::from_bech32(&cookbook_naddr) {
                         Ok(coord) => format!(
                             "{}:{}:{}",
@@ -173,8 +178,13 @@ pub fn AddToCookbookModal(
                             coord.identifier
                         ),
                         Err(e) => {
-                            log::error!("Failed to parse cookbook naddr: {}", e);
-                            error.set(Some(format!("Invalid cookbook address: {}", e)));
+                            log::error!("Failed to parse cookbook naddr {}: {}", saved_naddr, e);
+                            error.set(Some(format!(
+                                "Cookbook created but failed to add recipe. Your cookbook address: {}",
+                                saved_naddr
+                            )));
+                            // Store the naddr for potential manual recovery
+                            pending_pin_cookbook.set(Some((saved_naddr, String::new())));
                             is_submitting.set(false);
                             return;
                         }
@@ -203,11 +213,14 @@ pub fn AddToCookbookModal(
                             pending_pin_cookbook.set(None);
                             // Navigate to the new cookbook after a short delay
                             // Store task handle so it can be cancelled if modal is closed
-                            let task = spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(1500).await;
-                                navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
-                            });
-                            navigation_task.set(Some(task));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                let task = spawn(async move {
+                                    gloo_timers::future::TimeoutFuture::new(1500).await;
+                                    navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                                });
+                                navigation_task.set(Some(task));
+                            }
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - store cookbook info for retry
@@ -228,6 +241,7 @@ pub fn AddToCookbookModal(
 
     // Handle retrying pin after cookbook was created but pin failed
     let recipe_naddr_for_retry = recipe_naddr.clone();
+    #[allow(unused_variables)]
     let handle_retry_pin = move |_| {
         let (cookbook_naddr, board_a_tag) = match pending_pin_cookbook.read().clone() {
             Some(info) => info,
@@ -257,11 +271,14 @@ pub fn AddToCookbookModal(
                     is_submitting.set(false);
                     pending_pin_cookbook.set(None);
                     // Navigate to the cookbook after a short delay
-                    let task = spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
-                        navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
-                    });
-                    navigation_task.set(Some(task));
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let task = spawn(async move {
+                            gloo_timers::future::TimeoutFuture::new(1500).await;
+                            navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                        });
+                        navigation_task.set(Some(task));
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to add recipe to cookbook (retry): {}", e);
@@ -352,20 +369,33 @@ pub fn AddToCookbookModal(
                         div {
                             class: "space-y-4",
 
-                            // Info message
-                            div {
-                                class: "p-4 bg-amber-100 dark:bg-amber-900/20 rounded-lg",
-                                div {
-                                    class: "flex items-start gap-3",
-                                    span { class: "text-2xl", "📚" }
+                            // Info message - varies based on whether retry is available
+                            {
+                                let has_valid_a_tag = pending_pin_cookbook.read()
+                                    .as_ref()
+                                    .map(|(_, a_tag)| !a_tag.is_empty())
+                                    .unwrap_or(false);
+
+                                rsx! {
                                     div {
-                                        p {
-                                            class: "font-medium text-amber-800 dark:text-amber-200",
-                                            "Cookbook created successfully!"
-                                        }
-                                        p {
-                                            class: "text-sm text-amber-700 dark:text-amber-300 mt-1",
-                                            "However, adding the recipe failed. Click below to retry."
+                                        class: "p-4 bg-amber-100 dark:bg-amber-900/20 rounded-lg",
+                                        div {
+                                            class: "flex items-start gap-3",
+                                            span { class: "text-2xl", "📚" }
+                                            div {
+                                                p {
+                                                    class: "font-medium text-amber-800 dark:text-amber-200",
+                                                    "Cookbook created successfully!"
+                                                }
+                                                p {
+                                                    class: "text-sm text-amber-700 dark:text-amber-300 mt-1",
+                                                    if has_valid_a_tag {
+                                                        "However, adding the recipe failed. Click below to retry."
+                                                    } else {
+                                                        "However, adding the recipe failed. Visit your cookbook to add it manually."
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -394,19 +424,28 @@ pub fn AddToCookbookModal(
                                 }
                             }
 
-                            // Retry button
-                            button {
-                                r#type: "button",
-                                class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
-                                disabled: *is_submitting.read(),
-                                onclick: handle_retry_pin,
-                                if *is_submitting.read() {
-                                    span {
-                                        class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"
+                            // Retry button - only show if we have a valid a_tag
+                            // (a_tag is empty when Coordinate::from_bech32 failed)
+                            if pending_pin_cookbook.read().as_ref().map(|(_, a_tag)| !a_tag.is_empty()).unwrap_or(false) {
+                                button {
+                                    r#type: "button",
+                                    class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                    disabled: *is_submitting.read(),
+                                    onclick: handle_retry_pin,
+                                    if *is_submitting.read() {
+                                        span {
+                                            class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"
+                                        }
+                                        "Adding Recipe..."
+                                    } else {
+                                        "Retry Adding Recipe"
                                     }
-                                    "Adding Recipe..."
-                                } else {
-                                    "Retry Adding Recipe"
+                                }
+                            } else {
+                                // No valid a_tag - show message to manually add recipe
+                                p {
+                                    class: "text-sm text-muted-foreground text-center",
+                                    "You can add the recipe manually from your cookbook."
                                 }
                             }
 
@@ -501,11 +540,23 @@ pub fn AddToCookbookModal(
                                         class: "text-center py-6",
                                         span { class: "text-4xl mb-2 block", "⚠️" }
                                         p { class: "text-sm text-red-600 dark:text-red-400 mb-3", "{err}" }
-                                        button {
-                                            r#type: "button",
-                                            class: "text-sm text-primary hover:underline",
-                                            onclick: move |_| create_new.set(true),
-                                            "Create a new cookbook instead →"
+                                        div {
+                                            class: "flex gap-3 justify-center",
+                                            button {
+                                                r#type: "button",
+                                                class: "text-sm text-primary hover:underline",
+                                                onclick: move |_| {
+                                                    fetch_error.set(None);
+                                                    has_loaded.set(false);
+                                                },
+                                                "Retry"
+                                            }
+                                            button {
+                                                r#type: "button",
+                                                class: "text-sm text-muted-foreground hover:underline",
+                                                onclick: move |_| create_new.set(true),
+                                                "Create new cookbook instead"
+                                            }
                                         }
                                     }
                                 } else if cookbooks.read().is_empty() {

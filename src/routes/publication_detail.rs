@@ -2,17 +2,22 @@
 //! View NKBIP-01 publication with TOC (Kind 30040/30041)
 
 use dioxus::prelude::*;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use crate::components::{
-    PublicationToc, PublicationTocSkeleton, PublicationProgress, PublicationTocHorizontal,
+    PublicationTocDynamic, PublicationTocSkeleton, PublicationProgress, PublicationTocHorizontal,
     PublicationSectionContent, PublicationSectionSkeleton,
     SectionMetadata, SectionNavigation, SectionOutline, CitationMetadata,
 };
-use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon};
+use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon, RefreshIcon, AlertTriangleIcon};
 use crate::utils::clipboard::copy_formatted_content;
-use crate::stores::publication_store::{self, PublicationTree};
+use crate::stores::publication_store::{self, PublicationTree, PublicationSection};
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 use crate::utils::nkbip08::extract_book_wikilinks;
+
+/// Maximum number of dynamically loaded sections to cache
+const DYNAMIC_SECTIONS_CACHE_SIZE: usize = 100;
 
 /// Publication detail view with TOC navigation
 #[component]
@@ -24,6 +29,9 @@ pub fn PublicationDetail(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut copied = use_signal(|| false);
     let mut citation_count = use_signal(|| 0usize);
+
+    // Current parent section for TOC navigation (None = root level)
+    let mut current_toc_parent = use_signal(|| None::<PublicationSection>);
 
     let auth = auth_store::AUTH_STATE.read();
     let _is_logged_in = auth.pubkey.is_some();
@@ -58,17 +66,240 @@ pub fn PublicationDetail(naddr: String) -> Element {
         nav.push(Route::PublicationsHome {});
     };
 
-    let handle_section_select = move |address: String| {
+    // Handle section selection from sidebar - also updates TOC parent for nested indexes
+    let mut handle_section_select = move |address: String| {
+        // First, check if this address corresponds to a nested index
+        // If so, we should update the TOC parent to drill into it
+        let section_opt = tree.read().as_ref().and_then(|t| t.sections.get(&address).cloned());
+
+        if let Some(section) = section_opt {
+            if section.is_index && !section.child_addresses.is_empty() {
+                // This is a nested index - drill into it by setting it as TOC parent
+                current_toc_parent.set(Some(section));
+            }
+        }
+
         selected_section.set(Some(address));
     };
 
-    // Get current section content
+    // Dynamic section storage for child sections not in the main tree (bounded LRU cache)
+    let mut dynamic_sections = use_signal(|| {
+        LruCache::<String, publication_store::PublicationSection>::new(
+            NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap()
+        )
+    });
+
+    // Cleanup effect to clear cache on component unmount
+    use_drop(move || {
+        dynamic_sections.write().clear();
+    });
+
+    // Error state for section loading (addr -> error message)
+    let mut section_load_errors = use_signal(std::collections::HashMap::<String, String>::new);
+    // Loading state for sections being fetched
+    let mut section_loading = use_signal(std::collections::HashSet::<String>::new);
+
+    // Get current section content - either from tree or from dynamic sections
     let current_section = use_memo(move || {
         let sel = selected_section.read().clone();
         sel.and_then(|addr| {
-            tree.read().as_ref().and_then(|t| t.sections.get(&addr).cloned())
+            // First try to get from tree
+            if let Some(section) = tree.read().as_ref().and_then(|t| t.sections.get(&addr).cloned()) {
+                return Some(section);
+            }
+            // Then try dynamic sections LRU cache (for child sections loaded on demand)
+            // Note: peek doesn't update LRU order, which is fine for reads during render
+            dynamic_sections.read().peek(&addr).cloned()
         })
     });
+
+    // Retry handler for failed section loads
+    let mut retry_section_load = move |addr: String| {
+        // Clear error and re-trigger fetch by removing from dynamic_sections if present
+        section_load_errors.write().remove(&addr);
+        // The effect will re-fetch when it sees the section is missing
+        dynamic_sections.write().pop(&addr);
+    };
+
+    // Effect to fetch section on demand if not in tree or dynamic cache
+    use_effect(move || {
+        let sel = selected_section.read().clone();
+        if let Some(addr) = sel {
+            // Check if section already exists or is currently loading
+            let in_tree = tree.read().as_ref().map(|t| t.sections.contains_key(&addr)).unwrap_or(false);
+            let in_dynamic = dynamic_sections.read().contains(&addr);
+            let is_loading = section_loading.read().contains(&addr);
+
+            if !in_tree && !in_dynamic && !is_loading {
+                // Need to fetch this section
+                let addr_for_log = addr.clone();
+                let addr_for_check = addr.clone();
+                let addr_for_error = addr.clone();
+                let addr_for_loading = addr.clone();
+
+                // Mark as loading
+                section_loading.write().insert(addr_for_loading.clone());
+                // Clear any previous error for this address
+                section_load_errors.write().remove(&addr_for_error);
+
+                spawn(async move {
+                    // Parse address: "kind:pubkey:d-tag"
+                    let parts: Vec<&str> = addr.split(':').collect();
+                    if parts.len() >= 3 {
+                        let kind_result = parts[0].parse::<u16>();
+                        let pubkey_result = nostr_sdk::prelude::PublicKey::from_hex(parts[1]);
+
+                        match (kind_result, pubkey_result) {
+                            (Ok(kind), Ok(pubkey)) => {
+                                let d_tag = parts[2..].join(":");
+                                let filter = nostr_sdk::prelude::Filter::new()
+                                    .kind(nostr_sdk::prelude::Kind::Custom(kind))
+                                    .author(pubkey)
+                                    .identifier(&d_tag);
+
+                                let start = instant::Instant::now();
+                                match nostr_client::fetch_events_aggregated(
+                                    filter,
+                                    std::time::Duration::from_secs(10),
+                                ).await {
+                                    Ok(events) => {
+                                        // Check if selection changed while fetching - avoid stale updates
+                                        let current_sel = selected_section.read().clone();
+                                        if current_sel != Some(addr_for_check.clone()) {
+                                            log::debug!("Dropping stale section fetch result for addr={} (selection changed)", addr_for_log);
+                                            section_loading.write().remove(&addr_for_loading);
+                                            return;
+                                        }
+
+                                        // Also check if already inserted (e.g., by another concurrent fetch)
+                                        if dynamic_sections.read().contains(&addr_for_check) {
+                                            section_loading.write().remove(&addr_for_loading);
+                                            return;
+                                        }
+
+                                        if let Some(event) = events.first() {
+                                            if let Some(section) = publication_store::parse_publication_section(event) {
+                                                dynamic_sections.write().put(addr.clone(), section);
+                                                section_load_errors.write().remove(&addr_for_error);
+                                            } else {
+                                                log::warn!("Failed to parse publication section for addr={}", addr_for_log);
+                                                section_load_errors.write().insert(addr_for_error.clone(), "Failed to parse section content".to_string());
+                                            }
+                                        } else {
+                                            log::warn!("No events found for section addr={} (took {:?})", addr_for_log, start.elapsed());
+                                            section_load_errors.write().insert(addr_for_error.clone(), "Section not found".to_string());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to fetch section addr={}: {} (took {:?})", addr_for_log, e, start.elapsed());
+                                        section_load_errors.write().insert(addr_for_error.clone(), format!("Network error: {}", e));
+                                    }
+                                }
+                            }
+                            (Err(e), _) => {
+                                log::warn!("Failed to parse kind from addr={}: {}", addr_for_log, e);
+                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid section address: {}", e));
+                            }
+                            (_, Err(e)) => {
+                                log::warn!("Failed to parse pubkey from addr={}: {}", addr_for_log, e);
+                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid author key: {}", e));
+                            }
+                        }
+                    } else {
+                        log::warn!("Invalid address format (expected kind:pubkey:d-tag): {}", addr_for_log);
+                        section_load_errors.write().insert(addr_for_error.clone(), "Invalid address format".to_string());
+                    }
+
+                    // Clear loading state
+                    section_loading.write().remove(&addr_for_loading);
+                });
+            }
+        }
+    });
+
+    // Update TOC parent for dynamically loaded sections (not in tree.sections)
+    // Main forward navigation is handled by handle_section_select
+    use_effect(move || {
+        if let Some(ref section) = *current_section.read() {
+            // Only handle dynamically loaded sections that are nested indexes
+            // Skip if this is the root
+            let is_root = tree.read().as_ref()
+                .map(|t| t.root.a_tag == section.a_tag)
+                .unwrap_or(false);
+
+            if is_root {
+                return;
+            }
+
+            // Check if this section is NOT in tree.sections (was loaded dynamically)
+            let in_tree = tree.read().as_ref()
+                .map(|t| t.sections.contains_key(&section.a_tag))
+                .unwrap_or(false);
+
+            // Only auto-update for dynamically loaded nested indexes
+            if !in_tree && section.is_index && !section.child_addresses.is_empty() {
+                let current_parent = current_toc_parent.read().clone();
+
+                // Only update if not already set to this section
+                let should_update = current_parent.as_ref()
+                    .map(|p| p.a_tag != section.a_tag)
+                    .unwrap_or(true);
+
+                if should_update {
+                    current_toc_parent.set(Some(section.clone()));
+                }
+            }
+        }
+    });
+
+    // Handle back navigation in TOC - uses tree's parent relationships
+    let handle_toc_back = move |_| {
+        let current_parent = current_toc_parent.read().clone();
+        if let Some(parent) = current_parent {
+            if let Some(ref t) = *tree.read() {
+                // First check if current parent is a direct child of root
+                // Use case-insensitive comparison since pubkey hex can vary in case
+                let parent_a_tag_lower = parent.a_tag.to_lowercase();
+                let is_direct_child_of_root = t.root.section_addresses.iter()
+                    .any(|s| s.address.to_lowercase() == parent_a_tag_lower);
+
+                if is_direct_child_of_root {
+                    // Go back to root level - only reset TOC parent, don't change selected section
+                    // This prevents the effect from immediately re-setting the TOC parent
+                    current_toc_parent.set(None);
+                    // Don't change selected_section - keep current content visible
+                    // User can click a different section in the now-visible root TOC
+                } else if let Some(node) = t.nodes.get(&parent.a_tag) {
+                    // Find parent using tree nodes
+                    if let Some(ref parent_addr) = node.parent {
+                        if *parent_addr == t.root.a_tag {
+                            // Going back to root level
+                            current_toc_parent.set(None);
+                            if !t.root.section_addresses.is_empty() {
+                                selected_section.set(Some(t.root.section_addresses[0].address.clone()));
+                            }
+                        } else {
+                            // Navigate to intermediate parent
+                            selected_section.set(Some(parent_addr.clone()));
+                        }
+                    } else {
+                        // No parent in node, go to root
+                        current_toc_parent.set(None);
+                        if !t.root.section_addresses.is_empty() {
+                            selected_section.set(Some(t.root.section_addresses[0].address.clone()));
+                        }
+                    }
+                } else {
+                    // Node not in tree, go to root
+                    current_toc_parent.set(None);
+                    if !t.root.section_addresses.is_empty() {
+                        selected_section.set(Some(t.root.section_addresses[0].address.clone()));
+                    }
+                }
+            }
+        }
+        // If no current parent, we're already at root - do nothing
+    };
 
     // Compute prev/next sections for navigation
     let nav_sections = use_memo(move || {
@@ -226,13 +457,15 @@ pub fn PublicationDetail(naddr: String) -> Element {
                 div {
                     class: "flex-1 flex overflow-hidden",
 
-                    // TOC sidebar (desktop)
+                    // TOC sidebar (desktop) - Dynamic navigation using tree structure
                     aside {
                         class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto",
-                        PublicationToc {
+                        PublicationTocDynamic {
                             tree: pub_tree.clone(),
                             selected: selected_section.read().clone(),
+                            current_parent: current_toc_parent.read().clone(),
                             on_select: EventHandler::new(handle_section_select),
+                            on_back: EventHandler::new(handle_toc_back),
                         }
                     }
 
@@ -267,57 +500,118 @@ pub fn PublicationDetail(naddr: String) -> Element {
                             // Section content
                             div {
                                 class: "max-w-3xl mx-auto px-6 py-8",
-                                if let Some(ref section) = *current_section.read() {
-                                    // Section metadata (reading time, word count)
-                                    div {
-                                        class: "mb-6",
-                                        SectionMetadata {
-                                            section: section.clone(),
-                                        }
-                                    }
+                                // Check for loading state
+                                {
+                                    let sel_addr = selected_section.read().clone();
+                                    let is_section_loading = sel_addr.as_ref()
+                                        .map(|a| section_loading.read().contains(a))
+                                        .unwrap_or(false);
+                                    let section_error = sel_addr.as_ref()
+                                        .and_then(|a| section_load_errors.read().get(a).cloned());
 
-                                    // Section content
-                                    PublicationSectionContent {
-                                        section: section.clone(),
-                                        on_citations_loaded: move |metadata: CitationMetadata| {
-                                            citation_count.set(metadata.count);
-                                        },
-                                    }
-
-                                    // Section navigation (prev/next)
-                                    {
-                                        let (prev, next) = nav_sections.read().clone();
+                                    if is_section_loading {
                                         rsx! {
-                                            SectionNavigation {
-                                                prev_section: prev,
-                                                next_section: next,
-                                                on_navigate: handle_section_select,
+                                            // Loading indicator
+                                            div {
+                                                class: "flex flex-col items-center justify-center py-16",
+                                                div {
+                                                    class: "animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mb-4"
+                                                }
+                                                p {
+                                                    class: "text-muted-foreground",
+                                                    "Loading section..."
+                                                }
                                             }
                                         }
-                                    }
-                                } else {
-                                    // Show publication info when no section selected
-                                    div {
-                                        class: "text-center py-16",
-                                        h2 {
-                                            class: "text-2xl font-bold text-foreground mb-4",
-                                            "{pub_tree.root.title}"
-                                        }
-                                        if let Some(ref author) = pub_tree.root.author {
-                                            p {
-                                                class: "text-lg text-muted-foreground mb-4",
-                                                "by {author}"
+                                    } else if let Some(error_msg) = section_error {
+                                        let retry_addr = sel_addr.clone().unwrap_or_default();
+                                        rsx! {
+                                            // Error display with retry button
+                                            div {
+                                                class: "flex flex-col items-center justify-center py-16",
+                                                div {
+                                                    class: "bg-destructive/10 border border-destructive/20 rounded-lg p-6 max-w-md text-center",
+                                                    div {
+                                                        class: "flex items-center justify-center gap-2 text-destructive mb-3",
+                                                        AlertTriangleIcon { class: "w-5 h-5" }
+                                                        span {
+                                                            class: "font-medium",
+                                                            "Failed to load section"
+                                                        }
+                                                    }
+                                                    p {
+                                                        class: "text-sm text-muted-foreground mb-4",
+                                                        "{error_msg}"
+                                                    }
+                                                    button {
+                                                        class: "inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
+                                                        onclick: move |_| retry_section_load(retry_addr.clone()),
+                                                        RefreshIcon { class: "w-4 h-4" }
+                                                        "Retry"
+                                                    }
+                                                }
                                             }
                                         }
-                                        if let Some(ref summary) = pub_tree.root.summary {
-                                            p {
-                                                class: "text-muted-foreground max-w-md mx-auto mb-6",
-                                                "{summary}"
+                                    } else if let Some(ref section) = *current_section.read() {
+                                        rsx! {
+                                            // Section metadata (reading time, word count)
+                                            div {
+                                                class: "mb-6",
+                                                SectionMetadata {
+                                                    section: section.clone(),
+                                                }
+                                            }
+
+                                            // Section content
+                                            PublicationSectionContent {
+                                                section: section.clone(),
+                                                on_citations_loaded: move |metadata: CitationMetadata| {
+                                                    citation_count.set(metadata.count);
+                                                },
+                                                on_child_select: move |child_address: String| {
+                                                    // Use handle_section_select to update breadcrumbs for nested indexes
+                                                    handle_section_select(child_address);
+                                                },
+                                            }
+
+                                            // Section navigation (prev/next)
+                                            {
+                                                let (prev, next) = nav_sections.read().clone();
+                                                rsx! {
+                                                    SectionNavigation {
+                                                        prev_section: prev,
+                                                        next_section: next,
+                                                        on_navigate: handle_section_select,
+                                                    }
+                                                }
                                             }
                                         }
-                                        p {
-                                            class: "text-sm text-muted-foreground",
-                                            "{pub_tree.root.section_addresses.len()} sections"
+                                    } else {
+                                        // Show publication info when no section selected
+                                        rsx! {
+                                            div {
+                                                class: "text-center py-16",
+                                                h2 {
+                                                    class: "text-2xl font-bold text-foreground mb-4",
+                                                    "{pub_tree.root.title}"
+                                                }
+                                                if let Some(ref author) = pub_tree.root.author {
+                                                    p {
+                                                        class: "text-lg text-muted-foreground mb-4",
+                                                        "by {author}"
+                                                    }
+                                                }
+                                                if let Some(ref summary) = pub_tree.root.summary {
+                                                    p {
+                                                        class: "text-muted-foreground max-w-md mx-auto mb-6",
+                                                        "{summary}"
+                                                    }
+                                                }
+                                                p {
+                                                    class: "text-sm text-muted-foreground",
+                                                    "{pub_tree.root.section_addresses.len()} sections"
+                                                }
+                                            }
                                         }
                                     }
                                 }

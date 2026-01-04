@@ -322,7 +322,6 @@ pub fn PersistentMusicPlayer() -> Element {
         // Hidden audio element
         audio {
             id: "{audio_id}",
-            crossorigin: "anonymous",
             preload: if track.is_live_stream { "none" } else { "metadata" },
             style: "display: none;",
             src: "{track.media_url}",

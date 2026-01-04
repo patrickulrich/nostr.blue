@@ -57,6 +57,44 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
 
+    // Track whether to hide the "Posted!" badge after timeout
+    let mut hide_confirmed_badge = use_signal(|| false);
+    let mut badge_timer_started = use_signal(|| false);
+
+    // Convert pending_status prop to a signal so effects can react to changes
+    // Props aren't automatically reactive in Dioxus - we need an explicit signal
+    let mut pending_status_signal = use_signal(|| pending_status.clone());
+
+    // Clone pending_status before moving into effect closure
+    let pending_status_for_sync = pending_status.clone();
+
+    // Keep signal in sync with prop changes
+    use_effect(move || {
+        pending_status_signal.set(pending_status_for_sync.clone());
+    });
+
+    // Auto-hide "Posted!" badge after 3 seconds using use_effect
+    // Now reads from the reactive signal so the effect re-runs on status changes
+    // Also resets timer state when status changes away from Confirmed (e.g., on retry)
+    use_effect(move || {
+        let status = pending_status_signal.read();
+        let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
+
+        if is_confirmed && !*badge_timer_started.read() {
+            // Start timer for confirmed status
+            badge_timer_started.set(true);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(3_000).await;
+                hide_confirmed_badge.set(true);
+            });
+        } else if !is_confirmed && *badge_timer_started.read() {
+            // Reset timer state when status changes away from Confirmed (retry scenario)
+            // This allows the badge to show again if the comment is re-confirmed
+            badge_timer_started.set(false);
+            hide_confirmed_badge.set(false);
+        }
+    });
+
     // Reaction hook - handles like state with optimistic updates and toggle support
     let reaction = use_reaction(
         event_id_like.clone(),
@@ -398,10 +436,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                             "Posting..."
                                         }
                                     },
-                                    Some(CommentStatus::Confirmed(_)) => rsx! {
-                                        span {
-                                            class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
-                                            "Posted!"
+                                    Some(CommentStatus::Confirmed(_)) => {
+                                        if !*hide_confirmed_badge.read() {
+                                            rsx! {
+                                                span {
+                                                    class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+                                                    "Posted!"
+                                                }
+                                            }
+                                        } else {
+                                            rsx! {}
                                         }
                                     },
                                     Some(CommentStatus::Failed(error)) => {

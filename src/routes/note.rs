@@ -37,6 +37,21 @@ fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     ids
 }
 
+/// Extract the thread root event ID from a note's tags (NIP-10)
+/// Returns the event ID from the "root" marker tag, or None if this note is the root
+fn extract_thread_root_id(note: &NostrEvent) -> Option<EventId> {
+    for tag in note.tags.iter() {
+        let tag_vec = tag.clone().to_vec();
+        if tag_vec.len() >= 4
+            && tag_vec[0] == "e"
+            && tag_vec[3] == "root"
+        {
+            return EventId::from_hex(&tag_vec[1]).ok();
+        }
+    }
+    None
+}
+
 /// Fetch parent events by their IDs
 async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<Vec<NostrEvent>, String> {
     if parent_ids.is_empty() {
@@ -325,7 +340,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                         let reply_vec = replies.read().clone();
                         let confirmed_tree = build_thread_tree(reply_vec, &event.id);
                         // Merge pending comments for optimistic display
-                        let pending = get_pending_comments(&event.id);
+                        // Use thread root ID for lookup since ReplyComposer stores pending comments
+                        // under the NIP-10 thread root, not the currently viewed note
+                        let thread_root_id = extract_thread_root_id(event).unwrap_or(event.id);
+                        let pending = get_pending_comments(&thread_root_id);
                         let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
                         rsx! {

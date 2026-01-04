@@ -32,34 +32,36 @@ pub fn RecipeDetail(naddr: String) -> Element {
         false
     });
 
-    // Fetch recipe on mount
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-
-        let naddr_clone = naddr_for_effect.clone();
-        loading.set(true);
-        error.set(None);
-
-        spawn(async move {
-            match recipe_store::fetch_recipe_by_naddr(&naddr_clone).await {
-                Ok(Some(r)) => {
-                    recipe.set(Some(r));
-                    loading.set(false);
-                }
-                Ok(None) => {
-                    error.set(Some("Recipe not found".to_string()));
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
+    // Fetch recipe on mount - use_reactive to ensure re-run when client initializes
+    use_effect(use_reactive(
+        (&*nostr_client::CLIENT_INITIALIZED.read(), &naddr_for_effect),
+        move |(client_initialized, naddr_str)| {
+            if !client_initialized {
+                return;
             }
-        });
-    });
+
+            let naddr_clone = naddr_str.clone();
+            loading.set(true);
+            error.set(None);
+
+            spawn(async move {
+                match recipe_store::fetch_recipe_by_naddr(&naddr_clone).await {
+                    Ok(Some(r)) => {
+                        recipe.set(Some(r));
+                        loading.set(false);
+                    }
+                    Ok(None) => {
+                        error.set(Some("Recipe not found".to_string()));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            });
+        }
+    ));
 
     rsx! {
         div {
