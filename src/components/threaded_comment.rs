@@ -61,11 +61,23 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let mut hide_confirmed_badge = use_signal(|| false);
     let mut badge_timer_started = use_signal(|| false);
 
-    // Auto-hide "Posted!" badge after 3 seconds using use_effect
-    // Check pending_status inside the effect so it reacts to changes
-    let pending_status_clone = pending_status.clone();
+    // Convert pending_status prop to a signal so effects can react to changes
+    // Props aren't automatically reactive in Dioxus - we need an explicit signal
+    let mut pending_status_signal = use_signal(|| pending_status.clone());
+
+    // Clone pending_status before moving into effect closure
+    let pending_status_for_sync = pending_status.clone();
+
+    // Keep signal in sync with prop changes
     use_effect(move || {
-        let is_confirmed = matches!(pending_status_clone.as_ref(), Some(CommentStatus::Confirmed(_)));
+        pending_status_signal.set(pending_status_for_sync.clone());
+    });
+
+    // Auto-hide "Posted!" badge after 3 seconds using use_effect
+    // Now reads from the reactive signal so the effect re-runs on status changes
+    use_effect(move || {
+        let status = pending_status_signal.read();
+        let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
         if is_confirmed && !*badge_timer_started.read() {
             badge_timer_started.set(true);
             spawn(async move {

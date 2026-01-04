@@ -2,17 +2,22 @@
 //! View NKBIP-01 publication with TOC (Kind 30040/30041)
 
 use dioxus::prelude::*;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use crate::components::{
     PublicationTocDynamic, PublicationTocSkeleton, PublicationProgress, PublicationTocHorizontal,
     PublicationSectionContent, PublicationSectionSkeleton,
     SectionMetadata, SectionNavigation, SectionOutline, CitationMetadata,
 };
-use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon};
+use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon, RefreshIcon, AlertTriangleIcon};
 use crate::utils::clipboard::copy_formatted_content;
 use crate::stores::publication_store::{self, PublicationTree, PublicationSection};
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 use crate::utils::nkbip08::extract_book_wikilinks;
+
+/// Maximum number of dynamically loaded sections to cache
+const DYNAMIC_SECTIONS_CACHE_SIZE: usize = 100;
 
 /// Publication detail view with TOC navigation
 #[component]
@@ -77,8 +82,17 @@ pub fn PublicationDetail(naddr: String) -> Element {
         selected_section.set(Some(address));
     };
 
-    // Dynamic section storage for child sections not in the main tree
-    let mut dynamic_sections = use_signal(std::collections::HashMap::<String, publication_store::PublicationSection>::new);
+    // Dynamic section storage for child sections not in the main tree (bounded LRU cache)
+    let mut dynamic_sections = use_signal(|| {
+        LruCache::<String, publication_store::PublicationSection>::new(
+            NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap()
+        )
+    });
+
+    // Error state for section loading (addr -> error message)
+    let mut section_load_errors = use_signal(std::collections::HashMap::<String, String>::new);
+    // Loading state for sections being fetched
+    let mut section_loading = use_signal(std::collections::HashSet::<String>::new);
 
     // Get current section content - either from tree or from dynamic sections
     let current_section = use_memo(move || {
@@ -88,23 +102,41 @@ pub fn PublicationDetail(naddr: String) -> Element {
             if let Some(section) = tree.read().as_ref().and_then(|t| t.sections.get(&addr).cloned()) {
                 return Some(section);
             }
-            // Then try dynamic sections (for child sections loaded on demand)
-            dynamic_sections.read().get(&addr).cloned()
+            // Then try dynamic sections LRU cache (for child sections loaded on demand)
+            // Note: peek doesn't update LRU order, which is fine for reads during render
+            dynamic_sections.read().peek(&addr).cloned()
         })
     });
+
+    // Retry handler for failed section loads
+    let mut retry_section_load = move |addr: String| {
+        // Clear error and re-trigger fetch by removing from dynamic_sections if present
+        section_load_errors.write().remove(&addr);
+        // The effect will re-fetch when it sees the section is missing
+        dynamic_sections.write().pop(&addr);
+    };
 
     // Effect to fetch section on demand if not in tree or dynamic cache
     use_effect(move || {
         let sel = selected_section.read().clone();
         if let Some(addr) = sel {
-            // Check if section already exists
+            // Check if section already exists or is currently loading
             let in_tree = tree.read().as_ref().map(|t| t.sections.contains_key(&addr)).unwrap_or(false);
-            let in_dynamic = dynamic_sections.read().contains_key(&addr);
+            let in_dynamic = dynamic_sections.read().contains(&addr);
+            let is_loading = section_loading.read().contains(&addr);
 
-            if !in_tree && !in_dynamic {
+            if !in_tree && !in_dynamic && !is_loading {
                 // Need to fetch this section
                 let addr_for_log = addr.clone();
                 let addr_for_check = addr.clone();
+                let addr_for_error = addr.clone();
+                let addr_for_loading = addr.clone();
+
+                // Mark as loading
+                section_loading.write().insert(addr_for_loading.clone());
+                // Clear any previous error for this address
+                section_load_errors.write().remove(&addr_for_error);
+
                 spawn(async move {
                     // Parse address: "kind:pubkey:d-tag"
                     let parts: Vec<&str> = addr.split(':').collect();
@@ -130,39 +162,51 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                         let current_sel = selected_section.read().clone();
                                         if current_sel != Some(addr_for_check.clone()) {
                                             log::debug!("Dropping stale section fetch result for addr={} (selection changed)", addr_for_log);
+                                            section_loading.write().remove(&addr_for_loading);
                                             return;
                                         }
 
                                         // Also check if already inserted (e.g., by another concurrent fetch)
-                                        if dynamic_sections.read().contains_key(&addr_for_check) {
+                                        if dynamic_sections.read().contains(&addr_for_check) {
+                                            section_loading.write().remove(&addr_for_loading);
                                             return;
                                         }
 
                                         if let Some(event) = events.first() {
                                             if let Some(section) = publication_store::parse_publication_section(event) {
-                                                dynamic_sections.write().insert(addr, section);
+                                                dynamic_sections.write().put(addr.clone(), section);
+                                                section_load_errors.write().remove(&addr_for_error);
                                             } else {
                                                 log::warn!("Failed to parse publication section for addr={}", addr_for_log);
+                                                section_load_errors.write().insert(addr_for_error.clone(), "Failed to parse section content".to_string());
                                             }
                                         } else {
                                             log::warn!("No events found for section addr={} (took {:?})", addr_for_log, start.elapsed());
+                                            section_load_errors.write().insert(addr_for_error.clone(), "Section not found".to_string());
                                         }
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to fetch section addr={}: {} (took {:?})", addr_for_log, e, start.elapsed());
+                                        section_load_errors.write().insert(addr_for_error.clone(), format!("Network error: {}", e));
                                     }
                                 }
                             }
                             (Err(e), _) => {
                                 log::warn!("Failed to parse kind from addr={}: {}", addr_for_log, e);
+                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid section address: {}", e));
                             }
                             (_, Err(e)) => {
                                 log::warn!("Failed to parse pubkey from addr={}: {}", addr_for_log, e);
+                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid author key: {}", e));
                             }
                         }
                     } else {
                         log::warn!("Invalid address format (expected kind:pubkey:d-tag): {}", addr_for_log);
+                        section_load_errors.write().insert(addr_for_error.clone(), "Invalid address format".to_string());
                     }
+
+                    // Clear loading state
+                    section_loading.write().remove(&addr_for_loading);
                 });
             }
         }
@@ -451,61 +495,118 @@ pub fn PublicationDetail(naddr: String) -> Element {
                             // Section content
                             div {
                                 class: "max-w-3xl mx-auto px-6 py-8",
-                                if let Some(ref section) = *current_section.read() {
-                                    // Section metadata (reading time, word count)
-                                    div {
-                                        class: "mb-6",
-                                        SectionMetadata {
-                                            section: section.clone(),
-                                        }
-                                    }
+                                // Check for loading state
+                                {
+                                    let sel_addr = selected_section.read().clone();
+                                    let is_section_loading = sel_addr.as_ref()
+                                        .map(|a| section_loading.read().contains(a))
+                                        .unwrap_or(false);
+                                    let section_error = sel_addr.as_ref()
+                                        .and_then(|a| section_load_errors.read().get(a).cloned());
 
-                                    // Section content
-                                    PublicationSectionContent {
-                                        section: section.clone(),
-                                        on_citations_loaded: move |metadata: CitationMetadata| {
-                                            citation_count.set(metadata.count);
-                                        },
-                                        on_child_select: move |child_address: String| {
-                                            // Use handle_section_select to update breadcrumbs for nested indexes
-                                            handle_section_select(child_address);
-                                        },
-                                    }
-
-                                    // Section navigation (prev/next)
-                                    {
-                                        let (prev, next) = nav_sections.read().clone();
+                                    if is_section_loading {
                                         rsx! {
-                                            SectionNavigation {
-                                                prev_section: prev,
-                                                next_section: next,
-                                                on_navigate: handle_section_select,
+                                            // Loading indicator
+                                            div {
+                                                class: "flex flex-col items-center justify-center py-16",
+                                                div {
+                                                    class: "animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mb-4"
+                                                }
+                                                p {
+                                                    class: "text-muted-foreground",
+                                                    "Loading section..."
+                                                }
                                             }
                                         }
-                                    }
-                                } else {
-                                    // Show publication info when no section selected
-                                    div {
-                                        class: "text-center py-16",
-                                        h2 {
-                                            class: "text-2xl font-bold text-foreground mb-4",
-                                            "{pub_tree.root.title}"
-                                        }
-                                        if let Some(ref author) = pub_tree.root.author {
-                                            p {
-                                                class: "text-lg text-muted-foreground mb-4",
-                                                "by {author}"
+                                    } else if let Some(error_msg) = section_error {
+                                        let retry_addr = sel_addr.clone().unwrap_or_default();
+                                        rsx! {
+                                            // Error display with retry button
+                                            div {
+                                                class: "flex flex-col items-center justify-center py-16",
+                                                div {
+                                                    class: "bg-destructive/10 border border-destructive/20 rounded-lg p-6 max-w-md text-center",
+                                                    div {
+                                                        class: "flex items-center justify-center gap-2 text-destructive mb-3",
+                                                        AlertTriangleIcon { class: "w-5 h-5" }
+                                                        span {
+                                                            class: "font-medium",
+                                                            "Failed to load section"
+                                                        }
+                                                    }
+                                                    p {
+                                                        class: "text-sm text-muted-foreground mb-4",
+                                                        "{error_msg}"
+                                                    }
+                                                    button {
+                                                        class: "inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
+                                                        onclick: move |_| retry_section_load(retry_addr.clone()),
+                                                        RefreshIcon { class: "w-4 h-4" }
+                                                        "Retry"
+                                                    }
+                                                }
                                             }
                                         }
-                                        if let Some(ref summary) = pub_tree.root.summary {
-                                            p {
-                                                class: "text-muted-foreground max-w-md mx-auto mb-6",
-                                                "{summary}"
+                                    } else if let Some(ref section) = *current_section.read() {
+                                        rsx! {
+                                            // Section metadata (reading time, word count)
+                                            div {
+                                                class: "mb-6",
+                                                SectionMetadata {
+                                                    section: section.clone(),
+                                                }
+                                            }
+
+                                            // Section content
+                                            PublicationSectionContent {
+                                                section: section.clone(),
+                                                on_citations_loaded: move |metadata: CitationMetadata| {
+                                                    citation_count.set(metadata.count);
+                                                },
+                                                on_child_select: move |child_address: String| {
+                                                    // Use handle_section_select to update breadcrumbs for nested indexes
+                                                    handle_section_select(child_address);
+                                                },
+                                            }
+
+                                            // Section navigation (prev/next)
+                                            {
+                                                let (prev, next) = nav_sections.read().clone();
+                                                rsx! {
+                                                    SectionNavigation {
+                                                        prev_section: prev,
+                                                        next_section: next,
+                                                        on_navigate: handle_section_select,
+                                                    }
+                                                }
                                             }
                                         }
-                                        p {
-                                            class: "text-sm text-muted-foreground",
-                                            "{pub_tree.root.section_addresses.len()} sections"
+                                    } else {
+                                        // Show publication info when no section selected
+                                        rsx! {
+                                            div {
+                                                class: "text-center py-16",
+                                                h2 {
+                                                    class: "text-2xl font-bold text-foreground mb-4",
+                                                    "{pub_tree.root.title}"
+                                                }
+                                                if let Some(ref author) = pub_tree.root.author {
+                                                    p {
+                                                        class: "text-lg text-muted-foreground mb-4",
+                                                        "by {author}"
+                                                    }
+                                                }
+                                                if let Some(ref summary) = pub_tree.root.summary {
+                                                    p {
+                                                        class: "text-muted-foreground max-w-md mx-auto mb-6",
+                                                        "{summary}"
+                                                    }
+                                                }
+                                                p {
+                                                    class: "text-sm text-muted-foreground",
+                                                    "{pub_tree.root.section_addresses.len()} sections"
+                                                }
+                                            }
                                         }
                                     }
                                 }
