@@ -120,7 +120,7 @@ pub fn JoinButton(
 
 /// Pin/unpin toggle button for communities
 #[component]
-pub fn PinCommunityButton(a_tag: String) -> Element {
+fn PinCommunityButton(a_tag: String) -> Element {
     let mut is_pinned = use_signal(|| is_community_pinned(&a_tag));
     let mut is_loading = use_signal(|| false);
     let mut pin_error: Signal<Option<String>> = use_signal(|| None);
@@ -195,7 +195,7 @@ pub fn PinCommunityButton(a_tag: String) -> Element {
 
 /// Admin badge showing pending request count
 #[component]
-pub fn AdminBadge(count: u32) -> Element {
+fn AdminBadge(count: u32) -> Element {
     if count == 0 {
         return rsx! {};
     }

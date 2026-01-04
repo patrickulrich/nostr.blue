@@ -219,6 +219,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         )
     });
     let mut leaflet_loaded = use_signal(|| false);
+    let mut leaflet_loading = use_signal(|| false);
     let mut leaflet_error = use_signal(|| None::<String>);
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
@@ -244,15 +245,23 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
 
-    // Load Leaflet on mount
+    // Load Leaflet on mount (with guard to prevent duplicate loads)
     use_effect(move || {
+        // Guard: skip if already loaded, loading, or errored
+        if *leaflet_loaded.read() || *leaflet_loading.read() || leaflet_error.read().is_some() {
+            return;
+        }
+
+        leaflet_loading.set(true);
         spawn(async move {
             if let Err(e) = loadLeaflet().await {
                 log::error!("Failed to load Leaflet: {:?}", e);
                 leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
+                leaflet_loading.set(false);
                 return;
             }
             leaflet_loaded.set(true);
+            leaflet_loading.set(false);
         });
     });
 

@@ -98,6 +98,11 @@ pub fn RepoActionBar(
     // Star/Unstar handler
     let handle_star = {
         move |_| {
+            // Prevent concurrent star operations
+            if *star_loading.read() {
+                return;
+            }
+
             if !has_signer {
                 toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
                 return;
@@ -105,10 +110,13 @@ pub fn RepoActionBar(
 
             // Read coordinate fresh each time handler runs to avoid stale capture
             if let Some(coord) = coordinate.read().clone() {
+                // Set loading BEFORE reading state to prevent races
                 star_loading.set(true);
-                let currently_starred = *is_starred.read();
 
                 spawn(async move {
+                    // Read current state inside async block for fresh values
+                    let currently_starred = *is_starred.read();
+
                     let result = if currently_starred {
                         remove_star(&coord).await
                     } else {
@@ -118,6 +126,7 @@ pub fn RepoActionBar(
                     match result {
                         Ok(_) => {
                             is_starred.set(!currently_starred);
+                            // Read fresh count after operation succeeds
                             let current = *star_count.read();
                             if currently_starred {
                                 star_count.set(current.saturating_sub(1));
