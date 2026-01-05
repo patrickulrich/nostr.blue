@@ -90,11 +90,29 @@ pub async fn preview_token(token_string: String) -> Result<TokenPreview, String>
     // Get unit from token (defaults to sat)
     let unit = token.unit().map(|u| u.to_string()).unwrap_or_else(|| "sat".to_string());
 
+    // Truncate memo to prevent UI issues from arbitrarily long memos (UTF-8 safe)
+    let memo = token_data.memo.map(|m| {
+        if m.len() > 256 {
+            // Find the largest char boundary where the string ends at or before 253 bytes
+            let mut end = 0;
+            for (i, c) in m.char_indices() {
+                let char_end = i + c.len_utf8();
+                if char_end > 253 {
+                    break;
+                }
+                end = char_end;
+            }
+            format!("{}...", &m[..end])
+        } else {
+            m
+        }
+    });
+
     Ok(TokenPreview {
         mint_url: token_data.mint_url.to_string(),
         value,
         unit,
-        memo: token_data.memo,
+        memo,
         redeem_fee: None, // Fee calculation requires keyset info, skip for now
         proof_count: token_data.proofs.len(),
     })
