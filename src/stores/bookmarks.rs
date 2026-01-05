@@ -64,11 +64,12 @@ pub async fn init_bookmarks() -> Result<(), String> {
 
     log::info!("Loading bookmarks for {}", pubkey_str);
 
-    // Fetch bookmark list (kind 30001 with d tag "bookmark")
+    // Fetch bookmarks list (kind 30001 with d-tag "bookmark")
+    // Using deprecated format for Amethyst compatibility
     let filter = Filter::new()
         .author(pubkey)
-        .kind(Kind::from(30001)) // Bookmarks list
-        .identifier("bookmark") // NIP-51 bookmark identifier
+        .kind(Kind::from(30001))
+        .identifier("bookmark")
         .limit(1);
 
     // Ensure relays are ready before fetching
@@ -310,18 +311,13 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
         }
     }
 
-    // Use NIP-51 Bookmarks struct for type-safe bookmark list construction
-    use nostr_sdk::nips::nip51::Bookmarks;
-    let bookmarks_list = Bookmarks {
-        event_ids,
-        coordinate: Vec::new(),
-        hashtags: Vec::new(),
-        urls: Vec::new(),
-    };
+    // Build kind 30001 event with d-tag "bookmark" for Amethyst compatibility
+    // This is the deprecated NIP-51 format but widely used by clients like Amethyst
+    use nostr_sdk::Tag;
+    let mut tags: Vec<Tag> = event_ids.into_iter().map(Tag::event).collect();
+    tags.push(Tag::identifier("bookmark"));
 
-    // Use EventBuilder::bookmarks_set() for proper NIP-51 compliance
-    // This automatically adds the 'd' tag and properly formats all bookmark entries
-    let builder = EventBuilder::bookmarks_set("bookmark", bookmarks_list);
+    let builder = EventBuilder::new(Kind::from(30001), "").tags(tags);
 
     match client.send_event_builder(builder).await {
         Ok(output) => {
