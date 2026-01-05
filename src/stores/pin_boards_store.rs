@@ -971,12 +971,21 @@ pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>,
     let filter = pinboards_filter(limit);
     let current_user = crate::stores::auth_store::get_pubkey();
 
-    let result = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+    log::info!("Discover: Fetching pinboards with filter kind={}, limit={}", KIND_PINBOARD, limit);
+
+    // Use relay-only fetch for discovery to ensure fresh data from network
+    let result = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await;
 
     *LOADING_PINBOARDS.write() = false;
 
     match result {
         Ok(events) => {
+            log::info!("Discover: Got {} raw events from relays", events.len());
+
+            // Log unique authors to see if we're getting events from multiple users
+            let unique_authors: std::collections::HashSet<_> = events.iter().map(|e| e.pubkey.to_hex()).collect();
+            log::info!("Discover: Events from {} unique authors", unique_authors.len());
+
             let boards: Vec<Pinboard> = events
                 .iter()
                 .filter_map(|e| parse_pinboard_event(e, current_user.as_deref()))
@@ -985,11 +994,11 @@ pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>,
             cache_pinboards(&boards);
             *PINBOARDS_INITIALIZED.write() = true;
 
-            log::info!("Fetched {} pinboards", boards.len());
+            log::info!("Discover: Parsed {} pinboards successfully", boards.len());
             Ok(boards)
         }
         Err(e) => {
-            log::error!("Failed to fetch pinboards: {}", e);
+            log::error!("Discover: Failed to fetch pinboards: {}", e);
             Err(e)
         }
     }
@@ -1003,7 +1012,8 @@ pub async fn fetch_pinboards_page(
     let filter = pinboards_paginated_filter(limit, until);
     let current_user = crate::stores::auth_store::get_pubkey();
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
+    // Use relay-only fetch for discovery pagination to ensure fresh data
+    let events = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await?;
 
     let boards: Vec<Pinboard> = events
         .iter()
@@ -1341,7 +1351,7 @@ pub async fn publish_pinboard(
     let event_id = output.id().to_hex();
     log::info!("Pinboard published: {}", event_id);
 
-    // Build naddr for return
+    // Build naddr with relay hints for better discoverability (NIP-19)
     let signer = client
         .signer()
         .await
@@ -1351,10 +1361,7 @@ pub async fn publish_pinboard(
         .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
 
-    let naddr = Coordinate::new(Kind::Custom(KIND_PINBOARD), pubkey)
-        .identifier(&d_tag)
-        .to_bech32()
-        .map_err(|e| format!("Failed to build naddr: {}", e))?;
+    let naddr = nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &d_tag).await?;
 
     Ok(naddr)
 }
@@ -1539,7 +1546,7 @@ pub async fn update_pinboard_metadata(
     description: Option<String>,
     image: Option<String>,
     tags: Option<Vec<String>>,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<String, String> {
     // Fetch current board
     let board = fetch_pinboard_by_naddr(naddr)
         .await?
@@ -1561,8 +1568,8 @@ pub async fn update_pinboard_metadata(
         collaborative: board.collaborative,
     };
 
-    publish_pinboard(input, Some(&board.d_tag)).await?;
-    Ok(())
+    // Returns naddr with relay hints for sharing
+    publish_pinboard(input, Some(&board.d_tag)).await
 }
 
 // ============================================================================
@@ -1865,3 +1872,11 @@ pub static PIN_BOARDS_CACHE: GlobalSignal<LruCache<String, Pinboard>> =
 
 pub static LOADING_PIN_BOARDS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static PIN_BOARDS_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
+
+/// Get a shareable naddr with relay hints for a pinboard
+/// Per NIP-19, relay hints help other clients locate the event
+pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String, String> {
+    let pubkey = nostr::PublicKey::from_hex(&board.pubkey)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &board.d_tag).await
+}

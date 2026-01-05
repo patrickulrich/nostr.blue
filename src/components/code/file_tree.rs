@@ -22,10 +22,8 @@ fn get_indent_class(depth: usize) -> &'static str {
 
 /// File/folder icon based on entry type and extension
 #[component]
-fn FileIcon(entry: FileEntry) -> Element {
-    let is_dir = entry.is_directory();
-
-    if is_dir {
+fn FileIcon(is_directory: bool, name: String) -> Element {
+    if is_directory {
         // Folder icon
         rsx! {
             svg {
@@ -41,7 +39,7 @@ fn FileIcon(entry: FileEntry) -> Element {
         }
     } else {
         // File icon - color based on extension
-        let extension = entry.name.rsplit('.').next().unwrap_or("");
+        let extension = name.rsplit('.').next().unwrap_or("");
         let icon_class = match extension {
             "rs" => "text-orange-400",
             "js" | "jsx" | "mjs" => "text-yellow-400",
@@ -109,7 +107,7 @@ pub fn FileTreeEntry(
             to: route,
             class: "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition rounded {indent_class}",
 
-            FileIcon { entry: entry.clone() }
+            FileIcon { is_directory: is_dir, name: entry.name.clone() }
 
             span {
                 class: "text-sm truncate",

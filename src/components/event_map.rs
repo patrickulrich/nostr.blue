@@ -233,15 +233,16 @@ pub fn EventMap(props: EventMapProps) -> Element {
         geocode_cancelled.set(true);
     });
 
-    // Memoize events to prevent unnecessary re-processing
-    // Create a stable identifier using hash to avoid collision risks from comma-joining
-    let events_key = {
+    // Memoize events key to prevent unnecessary re-computation on every render
+    // Only recomputes when props.events changes
+    let events_for_memo = props.events.clone();
+    let events_key = use_memo(move || {
         let mut hasher = DefaultHasher::new();
-        for e in props.events.iter() {
+        for e in events_for_memo.iter() {
             e.coordinate().hash(&mut hasher);
         }
         hasher.finish().to_string()
-    };
+    });
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
 
@@ -289,16 +290,17 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
     // Geocode events when they change - use events_key to detect actual changes
     use_effect({
-        let events_key = events_key.clone();
         let events_for_geocode = events_for_geocode.clone();
         move || {
+            let key = events_key.read().clone();
+
             // Only process if events have actually changed
-            if events_key == *processed_event_ids.read() {
+            if key == *processed_event_ids.read() {
                 return;
             }
 
             if events_for_geocode.is_empty() {
-                processed_event_ids.set(events_key.clone());
+                processed_event_ids.set(key);
                 geocoded_events.set(Vec::new());
                 return;
             }
@@ -309,7 +311,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
             }
 
             loading_geo.set(true);
-            let key_to_store = events_key.clone();
+            let key_to_store = key.clone();
             // Clone events once for the spawned task
             let events_to_process = events_for_geocode.clone();
 
@@ -322,6 +324,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     // Check cancellation before processing each event
                     if *geocode_cancelled.read() {
                         log::debug!("Geocoding cancelled, stopping processing");
+                        loading_geo.set(false);
                         return;
                     }
 
@@ -377,6 +380,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 // Check cancellation before updating signals
                 if *geocode_cancelled.read() {
                     log::debug!("Geocoding cancelled, not updating signals");
+                    loading_geo.set(false);
                     return;
                 }
 
@@ -416,8 +420,18 @@ pub fn EventMap(props: EventMapProps) -> Element {
             .collect();
 
         // Add markers and fit bounds
-        if let Ok(json) = serde_json::to_string(&markers) {
-            addMarkersAndFit(&id, &json);
+        match serde_json::to_string(&markers) {
+            Ok(json) => {
+                addMarkersAndFit(&id, &json);
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to serialize {} map markers for container {}: {}",
+                    markers.len(),
+                    id,
+                    e
+                );
+            }
         }
     });
 

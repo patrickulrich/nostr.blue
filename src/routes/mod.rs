@@ -778,7 +778,7 @@ fn Layout() -> Element {
                 aside {
                     class: "w-[275px] flex-shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
                     div {
-                        class: "h-full flex flex-col p-4 overflow-y-auto",
+                        class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
 
                         // Logo
                         div {
