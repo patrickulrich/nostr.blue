@@ -135,6 +135,53 @@ pub async fn ensure_relays_ready(client: &Client) {
     }
 }
 
+/// Get URLs of write-enabled relays for use as relay hints in NIP-19 naddrs
+/// Returns up to 2 relay URLs that have the WRITE flag enabled.
+/// Per NIP-19, relay hints help other clients locate addressable events.
+pub async fn get_write_relay_hints() -> Vec<String> {
+    let client = match get_client() {
+        Some(c) => c,
+        None => return vec![],
+    };
+
+    let relays = client.relays().await;
+    let mut write_relays: Vec<String> = relays
+        .iter()
+        .filter(|(_, relay)| relay.flags().has_write())
+        .map(|(url, _)| url.to_string())
+        .take(2) // Limit to 2 relay hints per NIP-19 best practice
+        .collect();
+
+    // Sort for deterministic output
+    write_relays.sort();
+    write_relays
+}
+
+/// Create an naddr (NIP-19) with relay hints for an addressable event
+/// This includes relay hints from the user's write relays for better discoverability.
+pub async fn make_naddr_with_hints(
+    kind: u16,
+    pubkey: &nostr::PublicKey,
+    identifier: &str,
+) -> std::result::Result<String, String> {
+    use nostr::nips::nip19::{Nip19Coordinate, ToBech32};
+    use nostr::types::url::RelayUrl;
+
+    let coordinate = Coordinate::new(Kind::from(kind), *pubkey)
+        .identifier(identifier);
+
+    // Get write relay hints
+    let relay_hints = get_write_relay_hints().await;
+    let relay_urls: Vec<RelayUrl> = relay_hints
+        .iter()
+        .filter_map(|r| RelayUrl::parse(r).ok())
+        .collect();
+
+    let nip19 = Nip19Coordinate::new(coordinate, relay_urls);
+    nip19.to_bech32()
+        .map_err(|e| format!("Failed to encode naddr: {}", e))
+}
+
 /// Relay connection status
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -587,16 +634,31 @@ pub async fn fetch_events_from_relays(
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
-    log::info!("Fetching from relays (bypassing cache for discovery)");
-
     // Wait for at least one relay to be ready
     ensure_relays_ready(&client).await;
 
-    client
-        .fetch_events(filter, timeout)
+    // Log relay status for debugging
+    let relays = client.relays().await;
+    let connected: Vec<_> = relays.iter()
+        .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
+        .map(|(url, _)| url.to_string())
+        .collect();
+    log::info!("fetch_events_from_relays: {} relays connected: {:?}", connected.len(), connected);
+
+    let result = client
+        .fetch_events(filter.clone(), timeout)
         .await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| e.to_string())
+        .map(|events| {
+            let events: Vec<_> = events.into_iter().collect();
+            log::info!("fetch_events_from_relays: received {} events", events.len());
+            events
+        })
+        .map_err(|e| {
+            log::error!("fetch_events_from_relays error: {}", e);
+            e.to_string()
+        });
+
+    result
 }
 
 /// Fetch events using gossip (automatic relay routing)
