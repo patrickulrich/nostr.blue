@@ -364,7 +364,7 @@ pub fn PublicationsHome() -> Element {
                             div {
                                 class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4",
                                 for i in 0..6 {
-                                    PublicationCardSkeleton { key: "loading-{i}" }
+                                    PublicationCardSkeleton { key: "loading-grid-{i}" }
                                 }
                             }
                         }
@@ -399,7 +399,7 @@ pub fn PublicationsHome() -> Element {
                         // Loading more skeletons (only when not searching)
                         if *pagination_loading.read() && !is_searching {
                             for i in 0..3 {
-                                PublicationCardSkeleton { key: "loading-list-{i}" }
+                                PublicationCardSkeleton { key: "loading-list-skeleton-{i}" }
                             }
                         }
 

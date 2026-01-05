@@ -149,11 +149,11 @@ pub async fn get_write_relay_hints() -> Vec<String> {
         .iter()
         .filter(|(_, relay)| relay.flags().has_write())
         .map(|(url, _)| url.to_string())
-        .take(2) // Limit to 2 relay hints per NIP-19 best practice
         .collect();
 
-    // Sort for deterministic output
+    // Sort first for deterministic selection, then truncate to 2 per NIP-19 best practice
     write_relays.sort();
+    write_relays.truncate(2);
     write_relays
 }
 
