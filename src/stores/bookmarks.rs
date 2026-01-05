@@ -342,11 +342,27 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 
     log::info!("Publishing {} bookmarks", bookmarks.len());
 
-    // Convert event ID strings to EventId
-    let event_ids: Vec<EventId> = bookmarks
-        .iter()
-        .filter_map(|id| EventId::from_hex(id).ok())
-        .collect();
+    // Convert event ID strings to EventId, logging any invalid IDs
+    let mut event_ids: Vec<EventId> = Vec::with_capacity(bookmarks.len());
+    for (index, id) in bookmarks.iter().enumerate() {
+        match EventId::from_hex(id) {
+            Ok(event_id) => event_ids.push(event_id),
+            Err(e) => {
+                log::warn!(
+                    "Skipping malformed bookmark ID at index {}: '{}' (error: {})",
+                    index, id, e
+                );
+            }
+        }
+    }
+
+    if event_ids.len() < bookmarks.len() {
+        log::warn!(
+            "publish_bookmarks: {} of {} bookmark IDs were invalid and skipped",
+            bookmarks.len() - event_ids.len(),
+            bookmarks.len()
+        );
+    }
 
     // Use nostr-sdk's Bookmarks struct for standard NIP-51 format
     let bookmark_list = Bookmarks {
@@ -418,11 +434,27 @@ pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
-    // Convert event ID strings to EventId
-    let event_ids: Vec<EventId> = bookmarks_slice
-        .iter()
-        .filter_map(|id| EventId::from_hex(id).ok())
-        .collect();
+    // Convert event ID strings to EventId, logging any invalid IDs
+    let mut event_ids: Vec<EventId> = Vec::with_capacity(bookmarks_slice.len());
+    for (index, id) in bookmarks_slice.iter().enumerate() {
+        match EventId::from_hex(id) {
+            Ok(event_id) => event_ids.push(event_id),
+            Err(e) => {
+                log::warn!(
+                    "fetch_bookmarked_events: skipping malformed bookmark ID at index {}: '{}' (error: {})",
+                    skip + index, id, e
+                );
+            }
+        }
+    }
+
+    if event_ids.len() < bookmarks_slice.len() {
+        log::warn!(
+            "fetch_bookmarked_events: {} of {} bookmark IDs were invalid and skipped",
+            bookmarks_slice.len() - event_ids.len(),
+            bookmarks_slice.len()
+        );
+    }
 
     log::info!("Fetching {} bookmarked event IDs", event_ids.len());
     for id in &event_ids {
