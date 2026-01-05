@@ -233,16 +233,15 @@ pub fn EventMap(props: EventMapProps) -> Element {
         geocode_cancelled.set(true);
     });
 
-    // Memoize events key to prevent unnecessary re-computation on every render
-    // Only recomputes when props.events changes
-    let events_for_memo = props.events.clone();
-    let events_key = use_memo(move || {
+    // Memoize events key - recomputes only when props.events changes
+    // Uses use_reactive to properly track props.events as a dependency
+    let events_key = use_memo(use_reactive((&props.events,), |(events,)| {
         let mut hasher = DefaultHasher::new();
-        for e in events_for_memo.iter() {
+        for e in events.iter() {
             e.coordinate().hash(&mut hasher);
         }
         hasher.finish().to_string()
-    });
+    }));
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
 
