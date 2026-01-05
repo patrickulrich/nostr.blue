@@ -2,10 +2,14 @@
 //! Browse NKBIP-01 publications (Kind 30040)
 
 use dioxus::prelude::*;
+use std::collections::HashSet;
 use crate::components::{PublicationCardSkeleton, PublicationGrid, PublicationCardCompact};
 use crate::components::icons::{BookOpenIcon, SearchIcon, PenSquareIcon, RefreshIcon, GridIcon, ListIcon};
+use crate::hooks::use_infinite_scroll;
 use crate::stores::{publication_store, nostr_client};
 use crate::stores::publication_store::PublicationIndex;
+
+const PAGE_SIZE: usize = 24;
 
 /// View mode for the publications list
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -27,6 +31,11 @@ pub fn PublicationsHome() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut view_mode = use_signal(|| ViewMode::Grid);
 
+    // Pagination state
+    let mut pagination_loading = use_signal(|| false);
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+
     // Fetch publications on initial load
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -35,8 +44,13 @@ pub fn PublicationsHome() -> Element {
         }
         spawn(async move {
             loading.set(true);
-            match publication_store::fetch_publications(50, None).await {
+            match publication_store::fetch_publications(PAGE_SIZE, None).await {
                 Ok(result) => {
+                    // Set oldest timestamp for pagination
+                    if let Some(oldest) = result.last() {
+                        oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
+                    }
+                    has_more.set(result.len() >= PAGE_SIZE / 2);
                     publications.set(result);
                     loading.set(false);
                 }
@@ -47,6 +61,67 @@ pub fn PublicationsHome() -> Element {
             }
         });
     });
+
+    // Load more function for infinite scroll
+    let load_more = move || {
+        if *pagination_loading.peek() || !*has_more.peek() {
+            return;
+        }
+
+        let until = *oldest_timestamp.peek();
+
+        spawn(async move {
+            pagination_loading.set(true);
+
+            match publication_store::fetch_publications(PAGE_SIZE, until).await {
+                Ok(fetched) => {
+                    let fetched_count = fetched.len();
+
+                    if fetched.is_empty() {
+                        has_more.set(false);
+                    } else {
+                        // Always update oldest_timestamp from ALL fetched items (not just unique)
+                        // to ensure we make progress even if all items were duplicates
+                        // Subtract 1 to avoid re-fetching posts at the exact boundary
+                        if let Some(oldest) = fetched.last() {
+                            let ts = oldest.event.created_at.as_secs().saturating_sub(1);
+                            oldest_timestamp.set(Some(ts));
+                        }
+
+                        // Deduplicate and append
+                        let mut current = publications.peek().clone();
+                        let existing_ids: HashSet<_> = current
+                            .iter()
+                            .map(|p| p.event.id.to_hex())
+                            .collect();
+
+                        let mut added_count = 0;
+                        for pub_item in fetched {
+                            if !existing_ids.contains(&pub_item.event.id.to_hex()) {
+                                current.push(pub_item);
+                                added_count += 1;
+                            }
+                        }
+
+                        publications.set(current);
+
+                        // Only set has_more to false when fetch returns very few items
+                        if fetched_count < PAGE_SIZE / 2 {
+                            has_more.set(false);
+                        }
+
+                        log::info!("Pagination: fetched {}, added {} unique publications", fetched_count, added_count);
+                    }
+                }
+                Err(e) => log::error!("Failed to load more publications: {}", e),
+            }
+
+            pagination_loading.set(false);
+        });
+    };
+
+    // Setup infinite scroll
+    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
 
     // Perform search when committed_query changes
     use_effect(move || {
@@ -109,9 +184,16 @@ pub fn PublicationsHome() -> Element {
         search_query.set(String::new());
         committed_query.set(String::new());
         search_results.set(None);
+        // Reset pagination state
+        has_more.set(true);
+        oldest_timestamp.set(None);
         spawn(async move {
             loading.set(true);
-            if let Ok(result) = publication_store::fetch_publications(50, None).await {
+            if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None).await {
+                if let Some(oldest) = result.last() {
+                    oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
+                }
+                has_more.set(result.len() >= PAGE_SIZE / 2);
                 publications.set(result);
             }
             loading.set(false);
@@ -270,18 +352,70 @@ pub fn PublicationsHome() -> Element {
             } else {
                 // Content based on view mode
                 if *view_mode.read() == ViewMode::Grid {
-                    PublicationGrid {
-                        publications: display_publications.read().clone(),
-                        loading: *loading.read() || *searching.read(),
+                    div {
+                        // Grid view with pagination
+                        PublicationGrid {
+                            publications: display_publications.read().clone(),
+                            loading: *loading.read() || *searching.read(),
+                        }
+
+                        // Loading more skeletons (only when not searching)
+                        if *pagination_loading.read() && !is_searching {
+                            div {
+                                class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4",
+                                for i in 0..6 {
+                                    PublicationCardSkeleton { key: "loading-grid-{i}" }
+                                }
+                            }
+                        }
+
+                        // Infinite scroll sentinel (only when not searching)
+                        if *has_more.read() && !is_searching {
+                            div {
+                                id: "{sentinel_id}",
+                                class: "h-4"
+                            }
+                        }
+
+                        // End of list indicator (only when not searching)
+                        if !*has_more.read() && !publications.read().is_empty() && !is_searching {
+                            div {
+                                class: "text-center py-8 text-muted-foreground",
+                                "You've reached the end!"
+                            }
+                        }
                     }
                 } else {
-                    // List view
+                    // List view with pagination
                     div {
                         class: "space-y-3",
                         for publication in display_publications.read().iter() {
                             PublicationCardCompact {
                                 key: "{publication.event.id.to_hex()}",
                                 publication: publication.clone(),
+                            }
+                        }
+
+                        // Loading more skeletons (only when not searching)
+                        if *pagination_loading.read() && !is_searching {
+                            for i in 0..3 {
+                                PublicationCardSkeleton { key: "loading-list-skeleton-{i}" }
+                            }
+                        }
+
+                        // Infinite scroll sentinel (only when not searching)
+                        if *has_more.read() && !is_searching {
+                            div {
+                                id: "{sentinel_id}",
+                                class: "h-4"
+                            }
+                        }
+
+                        // End of list indicator (only when not searching)
+                        if !*has_more.read() && !publications.read().is_empty() && !is_searching {
+                            div {
+                                class: "text-center py-8 text-muted-foreground",
+                                "You've reached the end!"
                             }
                         }
                     }

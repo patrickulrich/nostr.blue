@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey};
+use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey, EventId};
+use nostr_sdk::nips::nip51::Bookmarks;
 use crate::stores::{auth_store, nostr_client};
 use std::time::Duration;
 
@@ -9,11 +10,13 @@ use std::time::Duration;
 use gloo_timers::callback::Timeout;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 /// Store for bookmarked event IDs with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
 pub struct BookmarkedEventsStore {
-    pub data: Vec<String>,
+    pub data: Vec<String>,  // Event ID hex strings
 }
 
 /// Store for bookmark rollback state with fine-grained reactivity
@@ -64,30 +67,61 @@ pub async fn init_bookmarks() -> Result<(), String> {
 
     log::info!("Loading bookmarks for {}", pubkey_str);
 
-    // Fetch bookmark list (kind 30001 with d tag "bookmark")
+    // Fetch bookmarks list using standard NIP-51 Kind 10003
     let filter = Filter::new()
         .author(pubkey)
-        .kind(Kind::from(30001)) // Bookmarks list
-        .identifier("bookmark") // NIP-51 bookmark identifier
+        .kind(Kind::Bookmarks)  // Kind 10003
         .limit(1);
 
     // Ensure relays are ready before fetching
     nostr_client::ensure_relays_ready(&client).await;
 
+    log::info!("Fetching bookmarks with filter: kind=10003, author={}", pubkey_str);
+
     match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
-                // Extract event IDs from 'e' tags using SDK helper
-                let bookmarked: Vec<String> = event.tags.event_ids()
-                    .map(|id| id.to_hex())
-                    .collect();
+            let events_vec: Vec<_> = events.into_iter().collect();
+            log::info!("Received {} bookmark events from relays", events_vec.len());
 
-                log::info!("Loaded {} bookmarks", bookmarked.len());
-                *BOOKMARKED_EVENTS.read().data().write() = bookmarked;
+            if let Some(event) = events_vec.into_iter().next() {
+                log::info!("Bookmark event found: id={}, tags count={}", event.id.to_hex(), event.tags.len());
+
+                // Log all tags for debugging
+                for tag in event.tags.iter() {
+                    log::debug!("  Tag: {:?}", tag);
+                }
+
+                // Extract event IDs from 'e' tags (deduplicated to prevent duplicate key panics)
+                let bookmarked: Vec<String> = {
+                    let mut seen = std::collections::HashSet::new();
+                    event.tags.iter()
+                        .filter_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first().map(|s| s.as_str()) == Some("e") && tag_vec.len() >= 2 {
+                                let id = tag_vec[1].clone();
+                                // Only include if we haven't seen this ID before
+                                if seen.insert(id.clone()) {
+                                    Some(id)
+                                } else {
+                                    log::warn!("Skipping duplicate bookmark ID: {}", id);
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
+
+                log::info!("Extracted {} bookmark entries from 'e' tags", bookmarked.len());
+                for entry in &bookmarked {
+                    log::debug!("  Bookmark: id={}", entry);
+                }
+                *BOOKMARKED_EVENTS.peek().data().write() = bookmarked;
                 Ok(())
             } else {
-                log::info!("No bookmarks found");
-                *BOOKMARKED_EVENTS.read().data().write() = Vec::new();
+                log::info!("No bookmark events found matching filter");
+                *BOOKMARKED_EVENTS.peek().data().write() = Vec::new();
                 Ok(())
             }
         }
@@ -99,33 +133,37 @@ pub async fn init_bookmarks() -> Result<(), String> {
 }
 
 /// Check if an event is bookmarked
+/// Uses peek() to avoid creating subscriptions that could conflict with writes
 pub fn is_bookmarked(event_id: &str) -> bool {
-    BOOKMARKED_EVENTS.read().data().read().contains(&event_id.to_string())
+    BOOKMARKED_EVENTS.peek().data().peek().iter().any(|id| id == event_id)
 }
 
 /// Add event to bookmarks
+///
+/// # Arguments
+/// * `event_id` - The event ID to bookmark
 pub async fn bookmark_event(event_id: String) -> Result<(), String> {
     // Validate event ID early to prevent invalid IDs from being stored
-    use nostr_sdk::EventId;
     EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
 
-    let mut bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
+    // Use peek() to avoid subscription conflicts during event handlers
+    let mut bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
 
     // Don't add if already bookmarked
-    if bookmarks.contains(&event_id) {
+    if bookmarks.iter().any(|id| id == &event_id) {
         return Ok(());
     }
 
     // Store rollback state before making changes (preserve initial state for batch)
-    if BOOKMARK_ROLLBACK_STATE.read().data().read().is_none() {
-        *BOOKMARK_ROLLBACK_STATE.read().data().write() = Some(bookmarks.clone());
+    if BOOKMARK_ROLLBACK_STATE.peek().data().peek().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.peek().data().write() = Some(bookmarks.clone());
     }
 
     bookmarks.push(event_id);
 
     // Update local state immediately for UI responsiveness
-    *BOOKMARKED_EVENTS.read().data().write() = bookmarks.clone();
+    *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
 
     // Debounce relay publish (batches rapid bookmarks into one publish)
     #[cfg(target_arch = "wasm32")]
@@ -135,8 +173,9 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
             *timeout.borrow_mut() = None;
 
             // Schedule new publish after 1 second
+            // Use spawn_local instead of dioxus::spawn because Timeout fires outside Dioxus scope
             let timeout_handle = Timeout::new(1000, move || {
-                spawn(async move {
+                spawn_local(async move {
                     publish_with_retry(bookmarks, 0).await;
                 });
             });
@@ -156,18 +195,19 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
 
 /// Remove event from bookmarks
 pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
-    let mut bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
+    // Use peek() to avoid subscription conflicts during event handlers
+    let mut bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
 
     // Store rollback state before making changes (preserve initial state for batch)
-    if BOOKMARK_ROLLBACK_STATE.read().data().read().is_none() {
-        *BOOKMARK_ROLLBACK_STATE.read().data().write() = Some(bookmarks.clone());
+    if BOOKMARK_ROLLBACK_STATE.peek().data().peek().is_none() {
+        *BOOKMARK_ROLLBACK_STATE.peek().data().write() = Some(bookmarks.clone());
     }
 
     // Remove the event ID
     bookmarks.retain(|id| id != &event_id);
 
     // Update local state immediately for UI responsiveness
-    *BOOKMARKED_EVENTS.read().data().write() = bookmarks.clone();
+    *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
 
     // Debounce relay publish (batches rapid unbookmarks into one publish)
     #[cfg(target_arch = "wasm32")]
@@ -177,8 +217,9 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
             *timeout.borrow_mut() = None;
 
             // Schedule new publish after 1 second
+            // Use spawn_local instead of dioxus::spawn because Timeout fires outside Dioxus scope
             let timeout_handle = Timeout::new(1000, move || {
-                spawn(async move {
+                spawn_local(async move {
                     publish_with_retry(bookmarks, 0).await;
                 });
             });
@@ -207,7 +248,7 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
         match publish_bookmarks(bookmarks.clone()).await {
             Ok(_) => {
                 // Success - clear rollback state and set status to idle
-                *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
+                *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
                 *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
                 log::info!("Bookmarks published successfully");
             }
@@ -225,7 +266,10 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
                     #[cfg(target_arch = "wasm32")]
                     {
                         let timeout_handle = Timeout::new(delay_ms, move || {
-                            spawn(publish_with_retry(bookmarks, retry_count + 1));
+                            // Use spawn_local instead of dioxus::spawn because Timeout fires outside Dioxus scope
+                            spawn_local(async move {
+                                publish_with_retry(bookmarks, retry_count + 1).await;
+                            });
                         });
                         // Note: We let the timeout run and don't store it since it's a retry
                         std::mem::forget(timeout_handle);
@@ -241,13 +285,13 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
                     log::error!("Bookmark publish failed after {} retries: {}", MAX_RETRIES, e);
 
                     // Rollback local state to match persisted state
-                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().data().read().clone() {
+                    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.peek().data().peek().clone() {
                         log::warn!("Automatically rolling back bookmarks to previous state due to publish failure");
-                        *BOOKMARKED_EVENTS.read().data().write() = previous_state;
+                        *BOOKMARKED_EVENTS.peek().data().write() = previous_state;
                     }
 
                     // Set failed status (rollback state is cleared here)
-                    *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
+                    *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
                     *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Failed {
                         error: e.clone(),
                         retry_count,
@@ -261,10 +305,10 @@ fn publish_with_retry(bookmarks: Vec<String>, retry_count: u32) -> std::pin::Pin
 /// Rollback bookmarks to previous state after failed publish
 #[allow(dead_code)]
 pub fn rollback_bookmarks() {
-    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.read().data().read().clone() {
+    if let Some(previous_state) = BOOKMARK_ROLLBACK_STATE.peek().data().peek().clone() {
         log::info!("Rolling back bookmarks to previous state");
-        *BOOKMARKED_EVENTS.read().data().write() = previous_state;
-        *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
+        *BOOKMARKED_EVENTS.peek().data().write() = previous_state;
+        *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
     } else {
         log::warn!("No rollback state available");
@@ -274,7 +318,7 @@ pub fn rollback_bookmarks() {
 /// Manually retry failed bookmark publish
 #[allow(dead_code)]
 pub async fn retry_bookmark_publish() {
-    let current_bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
+    let current_bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
     log::info!("Manually retrying bookmark publish");
     publish_with_retry(current_bookmarks, 0).await;
 }
@@ -283,7 +327,7 @@ pub async fn retry_bookmark_publish() {
 #[allow(dead_code)]
 pub fn dismiss_bookmark_error() {
     log::info!("Dismissing bookmark sync error, keeping local changes");
-    *BOOKMARK_ROLLBACK_STATE.read().data().write() = None;
+    *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
     *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
 }
 
@@ -298,30 +342,38 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 
     log::info!("Publishing {} bookmarks", bookmarks.len());
 
-    // Parse event IDs with better error messages
-    use nostr_sdk::EventId;
-    let mut event_ids = Vec::new();
-    for id in bookmarks.into_iter() {
-        match EventId::from_hex(&id) {
+    // Convert event ID strings to EventId, logging any invalid IDs
+    let mut event_ids: Vec<EventId> = Vec::with_capacity(bookmarks.len());
+    for (index, id) in bookmarks.iter().enumerate() {
+        match EventId::from_hex(id) {
             Ok(event_id) => event_ids.push(event_id),
             Err(e) => {
-                return Err(format!("Invalid event ID '{}': {}", id, e));
+                log::warn!(
+                    "Skipping malformed bookmark ID at index {}: '{}' (error: {})",
+                    index, id, e
+                );
             }
         }
     }
 
-    // Use NIP-51 Bookmarks struct for type-safe bookmark list construction
-    use nostr_sdk::nips::nip51::Bookmarks;
-    let bookmarks_list = Bookmarks {
+    if event_ids.len() < bookmarks.len() {
+        log::warn!(
+            "publish_bookmarks: {} of {} bookmark IDs were invalid and skipped",
+            bookmarks.len() - event_ids.len(),
+            bookmarks.len()
+        );
+    }
+
+    // Use nostr-sdk's Bookmarks struct for standard NIP-51 format
+    let bookmark_list = Bookmarks {
         event_ids,
         coordinate: Vec::new(),
         hashtags: Vec::new(),
         urls: Vec::new(),
     };
 
-    // Use EventBuilder::bookmarks_set() for proper NIP-51 compliance
-    // This automatically adds the 'd' tag and properly formats all bookmark entries
-    let builder = EventBuilder::bookmarks_set("bookmark", bookmarks_list);
+    // EventBuilder::bookmarks() creates Kind 10003 event
+    let builder = EventBuilder::bookmarks(bookmark_list);
 
     match client.send_event_builder(builder).await {
         Ok(output) => {
@@ -357,14 +409,14 @@ async fn publish_bookmarks(bookmarks: Vec<String>) -> Result<(), String> {
 /// * `skip` - Number of bookmarks to skip (for pagination)
 /// * `limit` - Maximum number of bookmarks to fetch (None = fetch all remaining)
 pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>) -> Result<Vec<Event>, String> {
-    let bookmarks = BOOKMARKED_EVENTS.read().data().read().clone();
+    let bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
 
     if bookmarks.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Apply skip and limit to bookmark IDs
-    let bookmarks_slice = if skip >= bookmarks.len() {
+    // Apply skip and limit to bookmark entries
+    let bookmarks_slice: Vec<String> = if skip >= bookmarks.len() {
         Vec::new()
     } else {
         let end = if let Some(lim) = limit {
@@ -382,25 +434,56 @@ pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
-    // Create filter for bookmarked events
-    let event_ids: Result<Vec<nostr_sdk::EventId>, _> = bookmarks_slice
-        .iter()
-        .map(|id| nostr_sdk::EventId::from_hex(id))
-        .collect();
+    // Convert event ID strings to EventId, logging any invalid IDs
+    let mut event_ids: Vec<EventId> = Vec::with_capacity(bookmarks_slice.len());
+    for (index, id) in bookmarks_slice.iter().enumerate() {
+        match EventId::from_hex(id) {
+            Ok(event_id) => event_ids.push(event_id),
+            Err(e) => {
+                log::warn!(
+                    "fetch_bookmarked_events: skipping malformed bookmark ID at index {}: '{}' (error: {})",
+                    skip + index, id, e
+                );
+            }
+        }
+    }
 
-    let event_ids = event_ids.map_err(|e| format!("Invalid event ID: {}", e))?;
+    if event_ids.len() < bookmarks_slice.len() {
+        log::warn!(
+            "fetch_bookmarked_events: {} of {} bookmark IDs were invalid and skipped",
+            bookmarks_slice.len() - event_ids.len(),
+            bookmarks_slice.len()
+        );
+    }
 
-    let filter = Filter::new().ids(event_ids);
+    log::info!("Fetching {} bookmarked event IDs", event_ids.len());
+    for id in &event_ids {
+        log::info!("  Requesting event: {}", id.to_hex());
+    }
+
+    let filter = Filter::new().ids(event_ids.clone());
 
     // Ensure relays are ready before fetching
     nostr_client::ensure_relays_ready(&client).await;
 
-    match client.fetch_events(filter, Duration::from_secs(15)).await {
+    match client.fetch_events(filter.clone(), Duration::from_secs(15)).await {
         Ok(events) => {
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             // Sort by created_at descending (newest first)
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             log::info!("Fetched {} bookmarked events (skip: {}, limit: {:?})", event_vec.len(), skip, limit);
+
+            // Log which events were found and which are missing
+            let found_ids: Vec<String> = event_vec.iter().map(|e| e.id.to_hex()).collect();
+            for id in &event_ids {
+                let hex = id.to_hex();
+                if found_ids.contains(&hex) {
+                    log::info!("  ✓ Found event: {}", hex);
+                } else {
+                    log::warn!("  ✗ Missing event: {} (not found on relays)", hex);
+                }
+            }
+
             Ok(event_vec)
         }
         Err(e) => {
@@ -412,5 +495,5 @@ pub async fn fetch_bookmarked_events_paginated(skip: usize, limit: Option<usize>
 
 /// Get the total number of bookmarks
 pub fn get_bookmarks_count() -> usize {
-    BOOKMARKED_EVENTS.read().data().read().len()
+    BOOKMARKED_EVENTS.peek().data().peek().len()
 }

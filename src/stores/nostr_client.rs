@@ -71,40 +71,61 @@ pub async fn ensure_relays_ready(client: &Client) {
         return;
     }
 
-    // No relays connected yet - attempt connection with a timeout
-    // This prevents blocking the WASM event loop indefinitely
+    // No relays connected yet - initiate connection and poll for status
     log::info!("No relays connected, attempting connection with timeout...");
+
+    // Initiate connection (non-blocking, spawns background tasks)
+    client.connect().await;
+
+    // Poll for at least one connected relay with timeout
+    const TIMEOUT_MS: u64 = 3000;
+    const POLL_INTERVAL_MS: u64 = 100;
 
     #[cfg(target_arch = "wasm32")]
     {
-        use futures::future::{select, Either};
-        use futures::pin_mut;
         use gloo_timers::future::TimeoutFuture;
+        let start = instant::Instant::now();
 
-        let timeout_fut = TimeoutFuture::new(2000); // 2 second timeout
-        let connect_fut = client.connect();
-        pin_mut!(timeout_fut);
-        pin_mut!(connect_fut);
+        loop {
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
 
-        match select(connect_fut, timeout_fut).await {
-            Either::Left(_) => {
-                log::info!("Relay connection completed within timeout");
+            if connected {
+                log::info!("Relay connected after {}ms", start.elapsed().as_millis());
+                return;
             }
-            Either::Right(_) => {
-                log::warn!("Relay connection timed out after 2s - proceeding anyway");
+
+            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
+                break;
             }
+
+            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            client.connect()
-        ).await;
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
+
+        loop {
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("Relay connected after {:?}", start.elapsed());
+                return;
+            }
+
+            if start.elapsed() > timeout {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+        }
     }
 
-    // Verify connection status after connect attempt
+    // Final status check
     let relays_after = client.relays().await;
     let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
     if connected_count == 0 {
@@ -112,6 +133,53 @@ pub async fn ensure_relays_ready(client: &Client) {
     } else {
         log::info!("After connection attempt: {} relay(s) connected", connected_count);
     }
+}
+
+/// Get URLs of write-enabled relays for use as relay hints in NIP-19 naddrs
+/// Returns up to 2 relay URLs that have the WRITE flag enabled.
+/// Per NIP-19, relay hints help other clients locate addressable events.
+pub async fn get_write_relay_hints() -> Vec<String> {
+    let client = match get_client() {
+        Some(c) => c,
+        None => return vec![],
+    };
+
+    let relays = client.relays().await;
+    let mut write_relays: Vec<String> = relays
+        .iter()
+        .filter(|(_, relay)| relay.flags().has_write())
+        .map(|(url, _)| url.to_string())
+        .collect();
+
+    // Sort first for deterministic selection, then truncate to 2 per NIP-19 best practice
+    write_relays.sort();
+    write_relays.truncate(2);
+    write_relays
+}
+
+/// Create an naddr (NIP-19) with relay hints for an addressable event
+/// This includes relay hints from the user's write relays for better discoverability.
+pub async fn make_naddr_with_hints(
+    kind: u16,
+    pubkey: &nostr::PublicKey,
+    identifier: &str,
+) -> std::result::Result<String, String> {
+    use nostr::nips::nip19::{Nip19Coordinate, ToBech32};
+    use nostr::types::url::RelayUrl;
+
+    let coordinate = Coordinate::new(Kind::from(kind), *pubkey)
+        .identifier(identifier);
+
+    // Get write relay hints
+    let relay_hints = get_write_relay_hints().await;
+    let relay_urls: Vec<RelayUrl> = relay_hints
+        .iter()
+        .filter_map(|r| RelayUrl::parse(r).ok())
+        .collect();
+
+    let nip19 = Nip19Coordinate::new(coordinate, relay_urls);
+    nip19.to_bech32()
+        .map_err(|e| format!("Failed to encode naddr: {}", e))
 }
 
 /// Relay connection status
@@ -554,6 +622,43 @@ pub async fn fetch_events_aggregated(
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| e.to_string())
+}
+
+/// Fetch events directly from relays, bypassing cache
+///
+/// Use this for discovery features where fresh data from the network is needed.
+/// Results are still stored in the database for future caching.
+pub async fn fetch_events_from_relays(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Wait for at least one relay to be ready
+    ensure_relays_ready(&client).await;
+
+    // Log relay status for debugging
+    let relays = client.relays().await;
+    let connected: Vec<_> = relays.iter()
+        .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
+        .map(|(url, _)| url.to_string())
+        .collect();
+    log::info!("fetch_events_from_relays: {} relays connected: {:?}", connected.len(), connected);
+
+    let result = client
+        .fetch_events(filter.clone(), timeout)
+        .await
+        .map(|events| {
+            let events: Vec<_> = events.into_iter().collect();
+            log::info!("fetch_events_from_relays: received {} events", events.len());
+            events
+        })
+        .map_err(|e| {
+            log::error!("fetch_events_from_relays error: {}", e);
+            e.to_string()
+        });
+
+    result
 }
 
 /// Fetch events using gossip (automatic relay routing)
@@ -2237,43 +2342,52 @@ pub async fn publish_video_tracked(
     let kind = if is_portrait { 22 } else { 21 };
     log::info!("Publishing video (kind {}): {}", kind, title);
 
-    // Build tags
+    // Build tags per NIP-71
     use nostr::Tag;
     let mut tags = vec![
         Tag::title(title.clone()),
-        Tag::custom(
-            nostr::TagKind::Custom("url".into()),
-            vec![video_url.clone()]
-        ),
     ];
 
-    // Add thumbnail if provided
+    // Build imeta tag with video metadata (NIP-71 + NIP-92)
+    let mut imeta_fields = vec![
+        format!("url {}", video_url),
+    ];
+
+    // Detect video mime type from extension (video-specific, not using detect_mime_type)
+    let video_mime = {
+        let url_lower = video_url.to_lowercase();
+        let path = url_lower.split('?').next().unwrap_or(&url_lower);
+        let ext = path.split('.').next_back().unwrap_or("");
+        match ext {
+            "mp4" | "m4v" => "video/mp4",
+            "webm" => "video/webm",
+            "mov" => "video/quicktime",
+            "avi" => "video/x-msvideo",
+            "mkv" => "video/x-matroska",
+            "m3u8" => "application/x-mpegURL",
+            "ts" => "video/MP2T",
+            _ => "video/mp4", // Default to mp4
+        }
+    };
+    imeta_fields.push(format!("m {}", video_mime));
+
+    // Add thumbnail as image in imeta if provided
     if !thumbnail_url.is_empty() {
-        tags.push(Tag::custom(
-            nostr::TagKind::Custom("thumb".into()),
-            vec![thumbnail_url]
-        ));
+        imeta_fields.push(format!("image {}", thumbnail_url));
     }
 
-    // Add summary (description)
-    if !description.is_empty() {
-        tags.push(Tag::custom(
-            nostr::TagKind::Custom("summary".into()),
-            vec![description.clone()]
-        ));
-    }
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
 
     // Add hashtags
     for hashtag in hashtags {
         tags.push(Tag::hashtag(hashtag));
     }
 
-    // Content includes title and video URL
-    let content = if description.is_empty() {
-        format!("{}\n\n{}", title, video_url)
-    } else {
-        format!("{}\n\n{}\n\n{}", title, description, video_url)
-    };
+    // Content is just the description per NIP-71
+    let content = description;
 
     // Build the event
     let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content)

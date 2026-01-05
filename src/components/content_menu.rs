@@ -66,6 +66,9 @@ pub struct ContentMenuProps {
     /// Optional event ID (hex) for non-addressable or as fallback
     #[props(default)]
     pub event_id: Option<String>,
+    /// Optional title of the content (for pin board display)
+    #[props(default)]
+    pub title: Option<String>,
 }
 
 #[component]
@@ -112,6 +115,11 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     }));
 
     let content_name = content_type.display_name();
+    // Use provided title or fall back to generic content type name
+    // Filter out empty/whitespace-only titles
+    let pin_title = props.title.clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| content_name.to_string());
 
     rsx! {
         div {
@@ -366,6 +374,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
             PinToBoardModal {
                 reference: PinReference::Coordinate { address: naddr_pin_board.clone(), relay_hint: None },
                 content_type: content_type.to_pin_content_type(),
+                title: Some(pin_title.clone()),
                 on_close: move |_| show_pin_to_board_modal.set(false),
             }
         }
