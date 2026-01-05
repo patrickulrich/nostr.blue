@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet};
+use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet, Url};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -15,6 +15,8 @@ pub struct GifMetadata {
     pub blurhash: Option<String>,
     pub alt: Option<String>,
     pub summary: Option<String>,
+    /// Description from event content field (NIP-94 stores description here)
+    pub description: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -63,11 +65,14 @@ pub async fn fetch_gifs(limit: usize, until: Option<Timestamp>, search_query: Op
         )
         .limit(limit);
 
-    // Add NIP-50 search if provided (relay-side search)
+    // Store search query for client-side filtering (fallback for relays without NIP-50)
+    let search_query_lower = search_query.as_ref().map(|q| q.to_lowercase());
+
+    // Add NIP-50 search if provided - relays that support it will filter server-side
     if let Some(ref query) = search_query {
         if !query.is_empty() {
             filter = filter.search(query);
-            log::info!("Using NIP-50 relay search for: '{}'", query);
+            log::info!("Using NIP-50 search for: '{}' (relays without NIP-50 will be filtered client-side)", query);
         }
     }
 
@@ -76,38 +81,31 @@ pub async fn fetch_gifs(limit: usize, until: Option<Timestamp>, search_query: Op
         filter = filter.until(until_ts);
     }
 
-    // Try gifbuddy relay first (dedicated GIF relay with likely NIP-50 support)
-    let gifbuddy_relays = vec!["wss://relay.gifbuddy.lol"];
-
-    let events = match client.fetch_events_from(
-        gifbuddy_relays.clone(),
-        filter.clone(),
-        Duration::from_secs(10)
-    ).await {
-        Ok(gifbuddy_events) => {
-            log::info!("Fetched {} GIF events from gifbuddy relay", gifbuddy_events.len());
-
-            // If we got good results from gifbuddy, use them
-            if !gifbuddy_events.is_empty() {
-                gifbuddy_events.into_iter().collect()
-            } else {
-                // Fallback to user's relays if gifbuddy returned nothing
-                log::info!("No results from gifbuddy, trying user relays");
-                crate::stores::nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(10)
-                ).await?
-            }
-        }
+    // Add gifbuddy relay to the client if not already connected
+    let gifbuddy_url = match Url::parse("wss://relay.gifbuddy.lol") {
+        Ok(url) => url,
         Err(e) => {
-            // If gifbuddy fails, fallback to user's relays
-            log::warn!("Failed to fetch from gifbuddy relay: {}, trying user relays", e);
-            crate::stores::nostr_client::fetch_events_aggregated(
-                filter,
-                Duration::from_secs(10)
-            ).await?
+            log::error!("Invalid gifbuddy relay URL: {}", e);
+            return Err(format!("Invalid relay URL: {}", e));
         }
     };
+
+    if let Err(e) = client.add_relay(&gifbuddy_url).await {
+        log::debug!("Gifbuddy relay already added or error: {}", e);
+    }
+    if let Err(e) = client.connect_relay(&gifbuddy_url).await {
+        log::warn!("Could not connect to gifbuddy relay: {}", e);
+    }
+
+    // Query ALL connected relays (user relays + gifbuddy) with NIP-50 search
+    // Relays that support NIP-50 will return filtered results
+    // Relays that don't will either return all results or empty (we filter client-side as fallback)
+    log::info!("Fetching GIFs from all connected relays (including gifbuddy)");
+
+    let events = crate::stores::nostr_client::fetch_events_aggregated(
+        filter,
+        Duration::from_secs(10)
+    ).await?;
 
     log::info!("Fetched {} GIF events total", events.len());
 
@@ -122,7 +120,45 @@ pub async fn fetch_gifs(limit: usize, until: Option<Timestamp>, search_query: Op
     // Sort by created_at (newest first)
     gifs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    log::info!("Parsed {} valid GIF entries", gifs.len());
+    // Deduplicate by URL (keep newest, which is first after sorting)
+    let mut seen_urls = std::collections::HashSet::new();
+    let gifs: Vec<GifMetadata> = gifs
+        .into_iter()
+        .filter(|gif| seen_urls.insert(gif.url.clone()))
+        .collect();
+    log::info!("After dedup: {} unique GIFs", gifs.len());
+
+    // Client-side filtering for relays that don't support NIP-50
+    let gifs = if let Some(ref query) = search_query_lower {
+        if !query.is_empty() {
+            let filtered: Vec<GifMetadata> = gifs
+                .into_iter()
+                .filter(|gif| {
+                    // Match against description (content), alt, summary, and url
+                    // NIP-94 stores file description in the content field, which NIP-50 searches
+                    let description_match = gif.description.as_ref()
+                        .map(|d| d.to_lowercase().contains(query))
+                        .unwrap_or(false);
+                    let alt_match = gif.alt.as_ref()
+                        .map(|a| a.to_lowercase().contains(query))
+                        .unwrap_or(false);
+                    let summary_match = gif.summary.as_ref()
+                        .map(|s| s.to_lowercase().contains(query))
+                        .unwrap_or(false);
+                    let url_match = gif.url.to_lowercase().contains(query);
+                    description_match || alt_match || summary_match || url_match
+                })
+                .collect();
+            log::info!("Filtered to {} GIFs matching '{}'", filtered.len(), query);
+            filtered
+        } else {
+            gifs
+        }
+    } else {
+        gifs
+    };
+
+    log::info!("Returning {} GIF entries", gifs.len());
 
     Ok(gifs)
 }
@@ -192,6 +228,13 @@ fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
     // URL is required
     let url = url?;
 
+    // Extract description from event content (NIP-94 stores file description in content)
+    let description = if event.content.is_empty() {
+        None
+    } else {
+        Some(event.content.to_string())
+    };
+
     Some(GifMetadata {
         url,
         thumbnail,
@@ -200,6 +243,7 @@ fn parse_gif_event(event: &nostr::Event) -> Option<GifMetadata> {
         blurhash,
         alt,
         summary,
+        description,
         created_at: event.created_at,
     })
 }

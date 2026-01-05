@@ -31,7 +31,7 @@ use crate::stores::{auth_store, nostr_client};
 
 /// Cache for mint MPP support: mint_url -> (timestamp_ms, supports_mpp)
 /// TTL is 5 minutes (300,000 ms)
-pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = Signal::global(|| HashMap::new());
+pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = Signal::global(HashMap::new);
 pub const MINT_INFO_CACHE_TTL_MS: f64 = 300_000.0; // 5 minutes
 
 // =============================================================================
@@ -354,7 +354,7 @@ pub async fn execute_mpp_melt(
             if let Some(proofs) = remaining_proofs.get(&mint_url_parsed) {
                 if !proofs.is_empty() {
                     let proof_data: Vec<ProofData> = proofs.iter()
-                        .map(|p| cdk_proof_to_proof_data(p))
+                        .map(cdk_proof_to_proof_data)
                         .collect();
 
                     let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()

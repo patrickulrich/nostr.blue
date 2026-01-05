@@ -629,7 +629,7 @@ async fn publish_send_events(
 
     // Publish token event with remaining proofs
     if !keep_proofs.is_empty() {
-        let proof_data: Vec<ProofData> = keep_proofs.iter().map(|p| cdk_proof_to_proof_data(p)).collect();
+        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
         let extended_proofs: Vec<ExtendedCashuProof> = proof_data
             .iter()
@@ -740,7 +740,7 @@ fn update_local_state_after_send(
     // Add new token with remaining proofs
     if let Some(ref event_id) = new_event_id {
         let keep_proof_data: Vec<ProofData> =
-            keep_proofs.iter().map(|p| cdk_proof_to_proof_data(p)).collect();
+            keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
         tokens_write.push(TokenData {
             event_id: event_id.clone(),
