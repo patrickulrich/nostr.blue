@@ -455,12 +455,12 @@ pub fn PublicationDetail(naddr: String) -> Element {
                     class: "flex-1 flex",
                     // TOC skeleton
                     aside {
-                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto",
+                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
                         PublicationTocSkeleton {}
                     }
                     // Content skeleton
                     main {
-                        class: "flex-1 overflow-y-auto p-6",
+                        class: "flex-1 overflow-y-auto scrollbar-hide p-6",
                         PublicationSectionSkeleton {}
                     }
                 }
@@ -470,7 +470,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
                     // TOC sidebar (desktop) - Dynamic navigation using tree structure
                     aside {
-                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto",
+                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
                         PublicationTocDynamic {
                             tree: pub_tree.clone(),
                             selected: selected_section.read().clone(),
@@ -487,7 +487,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                         // Center content
                         main {
                             id: "publication-content",
-                            class: "flex-1 overflow-y-auto",
+                            class: "flex-1 overflow-y-auto scrollbar-hide",
 
                             // Progress indicator
                             div {
@@ -637,7 +637,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
                                 rsx! {
                                     aside {
-                                        class: "hidden xl:block w-56 flex-shrink-0 border-l border-border overflow-y-auto p-4",
+                                        class: "hidden xl:block w-56 flex-shrink-0 border-l border-border overflow-y-auto scrollbar-hide p-4",
                                         div {
                                             class: "sticky top-4 space-y-6",
 

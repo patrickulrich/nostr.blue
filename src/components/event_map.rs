@@ -322,6 +322,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     // Check cancellation before processing each event
                     if *geocode_cancelled.read() {
                         log::debug!("Geocoding cancelled, stopping processing");
+                        loading_geo.set(false);
                         return;
                     }
 
@@ -377,6 +378,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 // Check cancellation before updating signals
                 if *geocode_cancelled.read() {
                     log::debug!("Geocoding cancelled, not updating signals");
+                    loading_geo.set(false);
                     return;
                 }
 
