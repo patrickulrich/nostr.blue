@@ -971,7 +971,8 @@ pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>,
     let filter = pinboards_filter(limit);
     let current_user = crate::stores::auth_store::get_pubkey();
 
-    let result = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+    // Use relay-only fetch for discovery to ensure fresh data from network
+    let result = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await;
 
     *LOADING_PINBOARDS.write() = false;
 
@@ -1003,7 +1004,8 @@ pub async fn fetch_pinboards_page(
     let filter = pinboards_paginated_filter(limit, until);
     let current_user = crate::stores::auth_store::get_pubkey();
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
+    // Use relay-only fetch for discovery pagination to ensure fresh data
+    let events = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await?;
 
     let boards: Vec<Pinboard> = events
         .iter()
