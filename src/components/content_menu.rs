@@ -116,7 +116,10 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
 
     let content_name = content_type.display_name();
     // Use provided title or fall back to generic content type name
-    let pin_title = props.title.clone().unwrap_or_else(|| content_name.to_string());
+    // Filter out empty/whitespace-only titles
+    let pin_title = props.title.clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| content_name.to_string());
 
     rsx! {
         div {
