@@ -189,6 +189,7 @@ pub fn CreateCookbookModal(
                         MediaUploader {
                             on_upload: move |url: String| image_url.set(Some(url)),
                             button_label: "Upload cover image".to_string(),
+                            input_id: "create-cookbook-modal-cover-image".to_string(),
                         }
                     }
 

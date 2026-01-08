@@ -726,7 +726,11 @@ pub async fn publish_recipe(
         .map_err(|e| format!("Failed to publish recipe: {}", e))?;
 
     log::info!("Recipe published: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+
+    // Return naddr instead of hex id
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let naddr = crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
+    Ok(naddr)
 }
 
 /// Fork (copy) an existing recipe for editing
@@ -787,7 +791,11 @@ pub async fn fork_recipe(
         .map_err(|e| format!("Failed to fork recipe: {}", e))?;
 
     log::info!("Recipe forked: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+
+    // Return naddr instead of hex id
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let naddr = crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, &slug).await?;
+    Ok(naddr)
 }
 
 /// Update an existing recipe (republish with same d-tag)
@@ -847,7 +855,11 @@ pub async fn update_recipe(
         .map_err(|e| format!("Failed to update recipe: {}", e))?;
 
     log::info!("Recipe updated: {}", output.id().to_hex());
-    Ok(output.id().to_hex())
+
+    // Return naddr instead of hex id
+    let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
+    let naddr = crate::stores::nostr_client::make_naddr_with_hints(KIND_RECIPE, &pubkey, original_slug).await?;
+    Ok(naddr)
 }
 
 /// Delete a recipe (publish deletion event)

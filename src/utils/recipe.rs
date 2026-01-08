@@ -205,9 +205,9 @@ fn parse_ingredients(content: &str) -> Result<Vec<String>, ValidationError> {
     Ok(ingredients)
 }
 
-/// Parse directions from numbered list
+/// Parse directions from numbered list (supports continuation lines)
 fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
-    let mut directions = Vec::new();
+    let mut directions: Vec<String> = Vec::new();
     let number_re = Regex::new(r"^(\d+)\.\s*(.*)$").unwrap();
     let mut expected_step = 1;
 
@@ -227,21 +227,32 @@ fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
                 ));
             }
 
-            if step_text.len() > 9999 {
-                return Err(ValidationError::DirectionTooLong);
-            }
-
-            if !step_text.is_empty() {
-                directions.push(step_text.to_string());
-            }
+            // Start a new step
+            directions.push(step_text.to_string());
             expected_step += 1;
-        } else if !line.is_empty() {
-            // Allow continuation lines or blank lines
-            return Err(ValidationError::InvalidDirectionFormat(
-                "Directions must be in numbered list format".to_string()
-            ));
+        } else {
+            // Continuation line - append to current step
+            if let Some(current_step) = directions.last_mut() {
+                if current_step.is_empty() {
+                    *current_step = line.to_string();
+                } else {
+                    current_step.push('\n');
+                    current_step.push_str(line);
+                }
+            }
+            // If no current step exists, ignore orphan continuation lines
         }
     }
+
+    // Validate total length of each direction
+    for direction in &directions {
+        if direction.len() > 9999 {
+            return Err(ValidationError::DirectionTooLong);
+        }
+    }
+
+    // Remove empty directions
+    directions.retain(|d| !d.trim().is_empty());
 
     Ok(directions)
 }
