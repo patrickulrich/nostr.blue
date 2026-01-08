@@ -1,7 +1,7 @@
-/// NIP-78: Application Data Storage for Notification Tracking
-///
-/// This module provides functions to create and parse NIP-78 events
-/// for syncing notification read status across devices.
+//! NIP-78: Application Data Storage for Notification Tracking
+//!
+//! This module provides functions to create and parse NIP-78 events
+//! for syncing notification read status across devices.
 
 use nostr_sdk::{Event, EventBuilder, Kind, Tag, Timestamp};
 

@@ -21,15 +21,15 @@ pub fn WebBookmarkModal(
     on_close: EventHandler<()>,
 ) -> Element {
     // Form state
-    let mut url_input = use_signal(|| String::new());
-    let mut title_input = use_signal(|| String::new());
-    let mut description_input = use_signal(|| String::new());
-    let mut image_input = use_signal(|| String::new());
-    let mut tags_input = use_signal(|| String::new());
-    let mut published_at_input = use_signal(|| String::new());
+    let mut url_input = use_signal(String::new);
+    let mut title_input = use_signal(String::new);
+    let mut description_input = use_signal(String::new);
+    let mut image_input = use_signal(String::new);
+    let mut tags_input = use_signal(String::new);
+    let mut published_at_input = use_signal(String::new);
 
     // Track reserved tags (favorite, archived) to preserve them on save
-    let mut reserved_tags = use_signal(|| Vec::<String>::new());
+    let mut reserved_tags = use_signal(Vec::<String>::new);
 
     // UI state
     let mut is_fetching_metadata = use_signal(|| false);

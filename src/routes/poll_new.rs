@@ -8,12 +8,12 @@ use once_cell::sync::Lazy;
 #[component]
 pub fn PollNew() -> Element {
     let navigator = navigator();
-    let nav_close = navigator.clone();
-    let nav_publish = navigator.clone();
-    let nav_effect = navigator.clone();
+    let nav_close = navigator;
+    let nav_publish = navigator;
+    let nav_effect = navigator;
 
     // Form state
-    let mut poll_question = use_signal(|| String::new());
+    let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
     let mut options = use_signal(|| vec![
         PollOptionData {
@@ -26,8 +26,8 @@ pub fn PollNew() -> Element {
         },
     ]);
     let mut end_time_preset = use_signal(|| String::from("1day"));
-    let mut custom_end_time = use_signal(|| String::new());
-    let mut hashtags_input = use_signal(|| String::new());
+    let mut custom_end_time = use_signal(String::new);
+    let mut hashtags_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
 
@@ -72,7 +72,7 @@ pub fn PollNew() -> Element {
         is_publishing.set(true);
         error_message.set(None);
 
-        let nav_spawn = nav_publish.clone();
+        let nav_spawn = nav_publish;
         spawn(async move {
             // Calculate end time
             let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
@@ -118,7 +118,7 @@ pub fn PollNew() -> Element {
     // Redirect if not authenticated - hoist use_effect to maintain hook order
     use_effect(move || {
         if !*is_authenticated.read() {
-            nav_effect.push(crate::routes::Route::Home {});
+            nav_effect.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

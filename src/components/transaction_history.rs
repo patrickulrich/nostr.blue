@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::stores::cashu::{WALLET_HISTORY, WalletHistoryStoreStoreExt};
-use crate::utils::format_sats_with_separator;
+use crate::utils::{format_sats_with_separator, format_relative_time_or};
 use nostr_sdk::nips::nip60::TransactionDirection;
 
 #[component]
@@ -42,8 +42,8 @@ pub fn TransactionHistory() -> Element {
                         let direction_color = if is_incoming { "text-green-500" } else { "text-orange-500" };
                         let amount_prefix = if is_incoming { "+" } else { "-" };
 
-                        // Format timestamp
-                        let timestamp_str = format_timestamp(item.created_at);
+                        // Format timestamp using shared utility
+                        let timestamp_str = format_relative_time_or(item.created_at, "Unknown");
 
                         rsx! {
                             div {
@@ -121,34 +121,5 @@ pub fn TransactionHistory() -> Element {
                 }
             }
         }
-    }
-}
-
-/// Format Unix timestamp to human-readable string
-fn format_timestamp(timestamp: u64) -> String {
-    use chrono::{DateTime, Utc, Local, TimeZone};
-
-    let datetime = Utc.timestamp_opt(timestamp as i64, 0)
-        .single()
-        .unwrap_or_else(|| Utc::now());
-
-    let local_datetime: DateTime<Local> = datetime.into();
-    let now = Local::now();
-
-    let duration = now.signed_duration_since(local_datetime);
-
-    if duration.num_seconds() < 60 {
-        return "Just now".to_string();
-    } else if duration.num_minutes() < 60 {
-        let mins = duration.num_minutes();
-        return format!("{}m ago", mins);
-    } else if duration.num_hours() < 24 {
-        let hours = duration.num_hours();
-        return format!("{}h ago", hours);
-    } else if duration.num_days() < 7 {
-        let days = duration.num_days();
-        return format!("{}d ago", days);
-    } else {
-        return local_datetime.format("%b %d, %Y").to_string();
     }
 }

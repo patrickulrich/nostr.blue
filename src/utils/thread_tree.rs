@@ -8,9 +8,10 @@ use instant::{Duration, Instant};
 use crate::stores::pending_comments::{CommentStatus, PendingComment};
 
 /// Source of a thread node - distinguishes confirmed vs pending comments
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ThreadNodeSource {
     /// Confirmed event from relays
+    #[default]
     Confirmed,
     /// Pending local comment awaiting confirmation
     Pending {
@@ -19,12 +20,6 @@ pub enum ThreadNodeSource {
         /// Author's public key (stored explicitly since display event may have dummy pubkey)
         author_pubkey: PublicKey,
     },
-}
-
-impl Default for ThreadNodeSource {
-    fn default() -> Self {
-        Self::Confirmed
-    }
 }
 
 /// Represents a node in a threaded conversation tree
@@ -461,7 +456,7 @@ pub fn merge_pending_into_tree(
         if let Some(parent_id) = pending_comment.parent_comment_id {
             // Replying to another comment - find and insert as child
             // Returns Some(node) if not found (ownership returned), None if consumed
-            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
+            fn insert_as_child(nodes: &mut [ThreadNode], parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
                 for existing in nodes.iter_mut() {
                     if existing.event.id == *parent_id {
                         existing.children.push(node);
