@@ -325,7 +325,8 @@ async fn create_list(
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
     }
-    if name.len() > 100 {
+    // Use chars().count() for proper UTF-8 character counting
+    if name.chars().count() > 100 {
         return Err("List name too long (max 100 characters)".to_string());
     }
 
