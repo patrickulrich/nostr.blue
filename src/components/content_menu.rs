@@ -285,7 +285,14 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                         },
                                         Err(e) => {
                                             log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
-                                            return; // Exit early, don't copy invalid ID
+                                            toast_api.error(
+                                                "Failed to copy link".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Could not parse event ID".to_string())
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                            return;
                                         }
                                     }
                                 } else {

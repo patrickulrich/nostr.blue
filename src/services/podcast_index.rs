@@ -441,8 +441,8 @@ pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::
 
     if !response.ok() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Chapters fetch error {}: {}", status, body));
+        // Don't include raw response body in error - could leak sensitive info
+        return Err(format!("Chapters fetch failed with status {}", status));
     }
 
     response
@@ -479,8 +479,8 @@ pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, St
 
     if !response.ok() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Transcript fetch error {}: {}", status, body));
+        // Don't include raw response body in error - could leak sensitive info
+        return Err(format!("Transcript fetch failed with status {}", status));
     }
 
     response
