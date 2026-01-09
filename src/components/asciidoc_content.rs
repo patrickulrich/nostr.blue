@@ -55,6 +55,9 @@ pub fn AsciiDocContent(
     let mut citations_loading = use_signal(|| false);
     let mut citations_error = use_signal(|| false);
 
+    // Generation token to guard async citation fetches - ensures only the latest fetch updates state
+    let mut fetch_generation = use_signal(|| 0u64);
+
     // Track last notified citation metadata to prevent redundant callbacks
     let mut last_notified_metadata: Signal<Option<CitationMetadata>> = use_signal(|| None);
 
@@ -62,36 +65,57 @@ pub fn AsciiDocContent(
     // Clone content for use in the effect - necessary because content is also used later in render logic
     let content_for_effect = content.clone();
     use_effect(use_reactive!(|(content_for_effect, enable_citations)| {
-        if enable_citations && content_has_citations(&content_for_effect) {
-            let identifiers = extract_citation_identifiers(&content_for_effect);
-            if !identifiers.is_empty() {
-                citations_loading.set(true);
-                spawn(async move {
-                    match fetch_citations_by_identifiers(&identifiers).await {
-                        Ok(cached) => {
-                            // Convert CachedCitation to ResolvedCitation
-                            let resolved: HashMap<String, ResolvedCitation> = cached
-                                .into_iter()
-                                .map(|(id, cached_cit)| {
-                                    let resolved = ResolvedCitation::from_citation(
-                                        id.clone(),
-                                        &cached_cit.citation,
-                                    );
-                                    (id, resolved)
-                                })
-                                .collect();
-                            resolved_citations.set(resolved);
-                            citations_error.set(false);
-                        }
-                        Err(e) => {
-                            crate::utils::log_fetch_error("citations for article", e);
-                            citations_error.set(true);
-                        }
-                    }
-                    citations_loading.set(false);
-                });
-            }
+        // Clear stale state when citations are disabled or content is empty
+        if !enable_citations || content_for_effect.is_empty() || !content_has_citations(&content_for_effect) {
+            citations_loading.set(false);
+            citations_error.set(false);
+            resolved_citations.set(HashMap::new());
+            return;
         }
+
+        let identifiers = extract_citation_identifiers(&content_for_effect);
+        if identifiers.is_empty() {
+            citations_loading.set(false);
+            citations_error.set(false);
+            return;
+        }
+
+        // Increment generation token for this fetch
+        let current_generation = *fetch_generation.read() + 1;
+        fetch_generation.set(current_generation);
+        citations_loading.set(true);
+
+        spawn(async move {
+            let result = fetch_citations_by_identifiers(&identifiers).await;
+
+            // Only apply results if this is still the latest fetch
+            if *fetch_generation.read() != current_generation {
+                return;
+            }
+
+            match result {
+                Ok(cached) => {
+                    // Convert CachedCitation to ResolvedCitation
+                    let resolved: HashMap<String, ResolvedCitation> = cached
+                        .into_iter()
+                        .map(|(id, cached_cit)| {
+                            let resolved = ResolvedCitation::from_citation(
+                                id.clone(),
+                                &cached_cit.citation,
+                            );
+                            (id, resolved)
+                        })
+                        .collect();
+                    resolved_citations.set(resolved);
+                    citations_error.set(false);
+                }
+                Err(e) => {
+                    crate::utils::log_fetch_error("citations for article", e);
+                    citations_error.set(true);
+                }
+            }
+            citations_loading.set(false);
+        });
     }));
 
     // Render content with citations if enabled
@@ -154,7 +178,9 @@ pub fn AsciiDocContent(
         if *citations_loading.read() {
             div {
                 class: "text-xs text-muted-foreground mt-2 flex items-center gap-1",
-                span { class: "animate-pulse", "⏳" }
+                role: "status",
+                aria_live: "polite",
+                span { class: "animate-pulse motion-reduce:animate-none", "⏳" }
                 span { "Loading citations..." }
             }
         }
@@ -162,6 +188,7 @@ pub fn AsciiDocContent(
         if *citations_error.read() {
             div {
                 class: "text-xs text-muted-foreground mt-2 flex items-center gap-1",
+                role: "alert",
                 span { "⚠" }
                 span { "Some citations could not be loaded" }
             }
