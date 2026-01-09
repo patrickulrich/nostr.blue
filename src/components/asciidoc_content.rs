@@ -65,6 +65,11 @@ pub fn AsciiDocContent(
     // Clone content for use in the effect - necessary because content is also used later in render logic
     let content_for_effect = content.clone();
     use_effect(use_reactive!(|(content_for_effect, enable_citations)| {
+        // Increment generation token at the start of every effect run
+        // This invalidates any in-flight async fetches, even on early returns
+        let current_generation = *fetch_generation.read() + 1;
+        fetch_generation.set(current_generation);
+
         // Clear stale state when citations are disabled or content is empty
         if !enable_citations || content_for_effect.is_empty() || !content_has_citations(&content_for_effect) {
             citations_loading.set(false);
@@ -80,9 +85,6 @@ pub fn AsciiDocContent(
             return;
         }
 
-        // Increment generation token for this fetch
-        let current_generation = *fetch_generation.read() + 1;
-        fetch_generation.set(current_generation);
         citations_loading.set(true);
 
         spawn(async move {
