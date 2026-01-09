@@ -117,6 +117,7 @@ pub fn AsciiDocContent(
                 }
                 Err(e) => {
                     crate::utils::log_fetch_error("citations for article", e);
+                    resolved_citations.set(HashMap::new());
                     citations_error.set(true);
                 }
             }

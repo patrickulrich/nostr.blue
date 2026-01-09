@@ -14,6 +14,15 @@ use crate::utils::format::format_sats_with_unit;
 use crate::utils::validation::is_valid_http_url;
 use crate::routes::Route;
 
+/// Truncate a GUID for privacy-conscious logging (first 8 chars + "...")
+fn truncate_guid(guid: &str) -> String {
+    if guid.len() > 12 {
+        format!("{}...", &guid[..8])
+    } else {
+        guid.to_string()
+    }
+}
+
 /// Generic external content card dispatcher
 /// Routes to the appropriate card based on content type
 #[component]
@@ -23,7 +32,7 @@ pub fn ExternalContentCard(
     /// Optional podcast GUID for episode lookups (from same note's podcast:guid tag)
     podcast_guid: Option<String>,
 ) -> Element {
-    log::info!("[ExternalContentCard] Dispatching content: {:?}", content);
+    log::debug!("[ExternalContentCard] Dispatching content: {:?}", content);
     match &content {
         ExternalContentId::Book(isbn) => rsx! {
             BookCard { isbn: isbn.clone(), compact }
@@ -701,18 +710,17 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
     let guid_for_fetch = guid.clone();
     let podcast_guid_for_fetch = props.podcast_guid.clone();
 
-    log::info!("[PodcastEpisodeGuidCard] Rendering with GUID: {}, podcast_guid: {:?}", guid, props.podcast_guid);
+    log::debug!("[PodcastEpisodeGuidCard] Rendering: {}", truncate_guid(&guid));
 
     // Fetch episode data from Podcast Index API
     let episode_data = use_resource(move || {
         let guid = guid_for_fetch.clone();
         let podcast_guid = podcast_guid_for_fetch.clone();
         async move {
-            log::info!("[PodcastEpisodeGuidCard] Fetching episode: {}, podcast_guid: {:?}", guid, podcast_guid);
+            log::debug!("[PodcastEpisodeGuidCard] Fetching episode: {}", truncate_guid(&guid));
             let result = podcast_index::get_episode_by_guid(&guid, podcast_guid.as_deref()).await;
-            match &result {
-                Ok(_) => log::info!("[PodcastEpisodeGuidCard] Fetch succeeded"),
-                Err(e) => log::error!("[PodcastEpisodeGuidCard] Fetch failed: {}", e),
+            if let Err(e) = &result {
+                log::error!("[PodcastEpisodeGuidCard] Fetch failed: {}", e);
             }
             result
         }
@@ -786,8 +794,12 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
             }
             drop(player_state);
 
-            // Play this episode
+            // Play this episode - validate track URL before playback
             let track = episode.to_music_track();
+            if !is_valid_http_url(&track.media_url) {
+                log::warn!("[PodcastEpisodeGuidCard] Invalid track URL, skipping playback");
+                return;
+            }
             music_player::play_track(track, None, None);
         }
     };
@@ -821,7 +833,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
 
     // Error state - fall back to compact badge
     if let Some(Err(_)) = *episode_data.read() {
-        let podcast_index_url = format!("https://podcastindex.org/search?q={}", guid);
+        let podcast_index_url = format!("https://podcastindex.org/search?q={}", urlencoding::encode(&guid));
         return rsx! {
             a {
                 href: "{podcast_index_url}",
@@ -878,9 +890,9 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
                         class: "w-10 h-10 rounded object-cover",
                         loading: "lazy"
                     }
-                    // Play button overlay
+                    // Play button overlay - visible on hover and keyboard focus for accessibility
                     button {
-                        class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
+                        class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 focus:opacity-100 group-focus-within:opacity-100 transition rounded",
                         onclick: handle_play,
                         aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
                         span {
@@ -937,9 +949,9 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
                     loading: "lazy"
                 }
 
-                // Play button overlay
+                // Play button overlay - visible on hover and keyboard focus for accessibility
                 button {
-                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
+                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 focus:opacity-100 group-focus-within:opacity-100 transition rounded-lg",
                     onclick: handle_play,
                     aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
                     span {
@@ -1005,17 +1017,16 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
     let guid = props.guid.clone();
     let guid_for_fetch = guid.clone();
 
-    log::info!("[PodcastGuidCard] Rendering with GUID: {}", guid);
+    log::debug!("[PodcastGuidCard] Rendering: {}", truncate_guid(&guid));
 
     // Fetch podcast data from Podcast Index API
     let podcast_data = use_resource(move || {
         let guid = guid_for_fetch.clone();
         async move {
-            log::info!("[PodcastGuidCard] Fetching podcast: {}", guid);
+            log::debug!("[PodcastGuidCard] Fetching podcast: {}", truncate_guid(&guid));
             let result = podcast_index::get_podcast_by_guid(&guid).await;
-            match &result {
-                Ok(_) => log::info!("[PodcastGuidCard] Fetch succeeded"),
-                Err(e) => log::error!("[PodcastGuidCard] Fetch failed: {}", e),
+            if let Err(e) = &result {
+                log::error!("[PodcastGuidCard] Fetch failed: {}", e);
             }
             result
         }
@@ -1038,7 +1049,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
 
     // Error state - fall back to compact badge with external link
     if let Some(Err(_)) = *podcast_data.read() {
-        let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+        let podcast_index_url = format!("https://podcastindex.org/podcast/{}", urlencoding::encode(&guid));
         return rsx! {
             a {
                 href: "{podcast_index_url}",
