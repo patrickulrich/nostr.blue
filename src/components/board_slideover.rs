@@ -298,6 +298,7 @@ pub fn BoardSlideover(
                                     disabled: *deleting.read(),
                                     onclick: move |_| {
                                         if !*deleting.read() {
+                                            delete_error.set(None);  // Clear stale error from previous attempts
                                             show_delete_confirm.set(true);
                                         }
                                     },

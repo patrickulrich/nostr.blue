@@ -96,7 +96,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         spawn(async move {
             match add_person_to_list(&list.event, &pubkey, is_private).await {
                 Ok(_) => {
-                    log::info!("Added person to list '{}' (private: {})", list.name, is_private);
+                    log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
 
                     // Close after brief delay to show success
@@ -105,8 +105,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                         use gloo_timers::future::TimeoutFuture;
                         TimeoutFuture::new(1000).await;
                     }
-                    on_added.call(());
                     loading.set(false);
+                    on_added.call(());
                 }
                 Err(e) => {
                     log::error!("Failed to add to list: {}", e);
@@ -142,12 +142,12 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 // First create the list
                 match crate::utils::list_encryption::create_people_list(name.clone(), None, is_private).await {
                     Ok(event) => {
-                        log::info!("Created new list '{}'", name);
+                        log::debug!("Created new people list");
 
                         // Now add the person to the new list
                         match add_person_to_list(&event, &pubkey, is_private).await {
                             Ok(_) => {
-                                log::info!("Added person to new list '{}'", name);
+                                log::debug!("Added person to new list");
                                 success_msg.set(Some(format!("Created \"{}\" and added", name)));
 
                                 // Close after brief delay
@@ -156,8 +156,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     use gloo_timers::future::TimeoutFuture;
                                     TimeoutFuture::new(1000).await;
                                 }
-                                on_added.call(());
                                 loading.set(false);
+                                on_added.call(());
                             }
                             Err(e) => {
                                 error_msg.set(Some(format!("Created \"{}\" but failed to add person: {}", name, e)));
@@ -177,8 +177,14 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
+            tabindex: "-1",  // Allow div to receive keyboard events for Escape key
             onclick: move |_| {
                 if !*loading.read() {
+                    props.on_close.call(());
+                }
+            },
+            onkeydown: move |e| {
+                if e.key() == Key::Escape && !*loading.read() {
                     props.on_close.call(());
                 }
             },

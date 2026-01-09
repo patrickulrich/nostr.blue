@@ -221,10 +221,9 @@ pub fn AddToCookbookModal(
                     match pin_boards_store::publish_pin(pin_input).await {
                         Ok(_) => {
                             success.set(true);
-                            is_submitting.set(false);
                             pending_pin_cookbook.set(None);
                             // Navigate to the new cookbook after a short delay
-                            // Store task handle so it can be cancelled if modal is closed
+                            // Store task handle FIRST so it can be cancelled if modal is closed
                             #[cfg(target_arch = "wasm32")]
                             {
                                 let task = spawn(async move {
@@ -233,6 +232,7 @@ pub fn AddToCookbookModal(
                                 });
                                 navigation_task.set(Some(task));
                             }
+                            is_submitting.set(false);
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - store cookbook info for retry
@@ -280,9 +280,9 @@ pub fn AddToCookbookModal(
             match pin_boards_store::publish_pin(pin_input).await {
                 Ok(_) => {
                     success.set(true);
-                    is_submitting.set(false);
                     pending_pin_cookbook.set(None);
                     // Navigate to the cookbook after a short delay
+                    // Store task handle FIRST so it can be cancelled if modal is closed
                     #[cfg(target_arch = "wasm32")]
                     {
                         let task = spawn(async move {
@@ -291,6 +291,7 @@ pub fn AddToCookbookModal(
                         });
                         navigation_task.set(Some(task));
                     }
+                    is_submitting.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to add recipe to cookbook (retry): {}", e);
