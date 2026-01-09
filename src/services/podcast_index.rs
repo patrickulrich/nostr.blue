@@ -4,8 +4,8 @@
 //! Provides podcast search, trending, categories, and episode discovery.
 //! Uses NIP-98 HTTP Authentication for API access.
 
-use futures::future::{select, Either};
 use gloo_net::http::Request;
+use gloo_timers::callback::Timeout;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
 
@@ -331,7 +331,7 @@ pub async fn get_episode_by_guid(guid: &str, podcast_guid: Option<&str>) -> Resu
     if let Some(pg) = podcast_guid {
         url.push_str(&format!("&podcastguid={}", urlencoding::encode(pg)));
     }
-    log::info!("[podcast_index] get_episode_by_guid: fetching {}", url);
+    log::debug!("[podcast_index] get_episode_by_guid: fetching {}", url);
 
     #[derive(Deserialize)]
     struct EpisodeByGuidData {
@@ -424,20 +424,34 @@ pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::
     }
 
     let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(chapters_url));
-    log::info!("[podcast_index] fetching chapters via proxy");
+    log::debug!("[podcast_index] fetching chapters via proxy");
 
     let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
 
-    let request_future = Request::get(&auth_result.signed_url)
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController")?;
+    let signal = controller.signal();
+
+    // Set up abort timeout - controller is cloned for the closure
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(PROXY_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Send request with abort signal - request is actually cancelled on timeout
+    let response = Request::get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .send();
-
-    let timeout = gloo_timers::future::TimeoutFuture::new(PROXY_TIMEOUT_MS);
-
-    let response = match select(Box::pin(request_future), Box::pin(timeout)).await {
-        Either::Left((result, _)) => result.map_err(|e| format!("Failed to fetch chapters: {}", e))?,
-        Either::Right((_, _)) => return Err("Chapters fetch timed out".to_string()),
-    };
+        .abort_signal(Some(&signal))
+        .send()
+        .await
+        .map_err(|e| {
+            if signal.aborted() {
+                "Chapters fetch timed out".to_string()
+            } else {
+                format!("Failed to fetch chapters: {}", e)
+            }
+        })?;
 
     if !response.ok() {
         let status = response.status();
@@ -462,20 +476,34 @@ pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, St
     }
 
     let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(transcript_url));
-    log::info!("[podcast_index] fetching transcript via proxy");
+    log::debug!("[podcast_index] fetching transcript via proxy");
 
     let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
 
-    let request_future = Request::get(&auth_result.signed_url)
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController")?;
+    let signal = controller.signal();
+
+    // Set up abort timeout - controller is cloned for the closure
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(PROXY_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Send request with abort signal - request is actually cancelled on timeout
+    let response = Request::get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .send();
-
-    let timeout = gloo_timers::future::TimeoutFuture::new(PROXY_TIMEOUT_MS);
-
-    let response = match select(Box::pin(request_future), Box::pin(timeout)).await {
-        Either::Left((result, _)) => result.map_err(|e| format!("Failed to fetch transcript: {}", e))?,
-        Either::Right((_, _)) => return Err("Transcript fetch timed out".to_string()),
-    };
+        .abort_signal(Some(&signal))
+        .send()
+        .await
+        .map_err(|e| {
+            if signal.aborted() {
+                "Transcript fetch timed out".to_string()
+            } else {
+                format!("Failed to fetch transcript: {}", e)
+            }
+        })?;
 
     if !response.ok() {
         let status = response.status();

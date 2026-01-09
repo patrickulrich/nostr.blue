@@ -105,6 +105,9 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     # Object URL for efficient blob previews (avoids base64 memory overhead)
     "Url",
+    # AbortController for cancellable HTTP requests
+    "AbortController",
+    "AbortSignal",
 ] }
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }

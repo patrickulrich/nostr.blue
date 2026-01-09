@@ -264,8 +264,13 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 let toast_api = toast;
 
                                 // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
-                                let nostr_uri = if !naddr_to_copy.is_empty() {
-                                    format!("nostr:{}", naddr_to_copy)
+                                // Normalize: strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
+                                let clean_naddr = naddr_to_copy
+                                    .strip_prefix("nostr:")
+                                    .or_else(|| naddr_to_copy.strip_prefix("NOSTR:"))
+                                    .unwrap_or(&naddr_to_copy);
+                                let nostr_uri = if !clean_naddr.is_empty() {
+                                    format!("nostr:{}", clean_naddr)
                                 } else if !event_id_fallback.is_empty() {
                                     // Convert hex to bech32 (note1...) per NIP-19/NIP-21
                                     match nostr_sdk::EventId::from_hex(&event_id_fallback) {
