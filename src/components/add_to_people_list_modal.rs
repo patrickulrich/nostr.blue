@@ -160,8 +160,19 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 on_added.call(());
                             }
                             Err(e) => {
-                                error_msg.set(Some(format!("Created \"{}\" but failed to add person: {}", name, e)));
+                                error_msg.set(Some(format!(
+                                    "Created \"{}\" but failed to add person: {} — list created, you can add the person later",
+                                    name, e
+                                )));
+
+                                // Close after delay like success case, so parent refreshes to show new list
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    use gloo_timers::future::TimeoutFuture;
+                                    TimeoutFuture::new(1000).await;
+                                }
                                 loading.set(false);
+                                on_added.call(()); // Trigger refresh so new list is visible
                             }
                         }
                     }
@@ -191,7 +202,22 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto",
+                role: "dialog",
+                aria_modal: "true",
+                tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
+                // Focus the modal when mounted for accessibility
+                onmounted: move |evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let element = evt.data();
+                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let _ = evt;
+                },
 
                 // Header
                 div {
@@ -202,6 +228,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     }
                     button {
                         class: "text-muted-foreground hover:text-foreground text-xl",
+                        aria_label: "Close dialog",
                         onclick: move |_| {
                             if !*loading.read() {
                                 props.on_close.call(());

@@ -55,7 +55,8 @@ pub fn BoardSlideover(
     let mut show_zap_modal = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
-    let mut deleting = use_signal(|| false);
+    // Counter for delete task to prevent concurrent deletes (0 = not deleting, >0 = in progress)
+    let mut delete_task_id = use_signal(|| 0u32);
     let mut delete_error = use_signal(|| None::<String>);
     // Pin to board modal (lifted from PinCard to avoid overflow clipping)
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
@@ -68,7 +69,7 @@ pub fn BoardSlideover(
             show_zap_modal.set(false);
             show_share_modal.set(false);
             show_delete_confirm.set(false);
-            deleting.set(false);
+            delete_task_id.set(0);
             delete_error.set(None);
             pin_to_board_request.set(None);
             // Reset pin state to prevent stale data from flashing on reopen
@@ -163,11 +164,13 @@ pub fn BoardSlideover(
     let nav = navigator();
     let on_close_for_delete = on_close;
     let handle_delete = move |_| {
-        // Guard against concurrent deletes
-        if *deleting.read() {
+        // Guard against concurrent deletes using counter pattern
+        let current = *delete_task_id.read();
+        if current > 0 {
+            // Delete already in progress
             return;
         }
-        deleting.set(true);
+        delete_task_id.set(current.wrapping_add(1));
         delete_error.set(None);
         let board_clone = board_for_delete.clone();
         let on_close = on_close_for_delete;
@@ -181,7 +184,7 @@ pub fn BoardSlideover(
                 Err(e) => {
                     log::error!("Failed to delete board: {}", e);
                     delete_error.set(Some(format!("Failed to delete: {}", e)));
-                    deleting.set(false);
+                    delete_task_id.set(0); // Reset to allow retry
                     // Keep modal open so user sees the error
                 }
             }
@@ -290,14 +293,14 @@ pub fn BoardSlideover(
 
                                 // Delete button
                                 button {
-                                    class: if *deleting.read() {
+                                    class: if *delete_task_id.read() > 0 {
                                         "p-2 rounded-lg text-red-500/50 cursor-not-allowed"
                                     } else {
                                         "p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition"
                                     },
-                                    disabled: *deleting.read(),
+                                    disabled: *delete_task_id.read() > 0,
                                     onclick: move |_| {
-                                        if !*deleting.read() {
+                                        if *delete_task_id.read() == 0 {
                                             delete_error.set(None);  // Clear stale error from previous attempts
                                             show_delete_confirm.set(true);
                                         }
@@ -540,14 +543,21 @@ pub fn BoardSlideover(
         }
 
         if *show_delete_confirm.read() {
+            // Show error as separate toast above the modal if present
+            if let Some(ref err) = *delete_error.read() {
+                div {
+                    class: "fixed inset-x-0 top-20 z-[51] flex justify-center pointer-events-none",
+                    div {
+                        class: "bg-red-500/95 text-white px-4 py-2 rounded-lg shadow-lg max-w-md text-center",
+                        "{err}"
+                    }
+                }
+            }
+
             ConfirmModal {
                 title: "Delete Board".to_string(),
-                message: if let Some(ref err) = *delete_error.read() {
-                    format!("{}\n\nAre you sure you want to delete this board? This action cannot be undone.", err)
-                } else {
-                    "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string()
-                },
-                confirm_text: Some(if *deleting.read() { "Deleting..." } else { "Delete" }.to_string()),
+                message: "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string(),
+                confirm_text: Some(if *delete_task_id.read() > 0 { "Deleting..." } else { "Delete" }.to_string()),
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
                 on_cancel: move |_| {
