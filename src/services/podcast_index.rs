@@ -320,15 +320,26 @@ pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
 }
 
 /// Get episode by episode GUID (NIP-73 podcast:item:guid: format)
-pub async fn get_episode_by_guid(guid: &str) -> Result<(Episode, Option<PodcastFeed>), String> {
-    let url = format!("{}/episodes/byguid?guid={}&fulltext", API_BASE, urlencoding::encode(guid));
+/// Optionally provide the podcast GUID for more reliable lookups
+pub async fn get_episode_by_guid(guid: &str, podcast_guid: Option<&str>) -> Result<(Episode, Option<PodcastFeed>), String> {
+    let mut url = format!("{}/episodes/byguid?guid={}&fulltext", API_BASE, urlencoding::encode(guid));
+    if let Some(pg) = podcast_guid {
+        url.push_str(&format!("&podcastguid={}", urlencoding::encode(pg)));
+    }
+    log::info!("[podcast_index] get_episode_by_guid: fetching {}", url);
 
     #[derive(Deserialize)]
     struct EpisodeByGuidData {
         episode: Episode,
     }
 
-    let data: ApiResponse<EpisodeByGuidData> = authenticated_get(&url).await?;
+    let data: ApiResponse<EpisodeByGuidData> = match authenticated_get(&url).await {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("[podcast_index] get_episode_by_guid failed: {}", e);
+            return Err(e);
+        }
+    };
 
     // Try to fetch the podcast info for context
     let podcast = if let Some(feed_id) = data.data.episode.feed_id {
@@ -391,4 +402,64 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
 
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
+}
+
+// ============================================================================
+// Proxy Functions for External Content (CORS-safe)
+// ============================================================================
+
+/// Fetch podcast chapters through the proxy to avoid CORS issues
+///
+/// This proxies the request through our worker to bypass browser CORS restrictions
+/// when fetching chapters from external podcast hosts.
+pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::podcast::ChaptersFile, String> {
+    let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(chapters_url));
+    log::info!("[podcast_index] fetch_chapters_proxied: {}", chapters_url);
+
+    let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
+
+    let response = Request::get(&auth_result.signed_url)
+        .header("Authorization", &auth_result.header)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Chapters fetch error {}: {}", status, body));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse chapters JSON: {}", e))
+}
+
+/// Fetch podcast transcript through the proxy to avoid CORS issues
+///
+/// This proxies the request through our worker to bypass browser CORS restrictions
+/// when fetching transcripts from external podcast hosts.
+pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, String> {
+    let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(transcript_url));
+    log::info!("[podcast_index] fetch_transcript_proxied: {}", transcript_url);
+
+    let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
+
+    let response = Request::get(&auth_result.signed_url)
+        .header("Authorization", &auth_result.header)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
+
+    if !response.ok() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Transcript fetch error {}: {}", status, body));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read transcript: {}", e))
 }

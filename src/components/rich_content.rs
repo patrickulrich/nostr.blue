@@ -3749,7 +3749,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
     let episode_resource = use_resource(move || {
         let g = guid_for_resource.clone();
         async move {
-            podcast_index::get_episode_by_guid(&g).await
+            podcast_index::get_episode_by_guid(&g, None).await
         }
     });
 

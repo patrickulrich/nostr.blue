@@ -450,7 +450,9 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
 // Chapter Fetching
 // ============================================================================
 
-/// Fetch and parse JSON chapters file
+/// Fetch and parse JSON chapters file (direct request, may have CORS issues)
+/// Note: For browser use, prefer podcast_index::fetch_chapters_proxied
+#[allow(dead_code)]
 pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
     let response = Request::get(url)
         .send()
@@ -467,7 +469,9 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
         .map_err(|e| format!("Failed to parse chapters: {}", e))
 }
 
-/// Fetch transcript content
+/// Fetch transcript content (direct request, may have CORS issues)
+/// Note: For browser use, prefer podcast_index::fetch_transcript_proxied
+#[allow(dead_code)]
 pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, String> {
     let response = Request::get(&transcript.url)
         .send()

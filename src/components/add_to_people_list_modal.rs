@@ -7,11 +7,15 @@
 //! - Creating a new list inline
 
 use dioxus::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::profiles;
 use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::add_person_to_list;
+
+/// Global counter for generating unique modal IDs
+static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, PartialEq)]
 enum ModalTab {
@@ -31,6 +35,11 @@ pub struct AddToPeopleListModalProps {
 
 #[component]
 pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
+    // Generate unique IDs for accessibility
+    let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let title_id = format!("add-to-list-modal-title-{}", modal_id());
+    let select_id = format!("add-to-list-select-{}", modal_id());
+
     let mut active_tab = use_signal(|| ModalTab::ExistingList);
     let mut selected_list = use_signal(|| None::<UserList>);
     let mut add_as_private = use_signal(|| false);
@@ -54,16 +63,31 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
             .collect::<Vec<_>>()
     });
 
-    // Get person's display name
+    // Get person's display name using signal + effect pattern for reactivity
+    // This ensures the display name updates when profile data arrives from the network
     let person_pubkey = props.person_pubkey.clone();
+    let person_pubkey_for_effect = props.person_pubkey.clone();
+    let mut person_metadata = use_signal(move || profiles::get_profile(&person_pubkey));
+
+    // Fetch profile in background if not cached
+    use_effect(use_reactive((&person_pubkey_for_effect,), move |(pk,)| {
+        spawn(async move {
+            if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                // Update signal with freshly fetched profile to trigger re-render
+                person_metadata.set(profiles::get_profile(&pk));
+            }
+        });
+    }));
+
+    let person_pubkey_for_display = props.person_pubkey.clone();
     let person_name = use_memo(move || {
-        profiles::get_profile(&person_pubkey)
+        person_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| {
-                if person_pubkey.len() >= 12 {
-                    person_pubkey[..12].to_string()
+                if person_pubkey_for_display.len() >= 12 {
+                    person_pubkey_for_display[..12].to_string()
                 } else {
-                    person_pubkey.clone()
+                    person_pubkey_for_display.clone()
                 }
             })
     });
@@ -99,7 +123,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
 
-                    // Close after brief delay to show success
+                    // Brief delay to show success message, then signal parent to refresh and close
                     #[cfg(target_arch = "wasm32")]
                     {
                         use gloo_timers::future::TimeoutFuture;
@@ -150,7 +174,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 log::debug!("Added person to new list");
                                 success_msg.set(Some(format!("Created \"{}\" and added", name)));
 
-                                // Close after brief delay
+                                // Brief delay to show success message, then signal parent to refresh and close
                                 #[cfg(target_arch = "wasm32")]
                                 {
                                     use gloo_timers::future::TimeoutFuture;
@@ -204,6 +228,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto",
                 role: "dialog",
                 aria_modal: "true",
+                aria_labelledby: "{title_id}",
                 tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
                 // Focus the modal when mounted for accessibility
@@ -224,6 +249,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     class: "flex justify-between items-center mb-4",
                     h2 {
                         class: "text-xl font-bold",
+                        id: "{title_id}",
                         "Add to List"
                     }
                     button {
@@ -317,16 +343,23 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     class: "space-y-2",
                                     label {
                                         class: "block text-sm font-medium",
+                                        r#for: "{select_id}",
                                         "Select a list"
                                     }
                                     select {
                                         class: "w-full px-3 py-2 bg-background border border-border rounded-lg",
+                                        id: "{select_id}",
+                                        value: "{selected_list.read().as_ref().map(|l| l.id.clone()).unwrap_or_default()}",
                                         onchange: move |e| {
                                             let value = e.value();
-                                            let list = people_lists.read()
-                                                .iter()
-                                                .find(|l| l.id == value)
-                                                .cloned();
+                                            let list = if value.is_empty() {
+                                                None
+                                            } else {
+                                                people_lists.read()
+                                                    .iter()
+                                                    .find(|l| l.id == value)
+                                                    .cloned()
+                                            };
                                             selected_list.set(list);
                                         },
                                         option {
