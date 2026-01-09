@@ -84,8 +84,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         person_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| {
-                if person_pubkey_for_display.len() >= 12 {
-                    person_pubkey_for_display[..12].to_string()
+                if person_pubkey_for_display.chars().count() >= 12 {
+                    person_pubkey_for_display.chars().take(12).collect::<String>()
                 } else {
                     person_pubkey_for_display.clone()
                 }
