@@ -97,6 +97,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let naddr_pin_board = naddr.clone();
     // event_id is hex format, used for ReportModal and AddToListModal which require EventId
     let event_id_hex = props.event_id.clone().unwrap_or_default();
+    let event_id_hex_copy = event_id_hex.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -248,50 +249,59 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                         }
                     }
 
-                    // Copy Link (naddr)
-                    button {
-                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
-                        onclick: move |e: MouseEvent| {
-                            e.stop_propagation();
-                            is_open.set(false);
+                    // Copy Link (naddr or event_id fallback)
+                    // Only show if we have an naddr or event_id to copy
+                    if !naddr_copy.is_empty() || !event_id_hex_copy.is_empty() {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                is_open.set(false);
 
-                            let naddr_to_copy = naddr_copy.clone();
-                            let toast_api = toast;
+                                let naddr_to_copy = naddr_copy.clone();
+                                let event_id_fallback = event_id_hex_copy.clone();
+                                let toast_api = toast;
 
-                            // Create nostr: URI
-                            let nostr_uri = format!("nostr:{}", naddr_to_copy);
+                                // Create nostr: URI - prefer naddr, fall back to note1 (event_id)
+                                let nostr_uri = if !naddr_to_copy.is_empty() {
+                                    format!("nostr:{}", naddr_to_copy)
+                                } else {
+                                    // Use event ID as fallback (already in hex, client can convert to note1)
+                                    format!("nostr:{}", event_id_fallback)
+                                };
 
-                            // Copy to clipboard (await the promise for proper error handling)
-                            spawn(async move {
-                                if let Some(window) = web_sys::window() {
-                                    let clipboard = window.navigator().clipboard();
-                                    let promise = clipboard.write_text(&nostr_uri);
-                                    match wasm_bindgen_futures::JsFuture::from(promise).await {
-                                        Ok(_) => {
-                                            toast_api.success(
-                                                "Copied!".to_string(),
-                                                ToastOptions::new()
-                                                    .description(format!("Link to {} copied to clipboard", content_name))
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
-                                        }
-                                        Err(_) => {
-                                            toast_api.error(
-                                                "Failed to copy".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Could not access clipboard".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
+                                // Copy to clipboard (await the promise for proper error handling)
+                                spawn(async move {
+                                    if let Some(window) = web_sys::window() {
+                                        let clipboard = window.navigator().clipboard();
+                                        let promise = clipboard.write_text(&nostr_uri);
+                                        match wasm_bindgen_futures::JsFuture::from(promise).await {
+                                            Ok(_) => {
+                                                toast_api.success(
+                                                    "Copied!".to_string(),
+                                                    ToastOptions::new()
+                                                        .description(format!("Link to {} copied to clipboard", content_name))
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
+                                            }
+                                            Err(_) => {
+                                                toast_api.error(
+                                                    "Failed to copy".to_string(),
+                                                    ToastOptions::new()
+                                                        .description("Could not access clipboard".to_string())
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
+                                            }
                                         }
                                     }
-                                }
-                            });
-                        },
-                        span {
-                            class: "text-sm",
-                            "Copy link"
+                                });
+                            },
+                            span {
+                                class: "text-sm",
+                                "Copy link"
+                            }
                         }
                     }
 

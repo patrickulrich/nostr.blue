@@ -9,6 +9,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered};
 use crate::stores::auth_store;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use crate::components::pin_board_card::HashtagBadge;
 use crate::components::pin_board_item_card::PinCard;
 use crate::components::pin_board_item_selector::PinToBoardModal;
@@ -321,7 +322,7 @@ pub fn BoardSlideover(
                 }
 
                 // Cover image
-                if let Some(ref img_url) = cover_image {
+                if let Some(ref img_url) = cover_image.as_ref().filter(|u| is_valid_http_url(u)) {
                     div {
                         class: "relative w-full h-48 md:h-64 overflow-hidden",
                         img {
@@ -347,7 +348,7 @@ pub fn BoardSlideover(
                         // Avatar
                         div {
                             class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
-                            if let Some(ref pic_url) = profile_picture() {
+                            if let Some(ref pic_url) = profile_picture().as_ref().filter(|u| is_valid_http_url(u)) {
                                 img {
                                     src: "{pic_url}",
                                     alt: "{display_name()}",

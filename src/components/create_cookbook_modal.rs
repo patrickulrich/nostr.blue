@@ -50,13 +50,19 @@ pub fn CreateCookbookModal(
         is_submitting.set(true);
 
         // Parse additional tags and always include "cookbook"
+        // Use HashSet to deduplicate while preserving order
+        let mut seen = std::collections::HashSet::new();
         let mut tags: Vec<String> = vec!["cookbook".to_string()];
-        let additional: Vec<String> = additional_tags.read()
+        seen.insert("cookbook".to_string());
+        for tag in additional_tags.read()
             .split(',')
             .map(|t| t.trim().to_lowercase())
-            .filter(|t| !t.is_empty() && t != "cookbook")
-            .collect();
-        tags.extend(additional);
+            .filter(|t| !t.is_empty())
+        {
+            if seen.insert(tag.clone()) {
+                tags.push(tag);
+            }
+        }
 
         let input = PinboardInput {
             title: title_trimmed,

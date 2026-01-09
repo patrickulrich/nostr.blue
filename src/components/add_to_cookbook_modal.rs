@@ -7,6 +7,7 @@ use crate::stores::pin_boards_store::{self, Pinboard, PinboardInput, PinInput, P
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::utils::validation::is_valid_http_url;
 
 /// Modal for adding a recipe to a cookbook
 #[component]
@@ -54,10 +55,11 @@ pub fn AddToCookbookModal(
     // Create local reads of global signals for use_reactive! tracking
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = *HAS_SIGNER.read();
+    let loaded = *has_loaded.read();
 
-    use_effect(use_reactive!(|(client_init, has_signer)| {
+    use_effect(use_reactive!(|(client_init, has_signer, loaded)| {
         // Skip if already loaded
-        if *has_loaded.read() {
+        if loaded {
             return;
         }
 
@@ -596,7 +598,7 @@ pub fn AddToCookbookModal(
                                                         // Thumbnail
                                                         div {
                                                             class: "w-12 h-12 rounded-lg overflow-hidden bg-gradient-to-br from-orange-500/60 to-amber-600/60 flex-shrink-0",
-                                                            if let Some(ref img) = cb_for_check.image {
+                                                            if let Some(ref img) = cb_for_check.image.as_ref().filter(|u| is_valid_http_url(u)) {
                                                                 img {
                                                                     src: "{img}",
                                                                     alt: "{cb_for_check.title}",

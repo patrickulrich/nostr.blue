@@ -74,6 +74,10 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
     // Handle adding to existing list
     let mut handle_add_to_list = move |_| {
+        // Guard against concurrent clicks
+        if *loading.read() {
+            return;
+        }
         let list = match selected_list.read().clone() {
             Some(l) => l,
             None => {
@@ -117,6 +121,10 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     let mut handle_create_and_add = {
         let pubkey = props.person_pubkey.clone();
         move |_| {
+            // Guard against concurrent clicks
+            if *loading.read() {
+                return;
+            }
             let name = new_list_name.read().trim().to_string();
             if name.is_empty() {
                 error_msg.set(Some("Please enter a list name".to_string()));
@@ -358,7 +366,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     }
                                     p {
                                         class: "text-sm text-muted-foreground mt-1",
-                                        "All members will be encrypted"
+                                        "This person will be added privately"
                                     }
                                 }
                             }
