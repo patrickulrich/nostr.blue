@@ -4,11 +4,16 @@
 //! Provides podcast search, trending, categories, and episode discovery.
 //! Uses NIP-98 HTTP Authentication for API access.
 
+use futures::future::{select, Either};
 use gloo_net::http::Request;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::nip98 as nip98_utils;
+use crate::utils::validation::parse_http_url;
+
+/// Timeout for proxy fetch requests (30 seconds)
+const PROXY_TIMEOUT_MS: u32 = 30_000;
 
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
@@ -413,16 +418,26 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
 /// This proxies the request through our worker to bypass browser CORS restrictions
 /// when fetching chapters from external podcast hosts.
 pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::podcast::ChaptersFile, String> {
+    // Validate input URL before proxying
+    if parse_http_url(chapters_url).is_none() {
+        return Err("Invalid chapters URL - must be http or https".to_string());
+    }
+
     let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(chapters_url));
-    log::info!("[podcast_index] fetch_chapters_proxied: {}", chapters_url);
+    log::info!("[podcast_index] fetching chapters via proxy");
 
     let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
 
-    let response = Request::get(&auth_result.signed_url)
+    let request_future = Request::get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
+        .send();
+
+    let timeout = gloo_timers::future::TimeoutFuture::new(PROXY_TIMEOUT_MS);
+
+    let response = match select(Box::pin(request_future), Box::pin(timeout)).await {
+        Either::Left((result, _)) => result.map_err(|e| format!("Failed to fetch chapters: {}", e))?,
+        Either::Right((_, _)) => return Err("Chapters fetch timed out".to_string()),
+    };
 
     if !response.ok() {
         let status = response.status();
@@ -441,16 +456,26 @@ pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::
 /// This proxies the request through our worker to bypass browser CORS restrictions
 /// when fetching transcripts from external podcast hosts.
 pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, String> {
+    // Validate input URL before proxying
+    if parse_http_url(transcript_url).is_none() {
+        return Err("Invalid transcript URL - must be http or https".to_string());
+    }
+
     let url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(transcript_url));
-    log::info!("[podcast_index] fetch_transcript_proxied: {}", transcript_url);
+    log::info!("[podcast_index] fetching transcript via proxy");
 
     let auth_result = nip98_utils::create_auth_header(&url, nip98::HttpMethod::GET).await?;
 
-    let response = Request::get(&auth_result.signed_url)
+    let request_future = Request::get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
+        .send();
+
+    let timeout = gloo_timers::future::TimeoutFuture::new(PROXY_TIMEOUT_MS);
+
+    let response = match select(Box::pin(request_future), Box::pin(timeout)).await {
+        Either::Left((result, _)) => result.map_err(|e| format!("Failed to fetch transcript: {}", e))?,
+        Either::Right((_, _)) => return Err("Transcript fetch timed out".to_string()),
+    };
 
     if !response.ok() {
         let status = response.status();

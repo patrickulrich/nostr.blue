@@ -44,7 +44,8 @@ pub fn BoardSlideover(
     let mut pins_loading = use_signal(|| true);
     let mut pins_error = use_signal(|| None::<String>);
     // Request counter for staleness check - prevents race conditions when board changes
-    let request_id = use_signal(|| 0u32);
+    // Value 0 means "invalidated" (no active request)
+    let mut request_id = use_signal(|| 0u32);
     // Manual retry trigger - incrementing this triggers a refetch
     let retry_trigger = use_signal(|| 0u32);
 
@@ -76,6 +77,8 @@ pub fn BoardSlideover(
             pins.set(Vec::new());
             pins_loading.set(true);  // Set to true so loading shows on reopen
             pins_error.set(None);
+            // Invalidate any in-flight requests by resetting request_id to 0
+            request_id.set(0);
         }
     });
 
@@ -126,7 +129,11 @@ pub fn BoardSlideover(
         let owner_pk = owner_pubkey_for_pins.clone();
 
         // Increment request counter and capture current value for staleness check
-        let current_request = request_id_mut.read().wrapping_add(1);
+        // Skip 0 as it's reserved for "invalidated" state
+        let current_request = {
+            let next = request_id_mut.read().wrapping_add(1);
+            if next == 0 { 1 } else { next }
+        };
         request_id_mut.set(current_request);
 
         pins_loading.set(true);
@@ -140,9 +147,10 @@ pub fn BoardSlideover(
                 fetch_pins_for_board_filtered(&a_tag, Some(&owner_pk), None).await
             };
 
-            // Check if this request is still current (not stale)
-            if *request_id_mut.read() != current_request {
-                // Stale request - discard results
+            // Check if this request is still current (not stale or invalidated)
+            let current = *request_id_mut.read();
+            if current == 0 || current != current_request {
+                // Invalidated (0) or stale request - discard results
                 return;
             }
 

@@ -204,11 +204,13 @@ pub fn CreateCookbookModal(
                         }
                         MediaUploader {
                             on_upload: move |url: String| {
-                                // Validate URL scheme before setting
-                                if is_valid_http_url(&url) {
-                                    image_url.set(Some(url));
+                                // Trim whitespace and validate URL scheme before setting
+                                let trimmed = url.trim();
+                                if is_valid_http_url(trimmed) {
+                                    image_url.set(Some(trimmed.to_string()));
                                     error.set(None); // Clear any previous error
                                 } else {
+                                    // Don't overwrite existing cover - just show error
                                     error.set(Some("Invalid image URL - must be http or https".to_string()));
                                 }
                             },

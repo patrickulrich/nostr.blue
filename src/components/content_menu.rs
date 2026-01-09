@@ -269,7 +269,20 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 } else if !event_id_fallback.is_empty() {
                                     // Convert hex to bech32 (note1...) per NIP-19/NIP-21
                                     match nostr_sdk::EventId::from_hex(&event_id_fallback) {
-                                        Ok(eid) => format!("nostr:{}", eid.to_bech32().expect("infallible")),
+                                        Ok(eid) => match eid.to_bech32() {
+                                            Ok(bech32) => format!("nostr:{}", bech32),
+                                            Err(e) => {
+                                                log::error!("Failed to encode event ID to bech32: {}", e);
+                                                toast_api.error(
+                                                    "Failed to copy link".to_string(),
+                                                    ToastOptions::new()
+                                                        .description("Could not encode event ID".to_string())
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
+                                                return;
+                                            }
+                                        },
                                         Err(e) => {
                                             log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
                                             return; // Exit early, don't copy invalid ID
@@ -281,28 +294,36 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
 
                                 // Copy to clipboard (await the promise for proper error handling)
                                 spawn(async move {
-                                    if let Some(window) = web_sys::window() {
-                                        let clipboard = window.navigator().clipboard();
-                                        let promise = clipboard.write_text(&nostr_uri);
-                                        match wasm_bindgen_futures::JsFuture::from(promise).await {
-                                            Ok(_) => {
-                                                toast_api.success(
-                                                    "Copied!".to_string(),
-                                                    ToastOptions::new()
-                                                        .description(format!("Link to {} copied to clipboard", content_name))
-                                                        .duration(Duration::from_secs(2))
-                                                        .permanent(false),
-                                                );
-                                            }
-                                            Err(_) => {
-                                                toast_api.error(
-                                                    "Failed to copy".to_string(),
-                                                    ToastOptions::new()
-                                                        .description("Could not access clipboard".to_string())
-                                                        .duration(Duration::from_secs(2))
-                                                        .permanent(false),
-                                                );
-                                            }
+                                    let Some(window) = web_sys::window() else {
+                                        toast_api.error(
+                                            "Clipboard not available".to_string(),
+                                            ToastOptions::new()
+                                                .description("Browser window not accessible".to_string())
+                                                .duration(Duration::from_secs(2))
+                                                .permanent(false),
+                                        );
+                                        return;
+                                    };
+                                    let clipboard = window.navigator().clipboard();
+                                    let promise = clipboard.write_text(&nostr_uri);
+                                    match wasm_bindgen_futures::JsFuture::from(promise).await {
+                                        Ok(_) => {
+                                            toast_api.success(
+                                                "Copied!".to_string(),
+                                                ToastOptions::new()
+                                                    .description(format!("Link to {} copied to clipboard", content_name))
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                        }
+                                        Err(_) => {
+                                            toast_api.error(
+                                                "Failed to copy".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Could not access clipboard".to_string())
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
                                         }
                                     }
                                 });

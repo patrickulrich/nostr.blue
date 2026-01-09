@@ -417,7 +417,7 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
         return None;
     }
 
-    // Decode the bech32 data
+    // Decode the bech32 data (bech32 0.11 returns Vec<u8> directly)
     let (hrp, data) = bech32::decode(identifier).ok()?;
 
     // Verify it's a nevent
@@ -425,23 +425,30 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
         return None;
     }
 
-    // Parse TLV: first entry should be type 0 (event ID) with 32 bytes
+    // Scan all TLV entries looking for type 0 (event ID)
+    // Per NIP-19, TLV entries can be in any order, not just type 0 first
     // TLV format: type (1 byte) + length (1 byte) + value (length bytes)
-    if data.len() < 34 {
-        return None;
+    let mut pos = 0;
+    while pos + 2 <= data.len() {
+        let tlv_type = data[pos];
+        let tlv_len = data[pos + 1] as usize;
+
+        // Check for valid TLV entry
+        if pos + 2 + tlv_len > data.len() {
+            break; // Invalid TLV - data too short
+        }
+
+        // Type 0 = special (event ID for nevent), length should be 32
+        if tlv_type == 0 && tlv_len == 32 {
+            let event_id_bytes: [u8; 32] = data[pos + 2..pos + 2 + 32].try_into().ok()?;
+            return EventId::from_byte_array(event_id_bytes).into();
+        }
+
+        // Move to next TLV entry
+        pos += 2 + tlv_len;
     }
 
-    let tlv_type = data[0];
-    let tlv_len = data[1] as usize;
-
-    // Type 0 = special (event ID for nevent), length should be 32
-    if tlv_type != 0 || tlv_len != 32 || data.len() < 2 + tlv_len {
-        return None;
-    }
-
-    // Extract the 32-byte event ID
-    let event_id_bytes: [u8; 32] = data[2..34].try_into().ok()?;
-    EventId::from_byte_array(event_id_bytes).into()
+    None
 }
 
 #[component]
