@@ -76,6 +76,7 @@ pub fn AddToCookbookModal(
 
         // Mark as loaded before spawning to prevent duplicate fetches
         has_loaded.set(true);
+        cookbooks_loading.set(true);
 
         spawn(async move {
             // Fetch user's own cookbooks
@@ -140,9 +141,14 @@ pub fn AddToCookbookModal(
 
     // Handle creating new cookbook and adding recipe
     let handle_create_and_add = move |_| {
-        let title_val = new_title.read().clone();
-        if title_val.trim().is_empty() {
+        // Validate and sanitize title (matching CreateCookbookModal)
+        let title_val = new_title.read().trim().to_string();
+        if title_val.is_empty() {
             error.set(Some("Cookbook name is required".to_string()));
+            return;
+        }
+        if title_val.chars().count() > 100 {
+            error.set(Some("Cookbook name must be 100 characters or less".to_string()));
             return;
         }
 
@@ -150,10 +156,14 @@ pub fn AddToCookbookModal(
         error.set(None);
         is_submitting.set(true);
 
-        let description = if new_description.read().is_empty() {
-            None
-        } else {
-            Some(new_description.read().clone())
+        // Sanitize description (truncate if over limit)
+        let description = {
+            let desc = new_description.read().trim().to_string();
+            if desc.is_empty() {
+                None
+            } else {
+                Some(desc.chars().take(1000).collect::<String>())
+            }
         };
         let image = new_image_url.read().clone();
 

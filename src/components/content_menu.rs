@@ -3,6 +3,7 @@
 //! Similar to NoteMenu but designed for addressable events with naddr
 
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip19::ToBech32;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{ReportModal, AddToListModal};
 use crate::components::pin_board_item_selector::PinToBoardModal;
@@ -262,12 +263,20 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 let event_id_fallback = event_id_hex_copy.clone();
                                 let toast_api = toast;
 
-                                // Create nostr: URI - prefer naddr, fall back to note1 (event_id)
+                                // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
                                 let nostr_uri = if !naddr_to_copy.is_empty() {
                                     format!("nostr:{}", naddr_to_copy)
+                                } else if !event_id_fallback.is_empty() {
+                                    // Convert hex to bech32 (note1...) per NIP-19/NIP-21
+                                    match nostr_sdk::EventId::from_hex(&event_id_fallback) {
+                                        Ok(eid) => format!("nostr:{}", eid.to_bech32().expect("infallible")),
+                                        Err(e) => {
+                                            log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
+                                            return; // Exit early, don't copy invalid ID
+                                        }
+                                    }
                                 } else {
-                                    // Use event ID as fallback (already in hex, client can convert to note1)
-                                    format!("nostr:{}", event_id_fallback)
+                                    return; // Nothing to copy
                                 };
 
                                 // Copy to clipboard (await the promise for proper error handling)

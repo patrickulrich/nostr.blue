@@ -34,7 +34,7 @@ pub fn ConfirmModal(
 
                 // Message
                 p {
-                    class: "text-muted-foreground mb-6",
+                    class: "text-muted-foreground mb-6 whitespace-pre-line",
                     id: "modal-message",
                     "{message}"
                 }

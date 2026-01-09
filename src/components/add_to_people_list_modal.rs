@@ -160,7 +160,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 on_added.call(());
                             }
                             Err(e) => {
-                                error_msg.set(Some(format!("Created list but failed to add: {}", e)));
+                                error_msg.set(Some(format!("Created \"{}\" but failed to add person: {}", name, e)));
                                 loading.set(false);
                             }
                         }
@@ -177,7 +177,11 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-            onclick: move |_| props.on_close.call(()),
+            onclick: move |_| {
+                if !*loading.read() {
+                    props.on_close.call(());
+                }
+            },
 
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto",

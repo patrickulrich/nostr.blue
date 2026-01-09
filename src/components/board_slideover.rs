@@ -60,6 +60,19 @@ pub fn BoardSlideover(
     // Pin to board modal (lifted from PinCard to avoid overflow clipping)
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
 
+    // Reset modal states when slideover closes
+    // Since `show` is a Signal<bool> prop, use_effect auto-subscribes to it
+    use_effect(move || {
+        if !*show.read() {
+            show_zap_modal.set(false);
+            show_share_modal.set(false);
+            show_delete_confirm.set(false);
+            deleting.set(false);
+            delete_error.set(None);
+            pin_to_board_request.set(None);
+        }
+    });
+
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
     let is_owner = auth_store::AUTH_STATE.read().pubkey
@@ -328,7 +341,9 @@ pub fn BoardSlideover(
                         img {
                             src: "{img_url}",
                             alt: "{title}",
-                            class: "w-full h-full object-cover"
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                            decoding: "async",
                         }
                         // Gradient overlay
                         div {
@@ -463,17 +478,34 @@ pub fn BoardSlideover(
                             }
                         }
                     } else {
-                        div {
-                            class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
-                            for pin in pins.read().iter() {
-                                PinCard {
-                                    key: "{pin.event_id}",
-                                    pin: pin.clone(),
-                                    is_owner: is_owner,
-                                    on_delete: handle_pin_deleted,
-                                    on_pin_to_board: move |req: PinToBoardRequest| {
-                                        pin_to_board_request.set(Some(req));
-                                    },
+                        {
+                            // Get current user pubkey for per-pin ownership check
+                            let current_user_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+
+                            rsx! {
+                                div {
+                                    class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
+                                    for pin in pins.read().iter() {
+                                        {
+                                            // Compute per-pin ownership (pin author, not board owner)
+                                            let pin_is_owner = current_user_pubkey
+                                                .as_ref()
+                                                .map(|pk| pk == &pin.pubkey)
+                                                .unwrap_or(false);
+
+                                            rsx! {
+                                                PinCard {
+                                                    key: "{pin.event_id}",
+                                                    pin: pin.clone(),
+                                                    is_owner: pin_is_owner,
+                                                    on_delete: handle_pin_deleted,
+                                                    on_pin_to_board: move |req: PinToBoardRequest| {
+                                                        pin_to_board_request.set(Some(req));
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

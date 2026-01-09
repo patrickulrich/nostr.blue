@@ -207,6 +207,7 @@ pub fn CreateCookbookModal(
                                 // Validate URL scheme before setting
                                 if is_valid_http_url(&url) {
                                     image_url.set(Some(url));
+                                    error.set(None); // Clear any previous error
                                 } else {
                                     error.set(Some("Invalid image URL - must be http or https".to_string()));
                                 }
