@@ -16,8 +16,9 @@ use crate::routes::Route;
 
 /// Truncate a GUID for privacy-conscious logging (first 8 chars + "...")
 fn truncate_guid(guid: &str) -> String {
-    if guid.len() > 12 {
-        format!("{}...", &guid[..8])
+    if guid.chars().count() > 12 {
+        let prefix: String = guid.chars().take(8).collect();
+        format!("{}...", prefix)
     } else {
         guid.to_string()
     }
