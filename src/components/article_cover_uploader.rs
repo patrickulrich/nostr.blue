@@ -66,6 +66,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
             // Label
             label {
                 class: "block text-sm font-medium mb-2",
+                r#for: "cover-url-input",
                 "Cover Image"
                 span {
                     class: "text-muted-foreground font-normal ml-1",
@@ -80,6 +81,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 // URL input field (only shown if show_url_input is true)
                 if props.show_url_input {
                     input {
+                        id: "cover-url-input",
                         class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm",
                         r#type: "url",
                         placeholder: "https://example.com/image.jpg",
@@ -90,6 +92,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
 
                 // Upload button
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg font-medium transition flex items-center gap-2 text-sm",
                     onclick: move |_| show_upload_modal.set(true),
                     // Upload icon
@@ -137,6 +140,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                         class: "absolute top-2 right-2",
 
                         button {
+                            r#type: "button",
                             class: "p-2 bg-red-600/80 hover:bg-red-600 text-white rounded-full transition",
                             title: "Remove cover image",
                             onclick: handle_remove,
@@ -190,6 +194,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
 
                     ModalFooter {
                         button {
+                            r#type: "button",
                             class: "px-4 py-2 text-sm font-medium rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition",
                             onclick: move |_| show_upload_modal.set(false),
                             "Cancel"

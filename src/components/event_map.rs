@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
+use crate::utils::validation::validate_css_dimension;
 
 /// Global counter for unique EventMap container IDs
 static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -440,7 +441,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
         destroyMap(&id);
     });
 
-    let container_style = format!("height: {}; width: 100%;", props.height);
+    // Validate height to prevent CSS injection - fallback to default if invalid
+    let safe_height = validate_css_dimension(&props.height).unwrap_or("400px");
+    let container_style = format!("height: {}; width: 100%;", safe_height);
 
     rsx! {
         div {

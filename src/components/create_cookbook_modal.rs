@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use crate::stores::pin_boards_store::{self, PinboardInput};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::utils::validation::is_valid_http_url;
 
 /// Modal for creating a new cookbook
 #[component]
@@ -80,10 +81,14 @@ pub fn CreateCookbookModal(
     };
 
     rsx! {
-        // Backdrop
+        // Backdrop - disabled while submitting to prevent late state writes
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| {
+                if !*is_submitting.read() {
+                    on_close.call(());
+                }
+            },
 
             // Modal
             div {
@@ -102,8 +107,13 @@ pub fn CreateCookbookModal(
 
                     button {
                         r#type: "button",
-                        class: "p-1.5 rounded-full hover:bg-muted transition",
-                        onclick: move |_| on_close.call(()),
+                        class: "p-1.5 rounded-full hover:bg-muted transition disabled:opacity-50",
+                        disabled: *is_submitting.read(),
+                        onclick: move |_| {
+                            if !*is_submitting.read() {
+                                on_close.call(());
+                            }
+                        },
                         svg {
                             class: "w-5 h-5",
                             fill: "none",
@@ -187,7 +197,14 @@ pub fn CreateCookbookModal(
                             }
                         }
                         MediaUploader {
-                            on_upload: move |url: String| image_url.set(Some(url)),
+                            on_upload: move |url: String| {
+                                // Validate URL scheme before setting
+                                if is_valid_http_url(&url) {
+                                    image_url.set(Some(url));
+                                } else {
+                                    error.set(Some("Invalid image URL - must be http or https".to_string()));
+                                }
+                            },
                             button_label: "Upload cover image".to_string(),
                             input_id: "create-cookbook-modal-cover-image".to_string(),
                         }

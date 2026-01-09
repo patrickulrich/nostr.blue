@@ -46,9 +46,6 @@ pub fn AsciiDocContent(
     /// Custom CSS classes to apply to the container
     #[props(default = String::new())]
     class: String,
-    /// Base path for wikilinks (e.g., "/wiki/")
-    #[props(default = String::from("/wiki/"))]
-    wikilink_base: String,
     /// Callback when citation metadata is available
     #[props(default = None)]
     on_citations_loaded: Option<EventHandler<CitationMetadata>>,
@@ -152,6 +149,14 @@ pub fn AsciiDocContent(
         div {
             class: "asciidoc-content prose prose-sm dark:prose-invert max-w-none {class}",
             dangerous_inner_html: "{sanitized_content}",
+        }
+        // Show subtle loading indicator while citations are being fetched
+        if *citations_loading.read() {
+            div {
+                class: "text-xs text-muted-foreground mt-2 flex items-center gap-1",
+                span { class: "animate-pulse", "⏳" }
+                span { "Loading citations..." }
+            }
         }
         // Show subtle error indicator if citations failed to load
         if *citations_error.read() {
@@ -297,6 +302,7 @@ pub fn WikilinksList(
             class: "flex flex-wrap gap-2 {class}",
             for link in links.iter() {
                 Link {
+                    key: "{link.target}",
                     class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
                     to: Route::WikiDetail { identifier: link.target.clone() },
                     {link.display_text().to_string()}
