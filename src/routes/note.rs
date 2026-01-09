@@ -361,6 +361,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                     class: "divide-y divide-border",
                                     for node in thread_tree {
                                         ThreadedComment {
+                                            key: "{node.event.id}",
                                             node: node.clone(),
                                             depth: 0
                                         }
