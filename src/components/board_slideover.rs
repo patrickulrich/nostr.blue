@@ -60,16 +60,21 @@ pub fn BoardSlideover(
     // Pin to board modal (lifted from PinCard to avoid overflow clipping)
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
 
-    // Reset modal states when slideover closes
+    // Reset modal states and pin state when slideover closes
     // Since `show` is a Signal<bool> prop, use_effect auto-subscribes to it
     use_effect(move || {
         if !*show.read() {
+            // Reset modal states
             show_zap_modal.set(false);
             show_share_modal.set(false);
             show_delete_confirm.set(false);
             deleting.set(false);
             delete_error.set(None);
             pin_to_board_request.set(None);
+            // Reset pin state to prevent stale data from flashing on reopen
+            pins.set(Vec::new());
+            pins_loading.set(true);  // Set to true so loading shows on reopen
+            pins_error.set(None);
         }
     });
 

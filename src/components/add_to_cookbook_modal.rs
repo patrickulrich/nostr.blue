@@ -739,7 +739,12 @@ pub fn AddToCookbookModal(
                                         }
                                     }
                                     MediaUploader {
-                                        on_upload: move |url: String| new_image_url.set(Some(url)),
+                                        on_upload: move |url: String| {
+                                            if is_valid_http_url(&url) {
+                                                new_image_url.set(Some(url));
+                                            }
+                                            // Invalid URLs are silently ignored (MediaUploader handles its own errors)
+                                        },
                                         button_label: "Upload cover".to_string(),
                                     }
                                 }

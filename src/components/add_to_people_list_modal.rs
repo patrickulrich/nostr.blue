@@ -98,7 +98,6 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 Ok(_) => {
                     log::info!("Added person to list '{}' (private: {})", list.name, is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
-                    loading.set(false);
 
                     // Close after brief delay to show success
                     #[cfg(target_arch = "wasm32")]
@@ -107,6 +106,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                         TimeoutFuture::new(1000).await;
                     }
                     on_added.call(());
+                    loading.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to add to list: {}", e);
@@ -149,7 +149,6 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                             Ok(_) => {
                                 log::info!("Added person to new list '{}'", name);
                                 success_msg.set(Some(format!("Created \"{}\" and added", name)));
-                                loading.set(false);
 
                                 // Close after brief delay
                                 #[cfg(target_arch = "wasm32")]
@@ -158,6 +157,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     TimeoutFuture::new(1000).await;
                                 }
                                 on_added.call(());
+                                loading.set(false);
                             }
                             Err(e) => {
                                 error_msg.set(Some(format!("Created \"{}\" but failed to add person: {}", name, e)));
@@ -196,7 +196,11 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     }
                     button {
                         class: "text-muted-foreground hover:text-foreground text-xl",
-                        onclick: move |_| props.on_close.call(()),
+                        onclick: move |_| {
+                            if !*loading.read() {
+                                props.on_close.call(());
+                            }
+                        },
                         "×"
                     }
                 }
@@ -400,7 +404,11 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     button {
                         class: "px-4 py-2 text-muted-foreground hover:text-foreground",
                         disabled: *loading.read(),
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| {
+                            if !*loading.read() {
+                                on_close.call(());
+                            }
+                        },
                         "Cancel"
                     }
                     button {
