@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
+use crate::utils::validation::validate_css_dimension;
 
 /// Global counter for unique EventMap container IDs
 static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -25,12 +26,18 @@ static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
 window.leafletMaps = window.leafletMaps || new Map();
 
 // Load Leaflet from CDN if not already loaded
+// Uses shared Promise pattern to prevent concurrent loads
 export async function loadLeaflet() {
     if (window.L) {
         return;
     }
 
-    return new Promise((resolve, reject) => {
+    // Return existing loading promise if one is in progress
+    if (window.leafletLoadingPromise) {
+        return window.leafletLoadingPromise;
+    }
+
+    window.leafletLoadingPromise = new Promise((resolve, reject) => {
         // Load CSS
         const link = document.createElement('link');
         link.rel = 'stylesheet';
@@ -51,6 +58,8 @@ export async function loadLeaflet() {
         script.onerror = () => reject(new Error('Failed to load Leaflet'));
         document.head.appendChild(script);
     });
+
+    return window.leafletLoadingPromise;
 }
 
 // Initialize map
@@ -235,10 +244,17 @@ pub fn EventMap(props: EventMapProps) -> Element {
 
     // Memoize events key - recomputes only when props.events changes
     // Uses use_reactive to explicitly track the prop as a dependency
+    // Hash all display-affecting fields, not just coordinates
     let events_key = use_memo(use_reactive((&props.events,), |(events,)| {
         let mut hasher = DefaultHasher::new();
         for e in events.iter() {
             e.coordinate().hash(&mut hasher);
+            e.title().hash(&mut hasher);
+            e.start_timestamp().hash(&mut hasher);
+            // Hash locations for map marker positioning
+            for loc in e.locations() {
+                loc.hash(&mut hasher);
+            }
         }
         hasher.finish().to_string()
     }));
@@ -440,7 +456,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
         destroyMap(&id);
     });
 
-    let container_style = format!("height: {}; width: 100%;", props.height);
+    // Validate height to prevent CSS injection - fallback to default if invalid
+    let safe_height = validate_css_dimension(&props.height).unwrap_or("400px");
+    let container_style = format!("height: {}; width: 100%;", safe_height);
 
     rsx! {
         div {

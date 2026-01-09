@@ -709,11 +709,33 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
         bg_color
     );
 
+    let naddr = pe.event.naddr();
+
+    // Skip rendering link for events without valid naddr (e.g., private/unsigned events)
+    if naddr.is_empty() {
+        return rsx! {
+            div {
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-default opacity-70 shadow-sm",
+                style: "{style}",
+                div {
+                    class: "font-medium truncate",
+                    "{pe.event.title()}"
+                }
+                if pe.position.height > 40.0 {
+                    div {
+                        class: "opacity-90 truncate",
+                        "{format_event_time(&pe.event)}"
+                    }
+                }
+            }
+        };
+    }
+
     // Route livestreams to /videos/live, calendar events to /calendar
     let detail_route = if pe.event.is_livestream() {
-        Route::LiveStreamDetail { note_id: pe.event.naddr().to_string() }
+        Route::LiveStreamDetail { note_id: naddr.to_string() }
     } else {
-        Route::CalendarEventDetail { naddr: pe.event.naddr().to_string(), from: Some("calendar".to_string()) }
+        Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
     };
 
     rsx! {

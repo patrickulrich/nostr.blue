@@ -195,16 +195,28 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         let uri = mat.as_str();
         let identifier = uri.strip_prefix("nostr:").unwrap_or(uri);
 
-        // Validate with rust-nostr SDK for proper bech32 validation
-        if let Ok(nip19) = Nip19::from_bech32(identifier) {
-            let content_token = match nip19 {
+        // Try to validate with rust-nostr SDK for proper bech32 validation
+        let content_token = if let Ok(nip19) = Nip19::from_bech32(identifier) {
+            match nip19 {
                 Nip19::Pubkey(_) | Nip19::Profile(_) => Some(ContentToken::Mention(uri.to_string())),
                 Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => Some(ContentToken::EventMention(uri.to_string())),
                 Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None, // Don't render secret keys as mentions
-            };
-            if let Some(token) = content_token {
-                matches.push((mat.start(), mat.end(), token));
             }
+        } else {
+            // SDK validation failed (e.g., nevent with invalid relay URL like empty string)
+            // Fall back to determining token type based on prefix so we can still render it
+            // This handles cases where the bech32 is valid but TLV data has issues
+            if identifier.starts_with("npub1") || identifier.starts_with("nprofile1") {
+                Some(ContentToken::Mention(uri.to_string()))
+            } else if identifier.starts_with("note1") || identifier.starts_with("nevent1") || identifier.starts_with("naddr1") {
+                Some(ContentToken::EventMention(uri.to_string()))
+            } else {
+                None
+            }
+        };
+
+        if let Some(token) = content_token {
+            matches.push((mat.start(), mat.end(), token));
         }
     }
 

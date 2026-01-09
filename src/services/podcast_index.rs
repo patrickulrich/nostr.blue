@@ -5,10 +5,15 @@
 //! Uses NIP-98 HTTP Authentication for API access.
 
 use gloo_net::http::Request;
+use gloo_timers::callback::Timeout;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::nip98 as nip98_utils;
+use crate::utils::validation::parse_http_url;
+
+/// Timeout for proxy fetch requests (30 seconds)
+const PROXY_TIMEOUT_MS: u32 = 30_000;
 
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
@@ -320,15 +325,26 @@ pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
 }
 
 /// Get episode by episode GUID (NIP-73 podcast:item:guid: format)
-pub async fn get_episode_by_guid(guid: &str) -> Result<(Episode, Option<PodcastFeed>), String> {
-    let url = format!("{}/episodes/byguid?guid={}&fulltext", API_BASE, urlencoding::encode(guid));
+/// Optionally provide the podcast GUID for more reliable lookups
+pub async fn get_episode_by_guid(guid: &str, podcast_guid: Option<&str>) -> Result<(Episode, Option<PodcastFeed>), String> {
+    let mut url = format!("{}/episodes/byguid?guid={}&fulltext", API_BASE, urlencoding::encode(guid));
+    if let Some(pg) = podcast_guid {
+        url.push_str(&format!("&podcastguid={}", urlencoding::encode(pg)));
+    }
+    log::debug!("[podcast_index] get_episode_by_guid: fetching {}", url);
 
     #[derive(Deserialize)]
     struct EpisodeByGuidData {
         episode: Episode,
     }
 
-    let data: ApiResponse<EpisodeByGuidData> = authenticated_get(&url).await?;
+    let data: ApiResponse<EpisodeByGuidData> = match authenticated_get(&url).await {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("[podcast_index] get_episode_by_guid failed: {}", e);
+            return Err(e);
+        }
+    };
 
     // Try to fetch the podcast info for context
     let podcast = if let Some(feed_id) = data.data.episode.feed_id {
@@ -391,4 +407,125 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
 
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
+}
+
+// ============================================================================
+// Proxy Functions for External Content (CORS-safe)
+// ============================================================================
+
+/// Generic helper to fetch JSON content through the proxy with timeout and proper cancellation.
+///
+/// Validates the input URL, builds the proxy URL, handles NIP-98 authentication,
+/// sets up request cancellation via AbortController, and parses the JSON response.
+async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(url: &str, resource_type: &str) -> Result<T, String> {
+    // Validate input URL before proxying
+    if parse_http_url(url).is_none() {
+        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+    }
+
+    let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
+    log::debug!("[podcast_index] fetching {} via proxy", resource_type);
+
+    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
+
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController")?;
+    let signal = controller.signal();
+
+    // Set up abort timeout - controller is cloned for the closure
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(PROXY_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Send request with abort signal - request is actually cancelled on timeout
+    let response = Request::get(&auth_result.signed_url)
+        .header("Authorization", &auth_result.header)
+        .abort_signal(Some(&signal))
+        .send()
+        .await
+        .map_err(|e| {
+            if signal.aborted() {
+                format!("{} fetch timed out", resource_type)
+            } else {
+                format!("Failed to fetch {}: {}", resource_type, e)
+            }
+        })?;
+
+    if !response.ok() {
+        let status = response.status();
+        // Don't include raw response body in error - could leak sensitive info
+        return Err(format!("{} fetch failed with status {}", resource_type, status));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse {} JSON: {}", resource_type, e))
+}
+
+/// Helper to fetch text content through the proxy with timeout and proper cancellation.
+async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, String> {
+    // Validate input URL before proxying
+    if parse_http_url(url).is_none() {
+        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+    }
+
+    let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
+    log::debug!("[podcast_index] fetching {} via proxy", resource_type);
+
+    let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
+
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController")?;
+    let signal = controller.signal();
+
+    // Set up abort timeout - controller is cloned for the closure
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(PROXY_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Send request with abort signal - request is actually cancelled on timeout
+    let response = Request::get(&auth_result.signed_url)
+        .header("Authorization", &auth_result.header)
+        .abort_signal(Some(&signal))
+        .send()
+        .await
+        .map_err(|e| {
+            if signal.aborted() {
+                format!("{} fetch timed out", resource_type)
+            } else {
+                format!("Failed to fetch {}: {}", resource_type, e)
+            }
+        })?;
+
+    if !response.ok() {
+        let status = response.status();
+        // Don't include raw response body in error - could leak sensitive info
+        return Err(format!("{} fetch failed with status {}", resource_type, status));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read {}: {}", resource_type, e))
+}
+
+/// Fetch podcast chapters through the proxy to avoid CORS issues
+///
+/// This proxies the request through our worker to bypass browser CORS restrictions
+/// when fetching chapters from external podcast hosts.
+pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::podcast::ChaptersFile, String> {
+    fetch_via_proxy(chapters_url, "chapters").await
+}
+
+/// Fetch podcast transcript through the proxy to avoid CORS issues
+///
+/// This proxies the request through our worker to bypass browser CORS restrictions
+/// when fetching transcripts from external podcast hosts.
+pub async fn fetch_transcript_proxied(transcript_url: &str) -> Result<String, String> {
+    fetch_text_via_proxy(transcript_url, "transcript").await
 }
