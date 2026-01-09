@@ -3,6 +3,7 @@
 //! Similar to NoteMenu but designed for addressable events with naddr
 
 use dioxus::prelude::*;
+use nostr_sdk::nips::nip19::ToBech32;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::{ReportModal, AddToListModal};
 use crate::components::pin_board_item_selector::PinToBoardModal;
@@ -93,10 +94,22 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
     let naddr = props.naddr.clone();
-    let naddr_copy = naddr.clone();
     let naddr_pin_board = naddr.clone();
     // event_id is hex format, used for ReportModal and AddToListModal which require EventId
     let event_id_hex = props.event_id.clone().unwrap_or_default();
+
+    // Pre-compute the normalized naddr for both rendering check and onclick handler
+    // Strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
+    let clean_naddr: String = if naddr.to_ascii_lowercase().starts_with("nostr:") {
+        naddr.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr).to_string()
+    } else {
+        naddr.clone()
+    };
+    let clean_naddr_copy = clean_naddr.clone();
+
+    // Determine if we have something to copy (for conditional rendering)
+    let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
+    let event_id_hex_copy = event_id_hex.clone();
 
     // Check follow status on mount
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
@@ -248,22 +261,68 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                         }
                     }
 
-                    // Copy Link (naddr)
-                    button {
-                        class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
-                        onclick: move |e: MouseEvent| {
-                            e.stop_propagation();
-                            is_open.set(false);
+                    // Copy Link (naddr or event_id fallback)
+                    // Only show if we have something to copy (pre-computed clean_naddr or event_id)
+                    if has_copyable_link {
+                        button {
+                            class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |e: MouseEvent| {
+                                e.stop_propagation();
+                                is_open.set(false);
 
-                            let naddr_to_copy = naddr_copy.clone();
-                            let toast_api = toast;
+                                // Use pre-computed clean_naddr (already stripped of nostr: prefix)
+                                let naddr_to_copy = clean_naddr_copy.clone();
+                                let event_id_fallback = event_id_hex_copy.clone();
+                                let toast_api = toast;
 
-                            // Create nostr: URI
-                            let nostr_uri = format!("nostr:{}", naddr_to_copy);
+                                // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
+                                let nostr_uri = if !naddr_to_copy.is_empty() {
+                                    format!("nostr:{}", naddr_to_copy)
+                                } else if !event_id_fallback.is_empty() {
+                                    // Convert hex to bech32 (note1...) per NIP-19/NIP-21
+                                    match nostr_sdk::EventId::from_hex(&event_id_fallback) {
+                                        Ok(eid) => match eid.to_bech32() {
+                                            Ok(bech32) => format!("nostr:{}", bech32),
+                                            Err(e) => {
+                                                log::error!("Failed to encode event ID to bech32: {}", e);
+                                                toast_api.error(
+                                                    "Failed to copy link".to_string(),
+                                                    ToastOptions::new()
+                                                        .description("Could not encode event ID".to_string())
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
+                                                return;
+                                            }
+                                        },
+                                        Err(e) => {
+                                            log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
+                                            toast_api.error(
+                                                "Failed to copy link".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Could not parse event ID".to_string())
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    return; // Nothing to copy
+                                };
 
-                            // Copy to clipboard (await the promise for proper error handling)
-                            spawn(async move {
-                                if let Some(window) = web_sys::window() {
+                                // Copy to clipboard (await the promise for proper error handling)
+                                spawn(async move {
+                                    let Some(window) = web_sys::window() else {
+                                        toast_api.error(
+                                            "Clipboard not available".to_string(),
+                                            ToastOptions::new()
+                                                .description("Browser window not accessible".to_string())
+                                                .duration(Duration::from_secs(2))
+                                                .permanent(false),
+                                        );
+                                        return;
+                                    };
                                     let clipboard = window.navigator().clipboard();
                                     let promise = clipboard.write_text(&nostr_uri);
                                     match wasm_bindgen_futures::JsFuture::from(promise).await {
@@ -286,12 +345,12 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                             );
                                         }
                                     }
-                                }
-                            });
-                        },
-                        span {
-                            class: "text-sm",
-                            "Copy link"
+                                });
+                            },
+                            span {
+                                class: "text-sm",
+                                "Copy link"
+                            }
                         }
                     }
 

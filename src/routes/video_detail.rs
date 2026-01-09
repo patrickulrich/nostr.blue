@@ -358,6 +358,7 @@ fn LandscapePlayer(event: Event) -> Element {
                                         class: "divide-y divide-border",
                                         for node in thread_tree {
                                             ThreadedComment {
+                                                key: "{node.event.id}",
                                                 node: node.clone(),
                                                 depth: 0
                                             }
@@ -1166,6 +1167,7 @@ fn VideoInfo(
                                                 class: "divide-y divide-border",
                                                 for node in thread_tree {
                                                     ThreadedComment {
+                                                        key: "{node.event.id}",
                                                         node: node.clone(),
                                                         depth: 0
                                                     }

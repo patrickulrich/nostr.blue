@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use crate::stores::pin_boards_store::{self, PinboardInput};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::utils::validation::is_valid_http_url;
 
 /// Modal for creating a new cookbook
 #[component]
@@ -49,13 +50,19 @@ pub fn CreateCookbookModal(
         is_submitting.set(true);
 
         // Parse additional tags and always include "cookbook"
+        // Use HashSet to deduplicate while preserving order
+        let mut seen = std::collections::HashSet::new();
         let mut tags: Vec<String> = vec!["cookbook".to_string()];
-        let additional: Vec<String> = additional_tags.read()
+        seen.insert("cookbook".to_string());
+        for tag in additional_tags.read()
             .split(',')
             .map(|t| t.trim().to_lowercase())
-            .filter(|t| !t.is_empty() && t != "cookbook")
-            .collect();
-        tags.extend(additional);
+            .filter(|t| !t.is_empty())
+        {
+            if seen.insert(tag.clone()) {
+                tags.push(tag);
+            }
+        }
 
         let input = PinboardInput {
             title: title_trimmed,
@@ -80,10 +87,14 @@ pub fn CreateCookbookModal(
     };
 
     rsx! {
-        // Backdrop
+        // Backdrop - disabled while submitting to prevent late state writes
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| {
+                if !*is_submitting.read() {
+                    on_close.call(());
+                }
+            },
 
             // Modal
             div {
@@ -102,8 +113,13 @@ pub fn CreateCookbookModal(
 
                     button {
                         r#type: "button",
-                        class: "p-1.5 rounded-full hover:bg-muted transition",
-                        onclick: move |_| on_close.call(()),
+                        class: "p-1.5 rounded-full hover:bg-muted transition disabled:opacity-50",
+                        disabled: *is_submitting.read(),
+                        onclick: move |_| {
+                            if !*is_submitting.read() {
+                                on_close.call(());
+                            }
+                        },
                         svg {
                             class: "w-5 h-5",
                             fill: "none",
@@ -187,8 +203,19 @@ pub fn CreateCookbookModal(
                             }
                         }
                         MediaUploader {
-                            on_upload: move |url: String| image_url.set(Some(url)),
+                            on_upload: move |url: String| {
+                                // Trim whitespace and validate URL scheme before setting
+                                let trimmed = url.trim();
+                                if is_valid_http_url(trimmed) {
+                                    image_url.set(Some(trimmed.to_string()));
+                                    error.set(None); // Clear any previous error
+                                } else {
+                                    // Don't overwrite existing cover - just show error
+                                    error.set(Some("Invalid image URL - must be http or https".to_string()));
+                                }
+                            },
                             button_label: "Upload cover image".to_string(),
+                            input_id: "create-cookbook-modal-cover-image".to_string(),
                         }
                     }
 

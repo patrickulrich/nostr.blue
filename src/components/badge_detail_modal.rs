@@ -77,7 +77,10 @@ pub fn BadgeDetailModal(
             // Profile not in cache - fetch it asynchronously using Nostr client
             let pubkey_str = badge_pubkey.clone();
             let new_task = spawn(async move {
-                let pubkey = match PublicKey::from_hex(&pubkey_str) {
+                // Try hex first, then bech32 (npub) format
+                let pubkey = match PublicKey::from_hex(&pubkey_str)
+                    .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                {
                     Ok(pk) => pk,
                     Err(e) => {
                         log::warn!("Invalid issuer pubkey: {}", e);
@@ -282,6 +285,10 @@ pub fn BadgeDetailModal(
                             {
                                 let mut start_processing = move |state: ProcessingState, handler: EventHandler<()>| {
                                     processing_state.set(state);
+                                    // Cancel any existing timeout to prevent race conditions
+                                    if let Some(existing_task) = processing_timeout.write().take() {
+                                        existing_task.cancel();
+                                    }
                                     // Set a timeout to reset processing if parent doesn't respond
                                     let timeout_task = spawn(async move {
                                         gloo_timers::future::TimeoutFuture::new(10000).await;

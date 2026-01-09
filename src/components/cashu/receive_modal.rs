@@ -50,16 +50,17 @@ pub fn CashuReceiveModal(
                         if token_string.read().trim() == token_snapshot {
                             preview.set(Some(p));
                             error_message.set(None);
+                            is_previewing.set(false);
                         }
                     }
                     Err(e) => {
                         if token_string.read().trim() == token_snapshot {
                             preview.set(None);
                             error_message.set(Some(e));
+                            is_previewing.set(false);
                         }
                     }
                 }
-                is_previewing.set(false);
             });
             preview_task.set(Some(new_task));
         } else {

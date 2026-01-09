@@ -738,6 +738,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                     class: "space-y-1 mt-1",
                     for child in children {
                         ThreadedComment {
+                            key: "{child.event.id}",
                             node: child.clone(),
                             depth: depth + 1
                         }

@@ -134,7 +134,6 @@ pub fn WikiPageContent(
             AsciiDocContent {
                 content: page.event.content.clone(),
                 enable_wikilinks: true,
-                wikilink_base: "/wiki/".to_string(),
                 on_citations_loaded: move |metadata: CitationMetadata| {
                     citation_count.set(metadata.count);
                 },

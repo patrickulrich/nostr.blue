@@ -2,6 +2,8 @@
 
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::PublicKey;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use url::Url;
 use crate::stores::signer::SIGNER_INFO;
 
@@ -144,6 +146,12 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
 // CSS URL Validation
 // ============================================================================
 
+// Static regex for CSS dimension validation - compiled once at startup
+static CSS_DIMENSION_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^-?[0-9]*\.?[0-9]+(px|%|vh|vw|em|rem|pt|vmin|vmax)?$")
+        .expect("Failed to compile CSS dimension regex")
+});
+
 /// Validate a URL for safe embedding in CSS `url()` context.
 ///
 /// This function checks that:
@@ -175,4 +183,53 @@ pub fn css_safe_url(url: &str) -> Option<&str> {
         return None;
     }
     Some(url)
+}
+
+/// Validates a CSS dimension value to prevent CSS injection attacks.
+///
+/// Accepts numeric values with allowed units: px, %, vh, vw, em, rem, pt.
+/// Also accepts pure numeric values (treated as pixels).
+///
+/// # Arguments
+/// * `dimension` - The dimension string to validate
+///
+/// # Returns
+/// * `Some(&str)` - The validated dimension if safe
+/// * `None` - If the dimension contains potentially dangerous content
+///
+/// # Examples
+/// ```
+/// assert!(validate_css_dimension("400px").is_some());
+/// assert!(validate_css_dimension("100%").is_some());
+/// assert!(validate_css_dimension("50vh").is_some());
+/// assert!(validate_css_dimension("expression(alert())").is_none());
+/// assert!(validate_css_dimension("100px; background: red").is_none());
+/// ```
+pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
+    let trimmed = dimension.trim();
+
+    // Reject empty strings
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Reject dangerous CSS content
+    // Semicolons, braces, parentheses, quotes, backslashes are dangerous
+    if trimmed.contains([';', '{', '}', '(', ')', '\'', '"', '\\', '<', '>']) {
+        return None;
+    }
+
+    // Reject common CSS injection patterns (case-insensitive check)
+    let lower = trimmed.to_lowercase();
+    if lower.contains("expression") || lower.contains("javascript") || lower.contains("url") {
+        return None;
+    }
+
+    // Must match pattern: number + optional unit
+    // Allowed units: px, %, vh, vw, em, rem, pt, vmin, vmax
+    if CSS_DIMENSION_PATTERN.is_match(trimmed) {
+        Some(trimmed)  // Return validated trimmed slice
+    } else {
+        None
+    }
 }

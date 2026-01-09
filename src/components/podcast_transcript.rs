@@ -10,7 +10,8 @@
 
 use dioxus::prelude::*;
 use crate::utils::podcast::TranscriptRef;
-use crate::services::podcast_rss::{fetch_transcript, format_duration};
+use crate::services::podcast_index::fetch_transcript_proxied;
+use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
 use crate::components::icons;
 
@@ -136,16 +137,11 @@ fn TranscriptContent(props: TranscriptContentProps) -> Element {
     let transcript_type = props.transcript.transcript_type.clone();
     let transcript_type_for_parse = transcript_type.clone();
 
-    // Fetch transcript content using the actual transcript type
+    // Fetch transcript content through proxy to avoid CORS issues
     let content = use_resource(move || {
         let url = transcript_url.clone();
-        let ttype = transcript_type.clone();
-        async move { fetch_transcript(&TranscriptRef {
-            url,
-            transcript_type: ttype,
-            language: None,
-            rel: None,
-        }).await }
+        let _ttype = transcript_type.clone(); // Keep for potential future use
+        async move { fetch_transcript_proxied(&url).await }
     });
 
     let content_read = content.read();
