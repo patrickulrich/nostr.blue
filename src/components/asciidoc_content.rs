@@ -67,7 +67,9 @@ pub fn AsciiDocContent(
     use_effect(use_reactive!(|(content_for_effect, enable_citations)| {
         // Increment generation token at the start of every effect run
         // This invalidates any in-flight async fetches, even on early returns
-        let current_generation = *fetch_generation.read() + 1;
+        // Use peek() instead of read() to avoid registering fetch_generation as a dependency,
+        // which would cause an infinite loop when we immediately call set() below
+        let current_generation = *fetch_generation.peek() + 1;
         fetch_generation.set(current_generation);
 
         // Clear stale state when citations are disabled or content is empty
@@ -91,7 +93,8 @@ pub fn AsciiDocContent(
             let result = fetch_citations_by_identifiers(&identifiers).await;
 
             // Only apply results if this is still the latest fetch
-            if *fetch_generation.read() != current_generation {
+            // Use peek() for consistency - we're checking, not subscribing
+            if *fetch_generation.peek() != current_generation {
                 return;
             }
 
