@@ -265,10 +265,12 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
 
                                 // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
                                 // Normalize: strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
-                                let clean_naddr = naddr_to_copy
-                                    .strip_prefix("nostr:")
-                                    .or_else(|| naddr_to_copy.strip_prefix("NOSTR:"))
-                                    .unwrap_or(&naddr_to_copy);
+                                let clean_naddr = if naddr_to_copy.to_ascii_lowercase().starts_with("nostr:") {
+                                    // Strip up to and including the first ':', preserving original case for the rest
+                                    naddr_to_copy.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr_to_copy)
+                                } else {
+                                    &naddr_to_copy
+                                };
                                 let nostr_uri = if !clean_naddr.is_empty() {
                                     format!("nostr:{}", clean_naddr)
                                 } else if !event_id_fallback.is_empty() {
