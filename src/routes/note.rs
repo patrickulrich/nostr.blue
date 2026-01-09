@@ -277,12 +277,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                 key: "{parent.id}",
                                 class: "relative",
                                 // Render VoiceMessageCard for voice messages, NoteCard otherwise
+                                // Key ensures component state resets when parent list changes
                                 if is_voice_message(parent) {
                                     VoiceMessageCard {
+                                        key: "{parent.id}",
                                         event: parent.clone()
                                     }
                                 } else {
                                     NoteCard {
+                                        key: "{parent.id}",
                                         event: parent.clone(),
                                         collapsible: true
                                     }
@@ -297,12 +300,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 }
 
                 // Main post being viewed - use VoiceMessageCard for voice messages
+                // Key ensures component is recreated when navigating between posts
                 if is_voice_message(event) {
                     VoiceMessageCard {
+                        key: "{event.id}",
                         event: event.clone()
                     }
                 } else {
                     NoteCard {
+                        key: "{event.id}",
                         event: event.clone(),
                         collapsible: false
                     }
@@ -361,6 +367,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                     class: "divide-y divide-border",
                                     for node in thread_tree {
                                         ThreadedComment {
+                                            key: "{node.event.id}",
                                             node: node.clone(),
                                             depth: 0
                                         }

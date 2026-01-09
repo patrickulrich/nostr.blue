@@ -7,6 +7,7 @@ use crate::stores::pin_boards_store::{self, Pinboard, PinboardInput, PinInput, P
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::utils::validation::is_valid_http_url;
 
 /// Modal for adding a recipe to a cookbook
 #[component]
@@ -54,10 +55,11 @@ pub fn AddToCookbookModal(
     // Create local reads of global signals for use_reactive! tracking
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = *HAS_SIGNER.read();
+    let loaded = *has_loaded.read();
 
-    use_effect(use_reactive!(|(client_init, has_signer)| {
+    use_effect(use_reactive!(|(client_init, has_signer, loaded)| {
         // Skip if already loaded
-        if *has_loaded.read() {
+        if loaded {
             return;
         }
 
@@ -74,6 +76,7 @@ pub fn AddToCookbookModal(
 
         // Mark as loaded before spawning to prevent duplicate fetches
         has_loaded.set(true);
+        cookbooks_loading.set(true);
 
         spawn(async move {
             // Fetch user's own cookbooks
@@ -138,9 +141,14 @@ pub fn AddToCookbookModal(
 
     // Handle creating new cookbook and adding recipe
     let handle_create_and_add = move |_| {
-        let title_val = new_title.read().clone();
-        if title_val.trim().is_empty() {
+        // Validate and sanitize title (matching CreateCookbookModal)
+        let title_val = new_title.read().trim().to_string();
+        if title_val.is_empty() {
             error.set(Some("Cookbook name is required".to_string()));
+            return;
+        }
+        if title_val.chars().count() > 100 {
+            error.set(Some("Cookbook name must be 100 characters or less".to_string()));
             return;
         }
 
@@ -148,10 +156,14 @@ pub fn AddToCookbookModal(
         error.set(None);
         is_submitting.set(true);
 
-        let description = if new_description.read().is_empty() {
-            None
-        } else {
-            Some(new_description.read().clone())
+        // Sanitize description (truncate if over limit)
+        let description = {
+            let desc = new_description.read().trim().to_string();
+            if desc.is_empty() {
+                None
+            } else {
+                Some(desc.chars().take(1000).collect::<String>())
+            }
         };
         let image = new_image_url.read().clone();
 
@@ -209,10 +221,9 @@ pub fn AddToCookbookModal(
                     match pin_boards_store::publish_pin(pin_input).await {
                         Ok(_) => {
                             success.set(true);
-                            is_submitting.set(false);
                             pending_pin_cookbook.set(None);
                             // Navigate to the new cookbook after a short delay
-                            // Store task handle so it can be cancelled if modal is closed
+                            // Store task handle FIRST so it can be cancelled if modal is closed
                             #[cfg(target_arch = "wasm32")]
                             {
                                 let task = spawn(async move {
@@ -221,6 +232,7 @@ pub fn AddToCookbookModal(
                                 });
                                 navigation_task.set(Some(task));
                             }
+                            is_submitting.set(false);
                         }
                         Err(e) => {
                             // Cookbook created but pin failed - store cookbook info for retry
@@ -268,9 +280,9 @@ pub fn AddToCookbookModal(
             match pin_boards_store::publish_pin(pin_input).await {
                 Ok(_) => {
                     success.set(true);
-                    is_submitting.set(false);
                     pending_pin_cookbook.set(None);
                     // Navigate to the cookbook after a short delay
+                    // Store task handle FIRST so it can be cancelled if modal is closed
                     #[cfg(target_arch = "wasm32")]
                     {
                         let task = spawn(async move {
@@ -279,6 +291,7 @@ pub fn AddToCookbookModal(
                         });
                         navigation_task.set(Some(task));
                     }
+                    is_submitting.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to add recipe to cookbook (retry): {}", e);
@@ -596,7 +609,7 @@ pub fn AddToCookbookModal(
                                                         // Thumbnail
                                                         div {
                                                             class: "w-12 h-12 rounded-lg overflow-hidden bg-gradient-to-br from-orange-500/60 to-amber-600/60 flex-shrink-0",
-                                                            if let Some(ref img) = cb_for_check.image {
+                                                            if let Some(ref img) = cb_for_check.image.as_ref().filter(|u| is_valid_http_url(u)) {
                                                                 img {
                                                                     src: "{img}",
                                                                     alt: "{cb_for_check.title}",
@@ -727,7 +740,12 @@ pub fn AddToCookbookModal(
                                         }
                                     }
                                     MediaUploader {
-                                        on_upload: move |url: String| new_image_url.set(Some(url)),
+                                        on_upload: move |url: String| {
+                                            if is_valid_http_url(&url) {
+                                                new_image_url.set(Some(url));
+                                            }
+                                            // Invalid URLs are silently ignored (MediaUploader handles its own errors)
+                                        },
                                         button_label: "Upload cover".to_string(),
                                     }
                                 }

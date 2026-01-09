@@ -9,6 +9,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered};
 use crate::stores::auth_store;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use crate::components::pin_board_card::HashtagBadge;
 use crate::components::pin_board_item_card::PinCard;
 use crate::components::pin_board_item_selector::PinToBoardModal;
@@ -54,10 +55,29 @@ pub fn BoardSlideover(
     let mut show_zap_modal = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
-    let mut deleting = use_signal(|| false);
+    // Counter for delete task to prevent concurrent deletes (0 = not deleting, >0 = in progress)
+    let mut delete_task_id = use_signal(|| 0u32);
     let mut delete_error = use_signal(|| None::<String>);
     // Pin to board modal (lifted from PinCard to avoid overflow clipping)
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
+
+    // Reset modal states and pin state when slideover closes
+    // Since `show` is a Signal<bool> prop, use_effect auto-subscribes to it
+    use_effect(move || {
+        if !*show.read() {
+            // Reset modal states
+            show_zap_modal.set(false);
+            show_share_modal.set(false);
+            show_delete_confirm.set(false);
+            delete_task_id.set(0);
+            delete_error.set(None);
+            pin_to_board_request.set(None);
+            // Reset pin state to prevent stale data from flashing on reopen
+            pins.set(Vec::new());
+            pins_loading.set(true);  // Set to true so loading shows on reopen
+            pins_error.set(None);
+        }
+    });
 
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
@@ -144,11 +164,13 @@ pub fn BoardSlideover(
     let nav = navigator();
     let on_close_for_delete = on_close;
     let handle_delete = move |_| {
-        // Guard against concurrent deletes
-        if *deleting.read() {
+        // Guard against concurrent deletes using counter pattern
+        let current = *delete_task_id.read();
+        if current > 0 {
+            // Delete already in progress
             return;
         }
-        deleting.set(true);
+        delete_task_id.set(current.wrapping_add(1));
         delete_error.set(None);
         let board_clone = board_for_delete.clone();
         let on_close = on_close_for_delete;
@@ -162,7 +184,7 @@ pub fn BoardSlideover(
                 Err(e) => {
                     log::error!("Failed to delete board: {}", e);
                     delete_error.set(Some(format!("Failed to delete: {}", e)));
-                    deleting.set(false);
+                    delete_task_id.set(0); // Reset to allow retry
                     // Keep modal open so user sees the error
                 }
             }
@@ -271,14 +293,15 @@ pub fn BoardSlideover(
 
                                 // Delete button
                                 button {
-                                    class: if *deleting.read() {
+                                    class: if *delete_task_id.read() > 0 {
                                         "p-2 rounded-lg text-red-500/50 cursor-not-allowed"
                                     } else {
                                         "p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition"
                                     },
-                                    disabled: *deleting.read(),
+                                    disabled: *delete_task_id.read() > 0,
                                     onclick: move |_| {
-                                        if !*deleting.read() {
+                                        if *delete_task_id.read() == 0 {
+                                            delete_error.set(None);  // Clear stale error from previous attempts
                                             show_delete_confirm.set(true);
                                         }
                                     },
@@ -321,13 +344,15 @@ pub fn BoardSlideover(
                 }
 
                 // Cover image
-                if let Some(ref img_url) = cover_image {
+                if let Some(ref img_url) = cover_image.as_ref().filter(|u| is_valid_http_url(u)) {
                     div {
                         class: "relative w-full h-48 md:h-64 overflow-hidden",
                         img {
                             src: "{img_url}",
                             alt: "{title}",
-                            class: "w-full h-full object-cover"
+                            class: "w-full h-full object-cover",
+                            loading: "lazy",
+                            decoding: "async",
                         }
                         // Gradient overlay
                         div {
@@ -347,7 +372,7 @@ pub fn BoardSlideover(
                         // Avatar
                         div {
                             class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
-                            if let Some(ref pic_url) = profile_picture() {
+                            if let Some(ref pic_url) = profile_picture().as_ref().filter(|u| is_valid_http_url(u)) {
                                 img {
                                     src: "{pic_url}",
                                     alt: "{display_name()}",
@@ -462,17 +487,34 @@ pub fn BoardSlideover(
                             }
                         }
                     } else {
-                        div {
-                            class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
-                            for pin in pins.read().iter() {
-                                PinCard {
-                                    key: "{pin.event_id}",
-                                    pin: pin.clone(),
-                                    is_owner: is_owner,
-                                    on_delete: handle_pin_deleted,
-                                    on_pin_to_board: move |req: PinToBoardRequest| {
-                                        pin_to_board_request.set(Some(req));
-                                    },
+                        {
+                            // Get current user pubkey for per-pin ownership check
+                            let current_user_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+
+                            rsx! {
+                                div {
+                                    class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
+                                    for pin in pins.read().iter() {
+                                        {
+                                            // Compute per-pin ownership (pin author, not board owner)
+                                            let pin_is_owner = current_user_pubkey
+                                                .as_ref()
+                                                .map(|pk| pk == &pin.pubkey)
+                                                .unwrap_or(false);
+
+                                            rsx! {
+                                                PinCard {
+                                                    key: "{pin.event_id}",
+                                                    pin: pin.clone(),
+                                                    is_owner: pin_is_owner,
+                                                    on_delete: handle_pin_deleted,
+                                                    on_pin_to_board: move |req: PinToBoardRequest| {
+                                                        pin_to_board_request.set(Some(req));
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -501,14 +543,21 @@ pub fn BoardSlideover(
         }
 
         if *show_delete_confirm.read() {
+            // Show error as separate toast above the modal if present
+            if let Some(ref err) = *delete_error.read() {
+                div {
+                    class: "fixed inset-x-0 top-20 z-[51] flex justify-center pointer-events-none",
+                    div {
+                        class: "bg-red-500/95 text-white px-4 py-2 rounded-lg shadow-lg max-w-md text-center",
+                        "{err}"
+                    }
+                }
+            }
+
             ConfirmModal {
                 title: "Delete Board".to_string(),
-                message: if let Some(ref err) = *delete_error.read() {
-                    format!("{}\n\nAre you sure you want to delete this board? This action cannot be undone.", err)
-                } else {
-                    "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string()
-                },
-                confirm_text: Some(if *deleting.read() { "Deleting..." } else { "Delete" }.to_string()),
+                message: "Are you sure you want to delete this board? This action cannot be undone. Note: Existing pins will become orphaned.".to_string(),
+                confirm_text: Some(if *delete_task_id.read() > 0 { "Deleting..." } else { "Delete" }.to_string()),
                 cancel_text: Some("Cancel".to_string()),
                 on_confirm: handle_delete,
                 on_cancel: move |_| {

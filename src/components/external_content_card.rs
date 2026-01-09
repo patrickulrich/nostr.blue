@@ -7,9 +7,11 @@ use dioxus::prelude::*;
 use nostr::nips::nip73::ExternalContentId;
 use crate::utils::nip73;
 use crate::components::icons;
-use crate::services::{mempool, openlibrary::{self, CoverSize}};
-use crate::stores::settings_store;
+use crate::components::podcast_episode_card::DisplayEpisode;
+use crate::services::{mempool, openlibrary::{self, CoverSize}, podcast_index, podcast_rss::format_duration};
+use crate::stores::{settings_store, music_player};
 use crate::utils::format::format_sats_with_unit;
+use crate::routes::Route;
 
 /// Generic external content card dispatcher
 /// Routes to the appropriate card based on content type
@@ -17,7 +19,10 @@ use crate::utils::format::format_sats_with_unit;
 pub fn ExternalContentCard(
     content: ExternalContentId,
     #[props(default = false)] compact: bool,
+    /// Optional podcast GUID for episode lookups (from same note's podcast:guid tag)
+    podcast_guid: Option<String>,
 ) -> Element {
+    log::info!("[ExternalContentCard] Dispatching content: {:?}", content);
     match &content {
         ExternalContentId::Book(isbn) => rsx! {
             BookCard { isbn: isbn.clone(), compact }
@@ -35,7 +40,7 @@ pub fn ExternalContentCard(
             PodcastGuidCard { guid: guid.clone(), is_episode: false, compact }
         },
         ExternalContentId::PodcastEpisode(guid) => rsx! {
-            PodcastGuidCard { guid: guid.clone(), is_episode: true, compact }
+            PodcastEpisodeGuidCard { guid: guid.clone(), podcast_guid: podcast_guid.clone(), compact }
         },
         ExternalContentId::Geohash(hash) => rsx! {
             GeohashCard { geohash: hash.clone(), compact }
@@ -61,6 +66,7 @@ pub fn ExternalContentCard(
 }
 
 /// List of external content cards from an event
+/// Podcasts are always rendered as full cards (non-compact) for playback support
 #[component]
 pub fn ExternalContentList(
     contents: Vec<(ExternalContentId, Option<String>)>,
@@ -70,14 +76,46 @@ pub fn ExternalContentList(
         return rsx! {};
     }
 
+    // Extract podcast feed GUID if present (for episode lookups)
+    let podcast_guid: Option<String> = contents.iter().find_map(|(content, _)| {
+        if let ExternalContentId::PodcastFeed(guid) = content {
+            Some(guid.clone())
+        } else {
+            None
+        }
+    });
+
+    // Separate podcasts from other content - podcasts get full cards for playback
+    let (podcasts, other): (Vec<_>, Vec<_>) = contents
+        .into_iter()
+        .partition(|(content, _)| matches!(content,
+            ExternalContentId::PodcastFeed(_) | ExternalContentId::PodcastEpisode(_)
+        ));
+
     rsx! {
         div {
-            class: "flex flex-wrap gap-2 mt-2",
-            for (content, _hint) in contents {
+            class: "flex flex-col gap-2 mt-2",
+            // Render podcasts as full cards (non-compact) for playback support
+            for (content, _hint) in podcasts.iter() {
                 ExternalContentCard {
-                    key: "{nip73::get_raw_identifier(&content)}",
+                    key: "{nip73::get_raw_identifier(content)}",
                     content: content.clone(),
-                    compact
+                    compact: false,
+                    podcast_guid: podcast_guid.clone()
+                }
+            }
+            // Render other external content with passed compact setting
+            if !other.is_empty() {
+                div {
+                    class: "flex flex-wrap gap-2",
+                    for (content, _hint) in other.iter() {
+                        ExternalContentCard {
+                            key: "{nip73::get_raw_identifier(content)}",
+                            content: content.clone(),
+                            compact,
+                            podcast_guid: None
+                        }
+                    }
                 }
             }
         }
@@ -642,38 +680,147 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
     }
 }
 
+// ============================================================================
+// Podcast Episode Card (with playback)
+// ============================================================================
+
 #[derive(Props, Clone, PartialEq)]
-struct PodcastGuidCardProps {
+struct PodcastEpisodeGuidCardProps {
     guid: String,
-    #[props(default = false)]
-    is_episode: bool,
+    /// Optional podcast GUID for more reliable episode lookups
+    podcast_guid: Option<String>,
     #[props(default = false)]
     compact: bool,
 }
 
-/// Podcast GUID card (links to internal podcast route or Podcast Index)
+/// Podcast episode card that fetches episode data and provides playback
 #[component]
-fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
-    let podcast_index_url = if props.is_episode {
-        format!("https://podcastindex.org/search?q={}", props.guid)
-    } else {
-        format!("https://podcastindex.org/podcast/{}", props.guid)
-    };
+fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
+    let guid = props.guid.clone();
+    let guid_for_fetch = guid.clone();
+    let podcast_guid_for_fetch = props.podcast_guid.clone();
 
-    // Short GUID for display (UTF-8 safe)
-    let short_guid = {
-        let chars: Vec<char> = props.guid.chars().collect();
-        if chars.len() > 20 {
-            let prefix: String = chars[..17].iter().collect();
-            format!("{}...", prefix)
+    log::info!("[PodcastEpisodeGuidCard] Rendering with GUID: {}, podcast_guid: {:?}", guid, props.podcast_guid);
+
+    // Fetch episode data from Podcast Index API
+    let episode_data = use_resource(move || {
+        let guid = guid_for_fetch.clone();
+        let podcast_guid = podcast_guid_for_fetch.clone();
+        async move {
+            log::info!("[PodcastEpisodeGuidCard] Fetching episode: {}, podcast_guid: {:?}", guid, podcast_guid);
+            let result = podcast_index::get_episode_by_guid(&guid, podcast_guid.as_deref()).await;
+            match &result {
+                Ok(_) => log::info!("[PodcastEpisodeGuidCard] Fetch succeeded"),
+                Err(e) => log::error!("[PodcastEpisodeGuidCard] Fetch failed: {}", e),
+            }
+            result
+        }
+    });
+
+    // Create display episode and track from fetched data
+    let display_episode = use_memo(move || {
+        if let Some(Ok((ref episode, ref feed))) = *episode_data.read() {
+            if let Some(feed) = feed {
+                Some(DisplayEpisode::from_podcast_index_episode(episode, feed))
+            } else {
+                // Create a minimal feed for display
+                let minimal_feed = podcast_index::PodcastFeed {
+                    id: episode.feed_id.unwrap_or(0),
+                    title: episode.feed_title.clone().unwrap_or_else(|| "Unknown Podcast".to_string()),
+                    url: episode.feed_url.clone().unwrap_or_default(),
+                    original_url: None,
+                    link: None,
+                    description: None,
+                    author: None,
+                    owner_name: None,
+                    image: episode.feed_image.clone(),
+                    artwork: None,
+                    language: None,
+                    itunes_id: None,
+                    podcast_guid: episode.podcast_guid.clone(),
+                    episode_count: None,
+                    categories: None,
+                    trending_score: None,
+                    value: None,
+                };
+                Some(DisplayEpisode::from_podcast_index_episode(episode, &minimal_feed))
+            }
         } else {
-            props.guid.clone()
+            None
+        }
+    });
+
+    // Check if this episode is currently playing
+    let episode_id = use_memo(move || {
+        display_episode.read().as_ref().map(|e| e.id.clone()).unwrap_or_default()
+    });
+    let episode_id_for_playing = episode_id;
+    let is_playing = use_memo(move || {
+        let ep_id = episode_id_for_playing();
+        if ep_id.is_empty() {
+            return false;
+        }
+        let player_state = music_player::MUSIC_PLAYER.read();
+        if let Some(ref current) = player_state.current_track {
+            current.id == ep_id && player_state.is_playing
+        } else {
+            false
+        }
+    });
+
+    // Handle play button click - prevent default and stop propagation to avoid Link navigation
+    let handle_play = move |e: MouseEvent| {
+        e.prevent_default();
+        e.stop_propagation();
+        if let Some(ref episode) = *display_episode.read() {
+            let player_state = music_player::MUSIC_PLAYER.read();
+
+            // If this episode is playing, toggle pause
+            if let Some(ref current) = player_state.current_track {
+                if current.id == episode.id && player_state.is_playing {
+                    drop(player_state);
+                    music_player::toggle_play();
+                    return;
+                }
+            }
+            drop(player_state);
+
+            // Play this episode
+            let track = episode.to_music_track();
+            music_player::play_track(track, None, None);
         }
     };
 
-    let label = if props.is_episode { "Episode" } else { "Podcast" };
+    // Get feed_id and episode_id for internal routing
+    let route_ids = use_memo(move || {
+        if let Some(Ok((ref episode, _))) = *episode_data.read() {
+            Some((
+                episode.feed_id.unwrap_or(0).to_string(),
+                episode.id.to_string()
+            ))
+        } else {
+            None
+        }
+    });
 
-    if props.compact {
+    // Loading state
+    if episode_data.read().is_none() {
+        return rsx! {
+            div {
+                class: "flex items-center gap-2 p-2 rounded-lg border border-border bg-card animate-pulse",
+                div { class: "w-12 h-12 rounded bg-muted" }
+                div {
+                    class: "flex-1 space-y-2",
+                    div { class: "h-3 bg-muted rounded w-3/4" }
+                    div { class: "h-2 bg-muted rounded w-1/2" }
+                }
+            }
+        };
+    }
+
+    // Error state - fall back to compact badge
+    if let Some(Err(_)) = *episode_data.read() {
+        let podcast_index_url = format!("https://podcastindex.org/search?q={}", guid);
         return rsx! {
             a {
                 href: "{podcast_index_url}",
@@ -684,39 +831,334 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
                     class: "w-3.5 h-3.5",
                     dangerous_inner_html: icons::PODCAST
                 }
-                "{label}"
+                "Episode"
             }
         };
     }
 
-    rsx! {
-        a {
-            href: "{podcast_index_url}",
-            target: "_blank",
-            rel: "noopener noreferrer",
-            class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
+    // Success - render episode card
+    // Clone episode data to avoid borrowing issues with rsx
+    let episode_opt = display_episode.read().clone();
+    let Some(episode) = episode_opt else {
+        return rsx! {};
+    };
 
+    // Get route IDs for navigation
+    let Some((podcast_id, episode_id)) = route_ids.read().clone() else {
+        return rsx! {};
+    };
+
+    let image_url = episode.image.clone()
+        .or(episode.podcast_image.clone())
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id));
+    let duration_str = episode.duration
+        .map(format_duration)
+        .unwrap_or_else(|| "--:--".to_string());
+    let has_v4v = episode.value.is_some();
+    let title = episode.title.clone();
+    let podcast_title = episode.podcast_title.clone();
+    let pub_date = episode.pub_date.clone();
+
+    // Compact mode - play button separate from navigation links
+    if props.compact {
+        return rsx! {
             div {
-                class: "w-10 h-10 rounded bg-purple-500/10 flex items-center justify-center flex-shrink-0",
-                span {
-                    class: "w-5 h-5 text-purple-500",
-                    dangerous_inner_html: icons::PODCAST
+                class: "flex items-center gap-2 p-2 rounded-lg border border-border bg-card hover:bg-muted/50 transition group max-w-md",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                // Episode image with play button (NOT inside Link)
+                div {
+                    class: "relative flex-shrink-0",
+                    img {
+                        src: "{image_url}",
+                        alt: "{title}",
+                        class: "w-10 h-10 rounded object-cover",
+                        loading: "lazy"
+                    }
+                    // Play button overlay
+                    button {
+                        class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
+                        onclick: handle_play,
+                        aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
+                        span {
+                            class: "w-4 h-4 text-white",
+                            dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY }
+                        }
+                    }
+                }
+
+                // Episode info - Link only wraps the title
+                div {
+                    class: "flex-1 min-w-0",
+                    Link {
+                        to: Route::PodcastRssEpisodeDetail { podcast_id: podcast_id.clone(), episode_id: episode_id.clone() },
+                        class: "font-medium text-sm truncate block hover:underline cursor-pointer",
+                        onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
+                        "{title}"
+                    }
+                    div {
+                        class: "text-xs text-muted-foreground truncate",
+                        "{podcast_title}"
+                    }
+                }
+
+                // Duration and V4V indicator
+                div {
+                    class: "flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0",
+                    if has_v4v {
+                        span {
+                            class: "text-amber-500",
+                            title: "Value 4 Value enabled",
+                            dangerous_inner_html: icons::ZAP
+                        }
+                    }
+                    span { "{duration_str}" }
+                }
+            }
+        };
+    }
+
+    // Full card mode - play button separate from navigation links
+    rsx! {
+        div {
+            class: "flex items-start gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition group max-w-md",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+
+            // Episode image with play button (NOT inside Link)
+            div {
+                class: "relative flex-shrink-0",
+                img {
+                    src: "{image_url}",
+                    alt: "{title}",
+                    class: "w-16 h-16 rounded-lg object-cover",
+                    loading: "lazy"
+                }
+
+                // Play button overlay
+                button {
+                    class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
+                    onclick: handle_play,
+                    aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
+                    span {
+                        class: "w-6 h-6 text-white",
+                        dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY }
+                    }
                 }
             }
 
+            // Episode info - Link only wraps the text for navigation
             div {
-                class: "flex flex-col min-w-0",
-                h4 {
-                    class: "font-semibold text-sm",
-                    "{label}"
+                class: "flex-1 min-w-0",
+
+                // Title - linked to episode page
+                Link {
+                    to: Route::PodcastRssEpisodeDetail { podcast_id: podcast_id.clone(), episode_id: episode_id.clone() },
+                    class: if *is_playing.read() { "font-medium text-sm text-primary line-clamp-2 hover:underline cursor-pointer" } else { "font-medium text-sm line-clamp-2 hover:underline cursor-pointer" },
+                    onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
+                    "{title}"
                 }
-                p {
-                    class: "text-xs text-muted-foreground font-mono truncate",
-                    "{short_guid}"
+
+                // Podcast title
+                div {
+                    class: "text-xs text-muted-foreground truncate mt-0.5",
+                    "{podcast_title}"
                 }
+
+                // Metadata row
+                div {
+                    class: "flex items-center gap-2 mt-1 text-xs text-muted-foreground",
+                    // Duration
+                    span { "{duration_str}" }
+                    // V4V indicator
+                    if has_v4v {
+                        span {
+                            class: "text-amber-500",
+                            title: "Value 4 Value enabled",
+                            dangerous_inner_html: icons::ZAP
+                        }
+                    }
+                    // Publication date
+                    if let Some(ref date) = pub_date {
+                        span { "• {date}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct PodcastGuidCardProps {
+    guid: String,
+    #[props(default = false)]
+    is_episode: bool,
+    #[props(default = false)]
+    compact: bool,
+}
+
+/// Podcast GUID card - fetches podcast data and links to internal route
+#[component]
+fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
+    let guid = props.guid.clone();
+    let guid_for_fetch = guid.clone();
+
+    log::info!("[PodcastGuidCard] Rendering with GUID: {}", guid);
+
+    // Fetch podcast data from Podcast Index API
+    let podcast_data = use_resource(move || {
+        let guid = guid_for_fetch.clone();
+        async move {
+            log::info!("[PodcastGuidCard] Fetching podcast: {}", guid);
+            let result = podcast_index::get_podcast_by_guid(&guid).await;
+            match &result {
+                Ok(_) => log::info!("[PodcastGuidCard] Fetch succeeded"),
+                Err(e) => log::error!("[PodcastGuidCard] Fetch failed: {}", e),
+            }
+            result
+        }
+    });
+
+    // Loading state
+    if podcast_data.read().is_none() {
+        return rsx! {
+            div {
+                class: "flex items-center gap-2 p-2 rounded-lg border border-border bg-card animate-pulse",
+                div { class: "w-12 h-12 rounded bg-muted" }
+                div {
+                    class: "flex-1 space-y-2",
+                    div { class: "h-3 bg-muted rounded w-3/4" }
+                    div { class: "h-2 bg-muted rounded w-1/2" }
+                }
+            }
+        };
+    }
+
+    // Error state - fall back to compact badge with external link
+    if let Some(Err(_)) = *podcast_data.read() {
+        let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+        return rsx! {
+            a {
+                href: "{podcast_index_url}",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                class: "inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full hover:bg-purple-500/20 transition",
                 span {
-                    class: "text-xs text-primary mt-0.5",
-                    "View on Podcast Index →"
+                    class: "w-3.5 h-3.5",
+                    dangerous_inner_html: icons::PODCAST
+                }
+                "Podcast"
+            }
+        };
+    }
+
+    // Success - render podcast card with internal link
+    let podcast = podcast_data.read().as_ref().unwrap().as_ref().unwrap().clone();
+    let podcast_id = podcast.id.to_string();
+    let title = podcast.title.clone();
+    let image_url = podcast.get_image()
+        .map(String::from)
+        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.id));
+    let author = podcast.author.clone().or(podcast.owner_name.clone());
+    let episode_count = podcast.episode_count;
+    let has_v4v = podcast.value.is_some();
+
+    // Compact mode - smaller card but still with image
+    if props.compact {
+        return rsx! {
+            Link {
+                to: Route::PodcastRssFeedDetail { podcast_id: podcast_id.clone() },
+                class: "block",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                div {
+                    class: "flex items-center gap-2 p-2 rounded-lg border border-border bg-card hover:bg-muted/50 transition group max-w-md cursor-pointer",
+
+                    // Podcast image
+                    img {
+                        src: "{image_url}",
+                        alt: "{title}",
+                        class: "w-10 h-10 rounded object-cover flex-shrink-0",
+                        loading: "lazy"
+                    }
+
+                    // Podcast info
+                    div {
+                        class: "flex-1 min-w-0",
+                        div {
+                            class: "font-medium text-sm truncate",
+                            "{title}"
+                        }
+                        if let Some(ref auth) = author {
+                            div {
+                                class: "text-xs text-muted-foreground truncate",
+                                "{auth}"
+                            }
+                        }
+                    }
+
+                    // V4V indicator
+                    if has_v4v {
+                        span {
+                            class: "text-amber-500 flex-shrink-0",
+                            title: "Value 4 Value enabled",
+                            dangerous_inner_html: icons::ZAP
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // Full card mode
+    rsx! {
+        Link {
+            to: Route::PodcastRssFeedDetail { podcast_id: podcast_id.clone() },
+            class: "block",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            div {
+                class: "flex items-start gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition group max-w-md cursor-pointer",
+
+                // Podcast image
+                img {
+                    src: "{image_url}",
+                    alt: "{title}",
+                    class: "w-16 h-16 rounded-lg object-cover flex-shrink-0",
+                    loading: "lazy"
+                }
+
+                // Podcast info
+                div {
+                    class: "flex-1 min-w-0",
+
+                    // Title
+                    div {
+                        class: "font-medium text-sm line-clamp-2",
+                        "{title}"
+                    }
+
+                    // Author
+                    if let Some(ref auth) = author {
+                        div {
+                            class: "text-xs text-muted-foreground truncate mt-0.5",
+                            "{auth}"
+                        }
+                    }
+
+                    // Metadata row
+                    div {
+                        class: "flex items-center gap-2 mt-1 text-xs text-muted-foreground",
+                        // Episode count
+                        if let Some(count) = episode_count {
+                            span { "{count} episodes" }
+                        }
+                        // V4V indicator
+                        if has_v4v {
+                            span {
+                                class: "text-amber-500",
+                                title: "Value 4 Value enabled",
+                                dangerous_inner_html: icons::ZAP
+                            }
+                        }
+                    }
                 }
             }
         }

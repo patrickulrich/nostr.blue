@@ -406,6 +406,44 @@ fn MentionRenderer(mention: String) -> Element {
     }
 }
 
+/// Try to extract event ID from a nevent string even when SDK parsing fails
+/// This handles cases where the nevent has invalid relay URLs (e.g., empty strings)
+/// by using lower-level bech32 decoding and manually parsing the TLV data
+fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
+    use bech32::Hrp;
+
+    // Only handle nevent identifiers
+    if !identifier.starts_with("nevent1") {
+        return None;
+    }
+
+    // Decode the bech32 data
+    let (hrp, data) = bech32::decode(identifier).ok()?;
+
+    // Verify it's a nevent
+    if hrp != Hrp::parse("nevent").ok()? {
+        return None;
+    }
+
+    // Parse TLV: first entry should be type 0 (event ID) with 32 bytes
+    // TLV format: type (1 byte) + length (1 byte) + value (length bytes)
+    if data.len() < 34 {
+        return None;
+    }
+
+    let tlv_type = data[0];
+    let tlv_len = data[1] as usize;
+
+    // Type 0 = special (event ID for nevent), length should be 32
+    if tlv_type != 0 || tlv_len != 32 || data.len() < 2 + tlv_len {
+        return None;
+    }
+
+    // Extract the 32-byte event ID
+    let event_id_bytes: [u8; 32] = data[2..34].try_into().ok()?;
+    EventId::from_byte_array(event_id_bytes).into()
+}
+
 #[component]
 fn EventMentionRenderer(mention: String) -> Element {
     // Extract the identifier from "nostr:note..." or just "note..."
@@ -433,8 +471,15 @@ fn EventMentionRenderer(mention: String) -> Element {
         _ => None, // Not an event reference
     });
 
-    let event_id_result = parsed_event.as_ref().map(|(id, _)| *id);
-    let relay_hints = parsed_event.map(|(_, relays)| relays).unwrap_or_default();
+    // If SDK parsing failed (e.g., nevent with invalid relay URL), try lower-level extraction
+    let (event_id_result, relay_hints) = if let Some((id, relays)) = parsed_event {
+        (Some(id), relays)
+    } else if let Some(id) = try_extract_event_id_from_nevent(identifier) {
+        // Fallback: extracted event ID from malformed nevent, no relay hints
+        (Some(id), Vec::new())
+    } else {
+        (None, Vec::new())
+    };
 
     // Always call hooks unconditionally
     let mut embedded_event = use_signal(|| None::<Event>);
@@ -3704,7 +3749,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
     let episode_resource = use_resource(move || {
         let g = guid_for_resource.clone();
         async move {
-            podcast_index::get_episode_by_guid(&g).await
+            podcast_index::get_episode_by_guid(&g, None).await
         }
     });
 

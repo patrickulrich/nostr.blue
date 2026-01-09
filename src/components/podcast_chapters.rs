@@ -8,7 +8,8 @@
 
 use dioxus::prelude::*;
 use crate::utils::podcast::Chapter;
-use crate::services::podcast_rss::{fetch_chapters, format_duration};
+use crate::services::podcast_index::fetch_chapters_proxied;
+use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
 use crate::components::icons;
 
@@ -32,10 +33,10 @@ pub struct PodcastChaptersProps {
 pub fn PodcastChapters(props: PodcastChaptersProps) -> Element {
     let chapters_url = props.chapters_url.clone();
 
-    // Fetch chapters
+    // Fetch chapters through proxy to avoid CORS issues
     let chapters = use_resource(move || {
         let url = chapters_url.clone();
-        async move { fetch_chapters(&url).await }
+        async move { fetch_chapters_proxied(&url).await }
     });
 
     let chapters_read = chapters.read();

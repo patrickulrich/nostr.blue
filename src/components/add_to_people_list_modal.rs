@@ -7,11 +7,15 @@
 //! - Creating a new list inline
 
 use dioxus::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::profiles;
 use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::add_person_to_list;
+
+/// Global counter for generating unique modal IDs
+static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, PartialEq)]
 enum ModalTab {
@@ -31,6 +35,11 @@ pub struct AddToPeopleListModalProps {
 
 #[component]
 pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
+    // Generate unique IDs for accessibility
+    let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let title_id = format!("add-to-list-modal-title-{}", modal_id());
+    let select_id = format!("add-to-list-select-{}", modal_id());
+
     let mut active_tab = use_signal(|| ModalTab::ExistingList);
     let mut selected_list = use_signal(|| None::<UserList>);
     let mut add_as_private = use_signal(|| false);
@@ -54,16 +63,31 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
             .collect::<Vec<_>>()
     });
 
-    // Get person's display name
+    // Get person's display name using signal + effect pattern for reactivity
+    // This ensures the display name updates when profile data arrives from the network
     let person_pubkey = props.person_pubkey.clone();
+    let person_pubkey_for_effect = props.person_pubkey.clone();
+    let mut person_metadata = use_signal(move || profiles::get_profile(&person_pubkey));
+
+    // Fetch profile in background if not cached
+    use_effect(use_reactive((&person_pubkey_for_effect,), move |(pk,)| {
+        spawn(async move {
+            if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                // Update signal with freshly fetched profile to trigger re-render
+                person_metadata.set(profiles::get_profile(&pk));
+            }
+        });
+    }));
+
+    let person_pubkey_for_display = props.person_pubkey.clone();
     let person_name = use_memo(move || {
-        profiles::get_profile(&person_pubkey)
+        person_metadata.read().as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| {
-                if person_pubkey.len() >= 12 {
-                    person_pubkey[..12].to_string()
+                if person_pubkey_for_display.chars().count() >= 12 {
+                    person_pubkey_for_display.chars().take(12).collect::<String>()
                 } else {
-                    person_pubkey.clone()
+                    person_pubkey_for_display.clone()
                 }
             })
     });
@@ -74,6 +98,10 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
     // Handle adding to existing list
     let mut handle_add_to_list = move |_| {
+        // Guard against concurrent clicks
+        if *loading.read() {
+            return;
+        }
         let list = match selected_list.read().clone() {
             Some(l) => l,
             None => {
@@ -92,16 +120,16 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
         spawn(async move {
             match add_person_to_list(&list.event, &pubkey, is_private).await {
                 Ok(_) => {
-                    log::info!("Added person to list '{}' (private: {})", list.name, is_private);
+                    log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
-                    loading.set(false);
 
-                    // Close after brief delay to show success
+                    // Brief delay to show success message, then signal parent to refresh and close
                     #[cfg(target_arch = "wasm32")]
                     {
                         use gloo_timers::future::TimeoutFuture;
                         TimeoutFuture::new(1000).await;
                     }
+                    loading.set(false);
                     on_added.call(());
                 }
                 Err(e) => {
@@ -117,6 +145,10 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     let mut handle_create_and_add = {
         let pubkey = props.person_pubkey.clone();
         move |_| {
+            // Guard against concurrent clicks
+            if *loading.read() {
+                return;
+            }
             let name = new_list_name.read().trim().to_string();
             if name.is_empty() {
                 error_msg.set(Some("Please enter a list name".to_string()));
@@ -134,26 +166,37 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 // First create the list
                 match crate::utils::list_encryption::create_people_list(name.clone(), None, is_private).await {
                     Ok(event) => {
-                        log::info!("Created new list '{}'", name);
+                        log::debug!("Created new people list");
 
                         // Now add the person to the new list
                         match add_person_to_list(&event, &pubkey, is_private).await {
                             Ok(_) => {
-                                log::info!("Added person to new list '{}'", name);
+                                log::debug!("Added person to new list");
                                 success_msg.set(Some(format!("Created \"{}\" and added", name)));
-                                loading.set(false);
 
-                                // Close after brief delay
+                                // Brief delay to show success message, then signal parent to refresh and close
                                 #[cfg(target_arch = "wasm32")]
                                 {
                                     use gloo_timers::future::TimeoutFuture;
                                     TimeoutFuture::new(1000).await;
                                 }
+                                loading.set(false);
                                 on_added.call(());
                             }
                             Err(e) => {
-                                error_msg.set(Some(format!("Created list but failed to add: {}", e)));
+                                error_msg.set(Some(format!(
+                                    "Created \"{}\" but failed to add person: {} — list created, you can add the person later",
+                                    name, e
+                                )));
+
+                                // Close after delay like success case, so parent refreshes to show new list
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    use gloo_timers::future::TimeoutFuture;
+                                    TimeoutFuture::new(1000).await;
+                                }
                                 loading.set(false);
+                                on_added.call(()); // Trigger refresh so new list is visible
                             }
                         }
                     }
@@ -169,22 +212,54 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-            onclick: move |_| props.on_close.call(()),
+            tabindex: "-1",  // Allow div to receive keyboard events for Escape key
+            onclick: move |_| {
+                if !*loading.read() {
+                    props.on_close.call(());
+                }
+            },
+            onkeydown: move |e| {
+                if e.key() == Key::Escape && !*loading.read() {
+                    props.on_close.call(());
+                }
+            },
 
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[90vh] overflow-y-auto",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "{title_id}",
+                tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
+                // Focus the modal when mounted for accessibility
+                onmounted: move |evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let element = evt.data();
+                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let _ = evt;
+                },
 
                 // Header
                 div {
                     class: "flex justify-between items-center mb-4",
                     h2 {
                         class: "text-xl font-bold",
+                        id: "{title_id}",
                         "Add to List"
                     }
                     button {
                         class: "text-muted-foreground hover:text-foreground text-xl",
-                        onclick: move |_| props.on_close.call(()),
+                        aria_label: "Close dialog",
+                        onclick: move |_| {
+                            if !*loading.read() {
+                                props.on_close.call(());
+                            }
+                        },
                         "×"
                     }
                 }
@@ -268,16 +343,23 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     class: "space-y-2",
                                     label {
                                         class: "block text-sm font-medium",
+                                        r#for: "{select_id}",
                                         "Select a list"
                                     }
                                     select {
                                         class: "w-full px-3 py-2 bg-background border border-border rounded-lg",
+                                        id: "{select_id}",
+                                        value: "{selected_list.read().as_ref().map(|l| l.id.clone()).unwrap_or_default()}",
                                         onchange: move |e| {
                                             let value = e.value();
-                                            let list = people_lists.read()
-                                                .iter()
-                                                .find(|l| l.id == value)
-                                                .cloned();
+                                            let list = if value.is_empty() {
+                                                None
+                                            } else {
+                                                people_lists.read()
+                                                    .iter()
+                                                    .find(|l| l.id == value)
+                                                    .cloned()
+                                            };
                                             selected_list.set(list);
                                         },
                                         option {
@@ -358,7 +440,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     }
                                     p {
                                         class: "text-sm text-muted-foreground mt-1",
-                                        "All members will be encrypted"
+                                        "This person will be added privately"
                                     }
                                 }
                             }
@@ -388,7 +470,11 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                     button {
                         class: "px-4 py-2 text-muted-foreground hover:text-foreground",
                         disabled: *loading.read(),
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| {
+                            if !*loading.read() {
+                                on_close.call(());
+                            }
+                        },
                         "Cancel"
                     }
                     button {
