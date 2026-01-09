@@ -300,9 +300,9 @@ pub fn WikilinksList(
     rsx! {
         div {
             class: "flex flex-wrap gap-2 {class}",
-            for link in links.iter() {
+            for (idx, link) in links.iter().enumerate() {
                 Link {
-                    key: "{link.target}",
+                    key: "{link.target}-{idx}",
                     class: "inline-flex items-center px-2 py-1 text-xs bg-accent rounded-md hover:bg-accent/80 transition-colors",
                     to: Route::WikiDetail { identifier: link.target.clone() },
                     {link.display_text().to_string()}

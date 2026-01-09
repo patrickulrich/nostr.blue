@@ -25,10 +25,18 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
     let mut image_error = use_signal(|| false);
 
-    // Generate unique ID for this uploader instance
+    // Generate unique IDs for this uploader instance
     let input_id = use_signal(|| format!("cover-upload-{}", uuid::Uuid::new_v4()));
+    let cover_input_id = use_signal(|| format!("cover-url-{}", uuid::Uuid::new_v4()));
 
     let has_cover = !props.cover_url.read().is_empty();
+
+    // Compute the for attribute value - need owned String for lifetime
+    let label_for = if props.show_url_input {
+        cover_input_id.read().clone()
+    } else {
+        String::new()
+    };
 
     // Handle successful upload - fills in the URL field
     let handle_upload = {
@@ -63,10 +71,10 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         div {
             class: "space-y-3",
 
-            // Label
+            // Label - only associate with input when it's rendered
             label {
                 class: "block text-sm font-medium mb-2",
-                r#for: "cover-url-input",
+                r#for: "{label_for}",
                 "Cover Image"
                 span {
                     class: "text-muted-foreground font-normal ml-1",
@@ -81,7 +89,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 // URL input field (only shown if show_url_input is true)
                 if props.show_url_input {
                     input {
-                        id: "cover-url-input",
+                        id: "{cover_input_id}",
                         class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm",
                         r#type: "url",
                         placeholder: "https://example.com/image.jpg",

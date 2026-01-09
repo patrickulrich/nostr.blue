@@ -879,6 +879,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
                     button {
                         class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded",
                         onclick: handle_play,
+                        aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
                         span {
                             class: "w-4 h-4 text-white",
                             dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY }
@@ -937,6 +938,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
                 button {
                     class: "absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition rounded-lg",
                     onclick: handle_play,
+                    aria_label: if *is_playing.read() { "Pause audio" } else { "Play audio" },
                     span {
                         class: "w-6 h-6 text-white",
                         dangerous_inner_html: if *is_playing.read() { icons::PAUSE } else { icons::PLAY }
