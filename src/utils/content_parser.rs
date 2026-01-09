@@ -13,9 +13,10 @@ fn clean_url_trailing_punctuation(url: &str) -> &str {
     url.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"', '>'])
 }
 // Nostr URI pattern - matches nostr: followed by valid NIP-19 prefixes
+// Case-insensitive to support both lowercase (npub1) and uppercase (NPUB1) per BIP-173/NIP-19
 // Permissive alphanumeric match; SDK validation via Nip19::from_bech32 handles bech32 correctness
 static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
+    Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
 });
 static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
@@ -193,10 +194,18 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     // This preserves the original URI string (NostrParser's to_nostr_uri re-encodes and may differ)
     for mat in NOSTR_URI_PATTERN.find_iter(content) {
         let uri = mat.as_str();
-        let identifier = uri.strip_prefix("nostr:").unwrap_or(uri);
+        // Handle both "nostr:" and "NOSTR:" prefixes (case-insensitive)
+        let identifier = if uri.len() > 6 && uri[..6].eq_ignore_ascii_case("nostr:") {
+            &uri[6..]
+        } else {
+            uri
+        };
+
+        // rust-nostr SDK requires lowercase bech32 per BIP-173
+        let identifier_lower = identifier.to_lowercase();
 
         // Try to validate with rust-nostr SDK for proper bech32 validation
-        let content_token = if let Ok(nip19) = Nip19::from_bech32(identifier) {
+        let content_token = if let Ok(nip19) = Nip19::from_bech32(&identifier_lower) {
             match nip19 {
                 Nip19::Pubkey(_) | Nip19::Profile(_) => Some(ContentToken::Mention(uri.to_string())),
                 Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => Some(ContentToken::EventMention(uri.to_string())),
@@ -206,9 +215,10 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             // SDK validation failed (e.g., nevent with invalid relay URL like empty string)
             // Fall back to determining token type based on prefix so we can still render it
             // This handles cases where the bech32 is valid but TLV data has issues
-            if identifier.starts_with("npub1") || identifier.starts_with("nprofile1") {
+            // Use identifier_lower for case-insensitive comparison
+            if identifier_lower.starts_with("npub1") || identifier_lower.starts_with("nprofile1") {
                 Some(ContentToken::Mention(uri.to_string()))
-            } else if identifier.starts_with("note1") || identifier.starts_with("nevent1") || identifier.starts_with("naddr1") {
+            } else if identifier_lower.starts_with("note1") || identifier_lower.starts_with("nevent1") || identifier_lower.starts_with("naddr1") {
                 Some(ContentToken::EventMention(uri.to_string()))
             } else {
                 None

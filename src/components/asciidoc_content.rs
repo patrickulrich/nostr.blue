@@ -84,6 +84,7 @@ pub fn AsciiDocContent(
         if identifiers.is_empty() {
             citations_loading.set(false);
             citations_error.set(false);
+            resolved_citations.set(HashMap::new());
             return;
         }
 

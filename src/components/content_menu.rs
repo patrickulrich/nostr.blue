@@ -94,10 +94,21 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
     let naddr = props.naddr.clone();
-    let naddr_copy = naddr.clone();
     let naddr_pin_board = naddr.clone();
     // event_id is hex format, used for ReportModal and AddToListModal which require EventId
     let event_id_hex = props.event_id.clone().unwrap_or_default();
+
+    // Pre-compute the normalized naddr for both rendering check and onclick handler
+    // Strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
+    let clean_naddr: String = if naddr.to_ascii_lowercase().starts_with("nostr:") {
+        naddr.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr).to_string()
+    } else {
+        naddr.clone()
+    };
+    let clean_naddr_copy = clean_naddr.clone();
+
+    // Determine if we have something to copy (for conditional rendering)
+    let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
     let event_id_hex_copy = event_id_hex.clone();
 
     // Check follow status on mount
@@ -251,28 +262,22 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                     }
 
                     // Copy Link (naddr or event_id fallback)
-                    // Only show if we have an naddr or event_id to copy
-                    if !naddr_copy.is_empty() || !event_id_hex_copy.is_empty() {
+                    // Only show if we have something to copy (pre-computed clean_naddr or event_id)
+                    if has_copyable_link {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                             onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
                                 is_open.set(false);
 
-                                let naddr_to_copy = naddr_copy.clone();
+                                // Use pre-computed clean_naddr (already stripped of nostr: prefix)
+                                let naddr_to_copy = clean_naddr_copy.clone();
                                 let event_id_fallback = event_id_hex_copy.clone();
                                 let toast_api = toast;
 
                                 // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
-                                // Normalize: strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
-                                let clean_naddr = if naddr_to_copy.to_ascii_lowercase().starts_with("nostr:") {
-                                    // Strip up to and including the first ':', preserving original case for the rest
-                                    naddr_to_copy.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr_to_copy)
-                                } else {
-                                    &naddr_to_copy
-                                };
-                                let nostr_uri = if !clean_naddr.is_empty() {
-                                    format!("nostr:{}", clean_naddr)
+                                let nostr_uri = if !naddr_to_copy.is_empty() {
+                                    format!("nostr:{}", naddr_to_copy)
                                 } else if !event_id_fallback.is_empty() {
                                     // Convert hex to bech32 (note1...) per NIP-19/NIP-21
                                     match nostr_sdk::EventId::from_hex(&event_id_fallback) {

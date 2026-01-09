@@ -11,6 +11,7 @@ use crate::components::podcast_episode_card::DisplayEpisode;
 use crate::services::{mempool, openlibrary::{self, CoverSize}, podcast_index, podcast_rss::format_duration};
 use crate::stores::{settings_store, music_player};
 use crate::utils::format::format_sats_with_unit;
+use crate::utils::validation::is_valid_http_url;
 use crate::routes::Route;
 
 /// Generic external content card dispatcher
@@ -848,8 +849,10 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
         return rsx! {};
     };
 
-    let image_url = episode.image.clone()
-        .or(episode.podcast_image.clone())
+    let image_url = episode.image.as_ref()
+        .or(episode.podcast_image.as_ref())
+        .filter(|url| is_valid_http_url(url))
+        .cloned()
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id));
     let duration_str = episode.duration
         .map(format_duration)
@@ -1052,10 +1055,15 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
     }
 
     // Success - render podcast card with internal link
-    let podcast = podcast_data.read().as_ref().unwrap().as_ref().unwrap().clone();
+    // Use pattern matching instead of double-unwrap for safer access
+    let Some(Ok(podcast)) = &*podcast_data.read() else {
+        return rsx! {};  // Guards above should prevent this, but be safe
+    };
+    let podcast = podcast.clone();
     let podcast_id = podcast.id.to_string();
     let title = podcast.title.clone();
     let image_url = podcast.get_image()
+        .filter(|url| is_valid_http_url(url))
         .map(String::from)
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.id));
     let author = podcast.author.clone().or(podcast.owner_name.clone());

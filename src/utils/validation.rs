@@ -2,6 +2,8 @@
 
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::PublicKey;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use url::Url;
 use crate::stores::signer::SIGNER_INFO;
 
@@ -144,6 +146,12 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
 // CSS URL Validation
 // ============================================================================
 
+// Static regex for CSS dimension validation - compiled once at startup
+static CSS_DIMENSION_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^-?[0-9]*\.?[0-9]+(px|%|vh|vw|em|rem|pt|vmin|vmax)?$")
+        .expect("Failed to compile CSS dimension regex")
+});
+
 /// Validate a URL for safe embedding in CSS `url()` context.
 ///
 /// This function checks that:
@@ -206,7 +214,7 @@ pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
     }
 
     // Reject dangerous CSS content
-    // Semicolons, braces, parentheses (except for calc), quotes, backslashes
+    // Semicolons, braces, parentheses, quotes, backslashes are dangerous
     if trimmed.contains([';', '{', '}', '(', ')', '\'', '"', '\\', '<', '>']) {
         return None;
     }
@@ -219,12 +227,8 @@ pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
 
     // Must match pattern: number + optional unit
     // Allowed units: px, %, vh, vw, em, rem, pt, vmin, vmax
-    let valid_pattern = regex::Regex::new(
-        r"^-?[0-9]*\.?[0-9]+(px|%|vh|vw|em|rem|pt|vmin|vmax)?$"
-    ).ok()?;
-
-    if valid_pattern.is_match(trimmed) {
-        Some(dimension)
+    if CSS_DIMENSION_PATTERN.is_match(trimmed) {
+        Some(trimmed)  // Return validated trimmed slice
     } else {
         None
     }
