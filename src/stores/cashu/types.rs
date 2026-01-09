@@ -91,6 +91,7 @@ impl SendMode {
     }
 
     /// Convert to CDK's SendKind
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_cdk_send_kind(&self) -> cdk::wallet::SendKind {
         use cdk::wallet::SendKind;
         use cdk::Amount;
@@ -807,6 +808,7 @@ pub struct PendingMeltQuotesStore {
 
 /// Event type for pending Nostr event publication
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::enum_variant_names)]
 pub enum PendingEventType {
     TokenEvent,
     DeletionEvent,

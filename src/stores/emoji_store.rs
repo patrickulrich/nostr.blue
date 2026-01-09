@@ -37,6 +37,7 @@ pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| S
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
 
 // Recent emojis (persisted to localStorage)
+#[cfg(target_arch = "wasm32")]
 const RECENT_EMOJIS_KEY: &str = "nostr_blue_recent_emojis";
 const MAX_RECENT: usize = 14;
 const DEFAULT_RECENT: &[&str] = &["❤️", "👍", "😂", "🔥", "😮", "😢", "🎉"];

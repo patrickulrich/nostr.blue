@@ -118,8 +118,9 @@ pub async fn load_preferred_reactions() {
         }
     };
 
-    let auth = auth_store::AUTH_STATE.read();
-    let pubkey = match auth.pubkey.as_ref() {
+    // Extract pubkey immediately and drop the read guard to avoid holding it across await points
+    let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone();
+    let pubkey = match pubkey_str.as_ref() {
         Some(pk_str) => {
             match nostr_sdk::PublicKey::from_bech32(pk_str)
                 .or_else(|_| nostr_sdk::PublicKey::from_hex(pk_str))
@@ -225,10 +226,25 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
         .tag(Tag::identifier(REACTIONS_D_TAG));
 
     // Publish to relays
-    client.send_event_builder(builder).await
+    let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish reactions: {}", e))?;
 
-    log::info!("Reactions preferences saved to Nostr successfully");
+    let success_count = output.success.len();
+    let failed_count = output.failed.len();
+    let total = success_count + failed_count;
+
+    log::info!(
+        "Reactions preferences saved: {} ({}/{} relays succeeded)",
+        output.id().to_hex(),
+        success_count,
+        total
+    );
+
+    if !output.failed.is_empty() {
+        for (relay, error) in &output.failed {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
 
     // Update global state
     *PREFERRED_REACTIONS.write() = reactions;

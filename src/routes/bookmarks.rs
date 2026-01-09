@@ -7,7 +7,7 @@ use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn Bookmarks() -> Element {
     let auth = auth_store::AUTH_STATE.read();
-    let mut bookmarked_events = use_signal(|| Vec::<NostrEvent>::new());
+    let mut bookmarked_events = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
@@ -82,17 +82,28 @@ pub fn Bookmarks() -> Element {
             match bookmarks::fetch_bookmarked_events_paginated(current_loaded, Some(BATCH_SIZE)).await {
                 Ok(new_events) => {
                     if !new_events.is_empty() {
-                        // Append new events to existing ones
+                        // Append new events to existing ones (deduplicated by event ID)
                         let mut current_events = bookmarked_events.read().clone();
-                        current_events.extend(new_events.clone());
+                        let existing_ids: std::collections::HashSet<_> = current_events.iter()
+                            .map(|e| e.id.to_hex())
+                            .collect();
+                        // Only add events that aren't already in the list
+                        let unique_new: Vec<_> = new_events.iter()
+                            .filter(|e| !existing_ids.contains(&e.id.to_hex()))
+                            .cloned()
+                            .collect();
+                        let unique_count = unique_new.len();
+                        current_events.extend(unique_new);
                         bookmarked_events.set(current_events);
 
+                        // Use the original new_events count for pagination tracking
+                        // (we still processed these bookmark IDs even if events were duplicates)
                         let new_loaded_count = current_loaded + new_events.len();
                         loaded_count.set(new_loaded_count);
 
                         // Check if there are more bookmarks to load
                         has_more.set(new_loaded_count < total_bookmarks);
-                        log::info!("Loaded more bookmarks: {} / {} total", new_loaded_count, total_bookmarks);
+                        log::info!("Loaded more bookmarks: {} / {} total ({} unique added)", new_loaded_count, total_bookmarks, unique_count);
                     } else {
                         has_more.set(false);
                     }

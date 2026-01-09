@@ -37,6 +37,21 @@ fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     ids
 }
 
+/// Extract the thread root event ID from a note's tags (NIP-10)
+/// Returns the event ID from the "root" marker tag, or None if this note is the root
+fn extract_thread_root_id(note: &NostrEvent) -> Option<EventId> {
+    for tag in note.tags.iter() {
+        let tag_vec = tag.clone().to_vec();
+        if tag_vec.len() >= 4
+            && tag_vec[0] == "e"
+            && tag_vec[3] == "root"
+        {
+            return EventId::from_hex(&tag_vec[1]).ok();
+        }
+    }
+    None
+}
+
 /// Fetch parent events by their IDs
 async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<Vec<NostrEvent>, String> {
     if parent_ids.is_empty() {
@@ -94,10 +109,10 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
 #[component]
 pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     // Determine initial is_voice_note from prop (for immediate correct header on deep-link)
-    let initial_is_voice = from_voice.as_ref().map_or(false, |v| v == "true");
+    let initial_is_voice = from_voice.as_ref().is_some_and(|v| v == "true");
     let mut note_data = use_signal(|| None::<NostrEvent>);
-    let mut parent_events = use_signal(|| Vec::<NostrEvent>::new());
-    let mut replies = use_signal(|| Vec::<NostrEvent>::new());
+    let mut parent_events = use_signal(Vec::<NostrEvent>::new);
+    let mut replies = use_signal(Vec::<NostrEvent>::new);
     let mut loading = use_signal(|| true);
     let mut loading_parents = use_signal(|| false);
     let mut loading_replies = use_signal(|| false);
@@ -204,9 +219,9 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             // Determine back route based on whether this is a voice message
             // Prefer the from_voice prop for immediate correct display, then update from loaded data
             {
-                let data_is_voice = note_data.read().as_ref().map(|e| is_voice_message(e));
+                let data_is_voice = note_data.read().as_ref().map(is_voice_message);
                 let is_voice_note = data_is_voice.unwrap_or(initial_is_voice);
-                let back_route = if is_voice_note { Route::VoiceMessages {} } else { Route::Home {} };
+                let back_route = if is_voice_note { Route::VoiceMessages {} } else { Route::Home { list: String::new() } };
                 let title = if is_voice_note { "Voice Message" } else { "Post" };
 
                 rsx! {
@@ -262,12 +277,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                 key: "{parent.id}",
                                 class: "relative",
                                 // Render VoiceMessageCard for voice messages, NoteCard otherwise
+                                // Key ensures component state resets when parent list changes
                                 if is_voice_message(parent) {
                                     VoiceMessageCard {
+                                        key: "{parent.id}",
                                         event: parent.clone()
                                     }
                                 } else {
                                     NoteCard {
+                                        key: "{parent.id}",
                                         event: parent.clone(),
                                         collapsible: true
                                     }
@@ -282,12 +300,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 }
 
                 // Main post being viewed - use VoiceMessageCard for voice messages
+                // Key ensures component is recreated when navigating between posts
                 if is_voice_message(event) {
                     VoiceMessageCard {
+                        key: "{event.id}",
                         event: event.clone()
                     }
                 } else {
                     NoteCard {
+                        key: "{event.id}",
                         event: event.clone(),
                         collapsible: false
                     }
@@ -325,7 +346,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                         let reply_vec = replies.read().clone();
                         let confirmed_tree = build_thread_tree(reply_vec, &event.id);
                         // Merge pending comments for optimistic display
-                        let pending = get_pending_comments(&event.id);
+                        // Use thread root ID for lookup since ReplyComposer stores pending comments
+                        // under the NIP-10 thread root, not the currently viewed note
+                        let thread_root_id = extract_thread_root_id(event).unwrap_or(event.id);
+                        let pending = get_pending_comments(&thread_root_id);
                         let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
 
                         rsx! {
@@ -343,6 +367,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                     class: "divide-y divide-border",
                                     for node in thread_tree {
                                         ThreadedComment {
+                                            key: "{node.event.id}",
                                             node: node.clone(),
                                             depth: 0
                                         }

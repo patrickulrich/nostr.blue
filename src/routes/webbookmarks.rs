@@ -57,7 +57,7 @@ impl SortOrder {
 #[component]
 pub fn WebBookmarks() -> Element {
     // State for feed events
-    let mut bookmarks = use_signal(|| Vec::<Event>::new());
+    let mut bookmarks = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
@@ -67,7 +67,7 @@ pub fn WebBookmarks() -> Element {
     // Filter and sort state
     let mut filter_tab = use_signal(|| FilterTab::All);
     let mut sort_order = use_signal(|| SortOrder::DateAdded);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     let mut selected_tag = use_signal(|| Option::<String>::None);
 
     // Modal state
@@ -76,7 +76,7 @@ pub fn WebBookmarks() -> Element {
     let mut editing_event = use_signal(|| Option::<Event>::None);
 
     // Quick-add state
-    let mut quick_url = use_signal(|| String::new());
+    let mut quick_url = use_signal(String::new);
     let mut quick_adding = use_signal(|| false);
 
     // Pagination state for infinite scroll
@@ -445,7 +445,7 @@ pub fn WebBookmarks() -> Element {
                             value: "{quick_url}",
                             oninput: move |evt| quick_url.set(evt.value().clone()),
                             onkeypress: {
-                                let mut handle_quick = handle_quick_add.clone();
+                                let mut handle_quick = handle_quick_add;
                                 move |evt: dioxus::prelude::Event<KeyboardData>| {
                                     if evt.key() == Key::Enter {
                                         handle_quick(());
@@ -456,7 +456,7 @@ pub fn WebBookmarks() -> Element {
                         button {
                             class: "px-4 py-2 text-sm bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/90 transition disabled:opacity-50",
                             onclick: {
-                                let mut handle_quick = handle_quick_add.clone();
+                                let mut handle_quick = handle_quick_add;
                                 move |_| handle_quick(())
                             },
                             disabled: *quick_adding.read() || quick_url.read().trim().is_empty(),

@@ -5,11 +5,11 @@ use crate::components::MediaUploader;
 #[component]
 pub fn VideoNewLandscape() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut description = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut description = use_signal(String::new);
     let mut video_url = use_signal(|| Option::<String>::None);
-    let mut thumbnail_url = use_signal(|| String::new());
-    let mut hashtags = use_signal(|| String::new());
+    let mut thumbnail_url = use_signal(String::new);
+    let mut hashtags = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut show_video_uploader = use_signal(|| true);
     let mut show_thumbnail_uploader = use_signal(|| false);
@@ -90,7 +90,7 @@ pub fn VideoNewLandscape() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 

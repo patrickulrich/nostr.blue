@@ -19,14 +19,14 @@ pub fn DVM() -> Element {
     let mut refresh_trigger = use_signal(|| 0);
 
     // Interaction counts cache (event_id -> counts) for batch optimization
-    let mut interaction_counts = use_signal(|| HashMap::<String, InteractionCounts>::new());
+    let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
     let mut fetch_in_progress = use_signal(|| false);
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
     let feed_events = DVM_FEED_EVENTS.read().clone();
-    let selected_provider = SELECTED_DVM_PROVIDER.read().clone();
+    let selected_provider = *SELECTED_DVM_PROVIDER.read();
 
     // Load DVMs and feed on mount and when client initializes
     use_effect(move || {
