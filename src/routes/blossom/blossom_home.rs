@@ -1,5 +1,9 @@
 use dioxus::prelude::*;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Counter for generating unique modal IDs for accessibility
+static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 use crate::stores::{
     auth_store,
@@ -437,6 +441,8 @@ fn MediaCard(
                     img {
                         class: "w-full h-full object-cover",
                         src: "{item.url}",
+                        alt: "Media thumbnail",
+                        referrerpolicy: "no-referrer",
                         loading: "lazy",
                     }
                 } else if is_video {
@@ -529,6 +535,10 @@ fn FileDetailModal(
     let mut copied = use_signal(|| false);
     let mut confirm_delete = use_signal(|| false);
 
+    // Generate unique ID for ARIA accessibility
+    let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let title_id = format!("file-detail-title-{}", modal_id());
+
     #[allow(unused_variables)]
     let handle_copy = {
         let url_for_copy = item.url.clone();
@@ -560,7 +570,16 @@ fn FileDetailModal(
     rsx! {
         div {
             class: "fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4",
+            role: "dialog",
+            aria_modal: "true",
+            aria_labelledby: "{title_id}",
+            tabindex: "-1",
             onclick: move |_| on_close.call(()),
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    on_close.call(());
+                }
+            },
 
             div {
                 class: "bg-card rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col",
@@ -568,7 +587,7 @@ fn FileDetailModal(
 
                 // Header
                 div { class: "flex items-center justify-between p-4 border-b border-border",
-                    h3 { class: "font-semibold", "File Details" }
+                    h3 { id: "{title_id}", class: "font-semibold", "File Details" }
                     button {
                         class: "p-2 hover:bg-accent rounded-lg transition",
                         onclick: move |_| on_close.call(()),
@@ -592,6 +611,8 @@ fn FileDetailModal(
                             img {
                                 class: "max-h-[400px] object-contain",
                                 src: "{item.url}",
+                                alt: "Media preview",
+                                referrerpolicy: "no-referrer",
                             }
                         } else if is_video {
                             video {
@@ -726,6 +747,10 @@ fn UploadModal(
     on_close: EventHandler<()>,
     on_upload_complete: EventHandler<()>,
 ) -> Element {
+    // Generate unique ID for ARIA accessibility
+    let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let title_id = format!("upload-modal-title-{}", modal_id());
+
     let mut file_data = use_signal(|| None::<(String, Vec<u8>, String)>);
     let mut quality = use_signal(|| 80u8);
     let mut uploading = use_signal(|| false);
@@ -735,16 +760,31 @@ fn UploadModal(
     let handle_file_select = move |_| {
         #[cfg(target_arch = "wasm32")]
         {
+            let mut error = error;
             spawn(async move {
                 use wasm_bindgen::JsCast;
 
-                let document = web_sys::window().unwrap().document().unwrap();
-                let body = document.body().unwrap();
-                let input: web_sys::HtmlInputElement = document
-                    .create_element("input")
-                    .unwrap()
-                    .dyn_into()
-                    .unwrap();
+                // Defensive error handling - avoid unwrap() chains
+                let Some(window) = web_sys::window() else {
+                    error.set(Some("Window not available".to_string()));
+                    return;
+                };
+                let Some(document) = window.document() else {
+                    error.set(Some("Document not available".to_string()));
+                    return;
+                };
+                let Some(body) = document.body() else {
+                    error.set(Some("Document body not available".to_string()));
+                    return;
+                };
+                let Ok(input_el) = document.create_element("input") else {
+                    error.set(Some("Failed to create input element".to_string()));
+                    return;
+                };
+                let Ok(input) = input_el.dyn_into::<web_sys::HtmlInputElement>() else {
+                    error.set(Some("Failed to cast input element".to_string()));
+                    return;
+                };
                 input.set_type("file");
                 input.set_accept("image/*,video/*,audio/*");
                 // Hide the input element
@@ -758,6 +798,7 @@ fn UploadModal(
 
                 // Capture input directly - no DOM query needed
                 let input_for_closure = input.clone();
+                let input_for_cleanup = input.clone();
 
                 // Use Closure::once - automatically cleaned up after first call
                 let closure = wasm_bindgen::closure::Closure::once(Box::new(move || {
@@ -770,23 +811,40 @@ fn UploadModal(
                 input.set_onchange(Some(closure.as_ref().unchecked_ref()));
                 input.click();
 
-                // Wait for file selection
-                if let Ok(Some(file)) = rx.await {
-                    let name = file.name();
-                    let mime_type = file.type_();
+                // Wait for file selection with timeout to prevent hanging
+                use futures::future::{select, Either};
+                use gloo_timers::future::TimeoutFuture;
 
-                    let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
-                    if let Ok(buffer) = array_buffer {
-                        let uint8_array = js_sys::Uint8Array::new(&buffer);
-                        let mut data = vec![0u8; uint8_array.length() as usize];
-                        uint8_array.copy_to(&mut data);
+                let timeout = TimeoutFuture::new(300_000); // 5 minute timeout
 
-                        file_data.set(Some((name, data, mime_type)));
+                let file = match select(std::pin::pin!(rx), std::pin::pin!(timeout)).await {
+                    Either::Left((Ok(Some(file)), _)) => file,
+                    Either::Left((Ok(None), _)) => {
+                        // User cancelled - clean up and return
+                        body.remove_child(&input_for_cleanup).ok();
+                        return;
                     }
+                    Either::Left((Err(_), _)) | Either::Right((_, _)) => {
+                        // Channel error or timeout - clean up and return
+                        body.remove_child(&input_for_cleanup).ok();
+                        return;
+                    }
+                };
+
+                let name = file.name();
+                let mime_type = file.type_();
+
+                let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
+                if let Ok(buffer) = array_buffer {
+                    let uint8_array = js_sys::Uint8Array::new(&buffer);
+                    let mut data = vec![0u8; uint8_array.length() as usize];
+                    uint8_array.copy_to(&mut data);
+
+                    file_data.set(Some((name, data, mime_type)));
                 }
 
                 // Clean up: remove from DOM (closure auto-drops with Closure::once)
-                body.remove_child(&input).ok();
+                body.remove_child(&input_for_cleanup).ok();
             });
         }
     };
@@ -825,8 +883,17 @@ fn UploadModal(
     rsx! {
         div {
             class: "fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4",
+            role: "dialog",
+            aria_modal: "true",
+            aria_labelledby: "{title_id}",
+            tabindex: "-1",
             onclick: move |_| {
                 if !uploading() {
+                    on_close.call(());
+                }
+            },
+            onkeydown: move |e| {
+                if e.key() == Key::Escape && !uploading() {
                     on_close.call(());
                 }
             },
@@ -837,7 +904,7 @@ fn UploadModal(
 
                 // Header
                 div { class: "flex items-center justify-between p-4 border-b border-border",
-                    h3 { class: "font-semibold", "Upload Media" }
+                    h3 { id: "{title_id}", class: "font-semibold", "Upload Media" }
                     button {
                         class: "p-2 hover:bg-accent rounded-lg transition",
                         disabled: uploading(),
@@ -990,6 +1057,43 @@ fn UploadModal(
     }
 }
 
+/// Validate and normalize a server URL
+fn validate_and_normalize_server_url(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+
+    // Try parsing with https:// prefix if no scheme
+    let url_str = if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        format!("https://{}", trimmed)
+    } else {
+        trimmed.to_string()
+    };
+
+    let url = url::Url::parse(&url_str)
+        .map_err(|e| format!("Invalid URL: {}", e))?;
+
+    // Validate scheme
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Err("URL must use http or https".to_string());
+    }
+
+    // Ensure host is present
+    let host = url.host_str().ok_or("URL must have a host")?;
+    if host.is_empty() {
+        return Err("URL must have a host".to_string());
+    }
+
+    // Normalize: scheme://host[:port] only (strip paths)
+    let mut normalized = format!("{}://{}", url.scheme(), host);
+    if let Some(port) = url.port() {
+        normalized.push_str(&format!(":{}", port));
+    }
+
+    Ok(normalized)
+}
+
 /// Server list component for the Servers tab
 #[component]
 fn ServerList(
@@ -999,20 +1103,20 @@ fn ServerList(
     on_set_preferred: EventHandler<String>,
 ) -> Element {
     let mut new_server_url = use_signal(String::new);
+    let mut new_server_error = use_signal(|| None::<String>);
     let mut publishing = use_signal(|| false);
     let mut publish_result = use_signal(|| None::<Result<String, String>>);
 
     let handle_add = move |_| {
-        let url = new_server_url().trim().to_string();
-        if !url.is_empty() {
-            // Normalize URL
-            let normalized = if url.starts_with("http://") || url.starts_with("https://") {
-                url
-            } else {
-                format!("https://{}", url)
-            };
-            on_add_server.call(normalized);
-            new_server_url.set(String::new());
+        match validate_and_normalize_server_url(&new_server_url()) {
+            Ok(normalized) => {
+                on_add_server.call(normalized);
+                new_server_url.set(String::new());
+                new_server_error.set(None);
+            }
+            Err(e) => {
+                new_server_error.set(Some(e));
+            }
         }
     };
 
@@ -1096,15 +1200,15 @@ fn ServerList(
                     oninput: move |e| new_server_url.set(e.value()),
                     onkeypress: move |e| {
                         if e.key() == Key::Enter {
-                            let url = new_server_url().trim().to_string();
-                            if !url.is_empty() {
-                                let normalized = if url.starts_with("http://") || url.starts_with("https://") {
-                                    url
-                                } else {
-                                    format!("https://{}", url)
-                                };
-                                on_add_server.call(normalized);
-                                new_server_url.set(String::new());
+                            match validate_and_normalize_server_url(&new_server_url()) {
+                                Ok(normalized) => {
+                                    on_add_server.call(normalized);
+                                    new_server_url.set(String::new());
+                                    new_server_error.set(None);
+                                }
+                                Err(err) => {
+                                    new_server_error.set(Some(err));
+                                }
                             }
                         }
                     },
@@ -1114,6 +1218,11 @@ fn ServerList(
                     onclick: handle_add,
                     "Add"
                 }
+            }
+
+            // URL validation error
+            if let Some(err) = new_server_error() {
+                div { class: "text-red-500 text-sm", "{err}" }
             }
 
             // Publish to Nostr

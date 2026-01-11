@@ -190,6 +190,16 @@ pub static LAST_FETCH_TIME: GlobalSignal<u64> = Signal::global(|| 0);
 /// Kind 24242 - Blossom Authorization Event
 pub const KIND_BLOSSOM_AUTH: u16 = 24242;
 
+/// Extract origin tuple (scheme, host, port) from URL string for comparison
+/// Returns None if URL is invalid or cannot be parsed
+fn get_url_origin(url_str: &str) -> Option<(String, String, Option<u16>)> {
+    url::Url::parse(url_str).ok().map(|u| (
+        u.scheme().to_string(),
+        u.host_str().unwrap_or("").to_string(),
+        u.port_or_known_default(),
+    ))
+}
+
 /// Add a custom Blossom server
 pub fn add_server(url: String) {
     let store = BLOSSOM_SERVERS.read();
@@ -679,10 +689,7 @@ pub async fn get_auth_header(
     // Build tags for the auth event
     let mut tags: Vec<Tag> = vec![
         Tag::custom(TagKind::Custom("t".into()), vec![action.to_string()]),
-        Tag::custom(
-            TagKind::Custom("expiration".into()),
-            vec![(Timestamp::now().as_secs() + 600).to_string()], // 10 minutes
-        ),
+        Tag::expiration(Timestamp::now() + Duration::from_secs(600)), // 10 minutes (NIP-40)
     ];
 
     // Add file hash tag if provided
@@ -984,11 +991,16 @@ pub async fn mirror_file(
 
     let mut new_mirrors: Vec<String> = vec![];
 
+    // Pre-compute source origin for comparison
+    let source_origin = get_url_origin(source_url);
+
     for server in &servers {
         let server_url = server.trim_end_matches('/');
 
-        // Skip if this is the source server
-        if source_url.starts_with(server_url) {
+        // Skip if same origin (scheme + host + port) - proper URL comparison
+        let server_origin = get_url_origin(server_url);
+        if source_origin.is_some() && source_origin == server_origin {
+            log::debug!("Skipping {} - same origin as source", server_url);
             continue;
         }
 
@@ -1015,11 +1027,8 @@ pub async fn mirror_file(
         }
     }
 
-    if new_mirrors.is_empty() {
-        Err("Failed to mirror to any server".to_string())
-    } else {
-        Ok(new_mirrors)
-    }
+    // Empty vec is valid - file may already be on all servers
+    Ok(new_mirrors)
 }
 
 /// Response from mirror endpoint
@@ -1093,39 +1102,42 @@ pub async fn mirror_files(items: &[MediaItem]) -> Result<usize, String> {
 }
 
 /// Check if a media item is fully mirrored (exists on all configured servers)
+/// Compares full origins (scheme, host, port) for accuracy
 pub fn is_fully_mirrored(item: &MediaItem) -> bool {
     let servers = get_servers();
     if servers.len() <= 1 {
         return true; // Only one server, already "fully mirrored"
     }
 
-    // Count unique servers where file exists
-    let mut server_domains: HashSet<String> = HashSet::new();
+    // Collect origins where file exists (using full origin comparison)
+    let mut file_origins: HashSet<(String, String, Option<u16>)> = HashSet::new();
 
-    // Add primary URL's domain
-    if let Ok(url) = url::Url::parse(&item.url) {
-        if let Some(host) = url.host_str() {
-            server_domains.insert(host.to_string());
-        }
+    // Add primary URL's origin
+    if let Some(origin) = get_url_origin(&item.url) {
+        file_origins.insert(origin);
     }
 
-    // Add mirror URL domains
+    // Add mirror URL origins
     for mirror in &item.mirrors {
-        if let Ok(url) = url::Url::parse(mirror) {
-            if let Some(host) = url.host_str() {
-                server_domains.insert(host.to_string());
-            }
+        if let Some(origin) = get_url_origin(mirror) {
+            file_origins.insert(origin);
         }
     }
 
-    // Check if file exists on all configured server domains
-    let configured_domains: HashSet<String> = servers
+    // Collect configured server origins (only valid ones)
+    let configured_origins: HashSet<(String, String, Option<u16>)> = servers
         .iter()
-        .filter_map(|s| url::Url::parse(s).ok())
-        .filter_map(|u| u.host_str().map(|h| h.to_string()))
+        .filter_map(|s| get_url_origin(s))
         .collect();
 
-    configured_domains.is_subset(&server_domains)
+    // If we couldn't parse any configured servers, return false (can't determine)
+    if configured_origins.is_empty() {
+        log::warn!("No valid server URLs configured - cannot determine mirror status");
+        return false;
+    }
+
+    // Check if all configured origins are covered by file locations
+    configured_origins.is_subset(&file_origins)
 }
 
 /// Get count of media items by filter type
