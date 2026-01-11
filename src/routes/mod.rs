@@ -127,6 +127,9 @@ pub mod shop_merchant_orders;
 pub mod shop_collection;
 pub mod shop_collection_new;
 pub mod shop_search;
+
+// Blossom Media Management (BUD-01/02/04/05)
+pub mod blossom;
 pub mod code_repositories;
 pub mod code_snippets;
 pub mod code_snippet_detail;
@@ -262,6 +265,7 @@ use shop_merchant_orders::ShopMerchantOrders;
 use shop_collection::ShopCollection;
 use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
+use blossom::BlossomPage;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -656,6 +660,10 @@ pub enum Route {
         #[route("/id/:identifier")]
         Nip19Handler { identifier: String },
 
+        // Blossom Media Management
+        #[route("/blossom")]
+        BlossomPage {},
+
         #[route("/settings")]
         Settings {},
 
@@ -737,6 +745,7 @@ fn Layout() -> Element {
         Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
         Route::ShopCollectionNew {} | Route::ShopSearch { .. }
     );
+    let is_blossom_page = matches!(current_route, Route::BlossomPage {});
     let is_settings_page = matches!(current_route, Route::Settings {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
@@ -1187,7 +1196,7 @@ fn Layout() -> Element {
                 // Center Content Area
                 main {
                     class: {
-                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page;
+                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_blossom_page || is_creation_page;
                         match (is_wide_page, music_player_visible) {
                             (true, true) => "w-full flex-1 border-r border-border pb-24",
                             (true, false) => "w-full flex-1 border-r border-border",
@@ -1221,7 +1230,7 @@ fn Layout() -> Element {
                 }
 
                 // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, Shop, and Settings pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_settings_page && !is_creation_page {
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_blossom_page && !is_settings_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1334,6 +1343,7 @@ fn NavLink(
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
+        (Route::BlossomPage {}, Route::BlossomPage {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
         _ => false,
     };
@@ -1758,6 +1768,22 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
         },
         SidebarItem::Shop => rsx! {
             crate::components::icons::ShoppingBagIcon { class: class.to_string() }
+        },
+        SidebarItem::Blossom => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Cloud/storage icon for Blossom
+                path { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" }
+            }
         },
     }
 }
