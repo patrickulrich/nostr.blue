@@ -531,7 +531,7 @@ impl EventTypeFilter {
 }
 
 /// Filter state for events
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EventFilterState {
     pub search_term: String,
     pub time_filter: TimeFilter,
@@ -539,15 +539,32 @@ pub struct EventFilterState {
     pub event_type_filter: EventTypeFilter,
     pub hashtag: Option<String>,
     pub include_private: bool,
+    /// Hide events that have ended (default: true)
+    pub hide_ended: bool,
+}
+
+impl Default for EventFilterState {
+    fn default() -> Self {
+        Self {
+            search_term: String::new(),
+            time_filter: TimeFilter::default(),
+            location_filter: LocationFilter::default(),
+            event_type_filter: EventTypeFilter::default(),
+            hashtag: None,
+            include_private: false,
+            hide_ended: true, // Hide ended events by default
+        }
+    }
 }
 
 impl EventFilterState {
     pub fn is_empty(&self) -> bool {
         self.search_term.is_empty()
-            && self.time_filter == TimeFilter::Upcoming
+            && self.time_filter == TimeFilter::All
             && self.location_filter == LocationFilter::All
             && self.event_type_filter == EventTypeFilter::All
             && self.hashtag.is_none()
+            && self.hide_ended // true means using default (hiding ended)
     }
 
     pub fn clear(&mut self) {
@@ -565,7 +582,15 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
     events
         .iter()
         .filter(|event| {
-            // Search term filter
+            // Hide ended events filter (checked first for performance)
+            if filters.hide_ended {
+                let end_ts = event.effective_end_timestamp();
+                if end_ts < now_secs {
+                    return false;
+                }
+            }
+
+            // Search term filter (client-side fallback, NIP-50 search is preferred)
             if !filters.search_term.is_empty() {
                 let term = filters.search_term.to_lowercase();
                 let matches = event.title().to_lowercase().contains(&term);
@@ -1283,6 +1308,108 @@ pub async fn fetch_event_rsvps(event_coordinate: &str) -> StdResult<Vec<Calendar
     Ok(rsvps)
 }
 
+// ============================================================================
+// Event Comments (NIP-22)
+// ============================================================================
+
+/// A comment on a calendar event
+#[derive(Clone, Debug)]
+pub struct CalendarEventComment {
+    pub event_id: String,
+    pub pubkey: String,
+    pub content: String,
+    pub created_at: u64,
+}
+
+/// Fetch comments for a calendar event by naddr
+/// Comments reference the event via 'a' tag (coordinate)
+/// Uses fetch_events_from_relays to bypass cache and get fresh data
+pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
+    // Use kind 1111 (NIP-22 comment) with 'a' tag referencing the event coordinate
+    let filter = Filter::new()
+        .kind(Kind::Custom(1111))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
+        .limit(100);
+
+    // Use fetch_events_from_relays to bypass cache for fresh comment data
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+
+    let mut comments: Vec<CalendarEventComment> = events
+        .iter()
+        .map(|e| CalendarEventComment {
+            event_id: e.id.to_hex(),
+            pubkey: e.pubkey.to_hex(),
+            content: e.content.clone(),
+            created_at: e.created_at.as_secs(),
+        })
+        .collect();
+
+    // Sort by created_at (newest first)
+    comments.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(comments)
+}
+
+/// Publish a comment on a calendar event
+pub async fn publish_event_comment(
+    coordinate: &str,
+    content: &str,
+) -> StdResult<String, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Build NIP-22 comment (kind 1111) referencing the event via 'a' tag
+    let builder = EventBuilder::new(Kind::Custom(1111), content)
+        .tag(Tag::custom(TagKind::a(), vec![coordinate.to_string()]));
+
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish comment: {}", e))?;
+
+    Ok(output.id().to_string())
+}
+
+// ============================================================================
+// NIP-50 Search
+// ============================================================================
+
+/// Search calendar events using NIP-50 relay search
+/// Searches across title, description, and content fields
+/// Uses fetch_events_from_relays to bypass cache for fresh search results
+pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // NIP-50 search filter for calendar event kinds (31922, 31923)
+    let filter = Filter::new()
+        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .search(query)
+        .limit(limit);
+
+    // Use fetch_events_from_relays to bypass cache for fresh search results
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+
+    // Parse events into UnifiedEvent
+    let mut results: Vec<UnifiedEvent> = events
+        .iter()
+        .filter_map(|e| {
+            match parse_calendar_event(e) {
+                Ok(cal_event) => Some(UnifiedEvent::Calendar(cal_event)),
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    // Cache the raw events
+    cache_calendar_events(&events);
+
+    // Sort by relevance (start time for calendar events)
+    results.sort_by_key(|a| a.start_timestamp());
+
+    Ok(results)
+}
+
 /// Fetch user's RSVPs
 pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String> {
     let pk = PublicKey::from_hex(pubkey)
@@ -1562,6 +1689,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
 // ============================================================================
 
 /// Publish a date-based calendar event (kind 31922)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_date_event(
     title: &str,
@@ -1572,6 +1700,7 @@ pub async fn publish_date_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     is_private: bool,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
@@ -1610,6 +1739,18 @@ pub async fn publish_date_event(
         builder = builder.tag(Tag::hashtag(tag));
     }
 
+    // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
+    for (pubkey, role) in participants {
+        if let Ok(pk) = PublicKey::parse(pubkey) {
+            // Format: ["p", pubkey, relay_hint, role]
+            builder = builder.tag(Tag::custom(
+                TagKind::p(),
+                vec![pk.to_hex(), "".to_string(), role.clone()]
+            ));
+        }
+    }
+
     if is_private {
         // TODO: Implement NIP-59 gift wrap for private events
         return Err("Private events not yet implemented".to_string());
@@ -1628,6 +1769,7 @@ pub async fn publish_date_event(
 }
 
 /// Publish a time-based calendar event (kind 31923)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_time_event(
     title: &str,
@@ -1638,6 +1780,7 @@ pub async fn publish_time_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     timezone: Option<&str>,
     is_private: bool,
 ) -> StdResult<String, String> {
@@ -1680,6 +1823,18 @@ pub async fn publish_time_event(
     // Hashtags
     for tag in hashtags {
         builder = builder.tag(Tag::hashtag(tag));
+    }
+
+    // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
+    for (pubkey, role) in participants {
+        if let Ok(pk) = PublicKey::parse(pubkey) {
+            // Format: ["p", pubkey, relay_hint, role]
+            builder = builder.tag(Tag::custom(
+                TagKind::p(),
+                vec![pk.to_hex(), "".to_string(), role.clone()]
+            ));
+        }
     }
 
     if is_private {

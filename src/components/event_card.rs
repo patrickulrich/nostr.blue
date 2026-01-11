@@ -29,18 +29,35 @@ fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
     }
 }
 
-/// Render live and private badges for event cards
+/// Render status and private badges for event cards
 fn render_badges(event: &UnifiedEvent) -> Element {
+    let status = get_event_status(event);
+
     rsx! {
-        // Live badge
-        if event.is_live() {
-            div {
-                class: "absolute top-2 left-2 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded animate-pulse",
-                "LIVE"
-            }
+        // Status badge (Live, Upcoming, or Ended) - top left
+        match status {
+            EventStatus::Live => rsx! {
+                div {
+                    class: "absolute top-2 left-2 px-2 py-1 bg-red-500 text-white text-xs font-bold rounded animate-pulse",
+                    "LIVE"
+                }
+            },
+            EventStatus::Upcoming => rsx! {
+                div {
+                    class: "absolute top-2 left-2 px-2 py-1 bg-blue-500 text-white text-xs font-bold rounded",
+                    "UPCOMING"
+                }
+            },
+            EventStatus::Ended => rsx! {
+                div {
+                    class: "absolute top-2 left-2 px-2 py-1 bg-gray-500 text-white text-xs font-bold rounded opacity-75",
+                    "ENDED"
+                }
+            },
+            EventStatus::None => rsx! {},
         }
 
-        // Private badge
+        // Private badge (top-right)
         if event.is_private() {
             div {
                 class: "absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded flex items-center gap-1",
@@ -516,4 +533,46 @@ fn get_location_info(event: &UnifiedEvent) -> Option<(String, bool)> {
     };
 
     Some((display_loc, is_online))
+}
+
+// ============================================================================
+// Event Status for Badges
+// ============================================================================
+
+/// Event status for display badges
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EventStatus {
+    Live,
+    Upcoming,
+    Ended,
+    None,
+}
+
+/// Determine event status badge to display
+fn get_event_status(event: &UnifiedEvent) -> EventStatus {
+    // Live status takes precedence
+    if event.is_live() {
+        return EventStatus::Live;
+    }
+
+    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let start_ts = event.start_timestamp();
+
+    // Only show status badges for calendar events
+    if event.is_calendar_event() {
+        // Use end timestamp or default to 24 hours after start
+        let end_ts = event.end_timestamp()
+            .unwrap_or(start_ts + 86400);
+
+        if end_ts < now_secs {
+            EventStatus::Ended
+        } else if start_ts > now_secs {
+            EventStatus::Upcoming
+        } else {
+            // Event is happening now (started but not ended)
+            EventStatus::None
+        }
+    } else {
+        EventStatus::None
+    }
 }
