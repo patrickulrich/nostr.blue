@@ -1323,6 +1323,7 @@ pub struct CalendarEventComment {
 
 /// Fetch comments for a calendar event by naddr
 /// Comments reference the event via 'a' tag (coordinate)
+/// Uses fetch_events_from_relays to bypass cache and get fresh data
 pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
     // Use kind 1111 (NIP-22 comment) with 'a' tag referencing the event coordinate
     let filter = Filter::new()
@@ -1330,7 +1331,8 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
         .limit(100);
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    // Use fetch_events_from_relays to bypass cache for fresh comment data
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
 
     let mut comments: Vec<CalendarEventComment> = events
         .iter()
@@ -1373,6 +1375,7 @@ pub async fn publish_event_comment(
 
 /// Search calendar events using NIP-50 relay search
 /// Searches across title, description, and content fields
+/// Uses fetch_events_from_relays to bypass cache for fresh search results
 pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
@@ -1384,7 +1387,8 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
         .search(query)
         .limit(limit);
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    // Use fetch_events_from_relays to bypass cache for fresh search results
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
 
     // Parse events into UnifiedEvent
     let mut results: Vec<UnifiedEvent> = events

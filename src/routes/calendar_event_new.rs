@@ -197,11 +197,22 @@ pub fn CalendarEventNew() -> Element {
         // Set content to full description
         content.set(evt.description.clone());
 
-        // Set summary to truncated excerpt for preview
+        // Set summary to truncated excerpt for preview (UTF-8 safe)
         let desc = &evt.description;
         if desc.len() > 200 {
-            // Find word boundary near 200 chars
-            let truncate_at = desc[..200].rfind(' ').unwrap_or(200);
+            // Find the last valid UTF-8 char boundary at or before 200 bytes
+            let safe_boundary = desc
+                .char_indices()
+                .take_while(|(i, _)| *i <= 200)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(desc.len().min(200));
+
+            // Find word boundary within the safe slice
+            let truncate_at = desc[..safe_boundary]
+                .rfind(' ')
+                .unwrap_or(safe_boundary);
+
             summary.set(format!("{}...", &desc[..truncate_at]));
         } else {
             summary.set(desc.clone());
