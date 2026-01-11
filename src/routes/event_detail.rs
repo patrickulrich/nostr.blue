@@ -571,6 +571,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         {
                             let content = evt.content();
                             if !content.is_empty() {
+                                // Sanitize HTML to prevent XSS attacks
+                                let sanitized_content = ammonia::clean(content);
                                 rsx! {
                                     div {
                                         class: "mb-4",
@@ -580,7 +582,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         }
                                         div {
                                             class: "prose prose-sm dark:prose-invert max-w-none",
-                                            dangerous_inner_html: "{content}"
+                                            dangerous_inner_html: "{sanitized_content}"
                                         }
                                     }
                                 }

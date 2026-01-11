@@ -12,6 +12,9 @@ use crate::components::MediaUploader;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 
+/// Maximum ICS file size (1MB)
+const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
+
 /// Event type selection
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum EventType {
@@ -136,6 +139,40 @@ pub fn CalendarEventNew() -> Element {
 
     // Handle ICS file upload
     let handle_ics_upload = move |_evt: Event<FormData>| {
+        // Check file size before spawning async task
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                error_message.set(Some("Failed to access window".to_string()));
+                return;
+            }
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => {
+                error_message.set(Some("Failed to access document".to_string()));
+                return;
+            }
+        };
+
+        if let Some(input) = document
+            .get_element_by_id("ics-file-input")
+            .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+        {
+            if let Some(files) = input.files() {
+                if let Some(file) = files.get(0) {
+                    let size = file.size() as u64;
+                    if size > MAX_ICS_FILE_SIZE {
+                        error_message.set(Some(format!(
+                            "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
+                            size as f64 / 1_048_576.0
+                        )));
+                        return;
+                    }
+                }
+            }
+        }
+
         spawn(async move {
             // Read file content from file input
             if let Ok(content) = read_ics_file_content("ics-file-input").await {
@@ -848,7 +885,7 @@ fn format_ics_datetime(dt: &IcsDateTime) -> String {
 }
 
 /// Read ICS file content from file input
-async fn read_ics_file_content(_file_name: &str) -> Result<String, String> {
+async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
 
@@ -857,7 +894,7 @@ async fn read_ics_file_content(_file_name: &str) -> Result<String, String> {
 
     // Get the file input element
     let input = document
-        .get_element_by_id("ics-file-input")
+        .get_element_by_id(element_id)
         .ok_or("Input not found")?
         .dyn_into::<HtmlInputElement>()
         .map_err(|_| "Not an input element")?;

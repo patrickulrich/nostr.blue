@@ -1736,8 +1736,9 @@ pub async fn publish_date_event(
     }
 
     // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
     for (pubkey, role) in participants {
-        if let Ok(pk) = PublicKey::from_hex(pubkey) {
+        if let Ok(pk) = PublicKey::parse(pubkey) {
             // Format: ["p", pubkey, relay_hint, role]
             builder = builder.tag(Tag::custom(
                 TagKind::p(),
@@ -1821,8 +1822,9 @@ pub async fn publish_time_event(
     }
 
     // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
     for (pubkey, role) in participants {
-        if let Ok(pk) = PublicKey::from_hex(pubkey) {
+        if let Ok(pk) = PublicKey::parse(pubkey) {
             // Format: ["p", pubkey, relay_hint, role]
             builder = builder.tag(Tag::custom(
                 TagKind::p(),

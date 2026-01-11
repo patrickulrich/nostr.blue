@@ -84,6 +84,9 @@ pub fn Events() -> Element {
 
         // Clear search results if search term is too short
         if search_term.len() < 2 {
+            // Increment debounce ID to invalidate any in-flight searches
+            let current_id = *search_debounce_id.peek() + 1;
+            search_debounce_id.set(current_id);
             search_results.set(None);
             searching.set(false);
             return;
