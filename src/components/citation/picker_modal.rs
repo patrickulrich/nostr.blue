@@ -6,7 +6,7 @@ use dioxus_core::Task;
 use nostr_sdk::ToBech32;
 use crate::stores::citation_store::{
     CachedCitation, USER_CITATIONS,
-    fetch_citations_by_author, search_citations,
+    fetch_citations_by_author,
 };
 use crate::stores::auth_store;
 use crate::utils::nkbip03::CitationStyle;
@@ -82,7 +82,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         },
     ));
 
-    // Handle search with debouncing and task cancellation
+    // Handle search with debouncing and task cancellation (UX Fix #13 - in-memory search)
     let mut handle_search = move |new_query: String| {
         search_query.set(new_query.clone());
 
@@ -97,49 +97,47 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
             return;
         }
 
-        if let Some(pk) = user_pubkey.clone() {
-            is_searching.set(true);
+        // Use in-memory filtering from cached citations instead of relay search
+        // This is faster and doesn't require network calls
+        is_searching.set(true);
 
-            // Capture query for stale result verification
-            let query_snapshot = new_query.clone();
+        // Capture query for stale result verification
+        let query_snapshot = new_query.clone();
+        let query_lower = query_snapshot.to_lowercase();
 
-            // Start new debounced search task
-            let new_task = spawn(async move {
-                // Debounce: wait 300ms before searching
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+        // Start new debounced search task
+        let new_task = spawn(async move {
+            // Debounce: wait 150ms before searching (shorter since it's local)
+            #[cfg(target_family = "wasm")]
+            {
+                gloo_timers::future::TimeoutFuture::new(150).await;
+            }
+            #[cfg(not(target_family = "wasm"))]
+            {
+                use std::time::Duration;
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
 
-                match search_citations(&query_snapshot, &pk, 50).await {
-                    Ok(results) => {
-                        // Only apply results if query hasn't changed
-                        if search_query.read().as_str() == query_snapshot.as_str() {
-                            search_results.set(results);
-                            is_searching.set(false);
-                        }
-                    }
-                    Err(e) => {
-                        if search_query.read().as_str() == query_snapshot.as_str() {
-                            log::warn!("Citation search failed: {}", e);
-                            is_searching.set(false);
-                        }
-                    }
-                }
-            });
+            // Only apply results if query hasn't changed
+            if search_query.read().as_str() == query_snapshot.as_str() {
+                // Filter cached citations in-memory
+                let all_citations = USER_CITATIONS.read().all();
+                let filtered: Vec<CachedCitation> = all_citations
+                    .into_iter()
+                    .filter(|c| {
+                        let base = c.citation.base();
+                        base.title.to_lowercase().contains(&query_lower)
+                            || base.author.to_lowercase().contains(&query_lower)
+                            || base.content.to_lowercase().contains(&query_lower)
+                    })
+                    .take(50)
+                    .collect();
+                search_results.set(filtered);
+                is_searching.set(false);
+            }
+        });
 
-            search_task.set(Some(new_task));
-        } else {
-            // User not authenticated - clear search state
-            // Search requires authentication to query personal citations
-            search_results.set(Vec::new());
-            is_searching.set(false);
-        }
+        search_task.set(Some(new_task));
     };
 
     // Get citations to display based on tab
@@ -167,8 +165,12 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         }
     });
 
-    // Close modal
+    // Close modal (Bug Fix #10 - cancel pending search tasks on close)
     let close_modal = move |_| {
+        // Cancel any pending search task
+        if let Some(task) = search_task.take() {
+            task.cancel();
+        }
         props.show.set(false);
     };
 

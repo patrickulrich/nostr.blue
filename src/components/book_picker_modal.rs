@@ -10,6 +10,24 @@ use crate::stores::publication_store::{
 use crate::utils::nkbip08::BookReference;
 use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon};
 
+// ============================================================================
+// Input Validation Functions (Security Fix #1)
+// ============================================================================
+
+/// Validate book version input against allowed format.
+/// Only lowercase letters, digits, and hyphens are allowed (per NKBIP-08).
+fn is_valid_book_version(input: &str) -> bool {
+    !input.is_empty()
+        && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Validate book sections input against allowed format.
+/// Only digits, commas, and hyphens are allowed (e.g., "1-5,7,10-12").
+fn is_valid_book_sections(input: &str) -> bool {
+    !input.is_empty()
+        && input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-')
+}
+
 /// Validates that a URL is safe for use as an image source.
 /// Returns true only for https:// URLs with reasonable length.
 fn is_safe_image_url(url: &str) -> bool {
@@ -76,6 +94,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut selected_chapter = use_signal(|| None::<String>);
     let mut selected_sections = use_signal(String::new);
     let mut selected_version = use_signal(String::new);
+
+    // Validation error signals (Security Fix #1)
+    let mut version_error = use_signal(|| false);
+    let mut sections_error = use_signal(|| false);
 
     // Loading state
     let mut loading = use_signal(|| false);
@@ -166,34 +188,54 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         }
     });
 
-    // Build book reference from selections
+    // Build book reference from selections with validation (Security Fix #1)
     let book_reference = use_memo(move || {
         selected_publication.read().as_ref().map(|pub_| {
             let mut reference = BookReference::new(&pub_.d_tag);
 
-            // Use author as "version" if provided
-            if !selected_version.read().is_empty() {
-                reference = reference.with_version(&selected_version.read());
+            // Validate and add version
+            let version_input = selected_version.read();
+            if !version_input.is_empty() {
+                if is_valid_book_version(&version_input) {
+                    reference = reference.with_version(&version_input);
+                    version_error.set(false);
+                } else {
+                    version_error.set(true);
+                }
+            } else {
+                version_error.set(false);
             }
 
-            // Add chapter
+            // Add chapter (validated by dropdown selection)
             if let Some(ref chapter) = *selected_chapter.read() {
                 reference = reference.with_chapter(chapter);
             }
 
-            // Add sections
+            // Validate and add sections
             let sections_str = selected_sections.read();
             if !sections_str.is_empty() {
-                for section in sections_str.split(',') {
-                    let section = section.trim();
-                    if !section.is_empty() {
-                        reference = reference.with_section(section);
+                if is_valid_book_sections(&sections_str) {
+                    for section in sections_str.split(',') {
+                        let section = section.trim();
+                        if !section.is_empty() {
+                            reference = reference.with_section(section);
+                        }
                     }
+                    sections_error.set(false);
+                } else {
+                    sections_error.set(true);
                 }
+            } else {
+                sections_error.set(false);
             }
 
             reference
         })
+    });
+
+    // Track overall validation state (for disabling Insert button)
+    let has_validation_error = use_memo(move || {
+        *version_error.read() || *sections_error.read()
     });
 
     // Generate markup preview
@@ -244,10 +286,19 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     }
 
     rsx! {
-        // Backdrop
+        // Backdrop (Accessibility Fix #6 - dialog semantics + Escape key)
         div {
             class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "book-picker-title",
+            tabindex: "-1",
             onclick: close_modal,
+            onkeydown: move |evt: KeyboardEvent| {
+                if evt.key() == Key::Escape {
+                    props.show.set(false);
+                }
+            },
 
             // Modal content
             div {
@@ -262,6 +313,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                         class: "flex items-center gap-2",
                         BookOpenIcon { class: "w-5 h-5 text-primary".to_string() }
                         h2 {
+                            id: "book-picker-title",
                             class: "text-lg font-semibold",
                             "Insert Book Reference"
                         }
@@ -290,7 +342,11 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             },
                             onclick: move |_| {
                                 active_tab.set(BookPickerTab::Browse);
+                                // Bug Fix #11: Invalidate pending searches when switching tabs
+                                debounce_counter.set(debounce_counter() + 1);
                                 search_query.set(String::new());
+                                search_results.set(Vec::new());
+                                is_searching.set(false);
                             },
                             "Browse"
                         }
@@ -491,7 +547,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                 }
 
-                                // Section range input
+                                // Section range input with validation (Security Fix #1)
                                 div {
                                     h3 {
                                         class: "text-sm font-medium mb-2",
@@ -499,18 +555,29 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                        class: if *sections_error.read() {
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                        } else {
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                        },
                                         placeholder: "e.g., 4-9 or 1,3,5",
                                         value: "{selected_sections}",
                                         oninput: move |e| selected_sections.set(e.value()),
                                     }
-                                    p {
-                                        class: "text-xs text-muted-foreground mt-1",
-                                        "Use ranges (4-9) or comma-separated (1,3,5)"
+                                    if *sections_error.read() {
+                                        p {
+                                            class: "text-xs text-red-600 dark:text-red-400 mt-1",
+                                            "Only numbers, commas, and hyphens allowed"
+                                        }
+                                    } else {
+                                        p {
+                                            class: "text-xs text-muted-foreground mt-1",
+                                            "Use ranges (4-9) or comma-separated (1,3,5)"
+                                        }
                                     }
                                 }
 
-                                // Version input
+                                // Version input with validation (Security Fix #1)
                                 div {
                                     h3 {
                                         class: "text-sm font-medium mb-2",
@@ -518,10 +585,20 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                        class: if *version_error.read() {
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                        } else {
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                        },
                                         placeholder: "e.g., kjv, 1st-edition",
                                         value: "{selected_version}",
                                         oninput: move |e| selected_version.set(e.value()),
+                                    }
+                                    if *version_error.read() {
+                                        p {
+                                            class: "text-xs text-red-600 dark:text-red-400 mt-1",
+                                            "Only lowercase letters, numbers, and hyphens allowed"
+                                        }
                                     }
                                 }
 
@@ -554,9 +631,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                 }
                             }
 
-                            // Insert button
+                            // Insert button (disabled when validation errors - Security Fix #1)
                             button {
-                                class: "w-full mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium",
+                                class: "w-full mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed",
+                                disabled: *has_validation_error.read(),
                                 onclick: handle_insert,
                                 "Insert Book Reference"
                             }

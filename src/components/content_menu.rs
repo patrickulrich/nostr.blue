@@ -94,7 +94,6 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
     let naddr = props.naddr.clone();
-    let naddr_pin_board = naddr.clone();
     // event_id is hex format, used for ReportModal and AddToListModal which require EventId
     let event_id_hex = props.event_id.clone().unwrap_or_default();
 
@@ -428,10 +427,10 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
             }
         }
 
-        // Pin to Board Modal
+        // Pin to Board Modal (UX Fix #15 - use clean_naddr to avoid double nostr: prefix)
         if *show_pin_to_board_modal.read() {
             PinToBoardModal {
-                reference: PinReference::Coordinate { address: naddr_pin_board.clone(), relay_hint: None },
+                reference: PinReference::Coordinate { address: clean_naddr.clone(), relay_hint: None },
                 content_type: content_type.to_pin_content_type(),
                 title: Some(pin_title.clone()),
                 on_close: move |_| show_pin_to_board_modal.set(false),

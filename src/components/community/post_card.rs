@@ -12,6 +12,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
 use crate::services::aggregation::InteractionCounts;
 use crate::utils::format::{format_sats_human, format_relative_time_or};
+use crate::utils::validation::is_valid_http_url;
 use crate::hooks::{use_reaction, ReactionState};
 use crate::components::{RichContent, ZapModal, CommunityPostComposer};
 use crate::routes::Route;
@@ -169,10 +170,10 @@ pub fn CommunityPostCard(
                 div {
                     class: "flex items-center gap-2",
 
-                    // Avatar with link
+                    // Avatar with link (Security Fix #5 - URL validation)
                     Link {
                         to: Route::Profile { pubkey: author_pubkey.clone() },
-                        if let Some(ref pic) = author_picture {
+                        if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                             img {
                                 class: "w-10 h-10 rounded-full object-cover",
                                 src: "{pic}",
@@ -265,16 +266,18 @@ pub fn CommunityPostCard(
                         }
                     }
 
-                    // Reaction button
+                    // Reaction button (Accessibility Fix #9 - consolidated class attributes)
                     if has_signer {
                         button {
-                            class: "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50",
-                            class: if *reaction.is_liked.read() { "text-red-500" } else { "" },
+                            class: if *reaction.is_liked.read() {
+                                "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50 text-red-500"
+                            } else {
+                                "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50"
+                            },
                             disabled: matches!(*reaction.state.read(), ReactionState::Pending),
                             onclick: move |_| reaction.toggle_like.call(()),
                             svg {
-                                class: "w-4 h-4",
-                                class: if *reaction.is_liked.read() { "fill-current" } else { "" },
+                                class: if *reaction.is_liked.read() { "w-4 h-4 fill-current" } else { "w-4 h-4" },
                                 xmlns: "http://www.w3.org/2000/svg",
                                 width: "24",
                                 height: "24",

@@ -8,6 +8,7 @@ use crate::routes::Route;
 use crate::stores::calendar_store::{UnifiedEvent, get_rsvp_count};
 use crate::utils::time::format_relative_time;
 use crate::utils::nip52::is_online_location;
+use crate::utils::validation::is_valid_http_url;
 
 // ============================================================================
 // Module-level Constants
@@ -15,11 +16,6 @@ use crate::utils::nip52::is_online_location;
 
 const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/// Check if URL is a valid HTTP/HTTPS URL for safe image rendering
-fn is_valid_image_url(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
-}
 
 /// Build route based on event type
 /// - Livestreams (30311) go to /videos/live/:naddr
@@ -77,12 +73,16 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
     // Get location info
     let location_info = get_location_info(&event);
 
-    // Get RSVP count for calendar events
-    let rsvp_count = get_rsvp_count(event.coordinate());
+    // Get RSVP count for calendar events only (UX Fix #17 - gate RSVP lookup)
+    let rsvp_count = if event.is_calendar_event() {
+        get_rsvp_count(event.coordinate())
+    } else {
+        0
+    };
 
     // Limit hashtags shown
     let all_hashtags = event.hashtags();
-    let hashtags: Vec<&str> = all_hashtags.iter().take(3).copied().collect();
+    let hashtags: Vec<(usize, &str)> = all_hashtags.iter().take(3).copied().enumerate().collect();
     let extra_tags = all_hashtags.len().saturating_sub(3);
 
     let detail_route = get_event_detail_route(&event, from);
@@ -93,8 +93,9 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
             class: "block rounded-lg border border-border bg-card overflow-hidden hover:shadow-md transition group",
 
             // Event image - only render safe http/https URLs, show placeholder otherwise
+            // (Cleanup Fix #18 - use centralized is_valid_http_url)
             {
-                let safe_image_url = event.image().filter(|url| is_valid_image_url(url));
+                let safe_image_url = event.image().filter(|url| is_valid_http_url(url));
 
                 if let Some(image_url) = safe_image_url {
                     rsx! {
@@ -105,6 +106,8 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                                 alt: "{event.title()}",
                                 class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
                                 loading: "lazy",
+                                // UX Fix #14: Prevent referrer leakage for external images
+                                referrerpolicy: "no-referrer",
                             }
 
                             // Live and private badges
@@ -113,9 +116,10 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                     }
                 } else {
                     // Placeholder for events without image or with unsafe URLs
+                    // (UX Fix #17 - match h-40 height of image container)
                     rsx! {
                         div {
-                            class: "relative h-24 bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center",
+                            class: "relative h-40 bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center",
                             svg {
                                 class: "w-12 h-12 text-muted-foreground/50",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -216,12 +220,13 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                     }
                 }
 
-                // Hashtags
+                // Hashtags (UX Fix #17 - add keys to avoid reconciliation issues)
                 if !hashtags.is_empty() {
                     div {
                         class: "flex flex-wrap gap-1 mb-3",
-                        for tag in hashtags {
+                        for (idx, tag) in hashtags {
                             span {
+                                key: "tag-{idx}-{tag}",
                                 class: "px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded-full",
                                 "#{tag}"
                             }
@@ -289,8 +294,9 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
             class: "flex items-center gap-3 p-3 hover:bg-accent/50 rounded-lg transition",
 
             // Thumbnail or date box - validate URL before rendering
+            // (Cleanup Fix #18 - use centralized is_valid_http_url)
             {
-                let safe_image_url = event.image().filter(|url| is_valid_image_url(url));
+                let safe_image_url = event.image().filter(|url| is_valid_http_url(url));
 
                 if let Some(image_url) = safe_image_url {
                     rsx! {
@@ -299,6 +305,8 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
                             alt: "{event.title()}",
                             class: "w-12 h-12 rounded object-cover flex-shrink-0",
                             loading: "lazy",
+                            // UX Fix #14: Prevent referrer leakage
+                            referrerpolicy: "no-referrer",
                         }
                     }
                 } else {
