@@ -11,6 +11,7 @@ use crate::utils::ics::{parse_ics, IcsEvent, IcsDateTime};
 use crate::components::MediaUploader;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
+use nostr_sdk::prelude::ToBech32;
 
 /// Maximum ICS file size (1MB)
 const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
@@ -92,22 +93,19 @@ pub fn CalendarEventNew() -> Element {
             return;
         }
 
-        // Try to parse as npub or hex pubkey
-        let (pubkey_hex, display) = if input.starts_with("npub1") {
-            // Parse npub
-            if let Ok(pk) = nostr_sdk::prelude::PublicKey::parse(&input) {
-                (pk.to_hex(), format!("{}...", &input[..12]))
-            } else {
-                error_message.set(Some("Invalid npub".to_string()));
+        // Use PublicKey::parse() which handles hex, bech32/npub, and nostr: URIs (NIP-21)
+        let pk = match nostr_sdk::prelude::PublicKey::parse(&input) {
+            Ok(pk) => pk,
+            Err(_) => {
+                error_message.set(Some("Invalid pubkey. Use hex, npub, or nostr:npub format".to_string()));
                 return;
             }
-        } else if input.len() == 64 && input.chars().all(|c| c.is_ascii_hexdigit()) {
-            // Hex pubkey
-            (input.clone(), format!("{}...", &input[..8]))
-        } else {
-            error_message.set(Some("Enter npub or hex pubkey".to_string()));
-            return;
         };
+        let pubkey_hex = pk.to_hex();
+        // Use to_bech32() for user-friendly display
+        let display = pk.to_bech32()
+            .map(|s| format!("{}...", &s[..12]))
+            .unwrap_or_else(|_| format!("{}...", &pubkey_hex[..8]));
 
         // Check for duplicates
         let mut parts = participants.read().clone();
@@ -167,6 +165,7 @@ pub fn CalendarEventNew() -> Element {
                             "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
                             size as f64 / 1_048_576.0
                         )));
+                        clear_file_input("ics-file-input");
                         return;
                     }
                 }
@@ -179,12 +178,14 @@ pub fn CalendarEventNew() -> Element {
                 let events = parse_ics(&content);
                 if events.is_empty() {
                     error_message.set(Some("No events found in ICS file".to_string()));
+                    clear_file_input("ics-file-input");
                 } else {
                     ics_events.set(events);
                     show_ics_selector.set(true);
                 }
             } else {
                 error_message.set(Some("Failed to read ICS file".to_string()));
+                clear_file_input("ics-file-input");
             }
         });
     };
@@ -192,7 +193,19 @@ pub fn CalendarEventNew() -> Element {
     // Apply selected ICS event to form
     let mut apply_ics_event = move |evt: &IcsEvent| {
         title.set(evt.title.clone());
-        summary.set(evt.description.clone());
+
+        // Set content to full description
+        content.set(evt.description.clone());
+
+        // Set summary to truncated excerpt for preview
+        let desc = &evt.description;
+        if desc.len() > 200 {
+            // Find word boundary near 200 chars
+            let truncate_at = desc[..200].rfind(' ').unwrap_or(200);
+            summary.set(format!("{}...", &desc[..truncate_at]));
+        } else {
+            summary.set(desc.clone());
+        }
 
         // Parse start time
         if let Some(ref start) = evt.start {
@@ -909,4 +922,17 @@ async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
         .map_err(|_| "Failed to read file")?;
 
     result.as_string().ok_or("Could not convert to string".to_string())
+}
+
+/// Clear file input value to allow re-selecting the same file
+fn clear_file_input(input_id: &str) {
+    if let Some(window) = web_sys::window() {
+        if let Some(document) = window.document() {
+            if let Some(element) = document.get_element_by_id(input_id) {
+                if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
+                    input.set_value("");
+                }
+            }
+        }
+    }
 }

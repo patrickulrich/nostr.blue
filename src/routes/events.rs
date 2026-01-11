@@ -398,7 +398,7 @@ pub fn Events() -> Element {
 
                         // More filters toggle button
                         button {
-                            class: if !filters.read().hide_ended {
+                            class: if *show_more_filters.read() {
                                 "text-sm bg-primary/10 text-primary border border-primary/30 rounded-lg px-3 py-1.5 flex items-center gap-1"
                             } else {
                                 "text-sm bg-muted rounded-lg px-3 py-1.5 flex items-center gap-1 hover:bg-accent transition"

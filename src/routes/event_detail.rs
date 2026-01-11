@@ -30,6 +30,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut comments_loading = use_signal(|| false);
     let mut comment_input = use_signal(String::new);
     let mut comment_posting = use_signal(|| false);
+    let mut comment_error = use_signal(|| None::<String>);
 
     // Determine back route based on where we came from
     let back_route = match from.as_deref() {
@@ -74,8 +75,14 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 
                         // Fetch comments
                         comments_loading.set(true);
-                        if let Ok(event_comments) = calendar_store::fetch_event_comments(&coord).await {
-                            comments.set(event_comments);
+                        match calendar_store::fetch_event_comments(&coord).await {
+                            Ok(event_comments) => {
+                                comments.set(event_comments);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to fetch comments: {}", e);
+                                comment_error.set(Some("Failed to load comments".to_string()));
+                            }
                         }
                         comments_loading.set(false);
                     } else {
@@ -173,6 +180,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 
         spawn(async move {
             comment_posting.set(true);
+            comment_error.set(None); // Clear any previous error
 
             match calendar_store::publish_event_comment(&coord, &content).await {
                 Ok(_) => {
@@ -184,6 +192,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to publish comment: {}", e);
+                    comment_error.set(Some(format!("Failed to post comment: {}", e)));
                 }
             }
 
@@ -271,61 +280,79 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             } else if let Some(evt) = event.read().as_ref() {
                 // Event content
                 div {
-                    // Event image
-                    if let Some(image_url) = evt.image() {
-                        div {
-                            class: "relative h-48 sm:h-64 overflow-hidden",
-                            img {
-                                src: "{image_url}",
-                                alt: "{evt.title()}",
-                                class: "w-full h-full object-cover",
-                            }
+                    // Event header with image and badges
+                    div {
+                        class: "relative",
 
-                            // Status badge (Live, Upcoming, Ended) - top left
-                            {
-                                let status = get_detail_event_status(evt);
-                                match status {
-                                    DetailEventStatus::Live => rsx! {
-                                        div {
-                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
-                                            "LIVE NOW"
-                                        }
-                                    },
-                                    DetailEventStatus::Upcoming => rsx! {
-                                        div {
-                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
-                                            "UPCOMING"
-                                        }
-                                    },
-                                    DetailEventStatus::Ended => rsx! {
-                                        div {
-                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
-                                            "ENDED"
-                                        }
-                                    },
-                                    DetailEventStatus::None => rsx! {},
+                        // Event image (optional)
+                        if let Some(image_url) = evt.image() {
+                            div {
+                                class: "h-48 sm:h-64 overflow-hidden",
+                                img {
+                                    src: "{image_url}",
+                                    alt: "{evt.title()}",
+                                    class: "w-full h-full object-cover",
                                 }
                             }
+                        }
 
-                            // Private badge (top-right)
-                            if evt.is_private() {
-                                div {
-                                    class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
-                                    svg {
-                                        class: "w-4 h-4",
-                                        xmlns: "http://www.w3.org/2000/svg",
-                                        fill: "none",
-                                        view_box: "0 0 24 24",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        path {
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                                        }
+                        // Status badge (always rendered for calendar events)
+                        {
+                            let status = get_detail_event_status(evt);
+                            let has_image = evt.image().is_some();
+                            // Use absolute positioning when there's an image, inline otherwise
+                            let badge_class = if has_image {
+                                "absolute top-4 left-4"
+                            } else {
+                                "inline-block mb-3 ml-4 mt-4"
+                            };
+                            match status {
+                                DetailEventStatus::Live => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
+                                        "LIVE NOW"
                                     }
-                                    "Private Event"
+                                },
+                                DetailEventStatus::HappeningNow => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
+                                        "HAPPENING NOW"
+                                    }
+                                },
+                                DetailEventStatus::Upcoming => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
+                                        "UPCOMING"
+                                    }
+                                },
+                                DetailEventStatus::Ended => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
+                                        "ENDED"
+                                    }
+                                },
+                                DetailEventStatus::None => rsx! {},
+                            }
+                        }
+
+                        // Private badge (top-right, only with image)
+                        if evt.is_private() && evt.image().is_some() {
+                            div {
+                                class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                                    }
                                 }
+                                "Private Event"
                             }
                         }
                     }
@@ -751,6 +778,14 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                     }
                                 }
 
+                                // Comment error display
+                                if let Some(err) = comment_error.read().as_ref() {
+                                    div {
+                                        class: "mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm",
+                                        "{err}"
+                                    }
+                                }
+
                                 // Comments list
                                 if *comments_loading.read() {
                                     div {
@@ -1022,6 +1057,7 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DetailEventStatus {
     Live,
+    HappeningNow,
     Upcoming,
     Ended,
     None,
@@ -1049,7 +1085,7 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
             DetailEventStatus::Upcoming
         } else {
             // Event is happening now (started but not ended)
-            DetailEventStatus::None
+            DetailEventStatus::HappeningNow
         }
     } else {
         DetailEventStatus::None
