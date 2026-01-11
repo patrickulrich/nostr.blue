@@ -531,7 +531,7 @@ impl EventTypeFilter {
 }
 
 /// Filter state for events
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EventFilterState {
     pub search_term: String,
     pub time_filter: TimeFilter,
@@ -539,15 +539,32 @@ pub struct EventFilterState {
     pub event_type_filter: EventTypeFilter,
     pub hashtag: Option<String>,
     pub include_private: bool,
+    /// Hide events that have ended (default: true)
+    pub hide_ended: bool,
+}
+
+impl Default for EventFilterState {
+    fn default() -> Self {
+        Self {
+            search_term: String::new(),
+            time_filter: TimeFilter::default(),
+            location_filter: LocationFilter::default(),
+            event_type_filter: EventTypeFilter::default(),
+            hashtag: None,
+            include_private: false,
+            hide_ended: true, // Hide ended events by default
+        }
+    }
 }
 
 impl EventFilterState {
     pub fn is_empty(&self) -> bool {
         self.search_term.is_empty()
-            && self.time_filter == TimeFilter::Upcoming
+            && self.time_filter == TimeFilter::All
             && self.location_filter == LocationFilter::All
             && self.event_type_filter == EventTypeFilter::All
             && self.hashtag.is_none()
+            && self.hide_ended // true means using default (hiding ended)
     }
 
     pub fn clear(&mut self) {
@@ -565,7 +582,15 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
     events
         .iter()
         .filter(|event| {
-            // Search term filter
+            // Hide ended events filter (checked first for performance)
+            if filters.hide_ended {
+                let end_ts = event.effective_end_timestamp();
+                if end_ts < now_secs {
+                    return false;
+                }
+            }
+
+            // Search term filter (client-side fallback, NIP-50 search is preferred)
             if !filters.search_term.is_empty() {
                 let term = filters.search_term.to_lowercase();
                 let matches = event.title().to_lowercase().contains(&term);
@@ -1340,6 +1365,45 @@ pub async fn publish_event_comment(
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
 
     Ok(output.id().to_string())
+}
+
+// ============================================================================
+// NIP-50 Search
+// ============================================================================
+
+/// Search calendar events using NIP-50 relay search
+/// Searches across title, description, and content fields
+pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // NIP-50 search filter for calendar event kinds (31922, 31923)
+    let filter = Filter::new()
+        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .search(query)
+        .limit(limit);
+
+    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+
+    // Parse events into UnifiedEvent
+    let mut results: Vec<UnifiedEvent> = events
+        .iter()
+        .filter_map(|e| {
+            match parse_calendar_event(e) {
+                Ok(cal_event) => Some(UnifiedEvent::Calendar(cal_event)),
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    // Cache the raw events
+    cache_calendar_events(&events);
+
+    // Sort by relevance (start time for calendar events)
+    results.sort_by_key(|a| a.start_timestamp());
+
+    Ok(results)
 }
 
 /// Fetch user's RSVPs
