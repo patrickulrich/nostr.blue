@@ -173,8 +173,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 
         let Some(evt) = event.read().as_ref().cloned() else { return };
 
-        let coord = match &evt {
-            UnifiedEvent::Calendar(e) => e.coordinate.clone(),
+        let (coord, author) = match &evt {
+            UnifiedEvent::Calendar(e) => (e.coordinate.clone(), e.pubkey.clone()),
             UnifiedEvent::Live(_) => return, // Comments only on calendar events for now
         };
 
@@ -182,7 +182,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             comment_posting.set(true);
             comment_error.set(None); // Clear any previous error
 
-            match calendar_store::publish_event_comment(&coord, &content).await {
+            match calendar_store::publish_event_comment(&coord, &author, &content).await {
                 Ok(_) => {
                     comment_input.set(String::new());
                     // Refresh comments

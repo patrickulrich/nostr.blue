@@ -37,6 +37,9 @@ pub fn Events() -> Element {
     let mut search_debounce_id = use_signal(|| 0u32);
     let mut show_more_filters = use_signal(|| false);
 
+    // Track previous search term to avoid redundant NIP-50 calls
+    let mut last_search_term = use_signal(String::new);
+
     // Pagination state
     let mut has_more = use_signal(|| true);
     let mut pagination_loading = use_signal(|| false);
@@ -81,6 +84,15 @@ pub fn Events() -> Element {
     // Debounced NIP-50 search effect
     use_effect(move || {
         let search_term = filters.read().search_term.clone();
+        let prev_term = last_search_term.read().clone();
+
+        // Skip if search term hasn't changed (prevents redundant NIP-50 calls when other filters change)
+        if search_term == prev_term {
+            return;
+        }
+
+        // Update last search term
+        last_search_term.set(search_term.clone());
 
         // Clear search results if search term is too short
         if search_term.len() < 2 {
@@ -100,7 +112,15 @@ pub fn Events() -> Element {
 
         spawn(async move {
             // Wait for debounce delay
-            gloo_timers::future::TimeoutFuture::new(SEARCH_DEBOUNCE_MS).await;
+            #[cfg(target_family = "wasm")]
+            {
+                gloo_timers::future::TimeoutFuture::new(SEARCH_DEBOUNCE_MS).await;
+            }
+            #[cfg(not(target_family = "wasm"))]
+            {
+                use std::time::Duration;
+                tokio::time::sleep(Duration::from_millis(SEARCH_DEBOUNCE_MS as u64)).await;
+            }
 
             // Check if this search is still current (use peek to avoid re-subscription)
             if *search_debounce_id.peek() != current_id {
@@ -109,7 +129,7 @@ pub fn Events() -> Element {
 
             log::info!("[Events] NIP-50 search for: {}", search_term);
 
-            match calendar_store::search_calendar_events(&search_term, 100).await {
+            match calendar_store::search_all_events(&search_term, 100).await {
                 Ok(results) => {
                     // Check again if search is still current
                     if *search_debounce_id.peek() == current_id {

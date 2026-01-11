@@ -1351,15 +1351,30 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
 }
 
 /// Publish a comment on a calendar event
+/// Uses proper NIP-22 threading tags (A/K/P for root, a/k/p for parent)
 pub async fn publish_event_comment(
     coordinate: &str,
+    event_author: &str,
     content: &str,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
-    // Build NIP-22 comment (kind 1111) referencing the event via 'a' tag
+    // Parse coordinate to extract kind (format: "kind:pubkey:d-tag")
+    let parts: Vec<&str> = coordinate.split(':').collect();
+    let event_kind = parts.first()
+        .and_then(|k| k.parse::<u16>().ok())
+        .ok_or("Invalid coordinate format")?;
+
+    // Build NIP-22 comment (kind 1111) with full tag set
     let builder = EventBuilder::new(Kind::Custom(1111), content)
-        .tag(Tag::custom(TagKind::a(), vec![coordinate.to_string()]));
+        // Root scope tags (uppercase) - for the calendar event being commented on
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)), vec![coordinate.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)), vec![event_kind.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)), vec![event_author.to_string()]))
+        // Parent scope tags (lowercase) - same as root for top-level comments
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)), vec![coordinate.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)), vec![event_kind.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)), vec![event_author.to_string()]));
 
     let output = client
         .send_event_builder(builder)
@@ -1407,6 +1422,66 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
     // Sort by relevance (start time for calendar events)
     results.sort_by_key(|a| a.start_timestamp());
 
+    Ok(results)
+}
+
+/// Search all events (calendar + meetings) using NIP-50 relay search
+/// Searches across title, description, and content fields for both calendar events and meetings
+/// Uses fetch_events_from_relays to bypass cache for fresh search results
+pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM, KIND_MEETING_SPACE};
+
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build filters for both calendar and meeting kinds
+    let cal_filter = Filter::new()
+        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .search(query)
+        .limit(limit);
+
+    let meeting_filter = Filter::new()
+        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .search(query)
+        .limit(limit);
+
+    // Fetch in parallel
+    let (cal_result, meeting_result) = futures::join!(
+        crate::stores::nostr_client::fetch_events_from_relays(cal_filter, Duration::from_secs(10)),
+        crate::stores::nostr_client::fetch_events_from_relays(meeting_filter, Duration::from_secs(10))
+    );
+
+    let mut results = Vec::new();
+
+    // Process calendar events
+    if let Ok(events) = cal_result {
+        cache_calendar_events(&events);
+        for event in &events {
+            if let Ok(cal_event) = parse_calendar_event(event) {
+                results.push(UnifiedEvent::Calendar(cal_event));
+            }
+        }
+    }
+
+    // Process meeting events
+    if let Ok(events) = meeting_result {
+        cache_live_events(&events);
+        for event in &events {
+            let kind = event.kind.as_u16();
+            let activity = match kind {
+                KIND_MEETING_ROOM => parse_meeting_room_event(event).ok().map(LiveActivityEvent::Meeting),
+                KIND_MEETING_SPACE => parse_meeting_space(event).ok().map(LiveActivityEvent::Space),
+                _ => None,
+            };
+            if let Some(activity) = activity {
+                results.push(UnifiedEvent::Live(activity));
+            }
+        }
+    }
+
+    // Sort by start time
+    results.sort_by_key(|e| e.start_timestamp());
     Ok(results)
 }
 

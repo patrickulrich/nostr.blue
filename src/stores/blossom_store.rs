@@ -981,6 +981,44 @@ pub async fn mirror_file(
     source_url: &str,
     target_servers: Option<Vec<String>>,
 ) -> Result<Vec<String>, String> {
+    // Validate source_url scheme
+    let source_parsed = url::Url::parse(source_url)
+        .map_err(|_| "Invalid source URL")?;
+
+    if source_parsed.scheme() != "http" && source_parsed.scheme() != "https" {
+        return Err("Source URL must use http or https scheme".to_string());
+    }
+
+    let source_origin = get_url_origin(source_url)
+        .ok_or("Could not parse source URL origin")?;
+
+    // Build set of allowed origins from:
+    // 1. Configured blossom servers
+    // 2. Existing media item's URL and mirrors (if found by sha256)
+    let servers = target_servers.clone().unwrap_or_else(get_servers);
+    let mut allowed_origins: HashSet<(String, String, Option<u16>)> =
+        servers.iter().filter_map(|s| get_url_origin(s)).collect();
+
+    // Also allow origins from existing media item locations
+    {
+        let items = MEDIA_ITEMS.read();
+        if let Some(item) = items.iter().find(|i| i.sha256 == sha256) {
+            if let Some(origin) = get_url_origin(&item.url) {
+                allowed_origins.insert(origin);
+            }
+            for mirror in &item.mirrors {
+                if let Some(origin) = get_url_origin(mirror) {
+                    allowed_origins.insert(origin);
+                }
+            }
+        }
+    }
+
+    // Validate source origin is in allowed set
+    if !allowed_origins.contains(&source_origin) {
+        return Err("Source URL origin not in allowed servers list".to_string());
+    }
+
     let servers = target_servers.unwrap_or_else(get_servers);
     if servers.is_empty() {
         return Err("No target servers".to_string());
@@ -991,15 +1029,12 @@ pub async fn mirror_file(
 
     let mut new_mirrors: Vec<String> = vec![];
 
-    // Pre-compute source origin for comparison
-    let source_origin = get_url_origin(source_url);
-
     for server in &servers {
         let server_url = server.trim_end_matches('/');
 
         // Skip if same origin (scheme + host + port) - proper URL comparison
         let server_origin = get_url_origin(server_url);
-        if source_origin.is_some() && source_origin == server_origin {
+        if server_origin.as_ref() == Some(&source_origin) {
             log::debug!("Skipping {} - same origin as source", server_url);
             continue;
         }
