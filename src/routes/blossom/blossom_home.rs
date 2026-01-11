@@ -923,8 +923,8 @@ fn UploadModal(
 
                 // Content
                 div { class: "p-4 space-y-4",
-                    // File picker
-                    if let Some((name, data, mime_type)) = file_data() {
+                    // File picker - use read().as_ref() to avoid cloning large Vec<u8>
+                    if let Some((name, data, mime_type)) = file_data.read().as_ref() {
                         div { class: "p-4 bg-muted rounded-lg",
                             div { class: "flex items-center gap-3",
                                 if mime_type.starts_with("image/") {
@@ -1047,7 +1047,7 @@ fn UploadModal(
                     }
                     button {
                         class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition disabled:opacity-50",
-                        disabled: file_data().is_none() || uploading(),
+                        disabled: file_data.read().is_none() || uploading(),
                         onclick: handle_upload,
                         if uploading() { "Uploading..." } else { "Upload" }
                     }
