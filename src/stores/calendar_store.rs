@@ -1283,6 +1283,65 @@ pub async fn fetch_event_rsvps(event_coordinate: &str) -> StdResult<Vec<Calendar
     Ok(rsvps)
 }
 
+// ============================================================================
+// Event Comments (NIP-22)
+// ============================================================================
+
+/// A comment on a calendar event
+#[derive(Clone, Debug)]
+pub struct CalendarEventComment {
+    pub event_id: String,
+    pub pubkey: String,
+    pub content: String,
+    pub created_at: u64,
+}
+
+/// Fetch comments for a calendar event by naddr
+/// Comments reference the event via 'a' tag (coordinate)
+pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
+    // Use kind 1111 (NIP-22 comment) with 'a' tag referencing the event coordinate
+    let filter = Filter::new()
+        .kind(Kind::Custom(1111))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
+        .limit(100);
+
+    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+
+    let mut comments: Vec<CalendarEventComment> = events
+        .iter()
+        .map(|e| CalendarEventComment {
+            event_id: e.id.to_hex(),
+            pubkey: e.pubkey.to_hex(),
+            content: e.content.clone(),
+            created_at: e.created_at.as_secs(),
+        })
+        .collect();
+
+    // Sort by created_at (newest first)
+    comments.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(comments)
+}
+
+/// Publish a comment on a calendar event
+pub async fn publish_event_comment(
+    coordinate: &str,
+    content: &str,
+) -> StdResult<String, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Build NIP-22 comment (kind 1111) referencing the event via 'a' tag
+    let builder = EventBuilder::new(Kind::Custom(1111), content)
+        .tag(Tag::custom(TagKind::a(), vec![coordinate.to_string()]));
+
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish comment: {}", e))?;
+
+    Ok(output.id().to_string())
+}
+
 /// Fetch user's RSVPs
 pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String> {
     let pk = PublicKey::from_hex(pubkey)
@@ -1562,6 +1621,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
 // ============================================================================
 
 /// Publish a date-based calendar event (kind 31922)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_date_event(
     title: &str,
@@ -1572,6 +1632,7 @@ pub async fn publish_date_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     is_private: bool,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
@@ -1610,6 +1671,17 @@ pub async fn publish_date_event(
         builder = builder.tag(Tag::hashtag(tag));
     }
 
+    // Participants (p tags with optional relay and role)
+    for (pubkey, role) in participants {
+        if let Ok(pk) = PublicKey::from_hex(pubkey) {
+            // Format: ["p", pubkey, relay_hint, role]
+            builder = builder.tag(Tag::custom(
+                TagKind::p(),
+                vec![pk.to_hex(), "".to_string(), role.clone()]
+            ));
+        }
+    }
+
     if is_private {
         // TODO: Implement NIP-59 gift wrap for private events
         return Err("Private events not yet implemented".to_string());
@@ -1628,6 +1700,7 @@ pub async fn publish_date_event(
 }
 
 /// Publish a time-based calendar event (kind 31923)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_time_event(
     title: &str,
@@ -1638,6 +1711,7 @@ pub async fn publish_time_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     timezone: Option<&str>,
     is_private: bool,
 ) -> StdResult<String, String> {
@@ -1680,6 +1754,17 @@ pub async fn publish_time_event(
     // Hashtags
     for tag in hashtags {
         builder = builder.tag(Tag::hashtag(tag));
+    }
+
+    // Participants (p tags with optional relay and role)
+    for (pubkey, role) in participants {
+        if let Ok(pk) = PublicKey::from_hex(pubkey) {
+            // Format: ["p", pubkey, relay_hint, role]
+            builder = builder.tag(Tag::custom(
+                TagKind::p(),
+                vec![pk.to_hex(), "".to_string(), role.clone()]
+            ));
+        }
     }
 
     if is_private {

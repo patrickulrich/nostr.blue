@@ -221,7 +221,6 @@ fn decode_geohash_approx(geohash: &str) -> Option<(f64, f64)> {
 // ICS Import (kept for future use)
 // ============================================================================
 
-#[allow(dead_code)]
 /// Parsed VEVENT from ICS file
 #[derive(Clone, Debug, Default)]
 pub struct IcsEvent {
@@ -236,7 +235,6 @@ pub struct IcsEvent {
     pub geo: Option<(f64, f64)>,
 }
 
-#[allow(dead_code)]
 /// ICS DateTime (either date-only or datetime)
 #[derive(Clone, Debug)]
 pub enum IcsDateTime {
@@ -275,7 +273,6 @@ impl IcsDateTime {
     }
 }
 
-#[allow(dead_code)]
 /// Parse ICS content and extract events
 pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     let mut events = Vec::new();
@@ -308,7 +305,6 @@ pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     events
 }
 
-#[allow(dead_code)]
 /// Unfold ICS lines (handle line continuations)
 fn unfold_ics_lines(content: &str) -> String {
     let mut result = String::new();
@@ -334,7 +330,6 @@ fn unfold_ics_lines(content: &str) -> String {
     result
 }
 
-#[allow(dead_code)]
 /// Parse a single ICS property line
 fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     // Split on first colon
@@ -379,7 +374,6 @@ fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     }
 }
 
-#[allow(dead_code)]
 /// Parse ICS datetime value
 fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     // Check for VALUE=DATE parameter
@@ -419,7 +413,6 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     None
 }
 
-#[allow(dead_code)]
 /// Parse UTC datetime: YYYYMMDDTHHmmssZ
 fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     // Format: 20241225T120000Z
@@ -447,7 +440,6 @@ fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     Some((date.get_time() / 1000.0) as u64)
 }
 
-#[allow(dead_code)]
 /// Parse local datetime: YYYYMMDDTHHmmss
 fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     // Format: 20241225T120000
@@ -475,7 +467,6 @@ fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     Some((date.get_time() / 1000.0) as u64)
 }
 
-#[allow(dead_code)]
 /// Unescape ICS text
 fn unescape_ics_text(text: &str) -> String {
     text.replace("\\n", "\n")

@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use crate::routes::Route;
 use crate::stores::{nostr_client, calendar_store, profiles, auth_store};
-use crate::stores::calendar_store::UnifiedEvent;
+use crate::stores::calendar_store::{UnifiedEvent, CalendarEventComment};
 use crate::utils::nip52::{RsvpStatus, is_online_location};
 use crate::utils::nip53::{RoomPresence, LiveActivityEvent};
 use crate::utils::ics::{export_event_to_ics, download_ics};
@@ -24,6 +24,12 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut rsvp_count = use_signal(|| 0usize);
     let mut room_presence = use_signal(Vec::<RoomPresence>::new);
     let mut parent_space_url = use_signal(|| None::<String>);
+
+    // Comment state
+    let mut comments = use_signal(Vec::<CalendarEventComment>::new);
+    let mut comments_loading = use_signal(|| false);
+    let mut comment_input = use_signal(String::new);
+    let mut comment_posting = use_signal(|| false);
 
     // Determine back route based on where we came from
     let back_route = match from.as_deref() {
@@ -65,6 +71,13 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         if let Some(my_rsvp) = calendar_store::get_my_rsvp(&coord) {
                             rsvp_status.set(Some(my_rsvp.status));
                         }
+
+                        // Fetch comments
+                        comments_loading.set(true);
+                        if let Ok(event_comments) = calendar_store::fetch_event_comments(&coord).await {
+                            comments.set(event_comments);
+                        }
+                        comments_loading.set(false);
                     } else {
                         // For meetings, fetch room presence (users in the last 5 minutes)
                         if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await {
@@ -141,6 +154,40 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             }
 
             rsvp_loading.set(false);
+        });
+    };
+
+    // Handle comment submission
+    let handle_comment_submit = move |_| {
+        let content = comment_input.read().trim().to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        let Some(evt) = event.read().as_ref().cloned() else { return };
+
+        let coord = match &evt {
+            UnifiedEvent::Calendar(e) => e.coordinate.clone(),
+            UnifiedEvent::Live(_) => return, // Comments only on calendar events for now
+        };
+
+        spawn(async move {
+            comment_posting.set(true);
+
+            match calendar_store::publish_event_comment(&coord, &content).await {
+                Ok(_) => {
+                    comment_input.set(String::new());
+                    // Refresh comments
+                    if let Ok(event_comments) = calendar_store::fetch_event_comments(&coord).await {
+                        comments.set(event_comments);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to publish comment: {}", e);
+                }
+            }
+
+            comment_posting.set(false);
         });
     };
 
@@ -234,15 +281,33 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 class: "w-full h-full object-cover",
                             }
 
-                            // Live badge
-                            if evt.is_live() {
-                                div {
-                                    class: "absolute top-4 left-4 px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
-                                    "LIVE NOW"
+                            // Status badge (Live, Upcoming, Ended) - top left
+                            {
+                                let status = get_detail_event_status(evt);
+                                match status {
+                                    DetailEventStatus::Live => rsx! {
+                                        div {
+                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
+                                            "LIVE NOW"
+                                        }
+                                    },
+                                    DetailEventStatus::Upcoming => rsx! {
+                                        div {
+                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
+                                            "UPCOMING"
+                                        }
+                                    },
+                                    DetailEventStatus::Ended => rsx! {
+                                        div {
+                                            class: "absolute top-4 left-4 px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
+                                            "ENDED"
+                                        }
+                                    },
+                                    DetailEventStatus::None => rsx! {},
                                 }
                             }
 
-                            // Private badge
+                            // Private badge (top-right)
                             if evt.is_private() {
                                 div {
                                     class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
@@ -643,8 +708,148 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 }
                             }
                         }
+
+                        // Comments Section (for calendar events)
+                        if let UnifiedEvent::Calendar(_) = evt {
+                            div {
+                                class: "border-t border-border pt-4 mt-4",
+                                h3 {
+                                    class: "text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2",
+                                    "Comments"
+                                    span {
+                                        class: "text-xs bg-muted px-2 py-0.5 rounded",
+                                        "{comments.read().len()}"
+                                    }
+                                }
+
+                                // Comment composer (if logged in)
+                                if auth_store::get_pubkey().is_some() {
+                                    div {
+                                        class: "mb-4",
+                                        div {
+                                            class: "flex gap-2",
+                                            textarea {
+                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none text-sm resize-none",
+                                                placeholder: "Add a comment...",
+                                                rows: 2,
+                                                value: "{comment_input}",
+                                                oninput: move |e| comment_input.set(e.value()),
+                                            }
+                                            button {
+                                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition disabled:opacity-50",
+                                                disabled: *comment_posting.read() || comment_input.read().trim().is_empty(),
+                                                onclick: handle_comment_submit,
+                                                if *comment_posting.read() {
+                                                    "..."
+                                                } else {
+                                                    "Post"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Comments list
+                                if *comments_loading.read() {
+                                    div {
+                                        class: "text-center text-muted-foreground py-4",
+                                        "Loading comments..."
+                                    }
+                                } else if comments.read().is_empty() {
+                                    div {
+                                        class: "text-center text-muted-foreground py-4 text-sm",
+                                        "No comments yet. Be the first to comment!"
+                                    }
+                                } else {
+                                    div {
+                                        class: "space-y-3",
+                                        for comment in comments.read().iter() {
+                                            CommentCard {
+                                                key: "{comment.event_id}",
+                                                pubkey: comment.pubkey.clone(),
+                                                content: comment.content.clone(),
+                                                created_at: comment.created_at,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Comment card component
+#[component]
+fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
+    let profile = profiles::get_cached_profile(&pubkey);
+
+    let display_name = profile
+        .as_ref()
+        .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
+        .unwrap_or("Anonymous");
+
+    let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
+
+    // Format time ago
+    let time_ago = {
+        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let diff = now.saturating_sub(created_at);
+        if diff < 60 {
+            "just now".to_string()
+        } else if diff < 3600 {
+            format!("{}m ago", diff / 60)
+        } else if diff < 86400 {
+            format!("{}h ago", diff / 3600)
+        } else {
+            format!("{}d ago", diff / 86400)
+        }
+    };
+
+    rsx! {
+        div {
+            class: "p-3 bg-muted/50 rounded-lg",
+
+            // Header
+            div {
+                class: "flex items-center gap-2 mb-2",
+
+                // Avatar
+                if let Some(url) = avatar {
+                    img {
+                        src: "{url}",
+                        alt: "{display_name}",
+                        class: "w-6 h-6 rounded-full object-cover",
+                    }
+                } else {
+                    div {
+                        class: "w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center",
+                        span {
+                            class: "text-xs font-bold text-primary",
+                            "{display_name.chars().next().unwrap_or('?')}"
+                        }
+                    }
+                }
+
+                // Name and time
+                Link {
+                    to: Route::Profile { pubkey: pubkey.clone() },
+                    class: "font-medium text-sm hover:underline",
+                    "{display_name}"
+                }
+                span {
+                    class: "text-xs text-muted-foreground",
+                    "{time_ago}"
+                }
+            }
+
+            // Content
+            p {
+                class: "text-sm whitespace-pre-wrap",
+                "{content}"
             }
         }
     }
@@ -804,5 +1009,47 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
                 class: "absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-background"
             }
         }
+    }
+}
+
+// ============================================================================
+// Event Status for Detail Page Badges
+// ============================================================================
+
+/// Event status for display badges
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DetailEventStatus {
+    Live,
+    Upcoming,
+    Ended,
+    None,
+}
+
+/// Determine event status badge to display for detail page
+fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
+    // Live status takes precedence
+    if event.is_live() {
+        return DetailEventStatus::Live;
+    }
+
+    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let start_ts = event.start_timestamp();
+
+    // Only show status badges for calendar events
+    if event.is_calendar_event() {
+        // Use end timestamp or default to 24 hours after start
+        let end_ts = event.end_timestamp()
+            .unwrap_or(start_ts + 86400);
+
+        if end_ts < now_secs {
+            DetailEventStatus::Ended
+        } else if start_ts > now_secs {
+            DetailEventStatus::Upcoming
+        } else {
+            // Event is happening now (started but not ended)
+            DetailEventStatus::None
+        }
+    } else {
+        DetailEventStatus::None
     }
 }

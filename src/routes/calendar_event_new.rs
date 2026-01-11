@@ -3,9 +3,14 @@
 //! Create new calendar events (NIP-52 kinds 31922/31923)
 
 use dioxus::prelude::*;
+use dioxus::events::MouseData;
 use crate::stores::{auth_store, calendar_store};
 use crate::routes::Route;
 use crate::utils::date_helpers::get_today;
+use crate::utils::ics::{parse_ics, IcsEvent, IcsDateTime};
+use crate::components::MediaUploader;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlInputElement;
 
 /// Event type selection
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -39,6 +44,15 @@ pub fn CalendarEventNew() -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
 
+    // ICS import state
+    let mut ics_events = use_signal(Vec::<IcsEvent>::new);
+    let mut show_ics_selector = use_signal(|| false);
+
+    // Participant state
+    // Each participant is (pubkey, display_name, role)
+    let mut participants = use_signal(Vec::<(String, String, String)>::new);
+    let mut participant_input = use_signal(String::new);
+
     // Check authentication
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
 
@@ -68,6 +82,127 @@ pub fn CalendarEventNew() -> Element {
         }
     };
 
+    // Add participant (closure for direct call)
+    let mut do_add_participant = move || {
+        let input = participant_input.read().trim().to_string();
+        if input.is_empty() {
+            return;
+        }
+
+        // Try to parse as npub or hex pubkey
+        let (pubkey_hex, display) = if input.starts_with("npub1") {
+            // Parse npub
+            if let Ok(pk) = nostr_sdk::prelude::PublicKey::parse(&input) {
+                (pk.to_hex(), format!("{}...", &input[..12]))
+            } else {
+                error_message.set(Some("Invalid npub".to_string()));
+                return;
+            }
+        } else if input.len() == 64 && input.chars().all(|c| c.is_ascii_hexdigit()) {
+            // Hex pubkey
+            (input.clone(), format!("{}...", &input[..8]))
+        } else {
+            error_message.set(Some("Enter npub or hex pubkey".to_string()));
+            return;
+        };
+
+        // Check for duplicates
+        let mut parts = participants.read().clone();
+        if parts.iter().any(|(pk, _, _)| pk == &pubkey_hex) {
+            error_message.set(Some("Participant already added".to_string()));
+            return;
+        }
+
+        // Add with default role "participant"
+        parts.push((pubkey_hex, display, "participant".to_string()));
+        participants.set(parts);
+        participant_input.set(String::new());
+        error_message.set(None);
+    };
+
+    // Add participant onclick handler
+    let add_participant = move |_: Event<MouseData>| {
+        do_add_participant();
+    };
+
+    // Remove participant
+    let mut remove_participant = move |idx: usize| {
+        let mut parts = participants.read().clone();
+        if idx < parts.len() {
+            parts.remove(idx);
+            participants.set(parts);
+        }
+    };
+
+    // Handle ICS file upload
+    let handle_ics_upload = move |_evt: Event<FormData>| {
+        spawn(async move {
+            // Read file content from file input
+            if let Ok(content) = read_ics_file_content("ics-file-input").await {
+                let events = parse_ics(&content);
+                if events.is_empty() {
+                    error_message.set(Some("No events found in ICS file".to_string()));
+                } else {
+                    ics_events.set(events);
+                    show_ics_selector.set(true);
+                }
+            } else {
+                error_message.set(Some("Failed to read ICS file".to_string()));
+            }
+        });
+    };
+
+    // Apply selected ICS event to form
+    let mut apply_ics_event = move |evt: &IcsEvent| {
+        title.set(evt.title.clone());
+        summary.set(evt.description.clone());
+
+        // Parse start time
+        if let Some(ref start) = evt.start {
+            match start {
+                IcsDateTime::Date(date_str) => {
+                    event_type.set(EventType::DateBased);
+                    start_date.set(date_str.clone());
+                }
+                IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+                    event_type.set(EventType::TimeBased);
+                    let (date, time) = timestamp_to_date_time(*ts);
+                    start_date.set(date);
+                    start_time.set(time);
+                }
+            }
+        }
+
+        // Parse end time
+        if let Some(ref end_dt) = evt.end {
+            match end_dt {
+                IcsDateTime::Date(date_str) => {
+                    end_date.set(date_str.clone());
+                }
+                IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+                    let (date, time) = timestamp_to_date_time(*ts);
+                    end_date.set(date);
+                    end_time.set(time);
+                }
+            }
+        }
+
+        // Location
+        if !evt.location.is_empty() {
+            location.set(evt.location.clone());
+        }
+
+        // URL
+        if !evt.url.is_empty() {
+            let mut locs = locations.read().clone();
+            locs.push(evt.url.clone());
+            locations.set(locs);
+        }
+
+        // Close selector
+        show_ics_selector.set(false);
+    };
+
     // Handle close
     let handle_close = move |_| {
         navigator.go_back();
@@ -93,6 +228,11 @@ pub fn CalendarEventNew() -> Element {
         let hashtags_val = hashtags_input.read().clone();
         let timezone_val = timezone.read().clone();
         let is_private_val = *is_private.read();
+        // Convert participants to (pubkey, role) tuples
+        let participants_val: Vec<(String, String)> = participants.read()
+            .iter()
+            .map(|(pk, _, role)| (pk.clone(), role.clone()))
+            .collect();
 
         is_publishing.set(true);
         error_message.set(None);
@@ -130,6 +270,7 @@ pub fn CalendarEventNew() -> Element {
                         if image_val.is_empty() { None } else { Some(&image_val) },
                         &all_locations,
                         &hashtags,
+                        &participants_val,
                         is_private_val,
                     ).await
                 }
@@ -147,6 +288,7 @@ pub fn CalendarEventNew() -> Element {
                         if image_val.is_empty() { None } else { Some(&image_val) },
                         &all_locations,
                         &hashtags,
+                        &participants_val,
                         if timezone_val.is_empty() { None } else { Some(&timezone_val) },
                         is_private_val,
                     ).await
@@ -238,6 +380,88 @@ pub fn CalendarEventNew() -> Element {
                         div {
                             class: "mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500",
                             "{err}"
+                        }
+                    }
+
+                    // ICS Import Section
+                    div {
+                        class: "mb-6 p-4 bg-muted/50 rounded-lg border border-border",
+                        div {
+                            class: "flex items-center gap-2 mb-2",
+                            span { class: "text-xl", "📅" }
+                            span { class: "font-medium", "Import from Calendar" }
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground mb-3",
+                            "Import event details from an .ics file (iCalendar format)"
+                        }
+                        label {
+                            class: "inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg cursor-pointer transition",
+                            input {
+                                r#type: "file",
+                                accept: ".ics,text/calendar",
+                                class: "hidden",
+                                id: "ics-file-input",
+                                onchange: handle_ics_upload,
+                            }
+                            span { class: "text-lg", "📁" }
+                            span { "Choose .ics File" }
+                        }
+                    }
+
+                    // ICS Event Selector Modal
+                    if *show_ics_selector.read() && !ics_events.read().is_empty() {
+                        div {
+                            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
+                            onclick: move |_| show_ics_selector.set(false),
+
+                            div {
+                                class: "bg-background rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden",
+                                onclick: move |evt| evt.stop_propagation(),
+
+                                // Modal header
+                                div {
+                                    class: "p-4 border-b border-border flex items-center justify-between",
+                                    h3 { class: "font-bold text-lg", "Select Event to Import" }
+                                    button {
+                                        class: "p-1 hover:bg-muted rounded",
+                                        onclick: move |_| show_ics_selector.set(false),
+                                        "✕"
+                                    }
+                                }
+
+                                // Event list
+                                div {
+                                    class: "p-4 overflow-y-auto max-h-[60vh]",
+                                    for evt in ics_events.read().iter() {
+                                        {
+                                            let evt_clone = evt.clone();
+                                            rsx! {
+                                                button {
+                                                    class: "w-full p-3 mb-2 text-left bg-muted/50 hover:bg-muted rounded-lg transition",
+                                                    onclick: move |_| apply_ics_event(&evt_clone),
+                                                    div {
+                                                        class: "font-medium",
+                                                        "{evt.title}"
+                                                    }
+                                                    if let Some(ref start) = evt.start {
+                                                        div {
+                                                            class: "text-sm text-muted-foreground",
+                                                            {format_ics_datetime(start)}
+                                                        }
+                                                    }
+                                                    if !evt.location.is_empty() {
+                                                        div {
+                                                            class: "text-sm text-muted-foreground",
+                                                            "📍 {evt.location}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -417,25 +641,104 @@ pub fn CalendarEventNew() -> Element {
                         }
                     }
 
-                    // Image URL
+                    // Cover Image
                     div {
                         class: "mb-4",
-                        label { class: "block text-sm font-medium mb-2", "Cover Image URL" }
-                        input {
-                            r#type: "url",
-                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
-                            placeholder: "https://...",
-                            value: "{image_url}",
-                            oninput: move |e| image_url.set(e.value())
+                        label { class: "block text-sm font-medium mb-2", "Cover Image" }
+
+                        MediaUploader {
+                            on_upload: move |url: String| {
+                                image_url.set(url);
+                            },
+                            button_label: "Upload Event Image".to_string(),
+                            input_id: "event-image-upload".to_string(),
+                            show_server_selector: true,
                         }
-                        // Preview
+
+                        // Preview uploaded image
                         if !image_url.read().is_empty() {
                             div {
-                                class: "mt-2",
+                                class: "mt-3 relative",
                                 img {
                                     src: "{image_url}",
-                                    alt: "Preview",
-                                    class: "max-h-32 rounded-lg object-cover"
+                                    alt: "Event cover",
+                                    class: "max-h-40 rounded-lg object-cover"
+                                }
+                                button {
+                                    class: "absolute top-2 right-2 px-2 py-1 bg-red-500/80 text-white text-xs rounded hover:bg-red-600 transition",
+                                    onclick: move |_| image_url.set(String::new()),
+                                    "Remove"
+                                }
+                            }
+                        }
+                    }
+
+                    // Participants
+                    div {
+                        class: "mb-4",
+                        label { class: "block text-sm font-medium mb-2", "Participants" }
+                        p {
+                            class: "text-xs text-muted-foreground mb-2",
+                            "Invite people to this event (enter npub or hex pubkey)"
+                        }
+                        div {
+                            class: "flex gap-2 mb-2",
+                            input {
+                                r#type: "text",
+                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                placeholder: "npub1... or hex pubkey",
+                                value: "{participant_input}",
+                                oninput: move |e| participant_input.set(e.value()),
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Enter {
+                                        do_add_participant();
+                                    }
+                                }
+                            }
+                            button {
+                                class: "px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg font-medium transition",
+                                r#type: "button",
+                                onclick: add_participant,
+                                "Add"
+                            }
+                        }
+                        // Participant list
+                        if !participants.read().is_empty() {
+                            div {
+                                class: "space-y-2",
+                                for (idx, (pubkey, display, role)) in participants.read().iter().enumerate() {
+                                    div {
+                                        class: "flex items-center gap-2 p-2 bg-muted/50 rounded-lg",
+                                        key: "{pubkey}",
+                                        div {
+                                            class: "flex-1",
+                                            div { class: "text-sm font-medium", "{display}" }
+                                            div { class: "text-xs text-muted-foreground", "{role}" }
+                                        }
+                                        select {
+                                            class: "px-2 py-1 text-xs bg-background border border-border rounded",
+                                            value: "{role}",
+                                            onchange: {
+                                                let pubkey = pubkey.clone();
+                                                move |e: Event<FormData>| {
+                                                    let mut parts = participants.read().clone();
+                                                    if let Some(p) = parts.iter_mut().find(|(pk, _, _)| pk == &pubkey) {
+                                                        p.2 = e.value();
+                                                    }
+                                                    participants.set(parts);
+                                                }
+                                            },
+                                            option { value: "participant", "Participant" }
+                                            option { value: "speaker", "Speaker" }
+                                            option { value: "organizer", "Organizer" }
+                                            option { value: "moderator", "Moderator" }
+                                        }
+                                        button {
+                                            class: "p-1 text-red-500 hover:text-red-600",
+                                            onclick: move |_| remove_participant(idx),
+                                            "✕"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -509,4 +812,64 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     js_date.set_minutes(minutes);
 
     (js_date.get_time() / 1000.0) as u64
+}
+
+/// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings
+fn timestamp_to_date_time(ts: u64) -> (String, String) {
+    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+    let year = date.get_full_year();
+    let month = date.get_month() + 1; // JS months 0-indexed
+    let day = date.get_date();
+    let hours = date.get_hours();
+    let minutes = date.get_minutes();
+
+    let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
+    let time_str = format!("{:02}:{:02}", hours, minutes);
+
+    (date_str, time_str)
+}
+
+/// Format ICS datetime for display
+fn format_ics_datetime(dt: &IcsDateTime) -> String {
+    match dt {
+        IcsDateTime::Date(d) => d.clone(),
+        IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+            let date = js_sys::Date::new(&(*ts as f64 * 1000.0).into());
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}",
+                date.get_full_year(),
+                date.get_month() + 1,
+                date.get_date(),
+                date.get_hours(),
+                date.get_minutes()
+            )
+        }
+    }
+}
+
+/// Read ICS file content from file input
+async fn read_ics_file_content(_file_name: &str) -> Result<String, String> {
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::window;
+
+    let window = window().ok_or("No window")?;
+    let document = window.document().ok_or("No document")?;
+
+    // Get the file input element
+    let input = document
+        .get_element_by_id("ics-file-input")
+        .ok_or("Input not found")?
+        .dyn_into::<HtmlInputElement>()
+        .map_err(|_| "Not an input element")?;
+
+    let file_list = input.files().ok_or("No files")?;
+    let file = file_list.get(0).ok_or("No file selected")?;
+
+    // Read file as text
+    let promise = file.text();
+    let result = JsFuture::from(promise)
+        .await
+        .map_err(|_| "Failed to read file")?;
+
+    result.as_string().ok_or("Could not convert to string".to_string())
 }
