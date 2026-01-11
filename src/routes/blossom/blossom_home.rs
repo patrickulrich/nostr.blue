@@ -7,7 +7,7 @@ static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 use crate::stores::{
     auth_store,
-    nostr_client,
+    nostr_client::{self, HAS_SIGNER},
     blossom_store::{
         self, BlossomTab, MediaFilter, MediaItem,
         MEDIA_ITEMS, MEDIA_LOADING, MEDIA_ERROR,
@@ -52,12 +52,14 @@ pub fn BlossomPage() -> Element {
     let mut deleting = use_signal(|| false);
     let mut mirroring = use_signal(|| false);
 
-    // Load files when client is initialized
+    // Load files when client is initialized AND signer is ready
+    // Signer is required for NIP-98 auth headers when listing files
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *HAS_SIGNER.read();
 
-        // Only load if client is initialized
-        if !client_initialized {
+        // Only load if client is initialized AND signer is ready
+        if !client_initialized || !has_signer {
             return;
         }
 
@@ -68,12 +70,13 @@ pub fn BlossomPage() -> Element {
         });
     });
 
-    // Load servers when client is initialized
+    // Load servers when client is initialized AND signer is ready
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *HAS_SIGNER.read();
 
-        // Only load if client is initialized
-        if !client_initialized {
+        // Only load if client is initialized AND signer is ready
+        if !client_initialized || !has_signer {
             return;
         }
 
