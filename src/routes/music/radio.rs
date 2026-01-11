@@ -10,18 +10,16 @@ pub fn MusicRadio() -> Element {
     let mut loading = use_signal(|| false);
     let mut radio_started = use_signal(|| false);
 
-    let genres = vec![
+    let genres = [
         "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
         "Classical", "Blues", "Country", "Reggae", "Punk", "Metal",
         "R&B", "Alternative", "Indie", "Ambient"
     ];
 
-    let time_periods = vec![
-        (1, "24 hours"),
+    let time_periods = [(1, "24 hours"),
         (7, "7 days"),
         (30, "30 days"),
-        (90, "90 days"),
-    ];
+        (90, "90 days")];
 
     // Start radio
     let start_radio = move |_| {

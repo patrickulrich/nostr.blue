@@ -1,18 +1,18 @@
-/// Virtual scrolling component with dynamic height support (Phase 3.1)
-///
-/// Renders only visible items in large lists to maintain smooth performance.
-/// Handles 10,000+ items efficiently by rendering only what's in the viewport.
-///
-/// # Features
-/// - Dynamic height tracking for variable-sized items
-/// - Configurable overscan for smooth scrolling
-/// - Automatic height measurement via DOM
-/// - Memory-efficient: O(viewport_size) DOM nodes vs O(total_items)
-///
-/// # Performance Impact
-/// - Before: Rendering 1000 notes = 1000 DOM nodes (slow, memory intensive)
-/// - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
-/// - Maintains 60fps even with 10,000+ items
+//! Virtual scrolling component with dynamic height support (Phase 3.1)
+//!
+//! Renders only visible items in large lists to maintain smooth performance.
+//! Handles 10,000+ items efficiently by rendering only what's in the viewport.
+//!
+//! # Features
+//! - Dynamic height tracking for variable-sized items
+//! - Configurable overscan for smooth scrolling
+//! - Automatic height measurement via DOM
+//! - Memory-efficient: O(viewport_size) DOM nodes vs O(total_items)
+//!
+//! # Performance Impact
+//! - Before: Rendering 1000 notes = 1000 DOM nodes (slow, memory intensive)
+//! - After: Rendering 1000 notes = ~20 DOM nodes (fast, constant memory)
+//! - Maintains 60fps even with 10,000+ items
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Track if a scroll update is pending (prevents flooding with rAF callbacks)
-    static SCROLL_UPDATE_PENDING: RefCell<bool> = RefCell::new(false);
+    static SCROLL_UPDATE_PENDING: RefCell<bool> = const { RefCell::new(false) };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -265,11 +265,11 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
         div {
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
-            onmounted: move |evt| {
+            onmounted: move |_evt| {
                 #[cfg(target_arch = "wasm32")]
                 {
                     // Store container element and measure viewport height
-                    let element = evt.data();
+                    let element = _evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
                         *container_element.write() = Some(html_element.clone());
 
@@ -299,8 +299,8 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                         return;
                     }
 
-                    let mut state = virtual_state.clone();
-                    let container = container_element.clone();
+                    let mut state = virtual_state;
+                    let container = container_element;
 
                     // Schedule update on next animation frame
                     // Use once_into_js to convert closure to JsValue that owns it (prevents premature drop)
@@ -342,7 +342,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
 
                     LAST_SCROLL_UPDATE.store(now, Ordering::Relaxed);
 
-                    let mut state = virtual_state.clone();
+                    let mut state = virtual_state;
                     // Note: Element storage not available on non-WASM
                     state.write().scroll_top = 0.0; // Fallback for non-WASM
                     log::trace!("Updated scroll_top (non-WASM fallback)");
@@ -363,27 +363,29 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     {
                         let item_index = *index;
                         let item_rc = item.clone();
-                        let state = virtual_state.clone();
+                        #[allow(unused_variables)]
+                        let state = virtual_state;
                         rsx! {
                             div {
                                 key: "{index}",
                                 class: "virtual-item",
-                                onmounted: move |evt| {
-                                    let mut state = state.clone();
-
+                                onmounted: move |_evt| {
                                     // Measure using the mounted element directly (no global IDs)
                                     #[cfg(target_arch = "wasm32")]
-                                    spawn(async move {
-                                        let element = evt.data();
-                                        if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
-                                            let rect = html_element.get_bounding_client_rect();
-                                            let height = rect.height();
-                                            if height > 0.0 {
-                                                state.write().set_item_height(item_index, height);
-                                                log::trace!("Measured item {} height: {}px", item_index, height);
+                                    {
+                                        let mut state = state;
+                                        spawn(async move {
+                                            let element = _evt.data();
+                                            if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                                                let rect = html_element.get_bounding_client_rect();
+                                                let height = rect.height();
+                                                if height > 0.0 {
+                                                    state.write().set_item_height(item_index, height);
+                                                    log::trace!("Measured item {} height: {}px", item_index, height);
+                                                }
                                             }
-                                        }
-                                    });
+                                        });
+                                    }
                                 },
                                 {(props.item_content)(item_rc, item_index)}
                             }

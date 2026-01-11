@@ -1,20 +1,20 @@
-/// Event interaction aggregation service
-///
-/// Provides batch fetching of interaction counts (replies, likes, reposts, zaps)
-/// for multiple events in a single query. This dramatically reduces database
-/// queries compared to fetching counts per-event.
-///
-/// # Performance Impact
-/// - Before: N queries (one per event in feed)
-/// - After: 1 query (batched for all events)
-/// - Example: 100 notes → 99% reduction in queries (100 → 1)
-///
-/// # L2 Caching (Phase 3.5)
-/// Implements in-memory LRU cache for computed interaction counts:
-/// - Cache size: 1000 events
-/// - TTL: 5 minutes per entry
-/// - Automatic eviction of stale/excess entries
-/// - Reduces redundant database queries for recently-viewed events
+//! Event interaction aggregation service
+//!
+//! Provides batch fetching of interaction counts (replies, likes, reposts, zaps)
+//! for multiple events in a single query. This dramatically reduces database
+//! queries compared to fetching counts per-event.
+//!
+//! # Performance Impact
+//! - Before: N queries (one per event in feed)
+//! - After: 1 query (batched for all events)
+//! - Example: 100 notes → 99% reduction in queries (100 → 1)
+//!
+//! # L2 Caching (Phase 3.5)
+//! Implements in-memory LRU cache for computed interaction counts:
+//! - Cache size: 1000 events
+//! - TTL: 5 minutes per entry
+//! - Automatic eviction of stale/excess entries
+//! - Reduces redundant database queries for recently-viewed events
 
 use dioxus::prelude::ReadableExt;
 use lru::LruCache;

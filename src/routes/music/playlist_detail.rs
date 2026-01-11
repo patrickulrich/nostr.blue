@@ -9,7 +9,7 @@ use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
 #[component]
 pub fn MusicPlaylistDetail(naddr: String) -> Element {
     let mut playlist = use_signal(|| None::<nostr_music::NostrPlaylist>);
-    let mut tracks = use_signal(|| Vec::<music_player::MusicTrack>::new());
+    let mut tracks = use_signal(Vec::<music_player::MusicTrack>::new);
     let mut creator_name = use_signal(|| String::from("Unknown"));
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);

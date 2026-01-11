@@ -24,7 +24,7 @@ pub const KIND_CONTENT_DISCOVERY_RESULT: u16 = 6300;
 /// NIP-89 Handler information / DVM announcement
 pub const KIND_APP_HANDLER: u16 = 31990;
 
-/// Default content discovery DVM (same as Snort uses)
+/// Default content discovery DVM
 pub const DEFAULT_CONTENT_DVM: &str = "0d9ec486275b70f0c4faec277fc4c63b9f14cb1ca1ec029f7d76210e957e5257";
 
 /// Relays known to have DVM providers

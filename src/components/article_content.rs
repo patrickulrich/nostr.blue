@@ -3,8 +3,8 @@ use crate::utils::markdown::render_markdown;
 
 #[component]
 pub fn ArticleContent(content: String) -> Element {
-    // Render markdown to sanitized HTML (render_markdown already sanitizes)
-    let html_content = render_markdown(&content);
+    // Memoize markdown rendering - use_memo automatically tracks captured props
+    let html_content = use_memo(move || render_markdown(&content));
 
     rsx! {
         div {

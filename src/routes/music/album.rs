@@ -252,7 +252,7 @@ pub fn MusicAlbum(album_id: String) -> Element {
 
                                                     // Duration
                                                     div { class: "text-sm text-gray-400",
-                                                        {track.duration.map(|d| format_duration(d)).unwrap_or_default()}
+                                                        {track.duration.map(&format_duration).unwrap_or_default()}
                                                     }
 
                                                     // Zap button

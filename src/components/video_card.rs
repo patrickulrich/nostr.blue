@@ -7,6 +7,8 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
+use crate::utils::truncate_pubkey;
+use crate::utils::duration::format_duration_timecode_padded;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -87,19 +89,6 @@ pub fn get_video_title(event: &Event) -> Option<String> {
     None
 }
 
-/// Format duration in seconds to MM:SS or HH:MM:SS
-fn format_duration(seconds: f64) -> String {
-    let total_secs = seconds as u64;
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    let secs = total_secs % 60;
-
-    if hours > 0 {
-        format!("{:02}:{:02}:{:02}", hours, minutes, secs)
-    } else {
-        format!("{:02}:{:02}", minutes, secs)
-    }
-}
 
 #[component]
 pub fn VideoCard(event: Event) -> Element {
@@ -336,15 +325,15 @@ pub fn VideoCard(event: Event) -> Element {
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
         metadata.display_name.clone()
             .or_else(|| metadata.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..]))
+            .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
-        format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..])
+        truncate_pubkey(&author_pubkey_display)
     };
 
     let author_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
 
-    let formatted_duration = first_video.duration.map(format_duration);
+    let formatted_duration = first_video.duration.map(|d| format_duration_timecode_padded(d as u64));
 
     rsx! {
         div {

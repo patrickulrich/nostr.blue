@@ -98,7 +98,7 @@ impl PendingComment {
 /// Global store for pending comments
 /// Key: target_event_id (hex string) -> Vec<PendingComment>
 pub static PENDING_COMMENTS: GlobalSignal<HashMap<String, Vec<PendingComment>>> =
-    Signal::global(|| HashMap::new());
+    Signal::global(HashMap::new);
 
 /// Add a pending comment to the store
 ///
@@ -110,7 +110,7 @@ pub fn add_pending_comment(comment: PendingComment) {
     log::debug!("Adding pending comment {} for target {}", comment.local_id, target_id);
 
     let mut store = PENDING_COMMENTS.write();
-    let comments = store.entry(target_id).or_insert_with(Vec::new);
+    let comments = store.entry(target_id).or_default();
 
     // Prevent duplicates: check if we already have a pending or failed comment with same content
     let already_exists = comments.iter().any(|c|
@@ -313,7 +313,7 @@ pub fn retry_pending_comment(local_id: &str) {
                 }
                 Err(e) => {
                     log::error!("Failed to retry reply: {}", e);
-                    update_pending_status(&local_id, CommentStatus::Failed(format!("{}", e)));
+                    update_pending_status(&local_id, CommentStatus::Failed(e.to_string()));
                 }
             }
         }

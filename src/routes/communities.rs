@@ -1,37 +1,147 @@
-use dioxus::prelude::*;
-use crate::stores::nostr_client;
-use crate::routes::Route;
-use nostr_sdk::{Event, Filter, Kind};
-use std::time::Duration;
+//! Communities List Page
+//! Displays NIP-72 moderated communities with:
+//! - Pinned communities at top
+//! - User's communities sorted by role (Owner > Moderator > Member > Pending)
+//! - Discover section for other communities
+//! - Real relay search
+//! - Infinite scroll pagination
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Community {
-    pub id: String,
-    pub pubkey: String,
-    pub d_tag: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub image: Option<String>,
-    pub moderators: Vec<String>,
-    pub event: Event,
-    pub a_tag: String, // Format: "34550:pubkey:d_tag"
-}
+use dioxus::prelude::*;
+use crate::stores::community_store::{self, Community, MembershipStatus, CommunityWithMembership};
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::auth_store;
+use crate::stores::pinned_communities::{self, get_pinned_communities_set};
+use crate::components::{CommunityCard, CommunityCardWithMembership, CommunityCardSkeleton, ClientInitializing};
+use crate::hooks::use_infinite_scroll;
+use crate::routes::Route;
+use std::collections::HashSet;
 
 #[component]
 pub fn Communities() -> Element {
-    let mut communities = use_signal(|| Vec::<Community>::new());
+    // Main communities list
+    let mut communities = use_signal(Vec::<Community>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let mut search_query = use_signal(|| String::new());
 
-    // Fetch communities on mount
+    // User's communities with membership info (sorted by role)
+    let mut user_communities_with_membership = use_signal(Vec::<CommunityWithMembership>::new);
+    let mut user_communities_loading = use_signal(|| false);
+
+    // Pinned communities
+    let mut pinned_communities = use_signal(Vec::<CommunityWithMembership>::new);
+    let mut pinned_loading = use_signal(|| false);
+
+    // Search state
+    let mut search_query = use_signal(String::new);
+    let mut search_results = use_signal(|| None::<Vec<Community>>);
+    let mut search_loading = use_signal(|| false);
+    let mut search_version = use_signal(|| 0u64);
+
+    // Pagination state for infinite scroll
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut pagination_loading = use_signal(|| false);
+
+    // Refresh trigger for re-fetching
+    let refresh_trigger = use_signal(|| 0);
+
+    // Initialize pinned communities on mount (if signed in)
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *HAS_SIGNER.read();
+        if !client_initialized || !has_signer {
+            return;
+        }
+
+        spawn(async move {
+            if let Err(e) = pinned_communities::init_pinned_communities().await {
+                log::warn!("Failed to initialize pinned communities: {}", e);
+            }
+        });
+    });
+
+    // Fetch user's communities with membership info on mount (if signed in)
+    use_effect(move || {
+        let _ = refresh_trigger.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *HAS_SIGNER.read();
+        if !client_initialized || !has_signer {
+            return;
+        }
+
+        if let Some(pubkey) = auth_store::get_pubkey() {
+            user_communities_loading.set(true);
+            pinned_loading.set(true);
+
+            spawn(async move {
+                // Fetch user's pending join requests first
+                if let Err(e) = community_store::fetch_user_join_requests(&pubkey).await {
+                    log::warn!("Failed to fetch user join requests: {}", e);
+                }
+
+                match community_store::fetch_user_communities(&pubkey).await {
+                    Ok(comms) => {
+                        // Get pinned set for sorting
+                        let pinned_set = get_pinned_communities_set();
+
+                        // Deduplicate communities (relays may return duplicates)
+                        let mut seen = HashSet::new();
+                        let deduped: Vec<_> = comms
+                            .into_iter()
+                            .filter(|c| seen.insert(c.a_tag.clone()))
+                            .collect();
+
+                        // Sort communities by membership status
+                        let sorted = community_store::sort_communities_by_membership(
+                            deduped,
+                            Some(pubkey.as_str()),
+                            &pinned_set,
+                        );
+
+                        // Separate pinned from user communities
+                        let (pinned, user): (Vec<_>, Vec<_>) = sorted
+                            .into_iter()
+                            .partition(|c| c.is_pinned);
+
+                        // Filter user communities to only those where user has a role
+                        let user_with_roles: Vec<_> = user
+                            .into_iter()
+                            .filter(|c| !matches!(c.membership_status, MembershipStatus::None))
+                            .collect();
+
+                        pinned_communities.set(pinned);
+                        user_communities_with_membership.set(user_with_roles);
+                        user_communities_loading.set(false);
+                        pinned_loading.set(false);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch user communities: {}", e);
+                        user_communities_loading.set(false);
+                        pinned_loading.set(false);
+                    }
+                }
+            });
+        }
+    });
+
+    // Fetch initial communities on mount
+    use_effect(move || {
+        let _ = refresh_trigger.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
         loading.set(true);
         error.set(None);
 
         spawn(async move {
-            match fetch_communities().await {
+            match community_store::fetch_communities_page(50, None).await {
                 Ok(comms) => {
+                    // Track oldest timestamp for pagination
+                    if let Some(last) = comms.last() {
+                        oldest_timestamp.set(Some(last.created_at));
+                    }
                     communities.set(comms);
                     loading.set(false);
                 }
@@ -43,23 +153,132 @@ pub fn Communities() -> Element {
         });
     });
 
-    // Filter communities based on search
-    let filtered_communities = use_memo(move || {
-        let query = search_query.read().to_lowercase();
-        if query.is_empty() {
-            communities.read().clone()
-        } else {
-            communities.read()
-                .iter()
-                .filter(|c| {
-                    c.name.as_ref().map(|n| n.to_lowercase().contains(&query)).unwrap_or(false) ||
-                    c.description.as_ref().map(|d| d.to_lowercase().contains(&query)).unwrap_or(false) ||
-                    c.d_tag.to_lowercase().contains(&query)
-                })
-                .cloned()
-                .collect()
+    // Debounced search effect
+    use_effect(move || {
+        let query = search_query.read().clone();
+
+        // Reset search if query is too short
+        if query.len() < 2 {
+            search_results.set(None);
+            search_loading.set(false);
+            return;
         }
+
+        // Increment version to invalidate previous searches
+        let version = search_version.with_mut(|v| { *v += 1; *v });
+        search_loading.set(true);
+
+        spawn(async move {
+            // Debounce 300ms
+            #[cfg(target_arch = "wasm32")]
+            gloo_timers::future::TimeoutFuture::new(300).await;
+
+            // Check if this search is still current
+            if *search_version.peek() != version {
+                return;
+            }
+
+            match community_store::search_communities(&query, 50).await {
+                Ok(results) => {
+                    // Check again after async operation
+                    if *search_version.peek() == version {
+                        search_results.set(Some(results));
+                        search_loading.set(false);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Search failed: {}", e);
+                    if *search_version.peek() == version {
+                        search_loading.set(false);
+                    }
+                }
+            }
+        });
     });
+
+    // Load more function for infinite scroll
+    let load_more = move || {
+        if *pagination_loading.peek() || !*has_more.peek() {
+            return;
+        }
+
+        // Don't paginate while searching
+        if search_results.peek().is_some() {
+            return;
+        }
+
+        pagination_loading.set(true);
+        let until = *oldest_timestamp.peek();
+
+        spawn(async move {
+            match community_store::fetch_communities_page(50, until).await {
+                Ok(new_communities) => {
+                    if new_communities.is_empty() {
+                        has_more.set(false);
+                    } else {
+                        // Update oldest timestamp for next page
+                        if let Some(last) = new_communities.last() {
+                            oldest_timestamp.set(Some(last.created_at));
+                        }
+                        // Append to existing communities
+                        communities.write().extend(new_communities);
+                    }
+                    pagination_loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load more communities: {}", e);
+                    pagination_loading.set(false);
+                }
+            }
+        });
+    };
+
+    // Set up infinite scroll sentinel
+    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
+
+    // Determine which communities to display in Discover section
+    let display_communities = use_memo(move || {
+        // If searching, show search results (deduplicated)
+        if let Some(results) = search_results.read().as_ref() {
+            let mut seen = HashSet::new();
+            return results.iter()
+                .filter(|c| seen.insert(c.a_tag.clone()))
+                .cloned()
+                .collect();
+        }
+
+        // Build set of a_tags to exclude (pinned + user's communities)
+        let mut excluded_a_tags: HashSet<String> = HashSet::new();
+
+        // Exclude pinned communities
+        for c in pinned_communities.read().iter() {
+            excluded_a_tags.insert(c.community.a_tag.clone());
+        }
+
+        // Exclude user's communities (with membership)
+        for c in user_communities_with_membership.read().iter() {
+            excluded_a_tags.insert(c.community.a_tag.clone());
+        }
+
+        let all_communities = communities.read();
+
+        // Filter and deduplicate (relays may return duplicates)
+        let mut seen = HashSet::new();
+        let filtered: Vec<_> = all_communities
+            .iter()
+            .filter(|c| !excluded_a_tags.contains(&c.a_tag))
+            .filter(|c| seen.insert(c.a_tag.clone()))
+            .cloned()
+            .collect();
+
+        log::info!("display_communities: total={}, excluded={}, filtered={}",
+            all_communities.len(), excluded_a_tags.len(), filtered.len());
+
+        filtered
+    });
+
+    // Check if we're in search mode
+    let is_searching = search_query.read().len() >= 2;
 
     rsx! {
         div {
@@ -70,22 +289,58 @@ pub fn Communities() -> Element {
                 class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div {
                     class: "px-4 py-3",
-                    h1 {
-                        class: "text-xl font-bold flex items-center gap-2 mb-3",
-                        span { "👥" }
-                        "Communities"
+                    div {
+                        class: "flex items-center justify-between mb-3",
+                        h1 {
+                            class: "text-xl font-bold flex items-center gap-2",
+                            svg {
+                                class: "w-6 h-6",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
+                                circle { cx: "9", cy: "7", r: "4" }
+                                path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
+                                path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                            }
+                            "Communities"
+                        }
+                        // Create Community button (only if signed in)
+                        if *HAS_SIGNER.read() {
+                            Link {
+                                to: Route::CommunityNew {},
+                                class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",
+                                "+ Create"
+                            }
+                        }
                     }
                     p {
                         class: "text-sm text-muted-foreground mb-3",
-                        "Discover communities and join the conversation"
+                        "Discover NIP-72 moderated communities and join the conversation"
                     }
 
                     // Search
                     div {
                         class: "relative",
-                        span {
-                            class: "absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground",
-                            "🔍"
+                        svg {
+                            class: "absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "11", cy: "11", r: "8" }
+                            line { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }
                         }
                         input {
                             class: "w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -94,232 +349,222 @@ pub fn Communities() -> Element {
                             value: "{search_query}",
                             oninput: move |evt| search_query.set(evt.value())
                         }
+                        // Search loading indicator
+                        if *search_loading.read() {
+                            div {
+                                class: "absolute right-3 top-1/2 -translate-y-1/2",
+                                span {
+                                    class: "inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
+                                }
+                            }
+                        }
                     }
                 }
             }
 
             // Content
-            if *loading.read() {
-                div {
-                    class: "flex items-center justify-center py-20",
-                    span {
-                        class: "inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                    }
-                }
+            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && communities.read().is_empty()) {
+                ClientInitializing {}
             } else if let Some(err) = error.read().as_ref() {
                 div {
                     class: "p-4",
                     div {
                         class: "p-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg",
-                        "❌ {err}"
-                    }
-                }
-            } else if filtered_communities.read().is_empty() {
-                div {
-                    class: "flex flex-col items-center justify-center py-20 px-4 text-center",
-                    div {
-                        class: "text-6xl mb-4",
-                        "👥"
-                    }
-                    h2 {
-                        class: "text-2xl font-bold mb-2",
-                        if !search_query.read().is_empty() {
-                            "No communities found"
-                        } else {
-                            "No communities available"
-                        }
-                    }
-                    p {
-                        class: "text-muted-foreground max-w-sm",
-                        if !search_query.read().is_empty() {
-                            "Try a different search term"
-                        } else {
-                            "Connect to more relays to discover communities"
-                        }
+                        "{err}"
                     }
                 }
             } else {
                 div {
-                    class: "p-4 space-y-4",
-                    for community in filtered_communities.read().iter() {
-                        CommunityCard { community: community.clone() }
+                    class: "p-4 space-y-6",
+
+                    // Pinned Communities section (only if signed in and has pinned communities, not searching)
+                    if *HAS_SIGNER.read() && !is_searching && !pinned_communities.read().is_empty() {
+                        div {
+                            h2 {
+                                class: "text-lg font-semibold mb-3 flex items-center gap-2",
+                                svg {
+                                    class: "w-5 h-5 text-yellow-500",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" }
+                                }
+                                "Pinned Communities"
+                            }
+                            div {
+                                class: "grid gap-4 md:grid-cols-2 lg:grid-cols-3",
+                                for cwm in pinned_communities.read().iter() {
+                                    CommunityCardWithMembership {
+                                        key: "{cwm.community.a_tag}",
+                                        data: cwm.clone()
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
-            }
-        }
-    }
-}
 
-#[component]
-fn CommunityCard(community: Community) -> Element {
-    let _a_tag_encoded = urlencoding::encode(&community.a_tag).to_string();
-
-    rsx! {
-        div {
-            class: "border border-border rounded-lg p-4 hover:shadow-md transition-shadow bg-card",
-
-            div {
-                class: "flex items-start gap-3 mb-3",
-
-                // Avatar/Image
-                if let Some(image_url) = &community.image {
-                    img {
-                        class: "w-12 h-12 rounded-full object-cover",
-                        src: "{image_url}",
-                        alt: "Community image"
+                    // Pinned communities loading skeleton
+                    if *HAS_SIGNER.read() && !is_searching && *pinned_loading.read() && pinned_communities.read().is_empty() {
+                        div {
+                            h2 {
+                                class: "text-lg font-semibold mb-3 flex items-center gap-2",
+                                svg {
+                                    class: "w-5 h-5 text-yellow-500",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" }
+                                }
+                                "Pinned Communities"
+                            }
+                            div {
+                                class: "grid gap-4 md:grid-cols-2 lg:grid-cols-3",
+                                for _ in 0..2 {
+                                    CommunityCardSkeleton {}
+                                }
+                            }
+                        }
                     }
-                } else {
+
+                    // Your Communities section (only if signed in and has communities, not searching)
+                    if *HAS_SIGNER.read() && !is_searching && !user_communities_with_membership.read().is_empty() {
+                        div {
+                            h2 {
+                                class: "text-lg font-semibold mb-3 flex items-center gap-2",
+                                svg {
+                                    class: "w-5 h-5 text-blue-500",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" }
+                                }
+                                "Your Communities"
+                            }
+                            div {
+                                class: "grid gap-4 md:grid-cols-2 lg:grid-cols-3",
+                                for cwm in user_communities_with_membership.read().iter() {
+                                    CommunityCardWithMembership {
+                                        key: "{cwm.community.a_tag}",
+                                        data: cwm.clone()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // User communities loading skeleton
+                    if *HAS_SIGNER.read() && !is_searching && *user_communities_loading.read() && user_communities_with_membership.read().is_empty() {
+                        div {
+                            h2 {
+                                class: "text-lg font-semibold mb-3",
+                                "Your Communities"
+                            }
+                            div {
+                                class: "grid gap-4 md:grid-cols-2 lg:grid-cols-3",
+                                for _ in 0..3 {
+                                    CommunityCardSkeleton {}
+                                }
+                            }
+                        }
+                    }
+
+                    // Discover / Search Results section
                     div {
-                        class: "w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white text-xl",
-                        "👥"
-                    }
-                }
+                        h2 {
+                            class: "text-lg font-semibold mb-3",
+                            if is_searching {
+                                "Search Results"
+                            } else {
+                                "Discover Communities"
+                            }
+                        }
 
-                // Info
-                div {
-                    class: "flex-1 min-w-0",
-                    h3 {
-                        class: "text-lg font-bold",
-                        "{community.name.as_ref().unwrap_or(&community.d_tag)}"
-                    }
-                    p {
-                        class: "text-sm text-muted-foreground",
-                        "{community.d_tag}"
-                    }
-                }
-            }
+                        if display_communities.read().is_empty() {
+                            div {
+                                class: "flex flex-col items-center justify-center py-12 px-4 text-center",
+                                svg {
+                                    class: "w-12 h-12 mb-4 text-muted-foreground",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
+                                    circle { cx: "9", cy: "7", r: "4" }
+                                    path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
+                                    path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                                }
+                                h3 {
+                                    class: "text-lg font-medium mb-1",
+                                    if is_searching {
+                                        "No communities found"
+                                    } else {
+                                        "No communities available"
+                                    }
+                                }
+                                p {
+                                    class: "text-muted-foreground text-sm",
+                                    if is_searching {
+                                        "Try a different search term"
+                                    } else {
+                                        "Connect to more relays to discover communities"
+                                    }
+                                }
+                            }
+                        } else {
+                            div {
+                                class: "grid gap-4 md:grid-cols-2 lg:grid-cols-3",
+                                for community in display_communities.read().iter() {
+                                    CommunityCard {
+                                        key: "{community.a_tag}",
+                                        community: community.clone()
+                                    }
+                                }
+                            }
 
-            // Description
-            if let Some(desc) = &community.description {
-                p {
-                    class: "text-sm text-muted-foreground mb-3",
-                    "{desc}"
-                }
-            }
+                            // Infinite scroll sentinel (only when not searching)
+                            if !is_searching && *has_more.read() {
+                                div {
+                                    id: "{sentinel_id}",
+                                    class: "h-4"
+                                }
+                            }
 
-            // Moderators count
-            if !community.moderators.is_empty() {
-                div {
-                    class: "mb-3",
-                    p {
-                        class: "text-xs text-muted-foreground",
-                        "👤 {community.moderators.len()} moderator"
-                        if community.moderators.len() != 1 { "s" }
+                            // Pagination loading indicator
+                            if *pagination_loading.read() {
+                                div {
+                                    class: "flex justify-center py-4",
+                                    span {
+                                        class: "inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
-            }
-
-            // View button
-            div {
-                class: "pt-3 border-t border-border",
-                Link {
-                    to: Route::CommunityPage { a_tag: community.a_tag.clone() },
-                    class: "w-full flex items-center justify-between px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition",
-                    span {
-                        class: "flex items-center gap-2",
-                        "👥 View Community"
-                    }
-                    span { "→" }
                 }
             }
         }
     }
-}
-
-// Fetch all communities from relays
-async fn fetch_communities() -> Result<Vec<Community>, String> {
-    log::info!("Fetching communities...");
-
-    // Fetch kind 34550 (NIP-72 community definitions)
-    let filter = Filter::new()
-        .kind(Kind::Custom(34550))
-        .limit(100);
-
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            log::info!("Fetched {} community events", events.len());
-
-            let mut communities: Vec<Community> = events.into_iter()
-                .filter_map(|event| parse_community_event(event))
-                .collect();
-
-            // Sort by creation date (newest first)
-            communities.sort_by(|a, b| b.event.created_at.cmp(&a.event.created_at));
-
-            Ok(communities)
-        }
-        Err(e) => {
-            log::error!("Failed to fetch communities: {}", e);
-            Err(format!("Failed to fetch communities: {}", e))
-        }
-    }
-}
-
-// Parse a community event into a Community struct
-pub fn parse_community_event(event: Event) -> Option<Community> {
-    use nostr_sdk::{TagKind, SingleLetterTag, Alphabet};
-
-    // Extract d tag (identifier)
-    let d_tag = event.tags.iter()
-        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
-        .and_then(|t| t.content())
-        .map(|s| s.to_string())?;
-
-    // Extract optional multi-letter tags by checking tag.as_slice()
-    let name = event.tags.iter()
-        .find(|t| {
-            let slice = t.as_slice();
-            slice.first().map(|s| s.as_str()) == Some("name")
-        })
-        .and_then(|t| {
-            let slice = t.as_slice();
-            slice.get(1).map(|v| v.to_string())
-        });
-
-    let description = event.tags.iter()
-        .find(|t| {
-            let slice = t.as_slice();
-            slice.first().map(|s| s.as_str()) == Some("description")
-        })
-        .and_then(|t| {
-            let slice = t.as_slice();
-            slice.get(1).map(|v| v.to_string())
-        });
-
-    let image = event.tags.iter()
-        .find(|t| {
-            let slice = t.as_slice();
-            slice.first().map(|s| s.as_str()) == Some("image")
-        })
-        .and_then(|t| {
-            let slice = t.as_slice();
-            slice.get(1).map(|v| v.to_string())
-        });
-
-    // Extract moderators (p tags)
-    // Note: In NIP-72, moderators are marked with "moderator" as 4th element
-    let moderators: Vec<String> = event.tags.iter()
-        .filter(|t| t.kind() == TagKind::p())
-        .filter(|t| {
-            // Check if 4th element is "moderator"
-            let slice = t.as_slice();
-            slice.get(3).map(|s| s.as_str()) == Some("moderator")
-        })
-        .filter_map(|t| t.content().map(|s| s.to_string()))
-        .collect();
-
-    // Create a_tag in format "34550:pubkey:d_tag"
-    let a_tag = format!("34550:{}:{}", event.pubkey.to_hex(), d_tag);
-
-    Some(Community {
-        id: event.id.to_hex(),
-        pubkey: event.pubkey.to_hex(),
-        d_tag: d_tag.clone(),
-        name,
-        description,
-        image,
-        moderators,
-        event,
-        a_tag,
-    })
 }

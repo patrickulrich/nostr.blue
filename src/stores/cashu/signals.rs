@@ -36,7 +36,7 @@ pub static WALLET_STATUS: GlobalSignal<WalletStatus> =
 
 /// Global signal for detailed balance breakdown
 pub static WALLET_BALANCES: GlobalSignal<WalletBalances> =
-    Signal::global(|| WalletBalances::default());
+    Signal::global(WalletBalances::default);
 
 /// Global signal for terms acceptance status
 /// None = not yet checked, Some(true) = accepted, Some(false) = not accepted
@@ -49,17 +49,17 @@ pub static TERMS_ACCEPTED: GlobalSignal<Option<bool>> = Signal::global(|| None);
 /// Operation lock to prevent concurrent wallet operations on the same mint
 /// Uses GlobalSignal with HashSet to track mints currently being operated on
 pub static MINT_OPERATION_LOCK: GlobalSignal<HashSet<String>> =
-    Signal::global(|| HashSet::new());
+    Signal::global(HashSet::new);
 
 /// Proof-to-EventId mapping for fast lookup of which Nostr event contains each proof
 /// Key: proof secret, Value: event_id of the token event containing this proof
 /// This enables correct deletion events when spending proofs
 pub static PROOF_EVENT_MAP: GlobalSignal<HashMap<String, String>> =
-    Signal::global(|| HashMap::new());
+    Signal::global(HashMap::new);
 
 /// Global signal for active transactions (local-only tracking)
 pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> =
-    Signal::global(|| Vec::new());
+    Signal::global(Vec::new);
 
 /// Proof secrets that the mint has reported as PENDING state
 /// Different from local pending (is_pending flag) - this tracks proofs
@@ -68,7 +68,7 @@ pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> =
 /// CDK best practice: Track timestamps for TTL cleanup to prevent stale entries
 /// Key: proof secret, Value: timestamp when registered (seconds since epoch)
 pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
-    Signal::global(|| HashMap::new());
+    Signal::global(HashMap::new);
 
 // =============================================================================
 // Sync State Signals
@@ -94,7 +94,7 @@ pub static SHARED_LOCALSTORE: GlobalSignal<
 
 /// Pending Nostr events (offline queue)
 pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> =
-    Signal::global(|| Vec::new());
+    Signal::global(Vec::new);
 
 /// Global signal for pending mint quotes (lightning receive)
 pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =
@@ -120,7 +120,7 @@ pub static PAYMENT_REQUEST_PROGRESS: GlobalSignal<Option<PaymentRequestProgress>
 
 /// Global signal for pending payment requests waiting for payment
 pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<HashMap<String, NostrPaymentWaitInfo>> =
-    Signal::global(|| HashMap::new());
+    Signal::global(HashMap::new);
 
 // =============================================================================
 // Counter Backup Signal
@@ -129,7 +129,7 @@ pub static PENDING_PAYMENT_REQUESTS: GlobalSignal<HashMap<String, NostrPaymentWa
 /// Counter backups for mint removal/re-addition
 /// When a mint is removed, its proof counters are backed up here
 /// When the same mint is re-added, counters are restored
-pub static COUNTER_BACKUPS: GlobalSignal<Vec<CounterBackup>> = Signal::global(|| Vec::new());
+pub static COUNTER_BACKUPS: GlobalSignal<Vec<CounterBackup>> = Signal::global(Vec::new);
 
 // =============================================================================
 // Constants

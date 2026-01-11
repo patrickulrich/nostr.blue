@@ -508,7 +508,7 @@ pub fn parse_cache_control(header: Option<&str>) -> Option<u64> {
             let part = part.trim();
             if let Some(rest) = part.strip_prefix("max-age") {
                 // Handle "max-age=123", "max-age = 123", "max-age=\"123\""
-                let rest = rest.trim_start_matches(|c| c == '=' || c == ' ' || c == '"');
+                let rest = rest.trim_start_matches(['=', ' ', '"']);
                 let rest = rest.trim_end_matches('"');
                 if let Ok(val) = rest.parse::<u64>() {
                     return Some(val);

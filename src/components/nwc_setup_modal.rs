@@ -8,7 +8,7 @@ pub fn NwcSetupModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut nwc_uri = use_signal(|| String::new());
+    let mut nwc_uri = use_signal(String::new);
     let mut is_connecting = use_signal(|| false);
     let mut connection_error = use_signal(|| Option::<String>::None);
     let mut connection_success = use_signal(|| false);
