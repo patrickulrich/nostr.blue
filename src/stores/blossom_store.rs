@@ -24,6 +24,10 @@ pub const KIND_USER_BLOSSOM_SERVERS: u16 = 10063;
 #[allow(dead_code)] // Used in WASM-only code paths
 const BLOSSOM_SERVERS_STORAGE_KEY: &str = "nostr_blue_blossom_servers";
 
+/// HTTP request timeout in milliseconds
+#[cfg(target_arch = "wasm32")]
+const REQUEST_TIMEOUT_MS: u32 = 10_000; // 10 seconds
+
 /// Save servers to local storage (WASM only)
 #[cfg(target_arch = "wasm32")]
 fn save_servers_to_storage(servers: &[String]) {
@@ -687,6 +691,13 @@ pub async fn get_auth_header(
         for h in hash.split(',') {
             let h = h.trim();
             if !h.is_empty() {
+                // Validate: must be exactly 64 hex characters (BUD-01 spec)
+                if h.len() != 64 {
+                    return Err(format!("Invalid SHA256 hash length: {} (expected 64)", h.len()));
+                }
+                if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err("Invalid SHA256 hash: contains non-hex characters".to_string());
+                }
                 tags.push(Tag::custom(TagKind::Custom("x".into()), vec![h.to_string()]));
             }
         }
@@ -759,8 +770,10 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
     // Get auth header for list operation
     let auth_header = get_auth_header("list", None, "List files via nostr.blue").await?;
 
-    // Fetch from all servers concurrently
+    // Fetch from all servers sequentially, tracking success
     let mut all_items: HashMap<String, MediaItem> = HashMap::new();
+    let mut success_count = 0;
+    let mut last_error = String::new();
 
     for server in &servers {
         let server_url = server.trim_end_matches('/');
@@ -770,6 +783,7 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
 
         match fetch_server_list(&list_url, &auth_header).await {
             Ok(blobs) => {
+                success_count += 1;
                 log::info!("Found {} files on {}", blobs.len(), server);
                 for blob in blobs {
                     if let Some(existing) = all_items.get_mut(&blob.sha256) {
@@ -792,8 +806,18 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
             }
             Err(e) => {
                 log::warn!("Failed to fetch from {}: {}", server, e);
+                last_error = e;
             }
         }
+    }
+
+    // If no server succeeded, return error instead of empty success
+    if success_count == 0 && !servers.is_empty() {
+        return Err(format!(
+            "Failed to fetch from all {} server(s). Last error: {}",
+            servers.len(),
+            last_error
+        ));
     }
 
     // Convert to vec and sort by upload time (newest first)
@@ -813,23 +837,30 @@ async fn fetch_server_list(url: &str, auth_header: &str) -> Result<Vec<BlobDescr
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
+        use futures::future::{select, Either};
+        use gloo_timers::future::TimeoutFuture;
 
-        let response = Request::get(url)
+        let request_future = Request::get(url)
             .header("Authorization", auth_header)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+            .send();
+        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
 
-        if !response.ok() {
-            return Err(format!("Server returned status: {}", response.status()));
+        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
+            Either::Left((response_result, _)) => {
+                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
+                if !response.ok() {
+                    return Err(format!("Server returned status: {}", response.status()));
+                }
+                let blobs: Vec<BlobDescriptor> = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse response: {}", e))?;
+                Ok(blobs)
+            }
+            Either::Right((_, _)) => {
+                Err("Request timeout".to_string())
+            }
         }
-
-        let blobs: Vec<BlobDescriptor> = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        Ok(blobs)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -901,17 +932,26 @@ async fn delete_from_server(url: &str, auth_header: &str) -> Result<(), String> 
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
+        use futures::future::{select, Either};
+        use gloo_timers::future::TimeoutFuture;
 
-        let response = Request::delete(url)
+        let request_future = Request::delete(url)
             .header("Authorization", auth_header)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+            .send();
+        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
 
-        if response.ok() {
-            Ok(())
-        } else {
-            Err(format!("Server returned status: {}", response.status()))
+        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
+            Either::Left((response_result, _)) => {
+                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
+                if response.ok() {
+                    Ok(())
+                } else {
+                    Err(format!("Server returned status: {}", response.status()))
+                }
+            }
+            Either::Right((_, _)) => {
+                Err("Request timeout".to_string())
+            }
         }
     }
 
@@ -997,28 +1037,35 @@ async fn mirror_to_server(mirror_url: &str, source_url: &str, auth_header: &str)
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
+        use futures::future::{select, Either};
+        use gloo_timers::future::TimeoutFuture;
 
         let body = serde_json::json!({ "url": source_url });
 
-        let response = Request::put(mirror_url)
+        let request_future = Request::put(mirror_url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .map_err(|e| format!("Failed to build request: {}", e))?
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+            .send();
+        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
 
-        if !response.ok() {
-            return Err(format!("Server returned status: {}", response.status()));
+        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
+            Either::Left((response_result, _)) => {
+                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
+                if !response.ok() {
+                    return Err(format!("Server returned status: {}", response.status()));
+                }
+                let mirror_response: MirrorResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse response: {}", e))?;
+                Ok(mirror_response.url)
+            }
+            Either::Right((_, _)) => {
+                Err("Request timeout".to_string())
+            }
         }
-
-        let mirror_response: MirrorResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        Ok(mirror_response.url)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

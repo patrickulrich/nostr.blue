@@ -17,6 +17,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Encrypted Messaging** - Full DM support with NIP-04 (legacy), NIP-17 (private), and NIP-44 (versioned encryption)
 - **Lightning Zaps** - Send and receive Bitcoin micropayments (NIP-57) with NWC integration (NIP-47)
 - **Rich Media** - Polls (NIP-88), Livestreaming (NIP-53), Voice Messages (NIP-A0), Podcasts
+- **Blossom Media Management** - Upload, delete, and mirror media across Blossom servers (BUD-01/02/04)
 - **Long-form Content** - Articles (NIP-23) with encrypted drafts (NIP-37), Photos (NIP-68), Videos (NIP-71)
 - **Wiki & Publications** - NIP-54 wiki pages with wikilinks, NKBIP-01 curated publications with AsciiDoc
 - **External Content** - NIP-73 support for books (ISBN), papers (DOI), Bitcoin transactions/addresses
@@ -156,6 +157,8 @@ nostr.blue/
 │   │   ├── poll_view.rs    # Individual poll view (NIP-88)
 │   │   ├── poll_new.rs     # Poll creation form (NIP-88)
 │   │   ├── webbookmarks.rs # Web bookmarks manager (NIP-B0)
+│   │   ├── blossom/        # Blossom media management
+│   │   │   └── blossom_home.rs # Media library with upload, delete, mirror (BUD-01/02/04)
 │   │   ├── cashu_wallet.rs # Cashu ecash wallet (NIP-60)
 │   │   ├── communities.rs  # Communities (NIP-72)
 │   │   ├── lists.rs        # User lists (NIP-51)
@@ -436,7 +439,7 @@ Production builds are optimized with:
 | [BUD-01](https://github.com/hzrd149/blossom/blob/master/buds/01.md) | Server requirements | ✅ |
 | [BUD-02](https://github.com/hzrd149/blossom/blob/master/buds/02.md) | Blob upload/management | ✅ |
 | [BUD-03](https://github.com/hzrd149/blossom/blob/master/buds/03.md) | User Server List | ✅ |
-| [BUD-04](https://github.com/hzrd149/blossom/blob/master/buds/04.md) | Mirroring blobs | ❌ |
+| [BUD-04](https://github.com/hzrd149/blossom/blob/master/buds/04.md) | Mirroring blobs | ✅ |
 | [BUD-05](https://github.com/hzrd149/blossom/blob/master/buds/05.md) | Media optimization | ❌ |
 | [BUD-06](https://github.com/hzrd149/blossom/blob/master/buds/06.md) | Upload requirements | ❌ |
 | [BUD-07](https://github.com/hzrd149/blossom/blob/master/buds/07.md) | Payment required | ❌ |

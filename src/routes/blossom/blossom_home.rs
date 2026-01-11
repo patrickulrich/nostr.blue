@@ -497,8 +497,11 @@ fn MediaCard(
             // Mirror count badge
             if mirror_count > 0 {
                 div {
-                    class: "absolute top-2 right-2 px-2 py-0.5 text-xs font-medium rounded-full",
-                    class: if is_fully_mirrored { "bg-green-500 text-white" } else { "bg-yellow-500 text-white" },
+                    class: if is_fully_mirrored {
+                        "absolute top-2 right-2 px-2 py-0.5 text-xs font-medium rounded-full bg-green-500 text-white"
+                    } else {
+                        "absolute top-2 right-2 px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-500 text-white"
+                    },
                     "{mirror_count + 1}"
                 }
             }
@@ -536,12 +539,18 @@ fn FileDetailModal(
                 spawn(async move {
                     if let Some(window) = web_sys::window() {
                         let clipboard = window.navigator().clipboard();
-                        let _ = wasm_bindgen_futures::JsFuture::from(
+                        match wasm_bindgen_futures::JsFuture::from(
                             clipboard.write_text(&url)
-                        ).await;
-                        copied.set(true);
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
-                        copied.set(false);
+                        ).await {
+                            Ok(_) => {
+                                copied.set(true);
+                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                copied.set(false);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to copy to clipboard: {:?}", e);
+                            }
+                        }
                     }
                 });
             }
@@ -730,6 +739,7 @@ fn UploadModal(
                 use wasm_bindgen::JsCast;
 
                 let document = web_sys::window().unwrap().document().unwrap();
+                let body = document.body().unwrap();
                 let input: web_sys::HtmlInputElement = document
                     .create_element("input")
                     .unwrap()
@@ -737,30 +747,30 @@ fn UploadModal(
                     .unwrap();
                 input.set_type("file");
                 input.set_accept("image/*,video/*,audio/*");
+                // Hide the input element
+                input.set_attribute("style", "display: none").ok();
+
+                // Append to body so it's in the DOM
+                body.append_child(&input).ok();
 
                 let (tx, rx) = futures::channel::oneshot::channel::<Option<web_sys::File>>();
                 let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
 
-                let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::Event| {
-                    if let Some(tx) = tx.borrow_mut().take() {
-                        let input = web_sys::window()
-                            .unwrap()
-                            .document()
-                            .unwrap()
-                            .query_selector("input[type=file]")
-                            .unwrap()
-                            .and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok());
+                // Capture input directly - no DOM query needed
+                let input_for_closure = input.clone();
 
-                        let file = input.and_then(|i| i.files()).and_then(|f| f.get(0));
+                // Use Closure::once - automatically cleaned up after first call
+                let closure = wasm_bindgen::closure::Closure::once(Box::new(move || {
+                    if let Some(tx) = tx.borrow_mut().take() {
+                        let file = input_for_closure.files().and_then(|f| f.get(0));
                         let _ = tx.send(file);
                     }
-                }) as Box<dyn FnMut(_)>);
+                }) as Box<dyn FnOnce()>);
 
                 input.set_onchange(Some(closure.as_ref().unchecked_ref()));
-                closure.forget();
-
                 input.click();
 
+                // Wait for file selection
                 if let Ok(Some(file)) = rx.await {
                     let name = file.name();
                     let mime_type = file.type_();
@@ -774,12 +784,16 @@ fn UploadModal(
                         file_data.set(Some((name, data, mime_type)));
                     }
                 }
+
+                // Clean up: remove from DOM (closure auto-drops with Closure::once)
+                body.remove_child(&input).ok();
             });
         }
     };
 
     let handle_upload = move |_| {
-        if let Some((_name, data, mime_type)) = file_data() {
+        // Take the data instead of cloning to avoid duplicating the Vec<u8>
+        if let Some((_name, data, mime_type)) = file_data.write().take() {
             uploading.set(true);
             error.set(None);
 
@@ -1146,7 +1160,16 @@ fn ServerList(
                         ("Nostria US", "https://mibo.us.nostria.app"),
                     ] {
                         {
-                            let is_added = servers.iter().any(|s| s.contains(url.trim_start_matches("https://").trim_end_matches('/')));
+                            // Use URL parsing for proper comparison (avoids false positives from substring matching)
+                            let is_added = servers.iter().any(|s| {
+                                match (url::Url::parse(s), url::Url::parse(url)) {
+                                    (Ok(server_url), Ok(preset_url)) => {
+                                        server_url.host_str() == preset_url.host_str()
+                                            && server_url.port_or_known_default() == preset_url.port_or_known_default()
+                                    }
+                                    _ => false
+                                }
+                            });
                             rsx! {
                                 button {
                                     key: "{url}",

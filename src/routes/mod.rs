@@ -1343,6 +1343,7 @@ fn NavLink(
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
+        (Route::BlossomPage {}, Route::BlossomPage {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
         _ => false,
     };
