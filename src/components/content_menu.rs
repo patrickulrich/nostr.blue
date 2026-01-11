@@ -179,6 +179,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
 
                             let pubkey = author_pubkey_follow_action.clone();
                             let currently_following = *is_following.read();
+                            let toast_api = toast;
 
                             is_updating_follow.set(true);
                             is_open.set(false);
@@ -202,6 +203,12 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                         log::error!("Failed to {} user: {}",
                                             if currently_following { "unfollow" } else { "follow" },
                                             e
+                                        );
+                                        toast_api.error(
+                                            format!("Failed to {} user: {}",
+                                                if currently_following { "unfollow" } else { "follow" },
+                                                e),
+                                            ToastOptions::new()
                                         );
                                     }
                                 }

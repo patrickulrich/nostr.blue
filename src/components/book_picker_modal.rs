@@ -121,11 +121,13 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                     }
                     loading.set(false);
                 });
-                // Reset selection when opening
+                // Reset selection and validation errors when opening
                 selected_publication.set(None);
                 selected_chapter.set(None);
                 selected_sections.set(String::new());
                 selected_version.set(String::new());
+                version_error.set(false);
+                sections_error.set(false);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
             }
@@ -188,22 +190,26 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         }
     });
 
-    // Build book reference from selections with validation (Security Fix #1)
+    // Validation effect - runs when inputs change (no side effects in memo)
+    use_effect(use_reactive!(|(selected_version, selected_sections)| {
+        let version = selected_version.read();
+        let sections = selected_sections.read();
+
+        // Validate version: error if non-empty and invalid
+        version_error.set(!version.is_empty() && !is_valid_book_version(&version));
+        // Validate sections: error if non-empty and invalid
+        sections_error.set(!sections.is_empty() && !is_valid_book_sections(&sections));
+    }));
+
+    // Build book reference from selections (pure computation - no side effects)
     let book_reference = use_memo(move || {
         selected_publication.read().as_ref().map(|pub_| {
             let mut reference = BookReference::new(&pub_.d_tag);
 
-            // Validate and add version
+            // Add version only if valid
             let version_input = selected_version.read();
-            if !version_input.is_empty() {
-                if is_valid_book_version(&version_input) {
-                    reference = reference.with_version(&version_input);
-                    version_error.set(false);
-                } else {
-                    version_error.set(true);
-                }
-            } else {
-                version_error.set(false);
+            if !version_input.is_empty() && is_valid_book_version(&version_input) {
+                reference = reference.with_version(&version_input);
             }
 
             // Add chapter (validated by dropdown selection)
@@ -211,22 +217,15 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 reference = reference.with_chapter(chapter);
             }
 
-            // Validate and add sections
+            // Add sections only if valid
             let sections_str = selected_sections.read();
-            if !sections_str.is_empty() {
-                if is_valid_book_sections(&sections_str) {
-                    for section in sections_str.split(',') {
-                        let section = section.trim();
-                        if !section.is_empty() {
-                            reference = reference.with_section(section);
-                        }
+            if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
+                for section in sections_str.split(',') {
+                    let section = section.trim();
+                    if !section.is_empty() {
+                        reference = reference.with_section(section);
                     }
-                    sections_error.set(false);
-                } else {
-                    sections_error.set(true);
                 }
-            } else {
-                sections_error.set(false);
             }
 
             reference
@@ -286,24 +285,24 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     }
 
     rsx! {
-        // Backdrop (Accessibility Fix #6 - dialog semantics + Escape key)
+        // Backdrop (click to close)
         div {
             class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
-            role: "dialog",
-            "aria-modal": "true",
-            "aria-labelledby": "book-picker-title",
-            tabindex: "-1",
             onclick: close_modal,
-            onkeydown: move |evt: KeyboardEvent| {
-                if evt.key() == Key::Escape {
-                    props.show.set(false);
-                }
-            },
 
-            // Modal content
+            // Modal content (dialog semantics + Escape key)
             div {
                 class: "bg-background border border-border rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-labelledby": "book-picker-title",
+                tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape {
+                        props.show.set(false);
+                    }
+                },
 
                 // Header
                 div {

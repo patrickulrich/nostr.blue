@@ -215,26 +215,26 @@ pub fn BoardSlideover(
     let pin_count = pins.read().len();
 
     rsx! {
-        // Backdrop (Accessibility Fix #7 - dialog semantics + Escape key)
+        // Backdrop (click to close)
         div {
             class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-200",
+            onclick: move |_| on_close.call(()),
+        }
+
+        // Sliding panel (dialog semantics + Escape key)
+        div {
+            class: "fixed inset-y-0 right-0 z-50 w-full max-w-5xl bg-background shadow-2xl
+                    transform transition-transform duration-500 ease-in-out overflow-hidden",
             role: "dialog",
             "aria-modal": "true",
             "aria-labelledby": "slideover-title",
             tabindex: "-1",
-            onclick: move |_| on_close.call(()),
+            onclick: move |e| e.stop_propagation(),
             onkeydown: move |evt: KeyboardEvent| {
                 if evt.key() == Key::Escape {
                     on_close.call(());
                 }
             },
-        }
-
-        // Sliding panel
-        div {
-            class: "fixed inset-y-0 right-0 z-50 w-full max-w-5xl bg-background shadow-2xl
-                    transform transition-transform duration-500 ease-in-out overflow-hidden",
-            onclick: move |e| e.stop_propagation(),
 
             // Scrollable content
             div {
@@ -373,6 +373,7 @@ pub fn BoardSlideover(
                             class: "w-full h-full object-cover",
                             loading: "lazy",
                             decoding: "async",
+                            referrerpolicy: "no-referrer",
                         }
                         // Gradient overlay
                         div {
@@ -398,6 +399,7 @@ pub fn BoardSlideover(
                                     alt: "{display_name()}",
                                     class: "w-full h-full object-cover",
                                     loading: "lazy",
+                                    referrerpolicy: "no-referrer",
                                 }
                             } else {
                                 span {

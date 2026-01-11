@@ -319,8 +319,11 @@ pub fn CommunityPostCard(
                     // Zap button
                     if has_signer {
                         button {
-                            class: "flex items-center gap-1 hover:text-yellow-500 transition",
-                            class: if zap_amount > 0 { "text-yellow-500" } else { "" },
+                            class: if zap_amount > 0 {
+                                "flex items-center gap-1 hover:text-yellow-500 transition text-yellow-500"
+                            } else {
+                                "flex items-center gap-1 hover:text-yellow-500 transition"
+                            },
                             onclick: move |_| show_zap_modal.set(true),
                             svg {
                                 class: "w-4 h-4",
@@ -440,7 +443,15 @@ pub fn CommunityPostCard(
 
                     div {
                         class: "bg-background rounded-lg p-6 max-w-md w-full shadow-xl",
+                        role: "dialog",
+                        "aria-modal": "true",
+                        tabindex: "-1",
                         onclick: move |e| e.stop_propagation(),
+                        onkeydown: move |evt: KeyboardEvent| {
+                            if evt.key() == Key::Escape {
+                                show_remove_dialog.set(false);
+                            }
+                        },
 
                         h3 {
                             class: "text-lg font-bold mb-4",
