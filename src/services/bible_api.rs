@@ -136,9 +136,11 @@ pub enum ChapterContent {
 /// 3. `FootnoteRef` - Matches objects with required `note_id` field (u32)
 /// 4. `InlineHeading` - Matches objects with required `heading` field (String)
 /// 5. `InlineLineBreak` - Matches objects with required `line_break` field (bool)
+/// 6. `Unknown` - Fallback for any unrecognized JSON value (prevents deserialization failures)
 ///
 /// Each struct variant has distinct required fields with different types, so matching
 /// should be unambiguous. The HelloAO Bible API sends objects with distinct shapes.
+/// The Unknown variant ensures forward compatibility with new API response shapes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum VerseContent {
@@ -152,6 +154,8 @@ pub enum VerseContent {
     InlineHeading(InlineHeadingContent),
     /// Inline line break - matches objects with `line_break` field
     InlineLineBreak(InlineLineBreakContent),
+    /// Unknown/unrecognized content - fallback to prevent deserialization failures
+    Unknown(serde_json::Value),
 }
 
 /// Formatted text with optional poem indentation or Words of Jesus marking

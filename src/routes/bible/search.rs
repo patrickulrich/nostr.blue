@@ -192,53 +192,83 @@ fn truncate_chars(s: &str, max_chars: usize) -> &str {
 }
 
 /// Find a case-insensitive match and return byte offsets safe for slicing.
-/// Uses character-level matching to handle Unicode case-folding correctly.
+/// Iterates the original haystack directly to ensure byte offsets are correct,
+/// even when case-folding changes character counts (e.g., ß → ss).
 /// Returns (start_byte, end_byte) or None if no match.
 fn find_match_byte_range(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-    let haystack_lower = haystack.to_lowercase();
-    let needle_lower = needle.to_lowercase();
-
-    // Find character position first
-    let needle_chars: Vec<char> = needle_lower.chars().collect();
-    if needle_chars.is_empty() {
+    // Pre-compute lowercased needle chars for comparison
+    let needle_lower: Vec<char> = needle.to_lowercase().chars().collect();
+    if needle_lower.is_empty() {
         return None;
     }
 
-    let mut char_start = None;
-    let mut match_count = 0;
+    // Collect char_indices from original haystack for byte offset tracking
+    let char_indices: Vec<(usize, char)> = haystack.char_indices().collect();
+    if char_indices.is_empty() {
+        return None;
+    }
 
-    for (char_idx, c) in haystack_lower.chars().enumerate() {
-        if c == needle_chars[match_count] {
-            if match_count == 0 {
-                char_start = Some(char_idx);
-            }
-            match_count += 1;
-            if match_count == needle_chars.len() {
-                // Found complete match - now convert to byte indices
-                let start_char = char_start.unwrap();
-                let end_char = char_idx + 1;
+    let mut match_start_idx: Option<usize> = None; // Index into char_indices
+    let mut needle_pos = 0; // Current position in needle_lower
 
-                // Convert char indices to byte indices using the original string
-                let start_byte = haystack.char_indices()
-                    .nth(start_char)
-                    .map(|(i, _)| i)?;
-                let end_byte = haystack.char_indices()
-                    .nth(end_char)
-                    .map(|(i, _)| i)
-                    .unwrap_or(haystack.len());
+    for (idx, &(_byte_pos, c)) in char_indices.iter().enumerate() {
+        // Case-fold the current haystack character for comparison
+        // Note: to_lowercase() can yield multiple chars (e.g., İ → i̇), but
+        // we handle the common case where it yields exactly one char
+        let c_lower: Vec<char> = c.to_lowercase().collect();
 
-                return Some((start_byte, end_byte));
-            }
-        } else {
-            match_count = 0;
-            char_start = None;
-            // Check if current char starts a new match
-            if c == needle_chars[0] {
-                char_start = Some(char_idx);
-                match_count = 1;
+        // Try to match against needle characters
+        let mut matched_in_this_char = false;
+        for lc in &c_lower {
+            if needle_pos < needle_lower.len() && *lc == needle_lower[needle_pos] {
+                if needle_pos == 0 {
+                    match_start_idx = Some(idx);
+                }
+                needle_pos += 1;
+                matched_in_this_char = true;
+            } else if matched_in_this_char {
+                // We were matching but this sub-char doesn't match
+                // Reset and check if this sub-char starts a new match
+                needle_pos = 0;
+                match_start_idx = None;
+                if *lc == needle_lower[0] {
+                    match_start_idx = Some(idx);
+                    needle_pos = 1;
+                }
             }
         }
+
+        // If we didn't match any sub-char, reset
+        if !matched_in_this_char && c_lower.iter().all(|lc| *lc != needle_lower[0]) {
+            needle_pos = 0;
+            match_start_idx = None;
+        } else if !matched_in_this_char {
+            // Check if any sub-char starts a new match
+            needle_pos = 0;
+            match_start_idx = None;
+            for lc in &c_lower {
+                if *lc == needle_lower[0] {
+                    match_start_idx = Some(idx);
+                    needle_pos = 1;
+                    break;
+                }
+            }
+        }
+
+        // Check if we've completed the match
+        if needle_pos == needle_lower.len() {
+            let start_idx = match_start_idx.unwrap();
+            let start_byte = char_indices[start_idx].0;
+            // End byte is either the start of the next char or end of string
+            let end_byte = if idx + 1 < char_indices.len() {
+                char_indices[idx + 1].0
+            } else {
+                haystack.len()
+            };
+            return Some((start_byte, end_byte));
+        }
     }
+
     None
 }
 

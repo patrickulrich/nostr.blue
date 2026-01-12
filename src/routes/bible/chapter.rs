@@ -633,5 +633,9 @@ fn render_verse_content(vc: &VerseContent) -> Element {
         VerseContent::InlineLineBreak(_) => {
             rsx! { br {} }
         }
+        VerseContent::Unknown(_) => {
+            // Silently ignore unknown content types for forward compatibility
+            rsx! {}
+        }
     }
 }
