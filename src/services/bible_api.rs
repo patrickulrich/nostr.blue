@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
-use futures::future::{select, Either};
-use gloo_timers::future::TimeoutFuture;
-use std::pin::pin;
+use gloo_timers::callback::Timeout;
 
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";
@@ -210,31 +208,23 @@ pub struct FootnoteVerseReference {
 // API Functions
 // =============================================================================
 
-/// Execute an async operation with a timeout.
-/// Returns an error if the operation doesn't complete within API_TIMEOUT_MS milliseconds.
-async fn with_timeout<T, F>(future: F) -> Result<T, String>
-where
-    F: std::future::Future<Output = Result<T, String>>,
-{
-    let timeout = TimeoutFuture::new(API_TIMEOUT_MS);
-    let future = pin!(future);
-    let timeout = pin!(timeout);
-
-    match select(future, timeout).await {
-        Either::Left((result, _)) => result,
-        Either::Right((_, _)) => Err("Request timed out after 10 seconds".to_string()),
-    }
-}
-
 /// Fetch all available Bible translations
 pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
-    with_timeout(fetch_translations_inner()).await
-}
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController".to_string())?;
+    let signal = controller.signal();
 
-async fn fetch_translations_inner() -> Result<Vec<Translation>, String> {
+    // Set up abort timeout
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
     let url = format!("{}/available_translations.json", BIBLE_API_BASE);
 
     let response = Request::get(&url)
+        .abort_signal(Some(&signal))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch translations: {}", e))?;
@@ -253,14 +243,22 @@ async fn fetch_translations_inner() -> Result<Vec<Translation>, String> {
 
 /// Fetch books for a specific translation
 pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
-    let translation = translation.to_string();
-    with_timeout(async move { fetch_books_inner(&translation).await }).await
-}
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController".to_string())?;
+    let signal = controller.signal();
 
-async fn fetch_books_inner(translation: &str) -> Result<Vec<Book>, String> {
-    let url = format!("{}/{}/books.json", BIBLE_API_BASE, translation);
+    // Set up abort timeout
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Percent-encode path segments to prevent URL corruption
+    let url = format!("{}/{}/books.json", BIBLE_API_BASE, urlencoding::encode(translation));
 
     let response = Request::get(&url)
+        .abort_signal(Some(&signal))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch books: {}", e))?;
@@ -279,15 +277,28 @@ async fn fetch_books_inner(translation: &str) -> Result<Vec<Book>, String> {
 
 /// Fetch a specific chapter
 pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
-    let translation = translation.to_string();
-    let book = book.to_string();
-    with_timeout(async move { fetch_chapter_inner(&translation, &book, chapter).await }).await
-}
+    // Create AbortController for proper request cancellation on timeout
+    let controller = web_sys::AbortController::new()
+        .map_err(|_| "Failed to create AbortController".to_string())?;
+    let signal = controller.signal();
 
-async fn fetch_chapter_inner(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
-    let url = format!("{}/{}/{}/{}.json", BIBLE_API_BASE, translation, book, chapter);
+    // Set up abort timeout
+    let controller_for_timeout = controller.clone();
+    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+        controller_for_timeout.abort();
+    });
+
+    // Percent-encode path segments to prevent URL corruption
+    let url = format!(
+        "{}/{}/{}/{}.json",
+        BIBLE_API_BASE,
+        urlencoding::encode(translation),
+        urlencoding::encode(book),
+        chapter
+    );
 
     let response = Request::get(&url)
+        .abort_signal(Some(&signal))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch chapter: {}", e))?;
@@ -306,7 +317,14 @@ async fn fetch_chapter_inner(translation: &str, book: &str, chapter: u32) -> Res
 
 /// Get the API URL for a specific chapter (useful for NIP-84 r tag)
 pub fn get_chapter_api_url(translation: &str, book: &str, chapter: u32) -> String {
-    format!("{}/{}/{}/{}.json", BIBLE_API_BASE, translation, book, chapter)
+    // Percent-encode path segments to prevent URL corruption
+    format!(
+        "{}/{}/{}/{}.json",
+        BIBLE_API_BASE,
+        urlencoding::encode(translation),
+        urlencoding::encode(book),
+        chapter
+    )
 }
 
 /// Get the display reference for a verse (e.g., "John 3:16 (BSB)")
@@ -401,12 +419,18 @@ impl ChapterContent {
 }
 
 /// Extract plain text from a verse's content
+/// Uses fold to avoid intermediate Vec allocation and adds spaces between pieces
 pub fn verse_to_plain_text(content: &[VerseContent]) -> String {
     content
         .iter()
         .filter_map(|c| c.as_text())
-        .collect::<Vec<_>>()
-        .join("")
+        .fold(String::new(), |mut acc, t| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(t);
+            acc
+        })
 }
 
 /// Filter to get only English translations

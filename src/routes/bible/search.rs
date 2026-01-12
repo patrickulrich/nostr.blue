@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 
 use crate::stores::bible_store::{
-    BibleSearchResult, search_cached_verses, get_all_cached_chapters,
+    BibleSearchResult, search_cached_verses, cached_chapter_count,
 };
 
 /// Bible Search Page
@@ -15,13 +15,14 @@ pub fn BibleSearch() -> Element {
     let mut results = use_signal(Vec::<BibleSearchResult>::new);
     let mut has_searched = use_signal(|| false);
 
-    // Count cached chapters
-    let cached_count = get_all_cached_chapters().len();
+    // Count cached chapters (uses efficient count-only function, no cloning)
+    let cached_count = cached_chapter_count();
 
     // Perform search
     let mut perform_search = move || {
         let q = query.read().clone();
-        if q.len() >= 3 {
+        // Use chars().count() for Unicode-safe length check (not bytes)
+        if q.chars().count() >= 3 {
             let found = search_cached_verses(&q, 50);
             results.set(found);
             has_searched.set(true);
@@ -190,6 +191,57 @@ fn truncate_chars(s: &str, max_chars: usize) -> &str {
     }
 }
 
+/// Find a case-insensitive match and return byte offsets safe for slicing.
+/// Uses character-level matching to handle Unicode case-folding correctly.
+/// Returns (start_byte, end_byte) or None if no match.
+fn find_match_byte_range(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    let haystack_lower = haystack.to_lowercase();
+    let needle_lower = needle.to_lowercase();
+
+    // Find character position first
+    let needle_chars: Vec<char> = needle_lower.chars().collect();
+    if needle_chars.is_empty() {
+        return None;
+    }
+
+    let mut char_start = None;
+    let mut match_count = 0;
+
+    for (char_idx, c) in haystack_lower.chars().enumerate() {
+        if c == needle_chars[match_count] {
+            if match_count == 0 {
+                char_start = Some(char_idx);
+            }
+            match_count += 1;
+            if match_count == needle_chars.len() {
+                // Found complete match - now convert to byte indices
+                let start_char = char_start.unwrap();
+                let end_char = char_idx + 1;
+
+                // Convert char indices to byte indices using the original string
+                let start_byte = haystack.char_indices()
+                    .nth(start_char)
+                    .map(|(i, _)| i)?;
+                let end_byte = haystack.char_indices()
+                    .nth(end_char)
+                    .map(|(i, _)| i)
+                    .unwrap_or(haystack.len());
+
+                return Some((start_byte, end_byte));
+            }
+        } else {
+            match_count = 0;
+            char_start = None;
+            // Check if current char starts a new match
+            if c == needle_chars[0] {
+                char_start = Some(char_idx);
+                match_count = 1;
+            }
+        }
+    }
+    None
+}
+
 /// Search result card
 #[component]
 fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
@@ -197,10 +249,6 @@ fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
         "{} {}:{} ({})",
         result.book_name, result.chapter, result.verse, result.translation
     );
-
-    // Highlight matching text
-    let text_lower = result.text.to_lowercase();
-    let query_lower = query.to_lowercase();
 
     rsx! {
         Link {
@@ -219,12 +267,11 @@ fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
             // Verse text with highlighted match
             p { class: "text-sm text-muted-foreground line-clamp-3",
                 {
-                    if let Some(idx) = text_lower.find(&query_lower) {
-                        // Calculate safe char boundaries for slicing
-                        // Note: idx is a byte index in text_lower, which has same byte positions as result.text
-                        // for ASCII chars, but we need to find corresponding position in original text
-                        let raw_start = idx.saturating_sub(50);
-                        let raw_end = idx + query.len() + 50;
+                    // Use Unicode-safe character-level matching
+                    if let Some((match_start, match_end)) = find_match_byte_range(&result.text, &query) {
+                        // Calculate context window around the match
+                        let raw_start = match_start.saturating_sub(50);
+                        let raw_end = match_end + 50;
 
                         // Find safe char boundaries in the original text
                         let start = floor_char_boundary(&result.text, raw_start);
@@ -235,20 +282,15 @@ fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
 
                         let text_slice = &result.text[start..end];
 
-                        // Find the query position within the slice using case-insensitive search
-                        let slice_lower = text_slice.to_lowercase();
-                        if let Some(match_byte_start) = slice_lower.find(&query_lower) {
-                            // Calculate safe boundaries for the match within the slice
-                            let match_start = floor_char_boundary(text_slice, match_byte_start);
-                            let match_end = ceil_char_boundary(text_slice, match_byte_start + query_lower.len());
-
+                        // Find the match position within the slice using Unicode-safe matching
+                        if let Some((slice_match_start, slice_match_end)) = find_match_byte_range(text_slice, &query) {
                             rsx! {
                                 span { "{before}" }
-                                span { "{&text_slice[..match_start]}" }
+                                span { "{&text_slice[..slice_match_start]}" }
                                 mark { class: "bg-yellow-200 dark:bg-yellow-800 px-0.5 rounded",
-                                    "{&text_slice[match_start..match_end]}"
+                                    "{&text_slice[slice_match_start..slice_match_end]}"
                                 }
-                                span { "{&text_slice[match_end..]}" }
+                                span { "{&text_slice[slice_match_end..]}" }
                                 span { "{after}" }
                             }
                         } else {

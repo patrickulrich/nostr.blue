@@ -116,6 +116,12 @@ pub static BIBLE_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| fa
 /// Last viewed position (for "Continue Reading" feature)
 pub static LAST_POSITION: GlobalSignal<Option<(String, String, u32)>> = GlobalSignal::new(|| None);
 
+/// Latest requested translation for race guard (prevents stale data on fast navigation)
+static LATEST_REQUESTED_TRANSLATION: GlobalSignal<String> = GlobalSignal::new(String::new);
+
+/// Latest requested highlight URL for race guard (prevents stale data on fast navigation)
+static LATEST_REQUESTED_HIGHLIGHT_URL: GlobalSignal<String> = GlobalSignal::new(String::new);
+
 // ============================================================================
 // Cache Key Functions
 // ============================================================================
@@ -151,6 +157,11 @@ pub fn cache_chapter(translation: &str, book: &str, chapter: u32, response: Chap
 /// Get all cached chapters (for search)
 pub fn get_all_cached_chapters() -> Vec<CachedChapter> {
     CHAPTER_CACHE.read().iter().map(|(_, c)| c.clone()).collect()
+}
+
+/// Get count of cached chapters without cloning
+pub fn cached_chapter_count() -> usize {
+    CHAPTER_CACHE.read().len()
 }
 
 /// Clear chapter cache
@@ -195,12 +206,17 @@ pub async fn initialize() -> StdResult<(), String> {
 
 /// Load books for a translation
 pub async fn load_books(translation: &str) -> StdResult<Vec<Book>, String> {
+    // Set this as the latest requested translation for race prevention
+    *LATEST_REQUESTED_TRANSLATION.write() = translation.to_string();
     *LOADING_BOOKS.write() = true;
 
     match fetch_books(translation).await {
         Ok(books) => {
-            *CURRENT_BOOKS.write() = books.clone();
-            *CURRENT_TRANSLATION.write() = translation.to_string();
+            // Only update global state if still the latest request
+            if *LATEST_REQUESTED_TRANSLATION.read() == translation {
+                *CURRENT_BOOKS.write() = books.clone();
+                *CURRENT_TRANSLATION.write() = translation.to_string();
+            }
             *LOADING_BOOKS.write() = false;
             Ok(books)
         }
@@ -313,6 +329,9 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHig
 
 /// Fetch all highlights for a specific chapter (from all users)
 pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighlight>, String> {
+    // Set this as the latest requested URL for race prevention
+    *LATEST_REQUESTED_HIGHLIGHT_URL.write() = api_url.to_string();
+
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
 
@@ -328,7 +347,10 @@ pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighl
                 .filter_map(parse_highlight)
                 .collect();
 
-            *CURRENT_CHAPTER_HIGHLIGHTS.write() = highlights.clone();
+            // Only update global state if still the latest request
+            if *LATEST_REQUESTED_HIGHLIGHT_URL.read() == api_url {
+                *CURRENT_CHAPTER_HIGHLIGHTS.write() = highlights.clone();
+            }
 
             log::info!("Fetched {} chapter highlights for {}", highlights.len(), api_url);
             Ok(highlights)
@@ -343,6 +365,13 @@ pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighl
 fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
     // Must be Kind 9802
     if event.kind.as_u16() != KIND_HIGHLIGHT {
+        return None;
+    }
+
+    // Verify event signature and ID before processing
+    // (nostr-sdk's client.fetch_events() does NOT automatically verify events)
+    if event.verify().is_err() {
+        log::warn!("Invalid event signature for highlight {}", event.id);
         return None;
     }
 
@@ -461,11 +490,13 @@ pub fn get_chapter_highlight_stats() -> ChapterHighlightStats {
     let mut stats = ChapterHighlightStats::default();
 
     for h in highlights.iter() {
+        // Count each highlight event once
+        stats.total += 1;
+
         // Extract verse numbers and count each verse in the range
         if let Some((start, end)) = extract_verses_from_reference(&h.reference) {
             for verse in start..=end {
                 *stats.verse_counts.entry(verse).or_insert(0) += 1;
-                stats.total += 1;
             }
         }
     }
@@ -509,7 +540,8 @@ pub struct BibleSearchResult {
 
 /// Search cached chapters for verses containing query
 pub fn search_cached_verses(query: &str, limit: usize) -> Vec<BibleSearchResult> {
-    if query.len() < 3 {
+    // Use chars().count() for Unicode-safe length check (not bytes)
+    if query.chars().count() < 3 {
         return Vec::new();
     }
 

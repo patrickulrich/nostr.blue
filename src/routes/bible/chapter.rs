@@ -9,6 +9,7 @@ use crate::stores::bible_store::{
 };
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
+use crate::components::content_share_modal::{ContentShareModal, ContentType};
 
 /// Bible Chapter Reading View
 #[component]
@@ -21,6 +22,12 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     // State for verse selection
     let mut selected_verses = use_signal(Vec::<u32>::new);
     let mut show_toolbar = use_signal(|| false);
+
+    // State for share modal
+    let mut show_share_modal = use_signal(|| false);
+    let mut share_title = use_signal(String::new);
+    let mut share_url = use_signal(String::new);
+    let mut share_content = use_signal(String::new);
 
     let is_authenticated = auth_store::is_authenticated();
 
@@ -369,9 +376,22 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             rsx! {
                                                 span {
                                                     key: "verse-{verse_num}",
-                                                    class: "cursor-pointer rounded px-0.5 transition-colors inline",
+                                                    // Keyboard accessibility
+                                                    tabindex: 0,
+                                                    role: "button",
+                                                    class: "cursor-pointer rounded px-0.5 transition-colors inline focus:outline-none focus:ring-2 focus:ring-primary",
                                                     class: if is_selected { "bg-primary/20 ring-2 ring-primary" } else if is_highlighted { "bg-yellow-100 dark:bg-yellow-900/30" } else { "" },
                                                     onclick: move |_| handle_verse_click(verse_num),
+                                                    onkeydown: move |evt: KeyboardEvent| {
+                                                        let key = evt.key();
+                                                        let code = evt.code().to_string();
+                                                        if key == Key::Enter || code == "Space" {
+                                                            if code == "Space" {
+                                                                evt.prevent_default(); // Prevent page scroll
+                                                            }
+                                                            handle_verse_click(verse_num);
+                                                        }
+                                                    },
 
                                                     // Verse number
                                                     sup { class: "text-xs text-cyan-500 mr-1 select-none", "{verse_num}" }
@@ -474,6 +494,66 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                     }
                                 }
                             }
+
+                            // Share button (requires auth)
+                            button {
+                                class: "p-2 hover:bg-muted rounded-lg transition",
+                                title: "Share verses",
+                                onclick: move |_| {
+                                    if let Some(Ok(ref data)) = *chapter_data.read() {
+                                        let verses = selected_verses.read().clone();
+                                        if verses.is_empty() {
+                                            return;
+                                        }
+
+                                        let book_name = &data.book.common_name;
+                                        let first = *verses.first().unwrap_or(&0);
+                                        let last = *verses.last().unwrap_or(&0);
+
+                                        // Build verse text (same format as copy button)
+                                        let mut text_parts = Vec::new();
+                                        for v in verses.iter() {
+                                            for content in &data.chapter.content {
+                                                if let ChapterContent::Verse { number, content: verse_content } = content {
+                                                    if number == v {
+                                                        let text = verse_to_plain_text(verse_content);
+                                                        text_parts.push(format!("{} {}", v, text));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        let verse_text = text_parts.join(" ");
+
+                                        // Build reference string
+                                        let reference = if first == last {
+                                            format!("{} {}:{} ({})", book_name, chapter, first, translation)
+                                        } else {
+                                            format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
+                                        };
+
+                                        // Build nostr.blue URL
+                                        let url = format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter);
+
+                                        share_title.set(reference);
+                                        share_url.set(url);
+                                        share_content.set(verse_text);
+                                        show_share_modal.set(true);
+                                    }
+                                },
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    class: "w-5 h-5",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
+                                    }
+                                }
+                            }
                         }
 
                         // Close button
@@ -496,6 +576,18 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             }
                         }
                     }
+                }
+            }
+
+            // Share Modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: share_title.read().clone(),
+                    url: share_url.read().clone(),
+                    content_type: ContentType::BibleVerse,
+                    image_url: None,
+                    content: Some(share_content.read().clone()),
+                    on_close: move |_| show_share_modal.set(false),
                 }
             }
         }

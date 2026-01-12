@@ -1384,6 +1384,9 @@ fn NavLink(
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::BlossomPage {}, Route::BlossomPage {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
+        (Route::BibleHome {}, Route::BibleHome {}) |
+        (Route::BibleHome {}, Route::BibleChapter { .. }) |
+        (Route::BibleHome {}, Route::BibleSearch {}) => true,
         _ => false,
     };
 
