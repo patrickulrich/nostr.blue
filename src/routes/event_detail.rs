@@ -198,8 +198,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 
                             if let Some(my_pubkey) = auth_store::get_pubkey() {
                                 let now = (js_sys::Date::now() / 1000.0) as u64;
+                                // Generate temporary unique ID for stable UI keys until refresh succeeds
+                                let temp_id = format!("temp-{}-{}", now, uuid::Uuid::new_v4());
                                 let optimistic_comment = CalendarEventComment {
-                                    event_id: String::new(), // Will be replaced on next refresh
+                                    event_id: temp_id,
                                     pubkey: my_pubkey,
                                     content: content.clone(),
                                     created_at: now,
@@ -904,10 +906,10 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
                 }
             }
 
-            // Content
+            // Content - sanitize for XSS protection (consistent with event content handling)
             p {
                 class: "text-sm whitespace-pre-wrap",
-                "{content}"
+                "{ammonia::clean(&content)}"
             }
         }
     }
