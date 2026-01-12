@@ -153,6 +153,43 @@ pub fn BibleSearch() -> Element {
     }
 }
 
+/// Find the nearest valid UTF-8 char boundary at or before the given byte index.
+/// This prevents panics when slicing strings with multi-byte characters (Hebrew, Greek, etc.)
+fn floor_char_boundary(s: &str, byte_idx: usize) -> usize {
+    if byte_idx >= s.len() {
+        return s.len();
+    }
+    let mut idx = byte_idx;
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Find the nearest valid UTF-8 char boundary at or after the given byte index.
+fn ceil_char_boundary(s: &str, byte_idx: usize) -> usize {
+    if byte_idx >= s.len() {
+        return s.len();
+    }
+    let mut idx = byte_idx;
+    while idx < s.len() && !s.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
+}
+
+/// Truncate a string to approximately n characters, respecting char boundaries.
+fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    // Find byte position of the nth character
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
+}
+
 /// Search result card
 #[component]
 fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
@@ -183,34 +220,54 @@ fn SearchResultCard(result: BibleSearchResult, query: String) -> Element {
             p { class: "text-sm text-muted-foreground line-clamp-3",
                 {
                     if let Some(idx) = text_lower.find(&query_lower) {
-                        // Show context around match
-                        let start = idx.saturating_sub(50);
-                        let end = (idx + query.len() + 50).min(result.text.len());
+                        // Calculate safe char boundaries for slicing
+                        // Note: idx is a byte index in text_lower, which has same byte positions as result.text
+                        // for ASCII chars, but we need to find corresponding position in original text
+                        let raw_start = idx.saturating_sub(50);
+                        let raw_end = idx + query.len() + 50;
+
+                        // Find safe char boundaries in the original text
+                        let start = floor_char_boundary(&result.text, raw_start);
+                        let end = ceil_char_boundary(&result.text, raw_end.min(result.text.len()));
 
                         let before = if start > 0 { "..." } else { "" };
                         let after = if end < result.text.len() { "..." } else { "" };
 
                         let text_slice = &result.text[start..end];
-                        let match_start = idx - start;
-                        let match_end = match_start + query.len();
 
-                        rsx! {
-                            span { "{before}" }
-                            span { "{&text_slice[..match_start]}" }
-                            mark { class: "bg-yellow-200 dark:bg-yellow-800 px-0.5 rounded",
-                                "{&text_slice[match_start..match_end]}"
+                        // Find the query position within the slice using case-insensitive search
+                        let slice_lower = text_slice.to_lowercase();
+                        if let Some(match_byte_start) = slice_lower.find(&query_lower) {
+                            // Calculate safe boundaries for the match within the slice
+                            let match_start = floor_char_boundary(text_slice, match_byte_start);
+                            let match_end = ceil_char_boundary(text_slice, match_byte_start + query_lower.len());
+
+                            rsx! {
+                                span { "{before}" }
+                                span { "{&text_slice[..match_start]}" }
+                                mark { class: "bg-yellow-200 dark:bg-yellow-800 px-0.5 rounded",
+                                    "{&text_slice[match_start..match_end]}"
+                                }
+                                span { "{&text_slice[match_end..]}" }
+                                span { "{after}" }
                             }
-                            span { "{&text_slice[match_end..]}" }
-                            span { "{after}" }
+                        } else {
+                            // Fallback if match not found in slice (shouldn't happen)
+                            rsx! {
+                                span { "{before}{text_slice}{after}" }
+                            }
                         }
                     } else {
                         // No match highlighting (shouldn't happen)
                         rsx! {
                             span {
-                                if result.text.len() > 150 {
-                                    "{&result.text[..150]}..."
-                                } else {
-                                    "{result.text}"
+                                {
+                                    let truncated = truncate_chars(&result.text, 150);
+                                    if truncated.len() < result.text.len() {
+                                        format!("{}...", truncated)
+                                    } else {
+                                        result.text.clone()
+                                    }
                                 }
                             }
                         }

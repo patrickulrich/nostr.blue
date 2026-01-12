@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
+use futures::future::{select, Either};
+use gloo_timers::future::TimeoutFuture;
+use std::pin::pin;
 
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";
+
+/// API request timeout in milliseconds (10 seconds)
+const API_TIMEOUT_MS: u32 = 10_000;
 
 // =============================================================================
 // Translation Types
@@ -119,19 +125,34 @@ pub enum ChapterContent {
     },
 }
 
-/// Verse content can be plain text, formatted text, or special elements
+/// Verse content can be plain text, formatted text, or special elements.
+///
+/// # Variant Order (Important for `#[serde(untagged)]`)
+///
+/// This enum uses `#[serde(untagged)]` deserialization, which means variant order matters!
+/// Serde will try each variant in declaration order until one successfully deserializes.
+///
+/// The variants are ordered to ensure correct matching:
+/// 1. `Plain(String)` - Only matches JSON strings, never objects
+/// 2. `Formatted` - Matches objects with required `text` field (+ optional `poem`, `words_of_jesus`)
+/// 3. `FootnoteRef` - Matches objects with required `note_id` field (u32)
+/// 4. `InlineHeading` - Matches objects with required `heading` field (String)
+/// 5. `InlineLineBreak` - Matches objects with required `line_break` field (bool)
+///
+/// Each struct variant has distinct required fields with different types, so matching
+/// should be unambiguous. The HelloAO Bible API sends objects with distinct shapes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum VerseContent {
-    /// Plain text
+    /// Plain text - only matches JSON strings
     Plain(String),
-    /// Formatted text with optional styling
+    /// Formatted text with optional styling - matches objects with `text` field
     Formatted(FormattedText),
-    /// Footnote reference
+    /// Footnote reference - matches objects with `note_id` field
     FootnoteRef(FootnoteReference),
-    /// Inline heading
+    /// Inline heading - matches objects with `heading` field
     InlineHeading(InlineHeadingContent),
-    /// Inline line break
+    /// Inline line break - matches objects with `line_break` field
     InlineLineBreak(InlineLineBreakContent),
 }
 
@@ -189,8 +210,28 @@ pub struct FootnoteVerseReference {
 // API Functions
 // =============================================================================
 
+/// Execute an async operation with a timeout.
+/// Returns an error if the operation doesn't complete within API_TIMEOUT_MS milliseconds.
+async fn with_timeout<T, F>(future: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, String>>,
+{
+    let timeout = TimeoutFuture::new(API_TIMEOUT_MS);
+    let future = pin!(future);
+    let timeout = pin!(timeout);
+
+    match select(future, timeout).await {
+        Either::Left((result, _)) => result,
+        Either::Right((_, _)) => Err("Request timed out after 10 seconds".to_string()),
+    }
+}
+
 /// Fetch all available Bible translations
 pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
+    with_timeout(fetch_translations_inner()).await
+}
+
+async fn fetch_translations_inner() -> Result<Vec<Translation>, String> {
     let url = format!("{}/available_translations.json", BIBLE_API_BASE);
 
     let response = Request::get(&url)
@@ -212,6 +253,11 @@ pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
 
 /// Fetch books for a specific translation
 pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
+    let translation = translation.to_string();
+    with_timeout(async move { fetch_books_inner(&translation).await }).await
+}
+
+async fn fetch_books_inner(translation: &str) -> Result<Vec<Book>, String> {
     let url = format!("{}/{}/books.json", BIBLE_API_BASE, translation);
 
     let response = Request::get(&url)
@@ -233,6 +279,12 @@ pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
 
 /// Fetch a specific chapter
 pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
+    let translation = translation.to_string();
+    let book = book.to_string();
+    with_timeout(async move { fetch_chapter_inner(&translation, &book, chapter).await }).await
+}
+
+async fn fetch_chapter_inner(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
     let url = format!("{}/{}/{}/{}.json", BIBLE_API_BASE, translation, book, chapter);
 
     let response = Request::get(&url)

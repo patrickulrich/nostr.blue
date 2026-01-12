@@ -129,10 +129,11 @@ fn chapter_cache_key(translation: &str, book: &str, chapter: u32) -> String {
 // Cache Functions
 // ============================================================================
 
-/// Get a chapter from cache
+/// Get a chapter from cache.
+/// Uses write() + get() to properly update LRU access order.
 pub fn get_cached_chapter(translation: &str, book: &str, chapter: u32) -> Option<CachedChapter> {
     let key = chapter_cache_key(translation, book, chapter);
-    CHAPTER_CACHE.read().peek(&key).cloned()
+    CHAPTER_CACHE.write().get(&key).cloned()
 }
 
 /// Cache a chapter
@@ -408,13 +409,41 @@ fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
 // Highlight Query Functions
 // ============================================================================
 
+/// Extract verse number(s) from a reference string like "John 3:16 (BSB)" or "John 3:16-18 (BSB)".
+/// Returns (start_verse, end_verse) where start == end for single verses.
+fn extract_verses_from_reference(reference: &str) -> Option<(u32, u32)> {
+    // Find the colon, then extract the verse part before the space/parenthesis
+    let after_colon = reference.split(':').nth(1)?;
+    let verse_part = after_colon
+        .split([' ', '('])
+        .next()?
+        .trim();
+
+    if let Some((start, end)) = verse_part.split_once('-') {
+        Some((start.trim().parse().ok()?, end.trim().parse().ok()?))
+    } else {
+        let v = verse_part.parse().ok()?;
+        Some((v, v))
+    }
+}
+
+/// Check if a reference matches a specific verse number.
+/// Handles both single verses ("John 3:16") and ranges ("John 3:16-18").
+fn verse_matches_reference(reference: &str, target_verse: u32) -> bool {
+    if let Some((start, end)) = extract_verses_from_reference(reference) {
+        target_verse >= start && target_verse <= end
+    } else {
+        false
+    }
+}
+
 /// Check if a verse is highlighted by the current user
 pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: u32) -> bool {
     let api_url = get_chapter_api_url(translation, book, chapter);
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().any(|h| {
-        h.api_url == api_url && h.reference.contains(&format!(":{}", verse))
+        h.api_url == api_url && verse_matches_reference(&h.reference, verse)
     })
 }
 
@@ -422,7 +451,7 @@ pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: 
 pub fn get_verse_highlight_count(verse: u32) -> usize {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
     highlights.iter().filter(|h| {
-        h.reference.contains(&format!(":{}", verse))
+        verse_matches_reference(&h.reference, verse)
     }).count()
 }
 
@@ -432,13 +461,11 @@ pub fn get_chapter_highlight_stats() -> ChapterHighlightStats {
     let mut stats = ChapterHighlightStats::default();
 
     for h in highlights.iter() {
-        // Try to extract verse number from reference like "John 3:16 (BSB)"
-        if let Some(verse_str) = h.reference.split(':').nth(1) {
-            if let Some(verse_num) = verse_str.split_whitespace().next() {
-                if let Ok(verse) = verse_num.parse::<u32>() {
-                    *stats.verse_counts.entry(verse).or_insert(0) += 1;
-                    stats.total += 1;
-                }
+        // Extract verse numbers and count each verse in the range
+        if let Some((start, end)) = extract_verses_from_reference(&h.reference) {
+            for verse in start..=end {
+                *stats.verse_counts.entry(verse).or_insert(0) += 1;
+                stats.total += 1;
             }
         }
     }
@@ -452,7 +479,7 @@ pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32,
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().find(|h| {
-        h.api_url == api_url && h.reference.contains(&format!(":{}", verse))
+        h.api_url == api_url && verse_matches_reference(&h.reference, verse)
     }).cloned()
 }
 
@@ -460,7 +487,7 @@ pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32,
 pub fn get_highlights_for_verse(verse: u32) -> Vec<BibleHighlight> {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
     highlights.iter().filter(|h| {
-        h.reference.contains(&format!(":{}", verse))
+        verse_matches_reference(&h.reference, verse)
     }).cloned().collect()
 }
 

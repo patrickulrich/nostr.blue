@@ -96,7 +96,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         show_toolbar.set(false);
     };
 
-    // Copy selected verses
+    // Copy selected verses (clipboard API only available on wasm32)
+    #[allow(unused_variables, unused_mut)]
     let copy_verses = {
         let translation = translation_for_copy;
         let mut selected_verses = selected_verses;
@@ -122,7 +123,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     }
                 }
 
-                // Copy to clipboard
+                // Copy to clipboard (wasm32 only)
                 #[cfg(target_arch = "wasm32")]
                 {
                     let first = *verses.first().unwrap_or(&0);
@@ -133,10 +134,23 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
                     };
                     let full_text = format!("{}\n\u{2014} {}", text_parts.join(" "), reference);
-                    let window = web_sys::window().unwrap();
-                    let nav = window.navigator();
-                    let clipboard = nav.clipboard();
-                    let _ = clipboard.write_text(&full_text);
+
+                    // Use spawn_local to properly await the clipboard Promise and handle errors
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let window = match web_sys::window() {
+                            Some(w) => w,
+                            None => {
+                                log::error!("Clipboard: No window object available");
+                                return;
+                            }
+                        };
+                        let clipboard = window.navigator().clipboard();
+                        let promise = clipboard.write_text(&full_text);
+
+                        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
+                            log::error!("Clipboard write failed: {:?}", e);
+                        }
+                    });
                 }
 
                 // Clear selection after copy
