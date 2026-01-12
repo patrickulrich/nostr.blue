@@ -531,7 +531,7 @@ impl EventTypeFilter {
 }
 
 /// Filter state for events
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EventFilterState {
     pub search_term: String,
     pub time_filter: TimeFilter,
@@ -539,15 +539,32 @@ pub struct EventFilterState {
     pub event_type_filter: EventTypeFilter,
     pub hashtag: Option<String>,
     pub include_private: bool,
+    /// Hide events that have ended (default: true)
+    pub hide_ended: bool,
+}
+
+impl Default for EventFilterState {
+    fn default() -> Self {
+        Self {
+            search_term: String::new(),
+            time_filter: TimeFilter::default(),
+            location_filter: LocationFilter::default(),
+            event_type_filter: EventTypeFilter::default(),
+            hashtag: None,
+            include_private: false,
+            hide_ended: true, // Hide ended events by default
+        }
+    }
 }
 
 impl EventFilterState {
     pub fn is_empty(&self) -> bool {
         self.search_term.is_empty()
-            && self.time_filter == TimeFilter::Upcoming
+            && self.time_filter == TimeFilter::All
             && self.location_filter == LocationFilter::All
             && self.event_type_filter == EventTypeFilter::All
             && self.hashtag.is_none()
+            && self.hide_ended // true means using default (hiding ended)
     }
 
     pub fn clear(&mut self) {
@@ -565,7 +582,15 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
     events
         .iter()
         .filter(|event| {
-            // Search term filter
+            // Hide ended events filter (skip when explicitly viewing past events)
+            if filters.hide_ended && filters.time_filter != TimeFilter::Past {
+                let end_ts = event.effective_end_timestamp();
+                if end_ts < now_secs {
+                    return false;
+                }
+            }
+
+            // Search term filter (client-side fallback, NIP-50 search is preferred)
             if !filters.search_term.is_empty() {
                 let term = filters.search_term.to_lowercase();
                 let matches = event.title().to_lowercase().contains(&term);
@@ -1283,6 +1308,198 @@ pub async fn fetch_event_rsvps(event_coordinate: &str) -> StdResult<Vec<Calendar
     Ok(rsvps)
 }
 
+// ============================================================================
+// Event Comments (NIP-22)
+// ============================================================================
+
+/// A comment on a calendar event
+#[derive(Clone, Debug)]
+pub struct CalendarEventComment {
+    pub event_id: String,
+    pub pubkey: String,
+    pub content: String,
+    pub created_at: u64,
+}
+
+/// Fetch comments for a calendar event by naddr
+/// Comments reference the event via 'a' tag (coordinate)
+/// Uses fetch_events_from_relays to bypass cache and get fresh data
+pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
+    // Use kind 1111 (NIP-22 comment) with 'a' tag referencing the event coordinate
+    let filter = Filter::new()
+        .kind(Kind::Custom(1111))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
+        .limit(100);
+
+    // Use fetch_events_from_relays to bypass cache for fresh comment data
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+
+    let mut comments: Vec<CalendarEventComment> = events
+        .iter()
+        .map(|e| CalendarEventComment {
+            event_id: e.id.to_hex(),
+            pubkey: e.pubkey.to_hex(),
+            content: e.content.clone(),
+            created_at: e.created_at.as_secs(),
+        })
+        .collect();
+
+    // Sort by created_at (newest first)
+    comments.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(comments)
+}
+
+/// Publish a comment on a calendar event
+/// Uses proper NIP-22 threading tags (A/K/P for root, a/k/p for parent)
+pub async fn publish_event_comment(
+    coordinate: &str,
+    event_author: &str,
+    content: &str,
+) -> StdResult<String, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
+
+    // Validate and normalize event_author to canonical hex
+    // PublicKey::parse() accepts hex, bech32 (npub), and NIP21 URIs
+    let author_pubkey = PublicKey::parse(event_author)
+        .map_err(|e| format!("Invalid event author pubkey '{}': {}", event_author, e))?;
+    let author_hex = author_pubkey.to_hex();
+
+    // Parse coordinate to extract kind (format: "kind:pubkey:d-tag")
+    let parts: Vec<&str> = coordinate.split(':').collect();
+    let event_kind = parts.first()
+        .and_then(|k| k.parse::<u16>().ok())
+        .ok_or("Invalid coordinate format")?;
+
+    // Build NIP-22 comment (kind 1111) with full tag set
+    let builder = EventBuilder::new(Kind::Custom(1111), content)
+        // Root scope tags (uppercase) - for the calendar event being commented on
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)), vec![coordinate.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)), vec![event_kind.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)), vec![author_hex.clone()]))
+        // Parent scope tags (lowercase) - same as root for top-level comments
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)), vec![coordinate.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)), vec![event_kind.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)), vec![author_hex]));
+
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish comment: {}", e))?;
+
+    Ok(output.id().to_string())
+}
+
+// ============================================================================
+// NIP-50 Search
+// ============================================================================
+
+/// Search calendar events using NIP-50 relay search
+/// Searches across title, description, and content fields
+/// Uses fetch_events_from_relays to bypass cache for fresh search results
+pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // NIP-50 search filter for calendar event kinds (31922, 31923)
+    let filter = Filter::new()
+        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .search(query)
+        .limit(limit);
+
+    // Use fetch_events_from_relays to bypass cache for fresh search results
+    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+
+    // Parse events into UnifiedEvent
+    let mut results: Vec<UnifiedEvent> = events
+        .iter()
+        .filter_map(|e| {
+            match parse_calendar_event(e) {
+                Ok(cal_event) => Some(UnifiedEvent::Calendar(cal_event)),
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    // Cache the raw events
+    cache_calendar_events(&events);
+
+    // Sort by relevance (start time for calendar events)
+    results.sort_by_key(|a| a.start_timestamp());
+
+    Ok(results)
+}
+
+/// Search all events (calendar + meetings) using NIP-50 relay search
+/// Searches across title, description, and content fields for both calendar events and meetings
+/// Uses fetch_events_from_relays to bypass cache for fresh search results
+pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM, KIND_MEETING_SPACE};
+
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build filters for both calendar and meeting kinds
+    let cal_filter = Filter::new()
+        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .search(query)
+        .limit(limit);
+
+    let meeting_filter = Filter::new()
+        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .search(query)
+        .limit(limit);
+
+    // Fetch in parallel
+    let (cal_result, meeting_result) = futures::join!(
+        crate::stores::nostr_client::fetch_events_from_relays(cal_filter, Duration::from_secs(10)),
+        crate::stores::nostr_client::fetch_events_from_relays(meeting_filter, Duration::from_secs(10))
+    );
+
+    // Only fail if BOTH fetches failed (following Nostr SDK graceful degradation pattern)
+    if cal_result.is_err() && meeting_result.is_err() {
+        return Err(format!(
+            "Search failed - calendar: {}, meetings: {}",
+            cal_result.as_ref().unwrap_err(),
+            meeting_result.as_ref().unwrap_err()
+        ));
+    }
+
+    let mut results = Vec::new();
+
+    // Process calendar events (only if Ok)
+    if let Ok(events) = cal_result {
+        cache_calendar_events(&events);
+        for event in &events {
+            if let Ok(cal_event) = parse_calendar_event(event) {
+                results.push(UnifiedEvent::Calendar(cal_event));
+            }
+        }
+    }
+
+    // Process meeting events
+    if let Ok(events) = meeting_result {
+        cache_live_events(&events);
+        for event in &events {
+            let kind = event.kind.as_u16();
+            let activity = match kind {
+                KIND_MEETING_ROOM => parse_meeting_room_event(event).ok().map(LiveActivityEvent::Meeting),
+                KIND_MEETING_SPACE => parse_meeting_space(event).ok().map(LiveActivityEvent::Space),
+                _ => None,
+            };
+            if let Some(activity) = activity {
+                results.push(UnifiedEvent::Live(activity));
+            }
+        }
+    }
+
+    // Sort by start time
+    results.sort_by_key(|e| e.start_timestamp());
+    Ok(results)
+}
+
 /// Fetch user's RSVPs
 pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String> {
     let pk = PublicKey::from_hex(pubkey)
@@ -1562,6 +1779,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
 // ============================================================================
 
 /// Publish a date-based calendar event (kind 31922)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_date_event(
     title: &str,
@@ -1572,6 +1790,7 @@ pub async fn publish_date_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     is_private: bool,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
@@ -1610,6 +1829,23 @@ pub async fn publish_date_event(
         builder = builder.tag(Tag::hashtag(tag));
     }
 
+    // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
+    for (pubkey, role) in participants {
+        match PublicKey::parse(pubkey) {
+            Ok(pk) => {
+                // Format: ["p", pubkey, relay_hint, role]
+                builder = builder.tag(Tag::custom(
+                    TagKind::p(),
+                    vec![pk.to_hex(), "".to_string(), role.clone()]
+                ));
+            }
+            Err(e) => {
+                log::warn!("Invalid participant pubkey '{}': {}", pubkey, e);
+            }
+        }
+    }
+
     if is_private {
         // TODO: Implement NIP-59 gift wrap for private events
         return Err("Private events not yet implemented".to_string());
@@ -1628,6 +1864,7 @@ pub async fn publish_date_event(
 }
 
 /// Publish a time-based calendar event (kind 31923)
+/// participants: slice of (pubkey_hex, role) tuples
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_time_event(
     title: &str,
@@ -1638,6 +1875,7 @@ pub async fn publish_time_event(
     image: Option<&str>,
     locations: &[String],
     hashtags: &[String],
+    participants: &[(String, String)], // (pubkey_hex, role)
     timezone: Option<&str>,
     is_private: bool,
 ) -> StdResult<String, String> {
@@ -1680,6 +1918,23 @@ pub async fn publish_time_event(
     // Hashtags
     for tag in hashtags {
         builder = builder.tag(Tag::hashtag(tag));
+    }
+
+    // Participants (p tags with optional relay and role)
+    // Use PublicKey::parse() to accept hex, bech32 (npub), and NIP21 URIs
+    for (pubkey, role) in participants {
+        match PublicKey::parse(pubkey) {
+            Ok(pk) => {
+                // Format: ["p", pubkey, relay_hint, role]
+                builder = builder.tag(Tag::custom(
+                    TagKind::p(),
+                    vec![pk.to_hex(), "".to_string(), role.clone()]
+                ));
+            }
+            Err(e) => {
+                log::warn!("Invalid participant pubkey '{}': {}", pubkey, e);
+            }
+        }
     }
 
     if is_private {
