@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store, dms, pinned_notes};
-use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, PinnedNotesCarousel, ProfileBadgesSection, AddToPeopleListModal};
+use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, ArticleCardSkeleton, PinnedNotesCarousel, ProfileBadgesSection, AddToPeopleListModal};
+use crate::utils::article_meta::get_identifier;
 use crate::components::icons::{InfoIcon, MailIcon, ListIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
@@ -71,6 +72,32 @@ fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
     map.insert(ProfileTab::Media(MediaSubTab::Verts), TabData::default());
     map.insert(ProfileTab::Likes, TabData::default());
     map
+}
+
+/// Deduplicate articles by NIP-23 address (kind:pubkey:identifier)
+/// Keeps only the most recent version of each article
+fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
+    let mut address_map: HashMap<String, NostrEvent> = HashMap::new();
+
+    for article in articles {
+        if let Some(identifier) = get_identifier(&article) {
+            let address = format!("{}:{}:{}",
+                article.kind.as_u16(),
+                article.pubkey.to_hex(),
+                identifier
+            );
+
+            address_map.entry(address)
+                .and_modify(|existing| {
+                    if article.created_at > existing.created_at {
+                        *existing = article.clone();
+                    }
+                })
+                .or_insert(article);
+        }
+    }
+
+    address_map.into_values().collect()
 }
 
 #[component]
@@ -343,6 +370,12 @@ pub fn Profile(pubkey: String) -> Element {
                             // Merge and sort
                             let mut merged = existing_data.events;
                             merged.extend(new_events.clone());
+
+                            // For Articles tab, apply NIP-23 deduplication to keep only newest version
+                            if matches!(tab_for_relay, ProfileTab::Articles) {
+                                merged = dedupe_articles_by_address(merged);
+                            }
+
                             merged.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
                             // Update oldest cursor
@@ -1092,10 +1125,21 @@ pub fn Profile(pubkey: String) -> Element {
                         }
 
                         if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading_events.read() && current_events.is_empty()) {
-                            // Show client initializing animation during:
+                            // Show skeleton loading during:
                             // 1. Client initialization
                             // 2. Initial events load (loading + no events, regardless of error state)
-                            ClientInitializing {}
+                            // Use tab-specific skeleton for better UX
+                            match &tab {
+                                ProfileTab::Articles => rsx! {
+                                    div {
+                                        class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-4",
+                                        for _ in 0..6 {
+                                            ArticleCardSkeleton {}
+                                        }
+                                    }
+                                },
+                                _ => rsx! { ClientInitializing {} }
+                            }
                         } else if !current_events.is_empty() {
                             // Use grid layout for Articles and Verts, list layout for others
                             div {
@@ -1726,6 +1770,11 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
                 .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
                 .collect()
         }
+        ProfileTab::Articles => {
+            // Deduplicate articles by NIP-23 address (kind:pubkey:identifier)
+            // This ensures only the newest version of each article is shown
+            dedupe_articles_by_address(events)
+        }
         _ => events, // No filtering needed for other tabs
     }
 }
@@ -2029,13 +2078,16 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
             let relay_count = events.len();
-            let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            log::info!("Loaded {} articles", event_vec.len());
+            let event_vec: Vec<NostrEvent> = events.into_iter().collect();
 
-            let oldest_cursor = event_vec.last().map(|e| e.created_at.as_secs());
+            // Apply NIP-23 deduplication (keep newest version of each article)
+            let mut deduplicated = dedupe_articles_by_address(event_vec);
+            deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            log::info!("Loaded {} articles (after dedup)", deduplicated.len());
+
+            let oldest_cursor = deduplicated.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
-                events: event_vec,
+                events: deduplicated,
                 oldest_cursor,
                 relay_count,
             })
