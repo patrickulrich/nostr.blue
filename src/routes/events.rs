@@ -95,7 +95,9 @@ pub fn Events() -> Element {
         last_search_term.set(search_term.clone());
 
         // Clear search results if search term is too short
-        if search_term.len() < 2 {
+        // Use chars().count() for proper Unicode handling (Dioxus pattern)
+        let search_term_trimmed = search_term.trim();
+        if search_term_trimmed.chars().count() < 2 {
             // Increment debounce ID to invalidate any in-flight searches
             let current_id = *search_debounce_id.peek() + 1;
             search_debounce_id.set(current_id);

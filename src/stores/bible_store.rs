@@ -173,7 +173,8 @@ pub fn clear_chapter_cache() {
 // Initialization Functions
 // ============================================================================
 
-/// Initialize the Bible store - fetch translations
+/// Initialize the Bible store - fetch translations and default books
+/// Only marks as initialized after ALL setup completes successfully
 pub async fn initialize() -> StdResult<(), String> {
     if *BIBLE_STORE_INITIALIZED.read() {
         return Ok(());
@@ -181,27 +182,31 @@ pub async fn initialize() -> StdResult<(), String> {
 
     *LOADING_TRANSLATIONS.write() = true;
 
-    match fetch_translations().await {
-        Ok(translations) => {
-            // Filter and sort English translations
-            let english = filter_english_translations(&translations);
-            let sorted_english = sort_translations_by_priority(english);
+    // Use async block to ensure LOADING_TRANSLATIONS is reset on all paths
+    let result = async {
+        let translations = fetch_translations().await?;
 
-            *ENGLISH_TRANSLATIONS.write() = sorted_english;
-            *TRANSLATIONS.write() = translations;
-            *BIBLE_STORE_INITIALIZED.write() = true;
-            *LOADING_TRANSLATIONS.write() = false;
+        // Filter and sort English translations
+        let english = filter_english_translations(&translations);
+        let sorted_english = sort_translations_by_priority(english);
 
-            // Load books for default translation
-            let _ = load_books(DEFAULT_TRANSLATION).await;
+        *ENGLISH_TRANSLATIONS.write() = sorted_english;
+        *TRANSLATIONS.write() = translations;
 
-            Ok(())
-        }
-        Err(e) => {
-            *LOADING_TRANSLATIONS.write() = false;
-            Err(e)
-        }
+        // Load books for default translation - propagate error instead of discarding
+        load_books(DEFAULT_TRANSLATION).await?;
+
+        Ok(())
+    }.await;
+
+    *LOADING_TRANSLATIONS.write() = false;
+
+    // Only set initialized on complete success (nostr-sdk pattern)
+    if result.is_ok() {
+        *BIBLE_STORE_INITIALIZED.write() = true;
     }
+
+    result
 }
 
 /// Load books for a translation

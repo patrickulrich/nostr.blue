@@ -110,14 +110,14 @@ pub fn cache_event(event: CalendarEvent) {
         }
     }
 
-    // Update events by date index
+    // Update events by date index - deduplicate (nostr-sdk pattern)
     {
         let date_key = get_date_key(&event.start);
         let mut by_date = EVENTS_BY_DATE.write();
-        by_date
-            .entry(date_key)
-            .or_default()
-            .push(event.coordinate.clone());
+        let entry = by_date.entry(date_key).or_default();
+        if !entry.contains(&event.coordinate) {
+            entry.push(event.coordinate.clone());
+        }
     }
 
     CALENDAR_EVENTS_CACHE.write().put(event.coordinate.clone(), event);
@@ -153,12 +153,12 @@ pub fn cache_calendar_events(events: &[NostrEvent]) {
                 hashtags.insert(tag.clone());
             }
 
-            // Update by date index
+            // Update by date index - deduplicate (nostr-sdk pattern)
             let date_key = get_date_key(&cal_event.start);
-            by_date
-                .entry(date_key)
-                .or_default()
-                .push(cal_event.coordinate.clone());
+            let entry = by_date.entry(date_key).or_default();
+            if !entry.contains(&cal_event.coordinate) {
+                entry.push(cal_event.coordinate.clone());
+            }
 
             cache.put(cal_event.coordinate.clone(), cal_event);
         }
@@ -1366,10 +1366,16 @@ pub async fn publish_event_comment(
     let author_hex = author_pubkey.to_hex();
 
     // Parse coordinate to extract kind (format: "kind:pubkey:d-tag")
+    // Validate format following nostr-sdk nip01.rs pattern
     let parts: Vec<&str> = coordinate.split(':').collect();
-    let event_kind = parts.first()
-        .and_then(|k| k.parse::<u16>().ok())
-        .ok_or("Invalid coordinate format")?;
+    if parts.len() < 3 {
+        return Err(format!(
+            "Invalid coordinate format '{}': expected 'kind:pubkey:d-tag'",
+            coordinate
+        ));
+    }
+    let event_kind: u16 = parts[0].parse()
+        .map_err(|_| format!("Invalid kind in coordinate: {}", parts[0]))?;
 
     // Build NIP-22 comment (kind 1111) with full tag set
     let builder = EventBuilder::new(Kind::Custom(1111), content)

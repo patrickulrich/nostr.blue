@@ -837,6 +837,19 @@ fn UploadModal(
                 let name = file.name();
                 let mime_type = file.type_();
 
+                // Check file size before reading into memory to prevent WASM OOM
+                const MAX_FILE_SIZE: f64 = 100.0 * 1024.0 * 1024.0; // 100MB
+                let file_size = file.size();
+                if file_size > MAX_FILE_SIZE {
+                    error.set(Some(format!(
+                        "File too large: {} exceeds maximum of {}",
+                        blossom_store::format_bytes(file_size as u64),
+                        blossom_store::format_bytes(MAX_FILE_SIZE as u64)
+                    )));
+                    body.remove_child(&input_for_cleanup).ok();
+                    return;
+                }
+
                 let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
                 if let Ok(buffer) = array_buffer {
                     let uint8_array = js_sys::Uint8Array::new(&buffer);
@@ -1201,7 +1214,7 @@ fn ServerList(
                     placeholder: "https://blossom.example.com",
                     value: "{new_server_url()}",
                     oninput: move |e| new_server_url.set(e.value()),
-                    onkeypress: move |e| {
+                    onkeydown: move |e| {
                         if e.key() == Key::Enter {
                             match validate_and_normalize_server_url(&new_server_url()) {
                                 Ok(normalized) => {

@@ -231,7 +231,14 @@ pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
         .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch translations: {}", e))?;
+        .map_err(|e| {
+            // Distinguish timeout from other network errors (nostr-sdk pattern)
+            if signal.aborted() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to fetch translations: {}", e)
+            }
+        })?;
 
     if !response.ok() {
         return Err(format!("API error: {}", response.status()));
@@ -265,7 +272,14 @@ pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
         .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch books: {}", e))?;
+        .map_err(|e| {
+            // Distinguish timeout from other network errors (nostr-sdk pattern)
+            if signal.aborted() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to fetch books: {}", e)
+            }
+        })?;
 
     if !response.ok() {
         return Err(format!("API error: {}", response.status()));
@@ -305,7 +319,14 @@ pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Resul
         .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch chapter: {}", e))?;
+        .map_err(|e| {
+            // Distinguish timeout from other network errors (nostr-sdk pattern)
+            if signal.aborted() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to fetch chapter: {}", e)
+            }
+        })?;
 
     if !response.ok() {
         return Err(format!("API error: {}", response.status()));
