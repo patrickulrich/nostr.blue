@@ -151,6 +151,9 @@ pub enum ContentToken {
     NostrBlueProduct(String),        // naddr from /marketplace/product/{naddr}
     NostrBlueCodeRepo(String),       // naddr from /code/repo/{naddr}
     NostrBlueCommunity(String),      // a_tag from /community/{a_tag}
+    // RSS podcast links (via Podcast Index API)
+    NostrBlueRssPodcastEpisode(String, String), // (podcast_id, episode_id) from /podcast/rss/episode/{podcast_id}/{episode_id}
+    NostrBlueRssPodcastShow(String),            // podcast_id from /podcast/rss/{podcast_id}
 }
 
 /// Parse note content into structured tokens
@@ -985,12 +988,29 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     if path.starts_with("/voicemessages/") && !path.starts_with("/voicemessages/new") {
         return extract_id_from_path(path, "/voicemessages/").map(ContentToken::NostrBlueVoice);
     }
-    // Podcast episode (must be before /podcast/nostr/)
+    // RSS Podcast episode (must be before /podcast/rss/ and Nostr podcast routes)
+    if path.starts_with("/podcast/rss/episode/") {
+        // Extract: /podcast/rss/episode/{podcast_id}/{episode_id}
+        if let Some(remainder) = path.strip_prefix("/podcast/rss/episode/") {
+            let parts: Vec<&str> = remainder.split('/').collect();
+            if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                let podcast_id = parts[0].to_string();
+                let episode_id = parts[1].split(['?', '#']).next().unwrap_or(parts[1]).to_string();
+                return Some(ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id));
+            }
+        }
+    }
+    // RSS Podcast show
+    if path.starts_with("/podcast/rss/") && !path.starts_with("/podcast/rss/episode/") {
+        return extract_id_from_path(path, "/podcast/rss/")
+            .map(ContentToken::NostrBlueRssPodcastShow);
+    }
+    // Nostr Podcast episode (must be before /podcast/nostr/)
     if path.starts_with("/podcast/nostr/episode/") {
         return extract_id_from_path(path, "/podcast/nostr/episode/")
             .map(ContentToken::NostrBluePodcastEpisode);
     }
-    // Podcast show
+    // Nostr Podcast show
     if path.starts_with("/podcast/nostr/") {
         return extract_id_from_path(path, "/podcast/nostr/")
             .map(ContentToken::NostrBluePodcastShow);

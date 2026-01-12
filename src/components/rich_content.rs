@@ -379,6 +379,12 @@ fn render_token(token: &ContentToken) -> Element {
         ContentToken::NostrBlueCommunity(id) => rsx! {
             NostrBlueCommunityRenderer { id: id.clone() }
         },
+        ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id) => rsx! {
+            NostrBlueRssPodcastEpisodeRenderer { podcast_id: podcast_id.clone(), episode_id: episode_id.clone() }
+        },
+        ContentToken::NostrBlueRssPodcastShow(podcast_id) => rsx! {
+            NostrBlueRssPodcastShowRenderer { podcast_id: podcast_id.clone() }
+        },
     }
 }
 
@@ -4467,6 +4473,165 @@ fn render_podcast_episode_card(event: &Event, naddr: &str) -> Element {
                     icons::MusicIcon { class: "w-4 h-4" }
                     "View Episode"
                 }
+            }
+        }
+    }
+}
+
+/// Renders a nostr.blue RSS podcast episode link with playback
+#[component]
+fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) -> Element {
+    let mut episode_data = use_signal(|| None::<DisplayEpisode>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+    let podcast_id_for_link = podcast_id.clone();
+    let episode_id_for_link = episode_id.clone();
+
+    use_effect(move || {
+        let podcast_id = podcast_id.clone();
+        let episode_id = episode_id.clone();
+        spawn(async move {
+            // Decode episode_id (may be URL-encoded)
+            let decoded_episode_id = urlencoding::decode(&episode_id)
+                .map(|s| s.into_owned())
+                .unwrap_or(episode_id);
+
+            // Check if podcast_id is numeric (Podcast Index feed ID)
+            if let Ok(feed_id) = podcast_id.parse::<u64>() {
+                // Fetch from Podcast Index API
+                match podcast_index::get_podcast_by_id(feed_id).await {
+                    Ok(feed) => {
+                        match podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await {
+                            Ok(episodes) => {
+                                // Find episode by ID
+                                if let Some(ep) = episodes.iter()
+                                    .find(|e| e.id.to_string() == decoded_episode_id)
+                                {
+                                    let display = DisplayEpisode::from_podcast_index_episode(ep, &feed);
+                                    episode_data.set(Some(display));
+                                } else {
+                                    error.set(Some("Episode not found".to_string()));
+                                }
+                            }
+                            Err(e) => error.set(Some(e)),
+                        }
+                    }
+                    Err(e) => error.set(Some(e)),
+                }
+            } else {
+                error.set(Some("Invalid podcast ID format".to_string()));
+            }
+            loading.set(false);
+        });
+    });
+
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            if *loading.read() {
+                {nostr_blue_loading_skeleton()}
+            } else if let Some(_err) = error.read().as_ref() {
+                // Fallback link on error
+                Link {
+                    to: Route::PodcastRssEpisodeDetail {
+                        podcast_id: podcast_id_for_link.clone(),
+                        episode_id: episode_id_for_link.clone()
+                    },
+                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                    icons::MusicIcon { class: "w-4 h-4" }
+                    "View Episode"
+                }
+            } else if let Some(display) = episode_data.read().as_ref() {
+                PodcastEpisodeCard {
+                    episode: display.clone(),
+                    show_description: false
+                }
+            }
+        }
+    }
+}
+
+/// Renders a nostr.blue RSS podcast show link
+#[component]
+fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
+    let mut show_data = use_signal(|| None::<PodcastShow>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+    let podcast_id_for_link = podcast_id.clone();
+
+    use_effect(move || {
+        let podcast_id = podcast_id.clone();
+        spawn(async move {
+            if let Ok(feed_id) = podcast_id.parse::<u64>() {
+                match podcast_index::get_podcast_by_id(feed_id).await {
+                    Ok(feed) => {
+                        // Create PodcastShow from PodcastFeed
+                        // Convert value block if available
+                        let value = feed.value.as_ref().and_then(|v| {
+                            let model = v.model.as_ref()?;
+                            Some(crate::utils::podcast::ValueBlock {
+                                value_type: model.model_type.clone().unwrap_or_else(|| "lightning".to_string()),
+                                method: model.method.clone().unwrap_or_else(|| "keysend".to_string()),
+                                suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
+                                recipients: v.destinations.iter().filter_map(|d| {
+                                    Some(crate::utils::podcast::ValueRecipient {
+                                        name: d.name.clone(),
+                                        custom_key: None,
+                                        custom_value: None,
+                                        recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                                        address: d.address.clone()?,
+                                        split: d.split.unwrap_or(0),
+                                        fee: None,
+                                    })
+                                }).collect(),
+                            })
+                        });
+                        let show = PodcastShow {
+                            id: feed.id.to_string(),
+                            title: feed.title.clone(),
+                            author: feed.author.clone().or(feed.owner_name.clone()),
+                            description: feed.description.clone(),
+                            image: feed.get_image().map(|s| s.to_string()),
+                            episode_count: feed.episode_count.map(|c| c as usize),
+                            source: crate::utils::podcast::PodcastSource::Rss {
+                                feed_url: feed.url.clone(),
+                                guid: feed.podcast_guid.clone().unwrap_or_default(),
+                                podcast_id: Some(feed.id),
+                            },
+                            value,
+                            categories: feed.categories
+                                .as_ref()
+                                .map(|c| c.values().cloned().collect())
+                                .unwrap_or_default(),
+                            explicit: false,
+                        };
+                        show_data.set(Some(show));
+                    }
+                    Err(e) => error.set(Some(e)),
+                }
+            } else {
+                error.set(Some("Invalid podcast ID format".to_string()));
+            }
+            loading.set(false);
+        });
+    });
+
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            if *loading.read() {
+                {nostr_blue_loading_skeleton()}
+            } else if let Some(_err) = error.read().as_ref() {
+                Link {
+                    to: Route::PodcastRssFeedDetail { podcast_id: podcast_id_for_link.clone() },
+                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                    icons::MusicIcon { class: "w-4 h-4" }
+                    "View Podcast"
+                }
+            } else if let Some(show) = show_data.read().as_ref() {
+                PodcastShowCard { show: show.clone(), compact: true }
             }
         }
     }
