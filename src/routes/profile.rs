@@ -382,9 +382,9 @@ pub fn Profile(pubkey: String) -> Element {
 
                             // For Articles, sort by published_at to match displayed timestamps
                             if matches!(tab_for_relay, ProfileTab::Articles) {
-                                merged.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+                                merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
                             } else {
-                                merged.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                                merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
                             }
 
                             // Update oldest cursor (use published_at for Articles)
@@ -1811,16 +1811,16 @@ async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) 
     // Sort and deduplicate
     // For Articles, sort by published_at to match displayed timestamps
     if matches!(tab, ProfileTab::Articles) {
-        processed.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+        processed.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
     } else {
-        processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        processed.sort_by_key(|e| std::cmp::Reverse(e.created_at));
     }
     let mut seen_ids = std::collections::HashSet::new();
     processed.retain(|e| seen_ids.insert(e.id));
 
     // For Articles, use published_at for pagination cursor
     let oldest_cursor = if matches!(tab, ProfileTab::Articles) {
-        processed.last().map(|e| get_published_at(e))
+        processed.last().map(get_published_at)
     } else {
         processed.last().map(|e| e.created_at.as_secs())
     };
@@ -1854,16 +1854,16 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
     // Sort and deduplicate
     // For Articles, sort by published_at to match displayed timestamps
     if matches!(tab, ProfileTab::Articles) {
-        processed.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+        processed.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
     } else {
-        processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        processed.sort_by_key(|e| std::cmp::Reverse(e.created_at));
     }
     let mut seen_ids = std::collections::HashSet::new();
     processed.retain(|e| seen_ids.insert(e.id));
 
     // For Articles, use published_at for pagination cursor
     let oldest_cursor = if matches!(tab, ProfileTab::Articles) {
-        processed.last().map(|e| get_published_at(e))
+        processed.last().map(get_published_at)
     } else {
         processed.last().map(|e| e.created_at.as_secs())
     };
@@ -2116,11 +2116,11 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             // Apply NIP-23 deduplication (keep newest version of each article)
             let mut deduplicated = dedupe_articles_by_address(event_vec);
             // Sort by published_at to match displayed timestamps
-            deduplicated.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+            deduplicated.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
             log::info!("Loaded {} articles (after dedup)", deduplicated.len());
 
             // Use published_at for pagination cursor
-            let oldest_cursor = deduplicated.last().map(|e| get_published_at(e));
+            let oldest_cursor = deduplicated.last().map(get_published_at);
             Ok(LoadOutcome {
                 events: deduplicated,
                 oldest_cursor,

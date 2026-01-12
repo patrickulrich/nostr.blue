@@ -16,7 +16,7 @@ pub mod repo_tab_nav;
 pub mod readme_viewer;
 
 // Re-export main component types for convenience
-pub use repo_card::{CodeRepoCard, CodeRepoCardCompact};
+pub use repo_card::CodeRepoCard;
 pub use status_badge::CodeStatusBadge;
 pub use snippet_card::CodeSnippetCard;
 pub use issue_card::CodeIssueRow;
