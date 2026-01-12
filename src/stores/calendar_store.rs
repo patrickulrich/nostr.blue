@@ -582,8 +582,8 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
     events
         .iter()
         .filter(|event| {
-            // Hide ended events filter (checked first for performance)
-            if filters.hide_ended {
+            // Hide ended events filter (skip when explicitly viewing past events)
+            if filters.hide_ended && filters.time_filter != TimeFilter::Past {
                 let end_ts = event.effective_end_timestamp();
                 if end_ts < now_secs {
                     return false;
@@ -1359,6 +1359,12 @@ pub async fn publish_event_comment(
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
+    // Validate and normalize event_author to canonical hex
+    // PublicKey::parse() accepts hex, bech32 (npub), and NIP21 URIs
+    let author_pubkey = PublicKey::parse(event_author)
+        .map_err(|e| format!("Invalid event author pubkey '{}': {}", event_author, e))?;
+    let author_hex = author_pubkey.to_hex();
+
     // Parse coordinate to extract kind (format: "kind:pubkey:d-tag")
     let parts: Vec<&str> = coordinate.split(':').collect();
     let event_kind = parts.first()
@@ -1370,11 +1376,11 @@ pub async fn publish_event_comment(
         // Root scope tags (uppercase) - for the calendar event being commented on
         .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)), vec![coordinate.to_string()]))
         .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)), vec![event_kind.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)), vec![event_author.to_string()]))
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)), vec![author_hex.clone()]))
         // Parent scope tags (lowercase) - same as root for top-level comments
         .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)), vec![coordinate.to_string()]))
         .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)), vec![event_kind.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)), vec![event_author.to_string()]));
+        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)), vec![author_hex]));
 
     let output = client
         .send_event_builder(builder)
@@ -1452,9 +1458,18 @@ pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<Unifi
         crate::stores::nostr_client::fetch_events_from_relays(meeting_filter, Duration::from_secs(10))
     );
 
+    // Only fail if BOTH fetches failed (following Nostr SDK graceful degradation pattern)
+    if cal_result.is_err() && meeting_result.is_err() {
+        return Err(format!(
+            "Search failed - calendar: {}, meetings: {}",
+            cal_result.as_ref().unwrap_err(),
+            meeting_result.as_ref().unwrap_err()
+        ));
+    }
+
     let mut results = Vec::new();
 
-    // Process calendar events
+    // Process calendar events (only if Ok)
     if let Ok(events) = cal_result {
         cache_calendar_events(&events);
         for event in &events {

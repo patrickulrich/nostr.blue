@@ -74,6 +74,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         }
 
                         // Fetch comments
+                        comment_error.set(None); // Clear any stale error before fetching
                         comments_loading.set(true);
                         match calendar_store::fetch_event_comments(&coord).await {
                             Ok(event_comments) => {
@@ -186,8 +187,14 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                 Ok(_) => {
                     comment_input.set(String::new());
                     // Refresh comments
-                    if let Ok(event_comments) = calendar_store::fetch_event_comments(&coord).await {
-                        comments.set(event_comments);
+                    match calendar_store::fetch_event_comments(&coord).await {
+                        Ok(event_comments) => {
+                            comments.set(event_comments);
+                        }
+                        Err(e) => {
+                            // Comment posted successfully, but refresh failed - log but don't set error
+                            log::warn!("Comment posted but failed to refresh comments: {}", e);
+                        }
                     }
                 }
                 Err(e) => {
@@ -296,7 +303,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             }
                         }
 
-                        // Status badge (always rendered for calendar events)
+                        // Status badge (calendar events show time-based status, live activities show Live when active)
                         {
                             let status = get_detail_event_status(evt);
                             let has_image = evt.image().is_some();

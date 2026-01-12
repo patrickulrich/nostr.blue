@@ -101,6 +101,8 @@ pub fn Events() -> Element {
             search_debounce_id.set(current_id);
             search_results.set(None);
             searching.set(false);
+            // Reset pagination to allow fresh pagination when exiting search
+            has_more.set(true);
             return;
         }
 
@@ -682,8 +684,8 @@ pub fn Events() -> Element {
                 }
             }
 
-            // Infinite scroll sentinel (only for Grid view)
-            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() {
+            // Infinite scroll sentinel (only for Grid view, disabled during NIP-50 search)
+            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() && search_results.peek().is_none() {
                 div {
                     id: "{sentinel_id}",
                     class: "p-8 flex justify-center",

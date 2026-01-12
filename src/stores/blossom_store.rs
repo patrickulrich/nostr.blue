@@ -910,10 +910,22 @@ pub async fn delete_file(sha256: &str) -> Result<(), String> {
         }
     }
 
-    if success_count > 0 {
-        // Remove from local state
+    if success_count == servers.len() {
+        // Full success - safe to remove from local state
         MEDIA_ITEMS.write().retain(|item| item.sha256 != sha256);
         Ok(())
+    } else if success_count > 0 {
+        // Partial success - file may still exist on some servers
+        log::warn!(
+            "Deleted from {}/{} servers, refreshing file list to reconcile",
+            success_count,
+            servers.len()
+        );
+        // Refresh list to get accurate state (file might still be on some servers)
+        if let Err(e) = list_files().await {
+            log::error!("Failed to refresh file list after partial delete: {}", e);
+        }
+        Ok(()) // Return Ok since at least one delete succeeded
     } else {
         Err(format!("Failed to delete from all servers: {}", last_error))
     }
