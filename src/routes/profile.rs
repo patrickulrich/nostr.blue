@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::{nostr_client, auth_store, dms, pinned_notes};
 use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, ArticleCardSkeleton, PinnedNotesCarousel, ProfileBadgesSection, AddToPeopleListModal};
-use crate::utils::article_meta::get_identifier;
+use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::components::icons::{InfoIcon, MailIcon, ListIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
 use crate::hooks::use_infinite_scroll;
@@ -75,7 +75,7 @@ fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
 }
 
 /// Deduplicate articles by NIP-23 address (kind:pubkey:identifier)
-/// Keeps only the most recent version of each article
+/// Keeps the version with the most recent published_at timestamp
 fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
     let mut address_map: HashMap<String, NostrEvent> = HashMap::new();
 
@@ -89,7 +89,8 @@ fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
 
             address_map.entry(address)
                 .and_modify(|existing| {
-                    if article.created_at > existing.created_at {
+                    // Use published_at to determine which version to keep
+                    if get_published_at(&article) > get_published_at(existing) {
                         *existing = article.clone();
                     }
                 })
@@ -324,8 +325,11 @@ pub fn Profile(pubkey: String) -> Element {
                     tab_data.set(data_map);
                     current_tab_has_more.set(has_more);
 
-                    // Stop showing loading spinner - DB results are displayed
-                    loading_events.set(false);
+                    // Only stop loading if we have events to show
+                    // If DB is empty, keep skeleton visible until relay fetch completes
+                    if !db_outcome.events.is_empty() {
+                        loading_events.set(false);
+                    }
 
                     log::info!("Phase 1 complete: showing {} events from DB instantly", db_outcome.events.len());
 
@@ -376,10 +380,19 @@ pub fn Profile(pubkey: String) -> Element {
                                 merged = dedupe_articles_by_address(merged);
                             }
 
-                            merged.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            // For Articles, sort by published_at to match displayed timestamps
+                            if matches!(tab_for_relay, ProfileTab::Articles) {
+                                merged.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+                            } else {
+                                merged.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            }
 
-                            // Update oldest cursor
-                            let oldest_ts = merged.last().map(|e| e.created_at.as_secs().saturating_sub(1));
+                            // Update oldest cursor (use published_at for Articles)
+                            let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
+                                merged.last().map(|e| get_published_at(e).saturating_sub(1))
+                            } else {
+                                merged.last().map(|e| e.created_at.as_secs().saturating_sub(1))
+                            };
 
                             // Update tab data
                             data_map.insert(tab_for_relay.clone(), TabData {
@@ -1796,11 +1809,21 @@ async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) 
     let mut processed = process_tab_events(events, tab);
 
     // Sort and deduplicate
-    processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // For Articles, sort by published_at to match displayed timestamps
+    if matches!(tab, ProfileTab::Articles) {
+        processed.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+    } else {
+        processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    }
     let mut seen_ids = std::collections::HashSet::new();
     processed.retain(|e| seen_ids.insert(e.id));
 
-    let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
+    // For Articles, use published_at for pagination cursor
+    let oldest_cursor = if matches!(tab, ProfileTab::Articles) {
+        processed.last().map(|e| get_published_at(e))
+    } else {
+        processed.last().map(|e| e.created_at.as_secs())
+    };
 
     log::info!("DB Phase: loaded {} {:?} events", processed.len(), tab);
 
@@ -1829,11 +1852,21 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
     let mut processed = process_tab_events(events, tab);
 
     // Sort and deduplicate
-    processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // For Articles, sort by published_at to match displayed timestamps
+    if matches!(tab, ProfileTab::Articles) {
+        processed.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
+    } else {
+        processed.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    }
     let mut seen_ids = std::collections::HashSet::new();
     processed.retain(|e| seen_ids.insert(e.id));
 
-    let oldest_cursor = processed.last().map(|e| e.created_at.as_secs());
+    // For Articles, use published_at for pagination cursor
+    let oldest_cursor = if matches!(tab, ProfileTab::Articles) {
+        processed.last().map(|e| get_published_at(e))
+    } else {
+        processed.last().map(|e| e.created_at.as_secs())
+    };
 
     log::info!("Relay Phase: fetched {} {:?} events (raw: {})", processed.len(), tab, relay_count);
 
@@ -2082,10 +2115,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
             // Apply NIP-23 deduplication (keep newest version of each article)
             let mut deduplicated = dedupe_articles_by_address(event_vec);
-            deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            // Sort by published_at to match displayed timestamps
+            deduplicated.sort_by(|a, b| get_published_at(b).cmp(&get_published_at(a)));
             log::info!("Loaded {} articles (after dedup)", deduplicated.len());
 
-            let oldest_cursor = deduplicated.last().map(|e| e.created_at.as_secs());
+            // Use published_at for pagination cursor
+            let oldest_cursor = deduplicated.last().map(|e| get_published_at(e));
             Ok(LoadOutcome {
                 events: deduplicated,
                 oldest_cursor,
