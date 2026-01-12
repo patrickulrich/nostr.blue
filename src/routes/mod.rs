@@ -130,6 +130,9 @@ pub mod shop_search;
 
 // Blossom Media Management (BUD-01/02/04/05)
 pub mod blossom;
+
+// Bible Reading (NIP-84 Highlights)
+pub mod bible;
 pub mod code_repositories;
 pub mod code_snippets;
 pub mod code_snippet_detail;
@@ -266,6 +269,7 @@ use shop_collection::ShopCollection;
 use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
 use blossom::BlossomPage;
+use bible::{BibleHome, BibleChapter, BibleSearch};
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -664,6 +668,16 @@ pub enum Route {
         #[route("/blossom")]
         BlossomPage {},
 
+        // Bible Reading (NIP-84 Highlights)
+        #[route("/bible")]
+        BibleHome {},
+
+        #[route("/bible/:translation/:book/:chapter")]
+        BibleChapter { translation: String, book: String, chapter: u32 },
+
+        #[route("/bible/search")]
+        BibleSearch {},
+
         #[route("/settings")]
         Settings {},
 
@@ -746,6 +760,9 @@ fn Layout() -> Element {
         Route::ShopCollectionNew {} | Route::ShopSearch { .. }
     );
     let is_blossom_page = matches!(current_route, Route::BlossomPage {});
+    let is_bible_page = matches!(current_route,
+        Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
+    );
     let is_settings_page = matches!(current_route, Route::Settings {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
@@ -1196,7 +1213,7 @@ fn Layout() -> Element {
                 // Center Content Area
                 main {
                     class: {
-                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_blossom_page || is_creation_page;
+                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
                         match (is_wide_page, music_player_visible) {
                             (true, true) => "w-full flex-1 border-r border-border pb-24",
                             (true, false) => "w-full flex-1 border-r border-border",
@@ -1230,7 +1247,7 @@ fn Layout() -> Element {
                 }
 
                 // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, Shop, and Settings pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_blossom_page && !is_settings_page && !is_creation_page {
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_blossom_page && !is_bible_page && !is_settings_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1783,6 +1800,24 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 stroke_linejoin: "round",
                 // Cloud/storage icon for Blossom
                 path { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" }
+            }
+        },
+        SidebarItem::Bible => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Book with cross icon for Bible
+                path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
+                path { d: "M12 7v6" }
+                path { d: "M9 10h6" }
             }
         },
     }

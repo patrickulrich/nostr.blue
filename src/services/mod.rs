@@ -16,3 +16,4 @@ pub mod git_worker;
 pub mod btc_price;
 pub mod geocoding;
 pub mod scheduler;  // Background task scheduler
+pub mod bible_api;  // HelloAO Bible API
