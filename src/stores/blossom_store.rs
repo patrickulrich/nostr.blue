@@ -191,13 +191,15 @@ pub static LAST_FETCH_TIME: GlobalSignal<u64> = Signal::global(|| 0);
 pub const KIND_BLOSSOM_AUTH: u16 = 24242;
 
 /// Extract origin tuple (scheme, host, port) from URL string for comparison
-/// Returns None if URL is invalid or cannot be parsed
+/// Returns None if URL is invalid, cannot be parsed, or has no host
 fn get_url_origin(url_str: &str) -> Option<(String, String, Option<u16>)> {
-    url::Url::parse(url_str).ok().map(|u| (
-        u.scheme().to_string(),
-        u.host_str().unwrap_or("").to_string(),
-        u.port_or_known_default(),
-    ))
+    url::Url::parse(url_str).ok().and_then(|u| {
+        u.host_str().map(|host| (
+            u.scheme().to_string(),
+            host.to_string(),
+            u.port_or_known_default(),
+        ))
+    })
 }
 
 /// Add a custom Blossom server
@@ -844,30 +846,42 @@ async fn fetch_server_list(url: &str, auth_header: &str) -> Result<Vec<BlobDescr
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
-        use futures::future::{select, Either};
-        use gloo_timers::future::TimeoutFuture;
+        use gloo_timers::callback::Timeout;
 
-        let request_future = Request::get(url)
+        // Create AbortController for proper request cancellation on timeout
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout - controller is cloned for the closure
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
+
+        // Send request with abort signal - request is actually cancelled on timeout
+        let response = Request::get(url)
             .header("Authorization", auth_header)
-            .send();
-        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
-
-        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
-            Either::Left((response_result, _)) => {
-                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
-                if !response.ok() {
-                    return Err(format!("Server returned status: {}", response.status()));
+            .abort_signal(Some(&signal))
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
+                } else {
+                    format!("Request failed: {}", e)
                 }
-                let blobs: Vec<BlobDescriptor> = response
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse response: {}", e))?;
-                Ok(blobs)
-            }
-            Either::Right((_, _)) => {
-                Err("Request timeout".to_string())
-            }
+            })?;
+
+        if !response.ok() {
+            return Err(format!("Server returned status: {}", response.status()));
         }
+
+        let blobs: Vec<BlobDescriptor> = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        Ok(blobs)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -951,26 +965,37 @@ async fn delete_from_server(url: &str, auth_header: &str) -> Result<(), String> 
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
-        use futures::future::{select, Either};
-        use gloo_timers::future::TimeoutFuture;
+        use gloo_timers::callback::Timeout;
 
-        let request_future = Request::delete(url)
+        // Create AbortController for proper request cancellation on timeout
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout - controller is cloned for the closure
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
+
+        // Send request with abort signal - request is actually cancelled on timeout
+        let response = Request::delete(url)
             .header("Authorization", auth_header)
-            .send();
-        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
-
-        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
-            Either::Left((response_result, _)) => {
-                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
-                if response.ok() {
-                    Ok(())
+            .abort_signal(Some(&signal))
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
                 } else {
-                    Err(format!("Server returned status: {}", response.status()))
+                    format!("Request failed: {}", e)
                 }
-            }
-            Either::Right((_, _)) => {
-                Err("Request timeout".to_string())
-            }
+            })?;
+
+        if response.ok() {
+            Ok(())
+        } else {
+            Err(format!("Server returned status: {}", response.status()))
         }
     }
 
@@ -1093,35 +1118,46 @@ async fn mirror_to_server(mirror_url: &str, source_url: &str, auth_header: &str)
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
-        use futures::future::{select, Either};
-        use gloo_timers::future::TimeoutFuture;
+        use gloo_timers::callback::Timeout;
+
+        // Create AbortController for proper request cancellation
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
 
         let body = serde_json::json!({ "url": source_url });
 
-        let request_future = Request::put(mirror_url)
+        // Send request with abort signal (abort_signal must be before body)
+        let response = Request::put(mirror_url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
+            .abort_signal(Some(&signal))
             .body(body.to_string())
             .map_err(|e| format!("Failed to build request: {}", e))?
-            .send();
-        let timeout_future = TimeoutFuture::new(REQUEST_TIMEOUT_MS);
-
-        match select(std::pin::pin!(request_future), std::pin::pin!(timeout_future)).await {
-            Either::Left((response_result, _)) => {
-                let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
-                if !response.ok() {
-                    return Err(format!("Server returned status: {}", response.status()));
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
+                } else {
+                    format!("Request failed: {}", e)
                 }
-                let mirror_response: MirrorResponse = response
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse response: {}", e))?;
-                Ok(mirror_response.url)
-            }
-            Either::Right((_, _)) => {
-                Err("Request timeout".to_string())
-            }
+            })?;
+
+        if !response.ok() {
+            return Err(format!("Server returned status: {}", response.status()));
         }
+        let mirror_response: MirrorResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        Ok(mirror_response.url)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

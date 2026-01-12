@@ -192,8 +192,22 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             comments.set(event_comments);
                         }
                         Err(e) => {
-                            // Comment posted successfully, but refresh failed - log but don't set error
+                            // Comment posted successfully, but refresh failed
+                            // Optimistically add the new comment to show immediate feedback
                             log::warn!("Comment posted but failed to refresh comments: {}", e);
+
+                            if let Some(my_pubkey) = auth_store::get_pubkey() {
+                                let now = (js_sys::Date::now() / 1000.0) as u64;
+                                let optimistic_comment = CalendarEventComment {
+                                    event_id: String::new(), // Will be replaced on next refresh
+                                    pubkey: my_pubkey,
+                                    content: content.clone(),
+                                    created_at: now,
+                                };
+                                let mut current_comments = comments.read().clone();
+                                current_comments.insert(0, optimistic_comment);
+                                comments.set(current_comments);
+                            }
                         }
                     }
                 }
@@ -1079,6 +1093,11 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
 
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let start_ts = event.start_timestamp();
+
+    // No status for events without a valid start time
+    if start_ts == 0 {
+        return DetailEventStatus::None;
+    }
 
     // Only show status badges for calendar events
     if event.is_calendar_event() {
