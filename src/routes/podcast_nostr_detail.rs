@@ -12,7 +12,7 @@ use crate::components::{
     ContentShareModal, ContentType,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client, auth_store, podcast_subscription};
+use crate::stores::{nostr_client::{self, HAS_SIGNER}, auth_store, podcast_subscription};
 use crate::utils::podcast::{self, PodcastMetadata};
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
@@ -31,13 +31,13 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
     let mut podcast_data = use_signal(|| None::<Result<(PodcastMetadata, Vec<DisplayEpisode>), String>>);
     let mut loading = use_signal(|| true);
 
-    // Fetch podcast when client is initialized
+    // Fetch podcast when client is initialized AND signer is ready
     use_effect(move || {
         let naddr = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *HAS_SIGNER.read();
 
-        if !client_initialized {
-            log::info!("Waiting for client initialization before loading podcast...");
+        if !client_initialized || !has_signer {
             return;
         }
 
@@ -72,7 +72,7 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
             }
 
             // Content
-            if !*nostr_client::CLIENT_INITIALIZED.read() || *loading.read() {
+            if !*nostr_client::CLIENT_INITIALIZED.read() || !*HAS_SIGNER.read() || *loading.read() {
                 // Loading state
                 PodcastDetailSkeleton {}
             } else {
