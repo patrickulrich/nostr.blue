@@ -558,6 +558,11 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let start_ts = event.start_timestamp();
 
+    // No status for events without valid start time
+    if start_ts == 0 {
+        return EventStatus::None;
+    }
+
     // Only show status badges for calendar events
     if event.is_calendar_event() {
         // Use end timestamp or default to 24 hours after start

@@ -3,7 +3,8 @@ use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigge
 use dioxus_primitives::ContentSide;
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
-use nostr_sdk::{Tag, FromBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
+use nostr_sdk::{Tag, FromBech32, ToBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
+use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip19::Nip19;
 use crate::stores::nostr_client;
 use crate::stores::profiles;
@@ -4772,7 +4773,6 @@ fn NostrBlueArticleRenderer(id: String) -> Element {
     let mut event = use_signal(|| None::<Event>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let _id_for_link = id.clone();
 
     use_effect(move || {
         let id_clone = id.clone();
@@ -4947,10 +4947,15 @@ fn NostrBlueNoteRenderer(id: String) -> Element {
 }
 
 fn render_note_minicard(event: &Event, note_id: &str) -> Element {
-    let content_preview = if event.content.len() > 200 {
-        format!("{}...", &event.content[..200])
-    } else {
-        event.content.clone()
+    // Use character-based truncation to avoid UTF-8 panic
+    let content_preview = {
+        let char_count = event.content.chars().count();
+        if char_count > 200 {
+            let truncated: String = event.content.chars().take(200).collect();
+            format!("{}...", truncated)
+        } else {
+            event.content.clone()
+        }
     };
 
     rsx! {
@@ -5175,8 +5180,10 @@ fn render_wiki_card(event: &Event, identifier: &str) -> Element {
     use crate::stores::wiki_store::CachedWikiPage;
 
     if let Ok(article) = parse_wiki_article(event) {
-        // Build naddr for the article
-        let naddr = format!("naddr:30818:{}:{}", event.pubkey.to_hex(), article.identifier);
+        // Build proper bech32 naddr using nostr-sdk builder pattern
+        let coord = Coordinate::new(Kind::from(30818), event.pubkey)
+            .identifier(&article.identifier);
+        let naddr = coord.to_bech32().unwrap_or_else(|_| identifier.to_string());
         let a_tag = format!("30818:{}:{}", event.pubkey.to_hex(), article.identifier);
 
         let cached = CachedWikiPage {

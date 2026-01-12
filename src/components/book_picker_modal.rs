@@ -270,6 +270,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Handle insert
     let handle_insert = move |_| {
+        // Guard against validation errors (keyboard/programmatic triggers)
+        if *has_validation_error.read() {
+            return;
+        }
         if let Some(reference) = book_reference.read().clone() {
             let markup = reference.raw.clone();
             props.on_select.call(BookSelection {

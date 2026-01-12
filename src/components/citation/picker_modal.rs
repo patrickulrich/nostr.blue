@@ -171,6 +171,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         if let Some(task) = search_task.take() {
             task.cancel();
         }
+        is_searching.set(false);
         props.show.set(false);
     };
 

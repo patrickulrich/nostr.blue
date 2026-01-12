@@ -230,6 +230,18 @@ pub fn BoardSlideover(
             "aria-labelledby": "slideover-title",
             tabindex: "-1",
             onclick: move |e| e.stop_propagation(),
+            // Focus the dialog when mounted so Escape key works immediately
+            onmounted: move |evt| {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let element = evt.data();
+                    if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                        let _ = html_element.focus();
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                let _ = evt;
+            },
             onkeydown: move |evt: KeyboardEvent| {
                 if evt.key() == Key::Escape {
                     on_close.call(());

@@ -116,10 +116,14 @@ pub fn CitationCard(
     // Accessibility Fix #8: Keyboard handler for clickable cards
     let tabindex_val = if is_clickable { "0" } else { "-1" };
 
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
+
     rsx! {
         div {
             class: "group relative bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg {cursor_class}",
             tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
                 if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
@@ -214,7 +218,9 @@ pub fn CitationCardCompact(
     let secondary_info = match &citation.citation {
         Citation::ExternalWeb(c) => {
             // Extract domain from URL using url crate for proper parsing
+            // Handle scheme-less URLs by retrying with https:// prefix
             Url::parse(&c.url)
+                .or_else(|_| Url::parse(&format!("https://{}", c.url)))
                 .ok()
                 .and_then(|u| u.host_str().map(|h| h.to_string()))
         },
@@ -235,11 +241,14 @@ pub fn CitationCardCompact(
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
     // Accessibility Fix #8: Keyboard handler for clickable cards
     let tabindex_val = if is_clickable { "0" } else { "-1" };
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
 
     rsx! {
         div {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors {cursor_class}",
             tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
                 if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
@@ -317,11 +326,14 @@ pub fn CitationBadge(
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
     // Accessibility Fix #8: Keyboard handler for clickable cards
     let tabindex_val = if is_clickable { "0" } else { "-1" };
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
 
     rsx! {
         span {
             class: "inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-border hover:bg-accent transition-colors {cursor_class}",
             tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
                 if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
