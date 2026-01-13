@@ -152,7 +152,8 @@ pub async fn fetch_custom_emojis(pubkey: String) {
     // Parse emoji set references and fetch them
     let mut emoji_sets = Vec::new();
     for set_ref in emoji_set_refs {
-        let parts: Vec<&str> = set_ref.split(':').collect();
+        // Use splitn(3, ':') to handle identifiers containing colons
+        let parts: Vec<&str> = set_ref.splitn(3, ':').collect();
         if parts.len() >= 3 && parts[0] == "30030" {
             let author = parts[1].to_string();
             let identifier = parts[2].to_string();

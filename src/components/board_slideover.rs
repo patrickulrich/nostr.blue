@@ -186,6 +186,8 @@ pub fn BoardSlideover(
         spawn(async move {
             match delete_pinboard(&board_clone).await {
                 Ok(_) => {
+                    // Bug Fix #12: Reset delete_task_id on success
+                    delete_task_id.set(0);
                     on_close.call(());
                     nav.push(Route::PinBoardsHome {});
                 }
@@ -213,17 +215,38 @@ pub fn BoardSlideover(
     let pin_count = pins.read().len();
 
     rsx! {
-        // Backdrop
+        // Backdrop (click to close)
         div {
             class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity duration-200",
             onclick: move |_| on_close.call(()),
         }
 
-        // Sliding panel
+        // Sliding panel (dialog semantics + Escape key)
         div {
             class: "fixed inset-y-0 right-0 z-50 w-full max-w-5xl bg-background shadow-2xl
                     transform transition-transform duration-500 ease-in-out overflow-hidden",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-labelledby": "slideover-title",
+            tabindex: "-1",
             onclick: move |e| e.stop_propagation(),
+            // Focus the dialog when mounted so Escape key works immediately
+            onmounted: move |evt| {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let element = evt.data();
+                    if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
+                        let _ = html_element.focus();
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                let _ = evt;
+            },
+            onkeydown: move |evt: KeyboardEvent| {
+                if evt.key() == Key::Escape {
+                    on_close.call(());
+                }
+            },
 
             // Scrollable content
             div {
@@ -235,8 +258,9 @@ pub fn BoardSlideover(
                     div {
                         class: "px-4 py-3 flex items-center justify-between",
 
-                        // Title
+                        // Title (Accessibility Fix #7 - aria-labelledby target)
                         h2 {
+                            id: "slideover-title",
                             class: "text-lg font-bold truncate",
                             "{title}"
                         }
@@ -361,6 +385,7 @@ pub fn BoardSlideover(
                             class: "w-full h-full object-cover",
                             loading: "lazy",
                             decoding: "async",
+                            referrerpolicy: "no-referrer",
                         }
                         // Gradient overlay
                         div {
@@ -386,6 +411,7 @@ pub fn BoardSlideover(
                                     alt: "{display_name()}",
                                     class: "w-full h-full object-cover",
                                     loading: "lazy",
+                                    referrerpolicy: "no-referrer",
                                 }
                             } else {
                                 span {
@@ -415,12 +441,12 @@ pub fn BoardSlideover(
                         }
                     }
 
-                    // Tags
+                    // Tags (UX Fix #16 - use index to avoid key collisions for duplicate tags)
                     if !tags.is_empty() {
                         div {
                             class: "flex flex-wrap items-center gap-2 mb-3",
-                            for tag in tags.iter() {
-                                HashtagBadge { key: "{tag}", tag: tag.clone() }
+                            for (idx, tag) in tags.iter().enumerate() {
+                                HashtagBadge { key: "tag-{idx}-{tag}", tag: tag.clone() }
                             }
                         }
                     }

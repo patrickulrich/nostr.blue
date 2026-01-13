@@ -312,7 +312,8 @@ async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
 /// Parse a_tag string to Coordinate
 /// Format: "34550:pubkey:d_tag"
 fn parse_a_tag_to_coordinate(a_tag: &str) -> Option<Coordinate> {
-    let parts: Vec<&str> = a_tag.split(':').collect();
+    // Use splitn(3, ':') to handle identifiers containing colons
+    let parts: Vec<&str> = a_tag.splitn(3, ':').collect();
     if parts.len() != 3 {
         return None;
     }

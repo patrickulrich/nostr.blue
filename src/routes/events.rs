@@ -10,6 +10,9 @@ use crate::stores::calendar_store::{UnifiedEvent, EventFilterState, TimeFilter, 
 use crate::components::{ClientInitializing, EventCard, EventCardSkeleton, EventMap};
 use crate::hooks::use_infinite_scroll;
 
+/// Debounce delay for NIP-50 search (milliseconds)
+const SEARCH_DEBOUNCE_MS: u32 = 300;
+
 /// View mode for events display
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum ViewMode {
@@ -27,6 +30,17 @@ pub fn Events() -> Element {
     let mut view_mode = use_signal(|| ViewMode::Grid);
     let mut filters = use_signal(EventFilterState::default);
     let mut selected_hashtag = use_signal(|| None::<String>);
+
+    // NIP-50 search state
+    let mut search_results = use_signal(|| None::<Vec<UnifiedEvent>>);
+    let mut searching = use_signal(|| false);
+    let mut search_debounce_id = use_signal(|| 0u32);
+    let mut show_more_filters = use_signal(|| false);
+    // Track whether user is actively in search mode (separate from having results)
+    let mut search_mode_active = use_signal(|| false);
+
+    // Track previous search term to avoid redundant NIP-50 calls
+    let mut last_search_term = use_signal(String::new);
 
     // Pagination state
     let mut has_more = use_signal(|| true);
@@ -66,6 +80,84 @@ pub fn Events() -> Element {
 
             log::info!("[Events] Setting loading to false");
             loading.set(false);
+        });
+    });
+
+    // Debounced NIP-50 search effect
+    use_effect(move || {
+        let search_term = filters.read().search_term.clone();
+        let prev_term = last_search_term.read().clone();
+
+        // Skip if search term hasn't changed (prevents redundant NIP-50 calls when other filters change)
+        if search_term == prev_term {
+            return;
+        }
+
+        // Update last search term
+        last_search_term.set(search_term.clone());
+
+        // Clear search results if search term is too short
+        // Use chars().count() for proper Unicode handling (Dioxus pattern)
+        let search_term_trimmed = search_term.trim();
+        if search_term_trimmed.chars().count() < 2 {
+            // Increment debounce ID to invalidate any in-flight searches
+            let current_id = *search_debounce_id.peek() + 1;
+            search_debounce_id.set(current_id);
+            search_results.set(None);
+            searching.set(false);
+            // Exit search mode and reset pagination
+            search_mode_active.set(false);
+            has_more.set(true);
+            return;
+        }
+
+        // Enter search mode
+        search_mode_active.set(true);
+        // Increment debounce ID to cancel previous searches
+        // Use peek() to avoid creating a reactive dependency (would cause infinite loop)
+        let current_id = *search_debounce_id.peek() + 1;
+        search_debounce_id.set(current_id);
+        searching.set(true);
+
+        spawn(async move {
+            // Wait for debounce delay
+            #[cfg(target_family = "wasm")]
+            {
+                gloo_timers::future::TimeoutFuture::new(SEARCH_DEBOUNCE_MS).await;
+            }
+            #[cfg(not(target_family = "wasm"))]
+            {
+                use std::time::Duration;
+                tokio::time::sleep(Duration::from_millis(SEARCH_DEBOUNCE_MS as u64)).await;
+            }
+
+            // Check if this search is still current (use peek to avoid re-subscription)
+            if *search_debounce_id.peek() != current_id {
+                return;
+            }
+
+            log::info!("[Events] NIP-50 search for: {}", search_term);
+
+            match calendar_store::search_all_events(&search_term, 100).await {
+                Ok(results) => {
+                    // Check again if search is still current
+                    if *search_debounce_id.peek() == current_id {
+                        log::info!("[Events] NIP-50 search returned {} results", results.len());
+                        search_results.set(Some(results));
+                    }
+                }
+                Err(e) => {
+                    log::error!("[Events] NIP-50 search failed: {}", e);
+                    // Fall back to client-side filtering by clearing search results
+                    if *search_debounce_id.peek() == current_id {
+                        search_results.set(None);
+                    }
+                }
+            }
+
+            if *search_debounce_id.peek() == current_id {
+                searching.set(false);
+            }
         });
     });
 
@@ -115,15 +207,25 @@ pub fn Events() -> Element {
     // Setup infinite scroll
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
 
-    // Compute filtered events - only memo needed for derived data
+    // Compute filtered events - use search results when available
     let filtered_events = use_memo(move || {
-        let all_events = events.read();
-        log::info!("[Events] filtered_events memo: all_events.len() = {}", all_events.len());
-
         let current_filters = filters.read().clone();
         let hashtag = selected_hashtag.read().clone();
 
-        let mut result = calendar_store::filter_events(&all_events, &current_filters);
+        // Use search results if available (NIP-50 search is active)
+        // Use search_mode_active to determine if we're filtering (not just presence of results)
+        let from_nip50 = *search_mode_active.read();
+        let base_events = if let Some(ref results) = *search_results.read() {
+            log::info!("[Events] Using NIP-50 search results: {} events", results.len());
+            results.clone()
+        } else {
+            let all_events = events.read();
+            log::info!("[Events] Using all events: {} events", all_events.len());
+            all_events.clone()
+        };
+
+        // Skip client-side search filter when using NIP-50 results (relay already filtered)
+        let mut result = calendar_store::filter_events_with_nip50(&base_events, &current_filters, from_nip50);
         log::info!("[Events] filtered_events memo: after filter = {}", result.len());
 
         if let Some(ref tag) = hashtag {
@@ -233,17 +335,40 @@ pub fn Events() -> Element {
                     // Search input
                     div {
                         class: "relative mb-3",
-                        svg {
-                            class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            path {
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                d: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                        // Search icon or loading spinner
+                        if *searching.read() {
+                            svg {
+                                class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                circle {
+                                    class: "opacity-25",
+                                    cx: "12",
+                                    cy: "12",
+                                    r: "10",
+                                    stroke: "currentColor",
+                                    stroke_width: "4"
+                                }
+                                path {
+                                    class: "opacity-75",
+                                    fill: "currentColor",
+                                    d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                }
+                            }
+                        } else {
+                            svg {
+                                class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                                }
                             }
                         }
                         input {
@@ -303,6 +428,33 @@ pub fn Events() -> Element {
                             option { value: "Online", "Online" }
                         }
 
+                        // More filters toggle button
+                        button {
+                            class: if *show_more_filters.read() {
+                                "text-sm bg-primary/10 text-primary border border-primary/30 rounded-lg px-3 py-1.5 flex items-center gap-1"
+                            } else {
+                                "text-sm bg-muted rounded-lg px-3 py-1.5 flex items-center gap-1 hover:bg-accent transition"
+                            },
+                            onclick: move |_| {
+                                let current = *show_more_filters.read();
+                                show_more_filters.set(!current);
+                            },
+                            "More"
+                            svg {
+                                class: if *show_more_filters.read() { "w-3 h-3 rotate-180 transition-transform duration-200" } else { "w-3 h-3 transition-transform duration-200" },
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M19 9l-7 7-7-7"
+                                }
+                            }
+                        }
+
                         // Clear filters button
                         if !filters.read().is_empty() || selected_hashtag.read().is_some() {
                             button {
@@ -353,6 +505,45 @@ pub fn Events() -> Element {
                                         }
                                     },
                                     "#{tag}"
+                                }
+                            }
+                        }
+                    }
+
+                    // Slide-down filter section
+                    if *show_more_filters.read() {
+                        div {
+                            class: "mt-2 pt-3 border-t border-border",
+                            div {
+                                class: "flex flex-wrap items-center gap-3",
+                                // Show ended events toggle
+                                button {
+                                    class: if !filters.read().hide_ended {
+                                        "flex items-center gap-2 px-3 py-1.5 text-sm bg-primary/10 text-primary border border-primary/30 rounded-lg transition"
+                                    } else {
+                                        "flex items-center gap-2 px-3 py-1.5 text-sm bg-muted text-muted-foreground rounded-lg hover:bg-accent transition"
+                                    },
+                                    onclick: move |_| {
+                                        let current = filters.read().hide_ended;
+                                        filters.write().hide_ended = !current;
+                                    },
+                                    // Checkmark icon when active
+                                    if !filters.read().hide_ended {
+                                        svg {
+                                            class: "w-4 h-4",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            fill: "none",
+                                            view_box: "0 0 24 24",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            path {
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                d: "M5 13l4 4L19 7"
+                                            }
+                                        }
+                                    }
+                                    "Show ended events"
                                 }
                             }
                         }
@@ -503,8 +694,9 @@ pub fn Events() -> Element {
                 }
             }
 
-            // Infinite scroll sentinel (only for Grid view)
-            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() {
+            // Infinite scroll sentinel (only for Grid view, disabled during NIP-50 search)
+            // Only show infinite scroll when not in search mode (search has its own result set)
+            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() && !*search_mode_active.peek() {
                 div {
                     id: "{sentinel_id}",
                     class: "p-8 flex justify-center",

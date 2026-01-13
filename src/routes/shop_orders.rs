@@ -423,7 +423,8 @@ pub fn ShopOrders() -> Element {
                                         for item in order.items.iter() {
                                             {
                                                 let coord = item.product_coordinate.clone();
-                                                let parts: Vec<&str> = coord.split(':').collect();
+                                                // Use splitn(3, ':') to handle identifiers containing colons
+                                                let parts: Vec<&str> = coord.splitn(3, ':').collect();
                                                 let product_name = if parts.len() >= 3 {
                                                     parts[2].to_string()
                                                 } else {

@@ -338,5 +338,6 @@ fn slug_from_text(text: &str) -> String {
 
 /// Extract identifier from address (kind:pubkey:identifier)
 fn extract_identifier_from_addr(addr: &str) -> String {
-    addr.split(':').nth(2).unwrap_or(addr).to_string()
+    // Use splitn(3, ':') to handle identifiers containing colons
+    addr.splitn(3, ':').nth(2).unwrap_or(addr).to_string()
 }

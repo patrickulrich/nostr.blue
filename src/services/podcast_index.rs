@@ -376,6 +376,27 @@ pub async fn get_episodes_by_feed_id(feed_id: u64, max: Option<u32>) -> Result<V
     Ok(data.data.items)
 }
 
+/// Get a single episode by its numeric ID
+pub async fn get_episode_by_id(episode_id: u64) -> Result<Episode, String> {
+    let url = format!("{}/episodes/byid?id={}&fulltext", API_BASE, episode_id);
+    log::debug!("[podcast_index] get_episode_by_id: fetching {}", url);
+
+    #[derive(Deserialize)]
+    struct EpisodeByIdData {
+        episode: Episode,
+    }
+
+    let data: ApiResponse<EpisodeByIdData> = match authenticated_get(&url).await {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("[podcast_index] get_episode_by_id failed: {}", e);
+            return Err(e);
+        }
+    };
+
+    Ok(data.data.episode)
+}
+
 /// Get currently live podcast streams
 pub async fn get_live_episodes(max: Option<u32>) -> Result<Vec<Episode>, String> {
     let max = max.unwrap_or(20);

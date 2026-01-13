@@ -3,6 +3,7 @@
 //! Creates Kind 39067 pin events
 
 use dioxus::prelude::*;
+use dioxus::html::input_data::keyboard_types::Key;
 use crate::stores::pin_boards_store::{
     Pinboard, PinContentType, PinReference, PinInput,
     publish_pin, fetch_my_pinboards,
@@ -124,6 +125,21 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
             // Modal content
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md mx-4 w-full max-h-[80vh] overflow-hidden flex flex-col",
+                tabindex: "-1",
+                onmounted: move |_evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                },
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape {
+                        evt.stop_propagation();
+                        props.on_close.call(());
+                    }
+                },
                 onclick: move |e| e.stop_propagation(),
 
                 // Header

@@ -1992,6 +1992,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gloo-events"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27c26fb45f7c385ba980f5fa87ac677e363949e065a083722697ef1b2cc91e41"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "gloo-net"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "nostrblue"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -3216,6 +3226,7 @@ dependencies = [
  "dioxus-stores",
  "futures",
  "getrandom 0.2.16",
+ "gloo-events",
  "gloo-net 0.5.0",
  "gloo-storage",
  "gloo-timers",
