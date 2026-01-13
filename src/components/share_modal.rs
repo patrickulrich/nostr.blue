@@ -254,7 +254,8 @@ pub fn ShareModal(
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "{title_id}",
-                aria_describedby: "{desc_id}",
+                // Only set aria-describedby when the description element exists (ShareMode::Main)
+                aria_describedby: if *share_mode.read() == ShareMode::Main { Some(desc_id.clone()) } else { None },
                 tabindex: "-1",
                 onmounted: move |_evt| {
                     #[cfg(target_arch = "wasm32")]

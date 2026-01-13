@@ -4456,210 +4456,151 @@ fn render_podcast_episode_card(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue RSS podcast episode link with playback
 #[component]
 fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) -> Element {
-    let mut episode_data = use_signal(|| None::<DisplayEpisode>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let podcast_id_for_link = podcast_id.clone();
     let episode_id_for_link = episode_id.clone();
 
-    use_effect(move || {
+    let resource: Resource<Result<DisplayEpisode, String>> = use_resource(move || {
         let podcast_id = podcast_id.clone();
         let episode_id = episode_id.clone();
-        spawn(async move {
+        async move {
             // Decode episode_id (may be URL-encoded)
             let decoded_episode_id = urlencoding::decode(&episode_id)
                 .map(|s| s.into_owned())
                 .unwrap_or(episode_id);
 
             // Check if podcast_id is numeric (Podcast Index feed ID)
-            let feed_id = match podcast_id.parse::<u64>() {
-                Ok(id) => id,
-                Err(_) => {
-                    error.set(Some("Invalid podcast ID format".to_string()));
-                    loading.set(false);
-                    return;
+            let feed_id = podcast_id.parse::<u64>()
+                .map_err(|_| "Invalid podcast ID format".to_string())?;
+
+            // Helper to create minimal feed from episode data
+            let create_minimal_feed = |ep: &podcast_index::Episode, feed_id: u64| -> podcast_index::PodcastFeed {
+                podcast_index::PodcastFeed {
+                    id: feed_id,
+                    title: ep.feed_title.clone().unwrap_or_default(),
+                    url: ep.feed_url.clone().unwrap_or_default(),
+                    original_url: None,
+                    link: None,
+                    description: None,
+                    author: None,
+                    owner_name: None,
+                    image: ep.feed_image.clone(),
+                    artwork: None,
+                    language: None,
+                    itunes_id: None,
+                    podcast_guid: ep.podcast_guid.clone(),
+                    categories: None,
+                    episode_count: None,
+                    trending_score: None,
+                    value: None,
                 }
             };
 
             // Try direct episode fetch if episode_id is numeric
             if let Ok(ep_id) = decoded_episode_id.parse::<u64>() {
                 // Fetch episode directly by ID - more efficient and doesn't miss episodes
-                match podcast_index::get_episode_by_id(ep_id).await {
-                    Ok(ep) => {
-                        // Fetch podcast info for display context
-                        match podcast_index::get_podcast_by_id(feed_id).await {
-                            Ok(feed) => {
-                                let display = DisplayEpisode::from_podcast_index_episode(&ep, &feed);
-                                episode_data.set(Some(display));
-                            }
-                            Err(e) => {
-                                // Episode found but feed fetch failed - still show with limited info
-                                log::warn!("Feed fetch failed but episode found: {}", e);
-                                // Create a minimal feed for display
-                                let minimal_feed = podcast_index::PodcastFeed {
-                                    id: feed_id,
-                                    title: ep.feed_title.clone().unwrap_or_default(),
-                                    url: ep.feed_url.clone().unwrap_or_default(),
-                                    original_url: None,
-                                    link: None,
-                                    description: None,
-                                    author: None,
-                                    owner_name: None,
-                                    image: ep.feed_image.clone(),
-                                    artwork: None,
-                                    language: None,
-                                    itunes_id: None,
-                                    podcast_guid: ep.podcast_guid.clone(),
-                                    categories: None,
-                                    episode_count: None,
-                                    trending_score: None,
-                                    value: None,
-                                };
-                                let display = DisplayEpisode::from_podcast_index_episode(&ep, &minimal_feed);
-                                episode_data.set(Some(display));
-                            }
-                        }
-                        loading.set(false);
-                        return;
-                    }
-                    Err(e) => {
-                        log::debug!("Direct episode fetch failed ({}), falling back to search", e);
-                        // Fall through to search-based approach
-                    }
+                if let Ok(ep) = podcast_index::get_episode_by_id(ep_id).await {
+                    // Fetch podcast info for display context
+                    let feed = podcast_index::get_podcast_by_id(feed_id).await
+                        .unwrap_or_else(|e| {
+                            // Episode found but feed fetch failed - still show with limited info
+                            log::warn!("Feed fetch failed but episode found: {}", e);
+                            create_minimal_feed(&ep, feed_id)
+                        });
+                    return Ok(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
                 }
+                log::debug!("Direct episode fetch failed, falling back to search");
             } else {
                 // Non-numeric episode ID - try GUID-based lookup first
-                match podcast_index::get_episode_by_guid(&decoded_episode_id, None).await {
-                    Ok((ep, feed_opt)) => {
-                        // Verify it's from the correct podcast by checking feed_id
-                        if ep.feed_id == Some(feed_id) {
-                            let feed = match feed_opt {
-                                Some(f) => f,
-                                None => {
-                                    // Try to fetch feed info, fall back to minimal feed
-                                    podcast_index::get_podcast_by_id(feed_id).await.unwrap_or_else(|_| {
-                                        podcast_index::PodcastFeed {
-                                            id: feed_id,
-                                            title: ep.feed_title.clone().unwrap_or_default(),
-                                            url: ep.feed_url.clone().unwrap_or_default(),
-                                            original_url: None,
-                                            link: None,
-                                            description: None,
-                                            author: None,
-                                            owner_name: None,
-                                            image: ep.feed_image.clone(),
-                                            artwork: None,
-                                            language: None,
-                                            itunes_id: None,
-                                            podcast_guid: ep.podcast_guid.clone(),
-                                            categories: None,
-                                            episode_count: None,
-                                            trending_score: None,
-                                            value: None,
-                                        }
-                                    })
-                                }
-                            };
-                            let display = DisplayEpisode::from_podcast_index_episode(&ep, &feed);
-                            episode_data.set(Some(display));
-                            loading.set(false);
-                            return;
-                        } else {
-                            log::debug!("GUID lookup returned episode from different feed, falling back to search");
-                        }
+                if let Ok((ep, feed_opt)) = podcast_index::get_episode_by_guid(&decoded_episode_id, None).await {
+                    // Verify it's from the correct podcast by checking feed_id
+                    if ep.feed_id == Some(feed_id) {
+                        let feed = match feed_opt {
+                            Some(f) => f,
+                            None => {
+                                // Try to fetch feed info, fall back to minimal feed
+                                podcast_index::get_podcast_by_id(feed_id).await
+                                    .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id))
+                            }
+                        };
+                        return Ok(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
+                    } else {
+                        log::debug!("GUID lookup returned episode from different feed, falling back to search");
                     }
-                    Err(e) => {
-                        log::debug!("GUID-based episode fetch failed ({}), falling back to search", e);
-                    }
+                } else {
+                    log::debug!("GUID-based episode fetch failed, falling back to search");
                 }
             }
 
             // Fallback: search through episodes with pagination
             // This handles when direct/GUID fetch fails
-            match podcast_index::get_podcast_by_id(feed_id).await {
-                Ok(feed) => {
-                    const MAX_PAGES: u32 = 5;
-                    const PAGE_SIZE: u32 = 100;
-                    let mut found = false;
+            let feed = podcast_index::get_podcast_by_id(feed_id).await
+                .map_err(|e| format!("Failed to fetch podcast: {}", e))?;
 
-                    for page in 0..MAX_PAGES {
-                        // Podcast Index API doesn't have offset, so we use max with increasing limits
-                        // This is inefficient but necessary for thorough search
-                        let fetch_count = PAGE_SIZE * (page + 1);
-                        match podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count)).await {
-                            Ok(episodes) => {
-                                // Skip episodes we've already checked in previous iterations
-                                let start_idx = if page == 0 { 0 } else { (PAGE_SIZE * page) as usize };
-                                let episodes_to_check = if start_idx < episodes.len() {
-                                    &episodes[start_idx..]
-                                } else {
-                                    // No new episodes, we've exhausted the list
-                                    break;
-                                };
+            const MAX_PAGES: u32 = 5;
+            const PAGE_SIZE: u32 = 100;
 
-                                if let Some(ep) = episodes_to_check.iter()
-                                    .find(|e| e.id.to_string() == decoded_episode_id)
-                                {
-                                    let display = DisplayEpisode::from_podcast_index_episode(ep, &feed);
-                                    episode_data.set(Some(display));
-                                    found = true;
-                                    break;
-                                }
+            for page in 0..MAX_PAGES {
+                // Podcast Index API doesn't have offset, so we use max with increasing limits
+                let fetch_count = PAGE_SIZE * (page + 1);
+                let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count)).await
+                    .map_err(|e| format!("Failed to fetch episodes: {}", e))?;
 
-                                // If we got fewer episodes than requested, we've exhausted the list
-                                if episodes.len() < fetch_count as usize {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                error.set(Some(format!("Failed to fetch episodes: {}", e)));
-                                break;
-                            }
-                        }
-                    }
+                // Skip episodes we've already checked in previous iterations
+                let start_idx = if page == 0 { 0 } else { (PAGE_SIZE * page) as usize };
+                let episodes_to_check = if start_idx < episodes.len() {
+                    &episodes[start_idx..]
+                } else {
+                    // No new episodes, we've exhausted the list
+                    break;
+                };
 
-                    if !found && error.read().is_none() {
-                        error.set(Some(format!(
-                            "Episode not found (searched {} episodes)",
-                            MAX_PAGES * PAGE_SIZE
-                        )));
-                    }
+                if let Some(ep) = episodes_to_check.iter()
+                    .find(|e| e.id.to_string() == decoded_episode_id)
+                {
+                    return Ok(DisplayEpisode::from_podcast_index_episode(ep, &feed));
                 }
-                Err(e) => error.set(Some(format!("Failed to fetch podcast: {}", e))),
+
+                // If we got fewer episodes than requested, we've exhausted the list
+                if episodes.len() < fetch_count as usize {
+                    break;
+                }
             }
-            loading.set(false);
-        });
+
+            Err(format!("Episode not found (searched {} episodes)", MAX_PAGES * PAGE_SIZE))
+        }
     });
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
-                {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
-                // Show error message with fallback link
-                div {
-                    class: "p-3 border border-border rounded-lg bg-card",
-                    p {
-                        class: "text-sm text-muted-foreground mb-2",
-                        "{err}"
+            match resource.read_unchecked().as_ref() {
+                None => { nostr_blue_loading_skeleton() },
+                Some(Err(err)) => rsx! {
+                    // Show error message with fallback link
+                    div {
+                        class: "p-3 border border-border rounded-lg bg-card",
+                        p {
+                            class: "text-sm text-muted-foreground mb-2",
+                            "{err}"
+                        }
+                        Link {
+                            to: Route::PodcastRssEpisodeDetail {
+                                podcast_id: podcast_id_for_link.clone(),
+                                episode_id: episode_id_for_link.clone()
+                            },
+                            class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                            icons::MusicIcon { class: "w-4 h-4" }
+                            "View Episode"
+                        }
                     }
-                    Link {
-                        to: Route::PodcastRssEpisodeDetail {
-                            podcast_id: podcast_id_for_link.clone(),
-                            episode_id: episode_id_for_link.clone()
-                        },
-                        class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                        icons::MusicIcon { class: "w-4 h-4" }
-                        "View Episode"
+                },
+                Some(Ok(display)) => rsx! {
+                    PodcastEpisodeCard {
+                        episode: display.clone(),
+                        show_description: false
                     }
-                }
-            } else if let Some(display) = episode_data.read().as_ref() {
-                PodcastEpisodeCard {
-                    episode: display.clone(),
-                    show_description: false
-                }
+                },
             }
         }
     }
@@ -4668,83 +4609,78 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
 /// Renders a nostr.blue RSS podcast show link
 #[component]
 fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
-    let mut show_data = use_signal(|| None::<PodcastShow>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let podcast_id_for_link = podcast_id.clone();
 
-    use_effect(move || {
+    let resource: Resource<Result<PodcastShow, String>> = use_resource(move || {
         let podcast_id = podcast_id.clone();
-        spawn(async move {
-            if let Ok(feed_id) = podcast_id.parse::<u64>() {
-                match podcast_index::get_podcast_by_id(feed_id).await {
-                    Ok(feed) => {
-                        // Create PodcastShow from PodcastFeed
-                        // Convert value block if available
-                        let value = feed.value.as_ref().and_then(|v| {
-                            let model = v.model.as_ref()?;
-                            Some(crate::utils::podcast::ValueBlock {
-                                value_type: model.model_type.clone().unwrap_or_else(|| "lightning".to_string()),
-                                method: model.method.clone().unwrap_or_else(|| "keysend".to_string()),
-                                suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
-                                recipients: v.destinations.iter().filter_map(|d| {
-                                    Some(crate::utils::podcast::ValueRecipient {
-                                        name: d.name.clone(),
-                                        custom_key: None,
-                                        custom_value: None,
-                                        recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
-                                        address: d.address.clone()?,
-                                        split: d.split.unwrap_or(0),
-                                        fee: None,
-                                    })
-                                }).collect(),
-                            })
-                        });
-                        let show = PodcastShow {
-                            id: feed.id.to_string(),
-                            title: feed.title.clone(),
-                            author: feed.author.clone().or(feed.owner_name.clone()),
-                            description: feed.description.clone(),
-                            image: feed.get_image().map(|s| s.to_string()),
-                            episode_count: feed.episode_count.map(|c| c as usize),
-                            source: crate::utils::podcast::PodcastSource::Rss {
-                                feed_url: feed.url.clone(),
-                                guid: feed.podcast_guid.clone().unwrap_or_default(),
-                                podcast_id: Some(feed.id),
-                            },
-                            value,
-                            categories: feed.categories
-                                .as_ref()
-                                .map(|c| c.values().cloned().collect())
-                                .unwrap_or_default(),
-                            explicit: false,
-                        };
-                        show_data.set(Some(show));
-                    }
-                    Err(e) => error.set(Some(e)),
-                }
-            } else {
-                error.set(Some("Invalid podcast ID format".to_string()));
-            }
-            loading.set(false);
-        });
+        async move {
+            let feed_id = podcast_id.parse::<u64>()
+                .map_err(|_| "Invalid podcast ID format".to_string())?;
+
+            let feed = podcast_index::get_podcast_by_id(feed_id).await
+                .map_err(|e| e.to_string())?;
+
+            // Create PodcastShow from PodcastFeed
+            // Convert value block if available
+            let value = feed.value.as_ref().and_then(|v| {
+                let model = v.model.as_ref()?;
+                Some(crate::utils::podcast::ValueBlock {
+                    value_type: model.model_type.clone().unwrap_or_else(|| "lightning".to_string()),
+                    method: model.method.clone().unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
+                    recipients: v.destinations.iter().filter_map(|d| {
+                        Some(crate::utils::podcast::ValueRecipient {
+                            name: d.name.clone(),
+                            custom_key: None,
+                            custom_value: None,
+                            recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                            address: d.address.clone()?,
+                            split: d.split.unwrap_or(0),
+                            fee: None,
+                        })
+                    }).collect(),
+                })
+            });
+
+            Ok(PodcastShow {
+                id: feed.id.to_string(),
+                title: feed.title.clone(),
+                author: feed.author.clone().or(feed.owner_name.clone()),
+                description: feed.description.clone(),
+                image: feed.get_image().map(|s| s.to_string()),
+                episode_count: feed.episode_count.map(|c| c as usize),
+                source: crate::utils::podcast::PodcastSource::Rss {
+                    feed_url: feed.url.clone(),
+                    guid: feed.podcast_guid.clone().unwrap_or_default(),
+                    podcast_id: Some(feed.id),
+                },
+                value,
+                categories: feed.categories
+                    .as_ref()
+                    .map(|c| c.values().cloned().collect())
+                    .unwrap_or_default(),
+                explicit: false,
+            })
+        }
     });
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
-                {nostr_blue_loading_skeleton()}
-            } else if let Some(_err) = error.read().as_ref() {
-                Link {
-                    to: Route::PodcastRssFeedDetail { podcast_id: podcast_id_for_link.clone() },
-                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                    icons::MusicIcon { class: "w-4 h-4" }
-                    "View Podcast"
-                }
-            } else if let Some(show) = show_data.read().as_ref() {
-                PodcastShowCard { show: show.clone(), compact: true }
+            match resource.read_unchecked().as_ref() {
+                None => { nostr_blue_loading_skeleton() },
+                Some(Err(_)) => rsx! {
+                    Link {
+                        to: Route::PodcastRssFeedDetail { podcast_id: podcast_id_for_link.clone() },
+                        class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                        icons::MusicIcon { class: "w-4 h-4" }
+                        "View Podcast"
+                    }
+                },
+                Some(Ok(show)) => rsx! {
+                    PodcastShowCard { show: show.clone(), compact: true }
+                },
             }
         }
     }
@@ -4941,39 +4877,23 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
 fn NostrBlueProfileRenderer(id: String) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut loading = use_signal(|| true);
-    // Store hex version for route navigation (Route::Profile expects hex, not bech32)
-    let mut pubkey_hex_signal = use_signal(|| id.clone());
+    // Track valid hex pubkey only - None if parsing fails
+    let mut valid_pubkey_hex = use_signal(|| None::<String>);
 
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
-            // Parse pubkey from various formats to get hex
-            let pubkey_hex = if id_clone.starts_with("npub1") || id_clone.starts_with("nprofile1") {
-                Nip19::from_bech32(&id_clone)
-                    .ok()
-                    .and_then(|n| match n {
-                        Nip19::Pubkey(pk) => Some(pk.to_hex()),
-                        Nip19::Profile(p) => Some(p.public_key.to_hex()),
-                        _ => None,
-                    })
-            } else {
-                // Validate hex pubkey format (64 hex chars = 32 bytes)
-                if id_clone.len() == 64 && id_clone.chars().all(|c| c.is_ascii_hexdigit()) {
-                    Some(id_clone.clone())
-                } else {
-                    log::debug!("Invalid hex pubkey format: {}", id_clone);
-                    None
-                }
-            };
+            // Use nostr-sdk PublicKey::parse() - handles hex, bech32, and NIP21 formats
+            if let Ok(pubkey) = PublicKey::parse(&id_clone) {
+                let hex = pubkey.to_hex();
+                valid_pubkey_hex.set(Some(hex.clone()));
 
-            if let Some(hex) = pubkey_hex {
-                // Store hex for link navigation
-                pubkey_hex_signal.set(hex.clone());
                 // Fetch from relays (handles cache internally)
                 if let Ok(fetched) = profiles::fetch_profile(hex).await {
                     profile.set(Some(fetched));
                 }
             }
+            // If parsing failed, valid_pubkey_hex stays None
             loading.set(false);
         });
     });
@@ -4985,45 +4905,81 @@ fn NostrBlueProfileRenderer(id: String) -> Element {
             if *loading.read() {
                 {nostr_blue_loading_skeleton()}
             } else {
-                // Pass hex pubkey for route (not bech32)
-                {render_profile_minicard(profile.read().as_ref(), &pubkey_hex_signal.read())}
+                {render_profile_minicard(profile.read().as_ref(), valid_pubkey_hex.read().as_deref())}
             }
         }
     }
 }
 
-fn render_profile_minicard(profile: Option<&profiles::Profile>, pubkey: &str) -> Element {
+fn render_profile_minicard(profile: Option<&profiles::Profile>, valid_pubkey: Option<&str>) -> Element {
     let display_name = profile
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &pubkey[..8.min(pubkey.len())]));
+        .unwrap_or_else(|| "Unknown".to_string());
     let picture = profile.and_then(|p| p.picture.clone());
     let about = profile.and_then(|p| p.about.clone());
 
-    rsx! {
-        Link {
-            to: Route::Profile { pubkey: pubkey.to_string() },
-            class: "flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
-            if let Some(pic) = picture {
-                img {
-                    src: "{pic}",
-                    class: "w-12 h-12 rounded-full object-cover flex-shrink-0"
+    // Build the inner content (avatar + name + about)
+    let avatar_initial = display_name.chars().next().unwrap_or('?');
+
+    // Conditionally wrap in Link or plain div based on valid pubkey
+    if let Some(pubkey) = valid_pubkey {
+        rsx! {
+            Link {
+                to: Route::Profile { pubkey: pubkey.to_string() },
+                class: "flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+                if let Some(ref pic) = picture {
+                    img {
+                        src: "{pic}",
+                        class: "w-12 h-12 rounded-full object-cover flex-shrink-0"
+                    }
+                } else {
+                    div {
+                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-medium",
+                        "{avatar_initial}"
+                    }
                 }
-            } else {
                 div {
-                    class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-medium",
-                    "{display_name.chars().next().unwrap_or('?')}"
+                    class: "flex-1 min-w-0",
+                    div {
+                        class: "font-medium text-foreground truncate",
+                        "{display_name}"
+                    }
+                    if let Some(ref bio) = about {
+                        div {
+                            class: "text-sm text-muted-foreground line-clamp-1",
+                            "{bio}"
+                        }
+                    }
                 }
             }
+        }
+    } else {
+        // Invalid pubkey - render as non-clickable card
+        rsx! {
             div {
-                class: "flex-1 min-w-0",
-                div {
-                    class: "font-medium text-foreground truncate",
-                    "{display_name}"
-                }
-                if let Some(bio) = about {
+                class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-muted/50",
+                if let Some(ref pic) = picture {
+                    img {
+                        src: "{pic}",
+                        class: "w-12 h-12 rounded-full object-cover flex-shrink-0"
+                    }
+                } else {
                     div {
-                        class: "text-sm text-muted-foreground line-clamp-1",
-                        "{bio}"
+                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-medium",
+                        "{avatar_initial}"
+                    }
+                }
+                div {
+                    class: "flex-1 min-w-0",
+                    div {
+                        class: "font-medium text-foreground truncate",
+                        "{display_name}"
+                    }
+                    if let Some(ref bio) = about {
+                        div {
+                            class: "text-sm text-muted-foreground line-clamp-1",
+                            "{bio}"
+                        }
                     }
                 }
             }
@@ -5477,9 +5433,9 @@ mod tests {
             ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
         ];
 
-        // Verify we're testing all 57 variants (update this count when adding new variants)
+        // Verify we're testing all 60 variants (update this count when adding new variants)
         assert_eq!(
-            test_cases.len(), 57,
+            test_cases.len(), 60,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test."
         );
 
