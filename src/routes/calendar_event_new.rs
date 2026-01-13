@@ -263,10 +263,12 @@ pub fn CalendarEventNew() -> Element {
             location.set(evt.location.clone());
         }
 
-        // URL
+        // URL - add only if not already present (avoid duplicates)
         if !evt.url.is_empty() {
             let mut locs = locations.read().clone();
-            locs.push(evt.url.clone());
+            if !locs.contains(&evt.url) {
+                locs.push(evt.url.clone());
+            }
             locations.set(locs);
         }
 
@@ -299,10 +301,18 @@ pub fn CalendarEventNew() -> Element {
         let hashtags_val = hashtags_input.read().clone();
         let timezone_val = timezone.read().clone();
         let is_private_val = *is_private.read();
-        // Convert participants to (pubkey, role) tuples
+        // Convert participants to (pubkey, role) tuples with role validation (defense in depth)
         let participants_val: Vec<(String, String)> = participants.read()
             .iter()
-            .map(|(pk, _, role)| (pk.clone(), role.clone()))
+            .filter_map(|(pk, _, role)| {
+                // Validate role before publishing
+                if VALID_ROLES.contains(&role.as_str()) {
+                    Some((pk.clone(), role.clone()))
+                } else {
+                    log::warn!("Skipping participant with invalid role: {}", role);
+                    None
+                }
+            })
             .collect();
 
         is_publishing.set(true);

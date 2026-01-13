@@ -76,26 +76,29 @@ fn default_tab_data_map() -> HashMap<ProfileTab, TabData> {
 
 /// Deduplicate articles by NIP-23 address (kind:pubkey:identifier)
 /// Keeps the version with the most recent published_at timestamp
+/// Falls back to event ID for articles without d-tag identifiers (nostr-sdk pattern)
 fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
     let mut address_map: HashMap<String, NostrEvent> = HashMap::new();
 
     for article in articles {
-        if let Some(identifier) = get_identifier(&article) {
-            let address = format!("{}:{}:{}",
-                article.kind.as_u16(),
-                article.pubkey.to_hex(),
-                identifier
-            );
+        // Use d-tag identifier if present, otherwise fallback to event ID
+        let identifier = get_identifier(&article)
+            .unwrap_or_else(|| format!("id-{}", article.id.to_hex()));
 
-            address_map.entry(address)
-                .and_modify(|existing| {
-                    // Use published_at to determine which version to keep
-                    if get_published_at(&article) > get_published_at(existing) {
-                        *existing = article.clone();
-                    }
-                })
-                .or_insert(article);
-        }
+        let address = format!("{}:{}:{}",
+            article.kind.as_u16(),
+            article.pubkey.to_hex(),
+            identifier
+        );
+
+        address_map.entry(address)
+            .and_modify(|existing| {
+                // Use published_at to determine which version to keep
+                if get_published_at(&article) > get_published_at(existing) {
+                    *existing = article.clone();
+                }
+            })
+            .or_insert(article);
     }
 
     address_map.into_values().collect()
@@ -574,6 +577,13 @@ pub fn Profile(pubkey: String) -> Element {
                     let mut data_map = tab_data.read().clone();
                     if let Some(data) = data_map.get_mut(&tab) {
                         data.events.extend(outcome.events.clone());
+
+                        // For Articles tab, deduplicate and re-sort after extending
+                        if matches!(tab, ProfileTab::Articles) {
+                            data.events = dedupe_articles_by_address(data.events.clone());
+                            data.events.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                        }
+
                         data.oldest_timestamp = oldest_ts;
                         data.has_more = has_more_val;
 

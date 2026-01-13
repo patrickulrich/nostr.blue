@@ -21,31 +21,35 @@ fn is_valid_book_version(input: &str) -> bool {
         && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// Validate book sections input against allowed format.
+/// Validate book sections input against allowed format (per NKBIP-08 spec).
 /// Only digits, commas, and hyphens are allowed (e.g., "1-5,7,10-12").
+/// NO SPACES allowed - spec requires strict format compliance.
 /// Also validates semantic correctness: no empty segments, valid ranges.
 fn is_valid_book_sections(input: &str) -> bool {
     if input.is_empty() {
         return false;
     }
 
-    // Split by comma to get segments
-    for segment in input.split(',') {
-        let trimmed = segment.trim();
+    // First check: all characters must be digits, commas, or hyphens (spec compliance)
+    if !input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-') {
+        return false;
+    }
 
+    // Second check: semantic validation
+    for segment in input.split(',') {
         // Empty segment (e.g., "1,,2" or leading/trailing commas)
-        if trimmed.is_empty() {
+        if segment.is_empty() {
             return false;
         }
 
         // Check if it's a single number or range
-        if let Some((start, end)) = trimmed.split_once('-') {
-            // Range format: N-M
-            let start_num: u32 = match start.trim().parse() {
+        if let Some((start, end)) = segment.split_once('-') {
+            // Range format: N-M - no trimming since spaces already rejected
+            let start_num: u32 = match start.parse() {
                 Ok(n) if n > 0 => n,
                 _ => return false, // Invalid or zero start
             };
-            let end_num: u32 = match end.trim().parse() {
+            let end_num: u32 = match end.parse() {
                 Ok(n) if n > 0 => n,
                 _ => return false, // Invalid or zero end
             };
@@ -56,7 +60,7 @@ fn is_valid_book_sections(input: &str) -> bool {
             }
         } else {
             // Single number - must be valid positive integer
-            match trimmed.parse::<u32>() {
+            match segment.parse::<u32>() {
                 Ok(n) if n > 0 => {}
                 _ => return false,
             }
@@ -339,6 +343,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 "aria-modal": "true",
                 "aria-labelledby": "book-picker-title",
                 tabindex: "-1",
+                onmounted: move |_evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                },
                 onclick: move |e| e.stop_propagation(),
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape {
@@ -617,7 +629,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     if *sections_error.read() {
                                         p {
                                             class: "text-xs text-red-600 dark:text-red-400 mt-1",
-                                            "Only numbers, commas, and hyphens allowed"
+                                            "Only digits, commas, and hyphens allowed (no spaces)"
                                         }
                                     } else {
                                         p {

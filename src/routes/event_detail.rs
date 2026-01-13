@@ -847,10 +847,12 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
 
+    // Show profile name, or truncated pubkey if no profile (makes users distinguishable)
     let display_name = profile
         .as_ref()
         .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
-        .unwrap_or("Anonymous");
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
 

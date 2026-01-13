@@ -224,11 +224,12 @@ pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
         .map_err(|_| "Failed to create AbortController".to_string())?;
     let signal = controller.signal();
 
-    // Set up abort timeout
+    // Set up abort timeout - use std::mem::forget to keep timeout alive
     let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+    let timeout = Timeout::new(API_TIMEOUT_MS, move || {
         controller_for_timeout.abort();
     });
+    std::mem::forget(timeout); // Keep alive to ensure abort fires on timeout
 
     let url = format!("{}/available_translations.json", BIBLE_API_BASE);
 
@@ -264,11 +265,12 @@ pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
         .map_err(|_| "Failed to create AbortController".to_string())?;
     let signal = controller.signal();
 
-    // Set up abort timeout
+    // Set up abort timeout - use std::mem::forget to keep timeout alive
     let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+    let timeout = Timeout::new(API_TIMEOUT_MS, move || {
         controller_for_timeout.abort();
     });
+    std::mem::forget(timeout); // Keep alive to ensure abort fires on timeout
 
     // Percent-encode path segments to prevent URL corruption
     let url = format!("{}/{}/books.json", BIBLE_API_BASE, urlencoding::encode(translation));
@@ -305,11 +307,12 @@ pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Resul
         .map_err(|_| "Failed to create AbortController".to_string())?;
     let signal = controller.signal();
 
-    // Set up abort timeout
+    // Set up abort timeout - use std::mem::forget to keep timeout alive
     let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+    let timeout = Timeout::new(API_TIMEOUT_MS, move || {
         controller_for_timeout.abort();
     });
+    std::mem::forget(timeout); // Keep alive to ensure abort fires on timeout
 
     // Percent-encode path segments to prevent URL corruption
     let url = format!(

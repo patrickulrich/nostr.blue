@@ -59,11 +59,20 @@ pub fn RichContent(
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
         let media_count = tokens.iter().filter(|t| {
-            matches!(t, ContentToken::Image(_) | ContentToken::Video(_) |
-                     ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
-                     ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
-                     ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
-                     ContentToken::EventMention(_) | ContentToken::CashuToken(_))
+            matches!(t,
+                ContentToken::Image(_) | ContentToken::Video(_) |
+                ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
+                ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
+                ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
+                ContentToken::EventMention(_) | ContentToken::CashuToken(_) |
+                // NostrBlue internal links (these render as cards)
+                ContentToken::NostrBlueLiveStream(_) | ContentToken::NostrBlueVideo(_) |
+                ContentToken::NostrBluePhoto(_) | ContentToken::NostrBluePodcastShow(_) |
+                ContentToken::NostrBluePodcastEpisode(_) | ContentToken::NostrBlueArticle(_) |
+                ContentToken::NostrBlueRecipe(_) | ContentToken::NostrBlueWiki(_) |
+                ContentToken::NostrBluePublication(_) | ContentToken::NostrBluePinboard(_) |
+                ContentToken::NostrBlueProduct(_) | ContentToken::NostrBlueCodeRepo(_)
+            )
         }).count();
 
         // Heuristic: >800 chars (roughly 16 lines at ~50 chars/line)

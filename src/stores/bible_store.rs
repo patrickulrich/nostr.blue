@@ -382,19 +382,21 @@ fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
 
     let tags = &event.tags;
 
-    // Extract context tag
+    // Extract context tag - REQUIRED, non-empty (nostr-sdk pattern: early validation)
     let reference = tags.iter()
         .find_map(|tag| {
             let slice = tag.as_slice();
             if slice.first().map(|s| s.as_str()) == Some("context") {
-                slice.get(1).map(|s| s.to_string())
+                slice.get(1).and_then(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+                })
             } else {
                 None
             }
-        })
-        .unwrap_or_default();
+        })?; // Return None if missing or empty
 
-    // Extract comment tag
+    // Extract comment tag (optional)
     let comment = tags.iter()
         .find_map(|tag| {
             let slice = tag.as_slice();
@@ -405,17 +407,19 @@ fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
             }
         });
 
-    // Extract r tag (API URL)
+    // Extract r tag (API URL) - REQUIRED, non-empty (nostr-sdk pattern: early validation)
     let api_url = tags.iter()
         .find_map(|tag| {
             let slice = tag.as_slice();
             if slice.first().map(|s| s.as_str()) == Some("r") {
-                slice.get(1).map(|s| s.to_string())
+                slice.get(1).and_then(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+                })
             } else {
                 None
             }
-        })
-        .unwrap_or_default();
+        })?; // Return None if missing or empty
 
     // Must have bible hashtag
     let has_bible_tag = tags.iter().any(|tag| {

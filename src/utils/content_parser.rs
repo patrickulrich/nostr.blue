@@ -1065,16 +1065,15 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         return extract_id_from_path(path, "/publications/")
             .map(ContentToken::NostrBluePublication);
     }
-    // Pinboards
+    // Pinboards - check full path for /edit before extraction (extraction stops at /)
     if path.starts_with("/pinboards/")
         && !path.starts_with("/pinboards/new")
         && !path.starts_with("/pinboards/pin")
         && !path.starts_with("/pinboards/pins")
+        && !path.contains("/edit")
     {
-        let id = extract_id_from_path(path, "/pinboards/")?;
-        if !id.ends_with("/edit") {
-            return Some(ContentToken::NostrBluePinboard(id));
-        }
+        return extract_id_from_path(path, "/pinboards/")
+            .map(ContentToken::NostrBluePinboard);
     }
     // Badges
     if path.starts_with("/badges/") && !path.starts_with("/badges/new") {

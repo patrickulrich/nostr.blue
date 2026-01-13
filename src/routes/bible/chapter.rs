@@ -33,6 +33,9 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let translation_for_copy = translation.clone();
     let translation_for_highlight = translation.clone();
     let book_for_highlight = book.clone();
+    // Clone for effect (these get moved into closure)
+    let translation_for_effect = translation.clone();
+    let book_for_effect = book.clone();
 
     // State for verse selection
     let mut selected_verses = use_signal(Vec::<u32>::new);
@@ -47,57 +50,59 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let is_authenticated = auth_store::is_authenticated();
 
     // Use a single key to track chapter identity
-    let current_key = format!("{}/{}/{}", translation, book, chapter);
     let mut loaded_key = use_signal(String::new);
 
     // Chapter data signal
     let mut chapter_data: Signal<Option<Result<crate::services::bible_api::ChapterResponse, String>>> = use_signal(|| None);
 
-    // Load chapter if key changed - do this in render, not in effect
-    if *loaded_key.peek() != current_key {
-        // Update loaded key immediately
-        loaded_key.set(current_key.clone());
+    // Load chapter when key changes - use effect to avoid render mutations (Dioxus pattern)
+    use_effect(move || {
+        let current_key = format!("{}/{}/{}", translation_for_effect, book_for_effect, chapter);
 
-        // Clear selection
-        selected_verses.set(Vec::new());
-        show_toolbar.set(false);
+        if *loaded_key.peek() != current_key {
+            loaded_key.set(current_key.clone());
 
-        // Clear old data to show loading state
-        chapter_data.set(None);
+            // Clear selection
+            selected_verses.set(Vec::new());
+            show_toolbar.set(false);
 
-        // Clone for async
-        let t = translation.clone();
-        let b = book.clone();
-        let c = chapter;
+            // Clear old data to show loading state
+            chapter_data.set(None);
 
-        // Spawn the async load
-        spawn(async move {
-            let result = bible_store::load_chapter(&t, &b, c).await;
+            // Clone for async
+            let t = translation_for_effect.clone();
+            let b = book_for_effect.clone();
+            let c = chapter;
 
-            // Set chapter data immediately so content renders
-            let load_succeeded = result.is_ok();
-            chapter_data.set(Some(result));
+            // Spawn the async load
+            spawn(async move {
+                let result = bible_store::load_chapter(&t, &b, c).await;
 
-            // Fetch highlights in background (don't block chapter render)
-            if load_succeeded {
-                let api_url = get_chapter_api_url(&t, &b, c);
+                // Set chapter data immediately so content renders
+                let load_succeeded = result.is_ok();
+                chapter_data.set(Some(result));
 
-                // Spawn highlight fetches separately so they don't block
-                spawn(async move {
-                    let _ = bible_store::fetch_chapter_highlights(&api_url).await;
-                });
+                // Fetch highlights in background (don't block chapter render)
+                if load_succeeded {
+                    let api_url = get_chapter_api_url(&t, &b, c);
 
-                // Fetch user's highlights if authenticated
-                if auth_store::is_authenticated() {
-                    if let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() {
-                        spawn(async move {
-                            let _ = bible_store::fetch_user_highlights(&pubkey).await;
-                        });
+                    // Spawn highlight fetches separately so they don't block
+                    spawn(async move {
+                        let _ = bible_store::fetch_chapter_highlights(&api_url).await;
+                    });
+
+                    // Fetch user's highlights if authenticated
+                    if auth_store::is_authenticated() {
+                        if let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() {
+                            spawn(async move {
+                                let _ = bible_store::fetch_user_highlights(&pubkey).await;
+                            });
+                        }
                     }
                 }
-            }
-        });
-    }
+            });
+        }
+    });
 
     // Handle verse click
     let mut handle_verse_click = move |verse_num: u32| {
@@ -396,13 +401,16 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                                     class: if is_selected { "bg-primary/20 ring-2 ring-primary" } else if is_highlighted { "bg-yellow-100 dark:bg-yellow-900/30" } else { "" },
                                                     onclick: move |_| handle_verse_click(verse_num),
                                                     onkeydown: move |evt: KeyboardEvent| {
-                                                        let key = evt.key();
-                                                        let code = evt.code().to_string();
-                                                        if key == Key::Enter || code == "Space" {
-                                                            if code == "Space" {
-                                                                evt.prevent_default(); // Prevent page scroll
+                                                        // Use Key enum consistently for keyboard handling (Dioxus pattern)
+                                                        match evt.key() {
+                                                            Key::Enter => {
+                                                                handle_verse_click(verse_num);
                                                             }
-                                                            handle_verse_click(verse_num);
+                                                            Key::Character(ref ch) if ch == " " => {
+                                                                evt.prevent_default(); // Prevent page scroll
+                                                                handle_verse_click(verse_num);
+                                                            }
+                                                            _ => {}
                                                         }
                                                     },
 

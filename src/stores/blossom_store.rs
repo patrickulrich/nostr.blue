@@ -788,6 +788,15 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
         let server_url = server.trim_end_matches('/');
         let list_url = format!("{}/list/{}", server_url, pubkey.to_hex());
 
+        // Parse server origin for validation (security)
+        let server_origin = match url::Url::parse(server_url) {
+            Ok(u) => format!("{}://{}", u.scheme(), u.host_str().unwrap_or("")),
+            Err(e) => {
+                log::warn!("Invalid server URL {}: {}", server_url, e);
+                continue;
+            }
+        };
+
         log::info!("Fetching files from: {}", list_url);
 
         match fetch_server_list(&list_url, &auth_header).await {
@@ -795,6 +804,23 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
                 success_count += 1;
                 log::info!("Found {} files on {}", blobs.len(), server);
                 for blob in blobs {
+                    // Validate origin matches server (security)
+                    let blob_valid = match url::Url::parse(&blob.url) {
+                        Ok(blob_url) => {
+                            let blob_origin = format!("{}://{}",
+                                blob_url.scheme(),
+                                blob_url.host_str().unwrap_or("")
+                            );
+                            blob_origin == server_origin
+                        }
+                        Err(_) => false,
+                    };
+
+                    if !blob_valid {
+                        log::warn!("Rejecting blob URL with mismatched origin: {}", blob.url);
+                        continue;
+                    }
+
                     if let Some(existing) = all_items.get_mut(&blob.sha256) {
                         // File exists on another server, add as mirror
                         if !existing.mirrors.contains(&blob.url) && existing.url != blob.url {

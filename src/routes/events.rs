@@ -208,6 +208,7 @@ pub fn Events() -> Element {
         let hashtag = selected_hashtag.read().clone();
 
         // Use search results if available (NIP-50 search is active)
+        let from_nip50 = search_results.read().is_some();
         let base_events = if let Some(ref results) = *search_results.read() {
             log::info!("[Events] Using NIP-50 search results: {} events", results.len());
             results.clone()
@@ -217,7 +218,8 @@ pub fn Events() -> Element {
             all_events.clone()
         };
 
-        let mut result = calendar_store::filter_events(&base_events, &current_filters);
+        // Skip client-side search filter when using NIP-50 results (relay already filtered)
+        let mut result = calendar_store::filter_events_with_nip50(&base_events, &current_filters, from_nip50);
         log::info!("[Events] filtered_events memo: after filter = {}", result.len());
 
         if let Some(ref tag) = hashtag {

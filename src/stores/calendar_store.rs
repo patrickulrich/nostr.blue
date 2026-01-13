@@ -141,10 +141,16 @@ fn get_date_key(time: &EventTime) -> String {
 }
 
 /// Parse and cache calendar events from nostr events
+/// Uses HashSet for O(1) deduplication lookups instead of O(n) Vec::contains
 pub fn cache_calendar_events(events: &[NostrEvent]) {
+    use std::collections::HashSet;
+
     let mut cache = CALENDAR_EVENTS_CACHE.write();
     let mut hashtags = ALL_EVENT_HASHTAGS.write();
     let mut by_date = EVENTS_BY_DATE.write();
+
+    // Build lookup map for O(1) deduplication (nostr-sdk pattern)
+    let mut existing_by_date: HashMap<String, HashSet<String>> = HashMap::new();
 
     for event in events {
         if let Ok(cal_event) = parse_calendar_event(event) {
@@ -153,11 +159,18 @@ pub fn cache_calendar_events(events: &[NostrEvent]) {
                 hashtags.insert(tag.clone());
             }
 
-            // Update by date index - deduplicate (nostr-sdk pattern)
+            // Update by date index - O(1) deduplication via HashSet
             let date_key = get_date_key(&cal_event.start);
-            let entry = by_date.entry(date_key).or_default();
-            if !entry.contains(&cal_event.coordinate) {
-                entry.push(cal_event.coordinate.clone());
+            let existing = existing_by_date
+                .entry(date_key.clone())
+                .or_insert_with(|| {
+                    by_date.get(&date_key)
+                        .map(|v| v.iter().cloned().collect())
+                        .unwrap_or_default()
+                });
+
+            if existing.insert(cal_event.coordinate.clone()) {
+                by_date.entry(date_key).or_default().push(cal_event.coordinate.clone());
             }
 
             cache.put(cal_event.coordinate.clone(), cal_event);
@@ -574,7 +587,13 @@ impl EventFilterState {
 }
 
 /// Filter unified events
+/// Set `from_nip50` to true when results came from NIP-50 relay search to skip client-side search filter
 pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec<UnifiedEvent> {
+    filter_events_with_nip50(events, filters, false)
+}
+
+/// Filter unified events with option to skip search term filter for NIP-50 results
+pub fn filter_events_with_nip50(events: &[UnifiedEvent], filters: &EventFilterState, from_nip50: bool) -> Vec<UnifiedEvent> {
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let today_start = now_secs - (now_secs % 86400);
     let week_end = today_start + (7 * 86400);
@@ -591,8 +610,8 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
                 }
             }
 
-            // Search term filter (client-side fallback, NIP-50 search is preferred)
-            if !filters.search_term.is_empty() {
+            // Search term filter (client-side fallback only - skip for NIP-50 results)
+            if !from_nip50 && !filters.search_term.is_empty() {
                 let term = filters.search_term.to_lowercase();
                 let matches = event.title().to_lowercase().contains(&term);
                 if !matches {

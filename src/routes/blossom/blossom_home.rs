@@ -1109,9 +1109,19 @@ fn validate_and_normalize_server_url(input: &str) -> Result<String, String> {
     let url = url::Url::parse(&url_str)
         .map_err(|e| format!("Invalid URL: {}", e))?;
 
-    // Validate scheme
+    // Validate scheme (only http/https allowed)
     if url.scheme() != "http" && url.scheme() != "https" {
         return Err("URL must use http or https".to_string());
+    }
+
+    // Check for multiple scheme separators (security - nostr-sdk pattern)
+    if url_str.matches("://").count() > 1 {
+        return Err("URL must not contain multiple scheme separators".to_string());
+    }
+
+    // Reject URLs with embedded credentials (security)
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URL must not contain embedded credentials".to_string());
     }
 
     // Ensure host is present
