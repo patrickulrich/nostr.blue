@@ -202,6 +202,12 @@ fn get_url_origin(url_str: &str) -> Option<(String, String, Option<u16>)> {
     })
 }
 
+/// Validate SHA256 hash format (64 hex characters per BUD-01 spec)
+/// Pattern matches nostr-sdk's validation approach: check length then hex chars
+fn is_valid_sha256(hash: &str) -> bool {
+    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// Add a custom Blossom server
 pub fn add_server(url: String) {
     let store = BLOSSOM_SERVERS.read();
@@ -804,6 +810,12 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
                 success_count += 1;
                 log::info!("Found {} files on {}", blobs.len(), server);
                 for blob in blobs {
+                    // Validate SHA256 hash before using as key (BUD-01 spec: 64 hex chars)
+                    if !is_valid_sha256(&blob.sha256) {
+                        log::warn!("Rejecting blob with invalid SHA256 hash: {}", blob.sha256);
+                        continue;
+                    }
+
                     // Validate origin matches server (security) - using helper that includes port
                     let blob_valid = get_url_origin(&blob.url)
                         .map(|blob_origin| blob_origin == server_origin)
@@ -1101,6 +1113,16 @@ pub async fn mirror_file(
 
         match mirror_to_server(&mirror_url, source_url, &auth_header).await {
             Ok(new_url) => {
+                // Validate returned URL origin matches target server (security)
+                let new_url_origin = get_url_origin(&new_url);
+                if new_url_origin.as_ref() != server_origin.as_ref() {
+                    log::warn!(
+                        "Rejecting mirror response with mismatched origin: expected {:?}, got {:?}",
+                        server_origin, new_url_origin
+                    );
+                    continue; // Skip this server, try next
+                }
+
                 log::info!("Successfully mirrored to {}: {}", server, new_url);
                 new_mirrors.push(new_url.clone());
 

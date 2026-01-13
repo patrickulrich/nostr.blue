@@ -243,6 +243,13 @@ pub async fn load_books(translation: &str) -> StdResult<Vec<Book>, String> {
 pub async fn load_chapter(translation: &str, book: &str, chapter: u32) -> StdResult<ChapterResponse, String> {
     // Check cache first
     if let Some(cached) = get_cached_chapter(translation, book, chapter) {
+        // Update LAST_POSITION even for cache hits to keep "Continue Reading" accurate
+        *LAST_POSITION.write() = Some((
+            translation.to_string(),
+            book.to_string(),
+            cached.response.book.common_name.clone(),
+            chapter,
+        ));
         return Ok(cached.response);
     }
 

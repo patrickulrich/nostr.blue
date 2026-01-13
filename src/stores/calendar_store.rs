@@ -1343,7 +1343,7 @@ pub struct CalendarEventComment {
     pub created_at: u64,
 }
 
-/// Fetch comments for a calendar event by naddr
+/// Fetch comments for a calendar event by coordinate
 /// Comments reference the event via 'A' tag (root scope per NIP-22)
 /// Uses fetch_events_from_relays to bypass cache and get fresh data
 pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
@@ -1361,60 +1361,47 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
     let mut comments: Vec<CalendarEventComment> = Vec::new();
 
     for e in events.iter() {
-        // Helper to get tag value by name
-        let get_tag_value = |tag_name: &str| -> Option<String> {
-            e.tags.iter()
-                .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
-                .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
+        // Helper to check if any tag with given name has the expected value
+        // Uses .any() instead of .find() to handle duplicate tags correctly
+        let has_tag_value = |tag_name: &str, expected: &str| -> bool {
+            e.tags.iter().any(|t| {
+                t.as_slice().first().map(|s| s.as_str()) == Some(tag_name)
+                    && t.as_slice().get(1).map(|s| s.as_str()) == Some(expected)
+            })
         };
 
-        // NIP-22 requires uppercase tags for root scope: A (coordinate), K (kind)
-        let root_a = get_tag_value("A");
-        let root_k = get_tag_value("K");
+        // Helper to check if any tag with given name has a valid kind number
+        let has_valid_kind_tag = |tag_name: &str| -> bool {
+            e.tags.iter().any(|t| {
+                t.as_slice().first().map(|s| s.as_str()) == Some(tag_name)
+                    && t.as_slice().get(1).is_some_and(|s| s.parse::<u32>().is_ok())
+            })
+        };
 
-        // NIP-22 requires lowercase tags for parent: k (kind)
-        // Note: lowercase 'a' may point to parent comment for nested replies, not the calendar event
-        let parent_k = get_tag_value("k");
-
-        // Validate root tags are present (required for all NIP-22 comments)
-        if root_a.is_none() || root_k.is_none() {
+        // NIP-22 requires: root 'A' tag matching coordinate, root 'K' tag with valid kind
+        if !has_tag_value("A", coordinate) {
             log::debug!(
-                "Skipping event {} - missing NIP-22 root tags (A={}, K={})",
-                e.id, root_a.is_some(), root_k.is_some()
+                "Skipping event {} - no 'A' tag matching coordinate '{}'",
+                e.id, coordinate
             );
             continue;
         }
 
-        // Validate parent kind tag exists (required per NIP-22)
-        if parent_k.is_none() {
+        if !has_valid_kind_tag("K") {
             log::debug!(
-                "Skipping event {} - missing NIP-22 parent kind tag (k)",
+                "Skipping event {} - missing or invalid 'K' tag",
                 e.id
             );
             continue;
         }
 
-        // Validate root A tag matches the requested coordinate
-        // (This should always match due to filter, but double-check)
-        if let Some(ref a_value) = root_a {
-            if a_value != coordinate {
-                log::warn!(
-                    "Skipping event {} - root 'A' tag mismatch: expected '{}', got '{}'",
-                    e.id, coordinate, a_value
-                );
-                continue;
-            }
-        }
-
-        // Validate root K tag contains a valid kind number
-        if let Some(ref k_value) = root_k {
-            if k_value.parse::<u32>().is_err() {
-                log::warn!(
-                    "Skipping event {} - invalid K tag value '{}' (expected kind number)",
-                    e.id, k_value
-                );
-                continue;
-            }
+        // Parent kind tag 'k' is required per NIP-22
+        if !has_valid_kind_tag("k") {
+            log::debug!(
+                "Skipping event {} - missing or invalid parent kind tag 'k'",
+                e.id
+            );
+            continue;
         }
 
         // All validations passed - add the comment with sanitized content
@@ -1434,21 +1421,15 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
 
 /// Publish a comment on a calendar event
 /// Uses proper NIP-22 threading tags (A/K/P for root, a/k/p for parent)
+/// Author is derived from coordinate (format: kind:pubkey:d-tag) to ensure consistency
 pub async fn publish_event_comment(
     coordinate: &str,
-    event_author: &str,
     content: &str,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
-    // Validate and normalize event_author to canonical hex
-    // PublicKey::parse() accepts hex, bech32 (npub), and NIP21 URIs
-    let author_pubkey = PublicKey::parse(event_author)
-        .map_err(|e| format!("Invalid event author pubkey '{}': {}", event_author, e))?;
-    let author_hex = author_pubkey.to_hex();
-
-    // Parse coordinate to extract kind (format: "kind:pubkey:d-tag")
-    // Validate format following nostr-sdk nip01.rs pattern
+    // Parse coordinate to extract kind and author (format: "kind:pubkey:d-tag")
+    // Following nostr-sdk pattern: use split then validate each part
     let parts: Vec<&str> = coordinate.split(':').collect();
     if parts.len() < 3 {
         return Err(format!(
@@ -1458,6 +1439,12 @@ pub async fn publish_event_comment(
     }
     let event_kind: u16 = parts[0].parse()
         .map_err(|_| format!("Invalid kind in coordinate: {}", parts[0]))?;
+
+    // Extract and validate author pubkey from coordinate using SDK's PublicKey::parse()
+    // (accepts hex, bech32/npub, and NIP-21 URIs per nostr-sdk best practice)
+    let author_pubkey = PublicKey::parse(parts[1])
+        .map_err(|e| format!("Invalid pubkey in coordinate '{}': {}", parts[1], e))?;
+    let author_hex = author_pubkey.to_hex();
 
     // Build NIP-22 comment (kind 1111) with full tag set
     let builder = EventBuilder::new(Kind::Custom(1111), content)
@@ -1510,22 +1497,25 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
     // Use fetch_events_from_relays to bypass cache for fresh search results
     let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
 
-    // Parse events into UnifiedEvent
-    let mut results: Vec<UnifiedEvent> = events
-        .iter()
-        .filter_map(|e| {
-            match parse_calendar_event(e) {
-                Ok(cal_event) => Some(UnifiedEvent::Calendar(cal_event)),
-                Err(_) => None,
-            }
-        })
-        .collect();
+    // Parse events into UnifiedEvent, deduplicating by coordinate
+    let mut seen_coords = std::collections::HashSet::new();
+    let mut results: Vec<UnifiedEvent> = Vec::new();
 
-    // Cache the raw events
+    for e in events.iter() {
+        if let Ok(cal_event) = parse_calendar_event(e) {
+            // Deduplicate by coordinate (addressable events use coordinate as unique key)
+            if seen_coords.insert(cal_event.coordinate.clone()) {
+                results.push(UnifiedEvent::Calendar(cal_event));
+            }
+        }
+    }
+
+    // Cache the raw events (caching handles its own deduplication)
     cache_calendar_events(&events);
 
-    // Sort by relevance (start time for calendar events)
+    // Sort by start time and truncate to requested limit
     results.sort_by_key(|a| a.start_timestamp());
+    results.truncate(limit);
 
     Ok(results)
 }
