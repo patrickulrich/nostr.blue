@@ -818,8 +818,8 @@ pub async fn resolve_playlist_tracks(
     if !missing_refs.is_empty() {
         // Build filters for each missing track
         for track_ref in &missing_refs {
-            // Parse coordinate: "36787:pubkey:d-tag"
-            let parts: Vec<&str> = track_ref.split(':').collect();
+            // Parse coordinate: "36787:pubkey:d-tag" (splitn to handle identifiers with colons)
+            let parts: Vec<&str> = track_ref.splitn(3, ':').collect();
             if parts.len() >= 3 {
                 let pubkey = parts[1];
                 let d_tag = parts[2];

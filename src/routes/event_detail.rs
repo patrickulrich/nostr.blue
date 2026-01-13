@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use crate::routes::Route;
 use crate::stores::{nostr_client, calendar_store, profiles, auth_store};
-use crate::stores::calendar_store::UnifiedEvent;
+use crate::stores::calendar_store::{UnifiedEvent, CalendarEventComment};
 use crate::utils::nip52::{RsvpStatus, is_online_location};
 use crate::utils::nip53::{RoomPresence, LiveActivityEvent};
 use crate::utils::ics::{export_event_to_ics, download_ics};
@@ -24,6 +24,13 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut rsvp_count = use_signal(|| 0usize);
     let mut room_presence = use_signal(Vec::<RoomPresence>::new);
     let mut parent_space_url = use_signal(|| None::<String>);
+
+    // Comment state
+    let mut comments = use_signal(Vec::<CalendarEventComment>::new);
+    let mut comments_loading = use_signal(|| false);
+    let mut comment_input = use_signal(String::new);
+    let mut comment_posting = use_signal(|| false);
+    let mut comment_error = use_signal(|| None::<String>);
 
     // Determine back route based on where we came from
     let back_route = match from.as_deref() {
@@ -65,6 +72,20 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         if let Some(my_rsvp) = calendar_store::get_my_rsvp(&coord) {
                             rsvp_status.set(Some(my_rsvp.status));
                         }
+
+                        // Fetch comments
+                        comment_error.set(None); // Clear any stale error before fetching
+                        comments_loading.set(true);
+                        match calendar_store::fetch_event_comments(&coord).await {
+                            Ok(event_comments) => {
+                                comments.set(event_comments);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to fetch comments: {}", e);
+                                comment_error.set(Some("Failed to load comments".to_string()));
+                            }
+                        }
+                        comments_loading.set(false);
                     } else {
                         // For meetings, fetch room presence (users in the last 5 minutes)
                         if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await {
@@ -76,8 +97,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) = unified_event {
                             if let Some(ref space_coord) = meeting.space_coordinate {
                                 log::info!("[CalendarEventDetail] Fetching parent space: {}", space_coord);
-                                // Convert coordinate to naddr format for fetching
-                                let parts: Vec<&str> = space_coord.split(':').collect();
+                                // Convert coordinate to naddr format for fetching (splitn to handle identifiers with colons)
+                                let parts: Vec<&str> = space_coord.splitn(3, ':').collect();
                                 if parts.len() >= 3 {
                                     // Build naddr from coordinate parts using nostr prelude
                                     use nostr::prelude::*;
@@ -141,6 +162,66 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             }
 
             rsvp_loading.set(false);
+        });
+    };
+
+    // Handle comment submission
+    let handle_comment_submit = move |_| {
+        let content = comment_input.read().trim().to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        let Some(evt) = event.read().as_ref().cloned() else { return };
+
+        let coord = match &evt {
+            UnifiedEvent::Calendar(e) => e.coordinate.clone(),
+            UnifiedEvent::Live(_) => return, // Comments only on calendar events for now
+        };
+
+        spawn(async move {
+            comment_posting.set(true);
+            comment_error.set(None); // Clear any previous error
+
+            match calendar_store::publish_event_comment(&coord, &content).await {
+                Ok(_) => {
+                    comment_input.set(String::new());
+                    // Refresh comments
+                    match calendar_store::fetch_event_comments(&coord).await {
+                        Ok(event_comments) => {
+                            comments.set(event_comments);
+                        }
+                        Err(e) => {
+                            // Comment posted successfully, but refresh failed
+                            // Optimistically add the new comment to show immediate feedback
+                            log::warn!("Comment posted but failed to refresh comments: {}", e);
+
+                            if let Some(my_pubkey) = auth_store::get_pubkey() {
+                                let now = (js_sys::Date::now() / 1000.0) as u64;
+                                // Generate temporary unique ID for stable UI keys until refresh succeeds
+                                let temp_id = format!("temp-{}-{}", now, uuid::Uuid::new_v4());
+                                // Sanitize content to match what fetched comments would have
+                                let sanitized_content = ammonia::clean(&content);
+                                let optimistic_comment = CalendarEventComment {
+                                    event_id: temp_id,
+                                    pubkey: my_pubkey,
+                                    content: sanitized_content.to_string(),
+                                    created_at: now,
+                                };
+                                let mut current_comments = comments.read().clone();
+                                current_comments.insert(0, optimistic_comment);
+                                comments.set(current_comments);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to publish comment: {}", e);
+                    comment_error.set(Some(format!("Failed to post comment: {}", e)));
+                }
+            }
+
+            comment_posting.set(false);
         });
     };
 
@@ -224,43 +305,79 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             } else if let Some(evt) = event.read().as_ref() {
                 // Event content
                 div {
-                    // Event image
-                    if let Some(image_url) = evt.image() {
-                        div {
-                            class: "relative h-48 sm:h-64 overflow-hidden",
-                            img {
-                                src: "{image_url}",
-                                alt: "{evt.title()}",
-                                class: "w-full h-full object-cover",
-                            }
+                    // Event header with image and badges
+                    div {
+                        class: "relative",
 
-                            // Live badge
-                            if evt.is_live() {
-                                div {
-                                    class: "absolute top-4 left-4 px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
-                                    "LIVE NOW"
+                        // Event image (optional)
+                        if let Some(image_url) = evt.image() {
+                            div {
+                                class: "h-48 sm:h-64 overflow-hidden",
+                                img {
+                                    src: "{image_url}",
+                                    alt: "{evt.title()}",
+                                    class: "w-full h-full object-cover",
                                 }
                             }
+                        }
 
-                            // Private badge
-                            if evt.is_private() {
-                                div {
-                                    class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
-                                    svg {
-                                        class: "w-4 h-4",
-                                        xmlns: "http://www.w3.org/2000/svg",
-                                        fill: "none",
-                                        view_box: "0 0 24 24",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        path {
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                                        }
+                        // Status badge (calendar events show time-based status, live activities show Live when active)
+                        {
+                            let status = get_detail_event_status(evt);
+                            let has_image = evt.image().is_some();
+                            // Use absolute positioning when there's an image, inline otherwise
+                            let badge_class = if has_image {
+                                "absolute top-4 left-4"
+                            } else {
+                                "inline-block mb-3 ml-4 mt-4"
+                            };
+                            match status {
+                                DetailEventStatus::Live => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
+                                        "LIVE NOW"
                                     }
-                                    "Private Event"
+                                },
+                                DetailEventStatus::HappeningNow => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
+                                        "HAPPENING NOW"
+                                    }
+                                },
+                                DetailEventStatus::Upcoming => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
+                                        "UPCOMING"
+                                    }
+                                },
+                                DetailEventStatus::Ended => rsx! {
+                                    div {
+                                        class: "{badge_class} px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
+                                        "ENDED"
+                                    }
+                                },
+                                DetailEventStatus::None => rsx! {},
+                            }
+                        }
+
+                        // Private badge (top-right, only with image)
+                        if evt.is_private() && evt.image().is_some() {
+                            div {
+                                class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    fill: "none",
+                                    view_box: "0 0 24 24",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    path {
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                                    }
                                 }
+                                "Private Event"
                             }
                         }
                     }
@@ -506,6 +623,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         {
                             let content = evt.content();
                             if !content.is_empty() {
+                                // Sanitize HTML to prevent XSS attacks
+                                let sanitized_content = ammonia::clean(content);
                                 rsx! {
                                     div {
                                         class: "mb-4",
@@ -515,7 +634,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         }
                                         div {
                                             class: "prose prose-sm dark:prose-invert max-w-none",
-                                            dangerous_inner_html: "{content}"
+                                            dangerous_inner_html: "{sanitized_content}"
                                         }
                                     }
                                 }
@@ -643,8 +762,158 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 }
                             }
                         }
+
+                        // Comments Section (for calendar events)
+                        if let UnifiedEvent::Calendar(_) = evt {
+                            div {
+                                class: "border-t border-border pt-4 mt-4",
+                                h3 {
+                                    class: "text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2",
+                                    "Comments"
+                                    span {
+                                        class: "text-xs bg-muted px-2 py-0.5 rounded",
+                                        "{comments.read().len()}"
+                                    }
+                                }
+
+                                // Comment composer (if logged in)
+                                if auth_store::get_pubkey().is_some() {
+                                    div {
+                                        class: "mb-4",
+                                        div {
+                                            class: "flex gap-2",
+                                            textarea {
+                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none text-sm resize-none",
+                                                placeholder: "Add a comment...",
+                                                rows: 2,
+                                                value: "{comment_input}",
+                                                oninput: move |e| comment_input.set(e.value()),
+                                            }
+                                            button {
+                                                class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition disabled:opacity-50",
+                                                disabled: *comment_posting.read() || comment_input.read().trim().is_empty(),
+                                                onclick: handle_comment_submit,
+                                                if *comment_posting.read() {
+                                                    "..."
+                                                } else {
+                                                    "Post"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Comment error display
+                                if let Some(err) = comment_error.read().as_ref() {
+                                    div {
+                                        class: "mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm",
+                                        "{err}"
+                                    }
+                                }
+
+                                // Comments list
+                                if *comments_loading.read() {
+                                    div {
+                                        class: "text-center text-muted-foreground py-4",
+                                        "Loading comments..."
+                                    }
+                                } else if comments.read().is_empty() {
+                                    div {
+                                        class: "text-center text-muted-foreground py-4 text-sm",
+                                        "No comments yet. Be the first to comment!"
+                                    }
+                                } else {
+                                    div {
+                                        class: "space-y-3",
+                                        for comment in comments.read().iter() {
+                                            CommentCard {
+                                                key: "{comment.event_id}",
+                                                pubkey: comment.pubkey.clone(),
+                                                content: comment.content.clone(),
+                                                created_at: comment.created_at,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Comment card component
+#[component]
+fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
+    let profile = profiles::get_cached_profile(&pubkey);
+
+    // Show profile name, or truncated pubkey if no profile (makes users distinguishable)
+    let display_name = profile
+        .as_ref()
+        .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
+
+    let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
+
+    // Format time ago
+    let time_ago = {
+        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let diff = now.saturating_sub(created_at);
+        if diff < 60 {
+            "just now".to_string()
+        } else if diff < 3600 {
+            format!("{}m ago", diff / 60)
+        } else if diff < 86400 {
+            format!("{}h ago", diff / 3600)
+        } else {
+            format!("{}d ago", diff / 86400)
+        }
+    };
+
+    rsx! {
+        div {
+            class: "p-3 bg-muted/50 rounded-lg",
+
+            // Header
+            div {
+                class: "flex items-center gap-2 mb-2",
+
+                // Avatar
+                if let Some(url) = avatar {
+                    img {
+                        src: "{url}",
+                        alt: "{display_name}",
+                        class: "w-6 h-6 rounded-full object-cover",
+                    }
+                } else {
+                    div {
+                        class: "w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center",
+                        span {
+                            class: "text-xs font-bold text-primary",
+                            "{display_name.chars().next().unwrap_or('?')}"
+                        }
+                    }
+                }
+
+                // Name and time
+                Link {
+                    to: Route::Profile { pubkey: pubkey.clone() },
+                    class: "font-medium text-sm hover:underline",
+                    "{display_name}"
+                }
+                span {
+                    class: "text-xs text-muted-foreground",
+                    "{time_ago}"
+                }
+            }
+
+            // Content - sanitize for XSS protection (consistent with event content handling)
+            p {
+                class: "text-sm whitespace-pre-wrap",
+                "{ammonia::clean(&content)}"
             }
         }
     }
@@ -804,5 +1073,53 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
                 class: "absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-background"
             }
         }
+    }
+}
+
+// ============================================================================
+// Event Status for Detail Page Badges
+// ============================================================================
+
+/// Event status for display badges
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DetailEventStatus {
+    Live,
+    HappeningNow,
+    Upcoming,
+    Ended,
+    None,
+}
+
+/// Determine event status badge to display for detail page
+fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
+    // Live status takes precedence
+    if event.is_live() {
+        return DetailEventStatus::Live;
+    }
+
+    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let start_ts = event.start_timestamp();
+
+    // No status for events without a valid start time
+    if start_ts == 0 {
+        return DetailEventStatus::None;
+    }
+
+    // Only show status badges for calendar events
+    if event.is_calendar_event() {
+        // Use end timestamp or default to 24 hours after start
+        let end_ts = event.end_timestamp()
+            .unwrap_or(start_ts + 86400);
+
+        if end_ts < now_secs {
+            DetailEventStatus::Ended
+        } else if start_ts > now_secs {
+            DetailEventStatus::Upcoming
+        } else {
+            // Event is happening now (started but not ended)
+            DetailEventStatus::HappeningNow
+        }
+    } else {
+        DetailEventStatus::None
     }
 }

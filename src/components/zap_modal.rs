@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
@@ -422,6 +423,21 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             div {
                 class: "bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto",
+                tabindex: "-1",
+                onmounted: move |_evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                },
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape {
+                        evt.stop_propagation();
+                        props.on_close.call(());
+                    }
+                },
                 onclick: move |e: MouseEvent| e.stop_propagation(),
 
                 // Header

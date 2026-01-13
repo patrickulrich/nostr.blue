@@ -718,8 +718,8 @@ pub fn removals_filter_by_community(community_a_tag: &str) -> Filter {
 
 /// Build filter for approved members list (kind 34551)
 pub fn approved_members_filter(community_a_tag: &str) -> Filter {
-    // Parse a_tag to get pubkey
-    let parts: Vec<&str> = community_a_tag.split(':').collect();
+    // Parse a_tag to get pubkey (use splitn to handle identifiers with colons)
+    let parts: Vec<&str> = community_a_tag.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Filter::new().kind(Kind::Custom(KIND_APPROVED_MEMBERS)).limit(0);
     }
@@ -808,8 +808,8 @@ pub async fn fetch_community_by_a_tag(a_tag: &str) -> std::result::Result<Option
         return Ok(Some(cached));
     }
 
-    // Parse a_tag: "34550:pubkey:d_tag"
-    let parts: Vec<&str> = a_tag.split(':').collect();
+    // Parse a_tag: "34550:pubkey:d_tag" (splitn to handle identifiers with colons)
+    let parts: Vec<&str> = a_tag.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Err("Invalid a_tag format".to_string());
     }

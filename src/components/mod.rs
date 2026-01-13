@@ -208,7 +208,7 @@ pub use external_content_card::ExternalContentList;
 
 // Code/Git hosting component exports
 pub use code::{
-    CodeRepoCard, CodeRepoCardCompact, CodeStatusBadge, CodeSnippetCard,
+    CodeRepoCard, CodeStatusBadge, CodeSnippetCard,
     CodeIssueRow, CodePullRow, CodeFileTree, FileTreeSkeleton, FilePathBreadcrumb,
     BranchSelector, CodeFileViewer, CodeFileViewerSkeleton,
 };

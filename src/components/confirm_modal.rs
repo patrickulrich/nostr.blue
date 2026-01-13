@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::html::input_data::keyboard_types::Key;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Global counter for generating unique modal IDs
@@ -33,6 +34,21 @@ pub fn ConfirmModal(
                 aria_modal: "true",
                 aria_labelledby: "{title_id}",
                 aria_describedby: "{message_id}",
+                tabindex: "-1",
+                onmounted: move |_evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                },
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape {
+                        evt.stop_propagation();
+                        on_cancel.call(());
+                    }
+                },
                 onclick: move |e| e.stop_propagation(),
 
                 // Title

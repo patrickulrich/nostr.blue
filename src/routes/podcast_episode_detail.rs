@@ -47,7 +47,6 @@ pub fn PodcastNostrEpisodeDetail(props: PodcastNostrEpisodeDetailProps) -> Eleme
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized {
-            log::info!("Waiting for client initialization before loading episode...");
             return;
         }
 
@@ -847,8 +846,8 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
             _ => Err("Expected naddr coordinate".to_string())
         }
     } else {
-        // Handle coordinate format: "KIND:PUBKEY:D-TAG"
-        let parts: Vec<&str> = coord.split(':').collect();
+        // Handle coordinate format: "KIND:PUBKEY:D-TAG" (splitn to handle identifiers with colons)
+        let parts: Vec<&str> = coord.splitn(3, ':').collect();
         if parts.len() >= 3 {
             return Ok((parts[1].to_string(), parts[2].to_string()));
         }

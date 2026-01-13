@@ -150,7 +150,7 @@ pub fn parse_recipe_event(event: &NostrEvent) -> Option<CachedRecipe> {
     // Get d-tag (required)
     let d_tag = event.tags.identifier()?;
 
-    // Build a_tag
+    // Build a_tag (no encoding needed - use splitn(3, ':') when parsing to handle colons in identifier)
     let a_tag = format!("{}:{}:{}", KIND_RECIPE, event.pubkey.to_hex(), d_tag);
 
     // Build naddr
