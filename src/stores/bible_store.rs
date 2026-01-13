@@ -597,14 +597,16 @@ pub fn search_cached_verses(query: &str, limit: usize) -> Vec<BibleSearchResult>
     let mut results = Vec::new();
 
     for (key, cached) in cache.iter() {
-        let parts: Vec<&str> = key.split(':').collect();
+        // Use rsplitn to parse from end, handling colons in translation/book IDs
+        let parts: Vec<&str> = key.rsplitn(3, ':').collect();
         if parts.len() != 3 {
             continue;
         }
 
-        let translation = parts[0];
+        // rsplitn splits from end: parts[0]=chapter, parts[1]=book, parts[2]=translation
+        let translation = parts[2];
         let book = parts[1];
-        let chapter: u32 = match parts[2].parse() {
+        let chapter: u32 = match parts[0].parse() {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -679,8 +681,14 @@ pub fn format_bible_url(translation: &str, book: &str, chapter: u32) -> String {
 
 /// Generate the canonical nostr.blue Bible URL for NIP-84 highlights.
 /// This URL is used in r-tags to link back to the source content.
+/// URL-encodes translation and book to handle spaces/special chars (e.g., "1 Samuel").
 pub fn get_nostr_blue_bible_url(translation: &str, book: &str, chapter: u32) -> String {
-    format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter)
+    format!(
+        "https://nostr.blue/bible/{}/{}/{}",
+        urlencoding::encode(translation),
+        urlencoding::encode(book),
+        chapter
+    )
 }
 
 /// Clear all store state
