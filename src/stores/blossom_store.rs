@@ -788,11 +788,11 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
         let server_url = server.trim_end_matches('/');
         let list_url = format!("{}/list/{}", server_url, pubkey.to_hex());
 
-        // Parse server origin for validation (security)
-        let server_origin = match url::Url::parse(server_url) {
-            Ok(u) => format!("{}://{}", u.scheme(), u.host_str().unwrap_or("")),
-            Err(e) => {
-                log::warn!("Invalid server URL {}: {}", server_url, e);
+        // Parse server origin for validation (security) - includes port
+        let server_origin = match get_url_origin(server_url) {
+            Some(origin) => origin,
+            None => {
+                log::warn!("Invalid server URL {}", server_url);
                 continue;
             }
         };
@@ -804,17 +804,10 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
                 success_count += 1;
                 log::info!("Found {} files on {}", blobs.len(), server);
                 for blob in blobs {
-                    // Validate origin matches server (security)
-                    let blob_valid = match url::Url::parse(&blob.url) {
-                        Ok(blob_url) => {
-                            let blob_origin = format!("{}://{}",
-                                blob_url.scheme(),
-                                blob_url.host_str().unwrap_or("")
-                            );
-                            blob_origin == server_origin
-                        }
-                        Err(_) => false,
-                    };
+                    // Validate origin matches server (security) - using helper that includes port
+                    let blob_valid = get_url_origin(&blob.url)
+                        .map(|blob_origin| blob_origin == server_origin)
+                        .unwrap_or(false);
 
                     if !blob_valid {
                         log::warn!("Rejecting blob URL with mismatched origin: {}", blob.url);

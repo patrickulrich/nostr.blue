@@ -96,10 +96,12 @@ pub fn BibleHome() -> Element {
                                 translations.iter().take(6).cloned().collect::<Vec<_>>()
                             };
 
+                            // Read selection once before loop to avoid per-iteration subscriptions
+                            let current_selection = selected_translation.read().clone();
                             rsx! {
                                 for t in display_translations {
                                     {
-                                        let is_selected = *selected_translation.read() == t.id;
+                                        let is_selected = current_selection == t.id;
                                         let tid = t.id.clone();
                                         rsx! {
                                             button {
@@ -174,12 +176,14 @@ pub fn BibleHome() -> Element {
                             &new_testament
                         };
 
+                        // Read selection once before loop to avoid per-iteration subscriptions
+                        let current_translation = selected_translation.read().clone();
                         rsx! {
                             for book in books_to_show.iter() {
                                 BookCard {
                                     key: "{book.id}",
                                     book: book.clone(),
-                                    translation: selected_translation.read().clone()
+                                    translation: current_translation.clone()
                                 }
                             }
                         }

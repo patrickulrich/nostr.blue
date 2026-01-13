@@ -129,13 +129,11 @@ pub fn CalendarEventNew() -> Element {
         do_add_participant();
     };
 
-    // Remove participant
-    let mut remove_participant = move |idx: usize| {
+    // Remove participant by pubkey (using stable ID, not index - Dioxus list pattern)
+    let mut remove_participant = move |pubkey_to_remove: String| {
         let mut parts = participants.read().clone();
-        if idx < parts.len() {
-            parts.remove(idx);
-            participants.set(parts);
-        }
+        parts.retain(|(pk, _, _)| pk != &pubkey_to_remove);
+        participants.set(parts);
     };
 
     // Handle ICS file upload
@@ -231,15 +229,19 @@ pub fn CalendarEventNew() -> Element {
                     event_type.set(EventType::DateBased);
                     start_date.set(date_str.clone());
                 }
-                IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+                IcsDateTime::DateTime(ts) => {
                     event_type.set(EventType::TimeBased);
                     let (date, time) = timestamp_to_date_time(*ts);
                     start_date.set(date);
                     start_time.set(time);
-                    // Preserve timezone from ICS if present
-                    if let Some(tz) = start.timezone() {
-                        timezone.set(tz.to_string());
-                    }
+                }
+                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                    event_type.set(EventType::TimeBased);
+                    // Convert to event's timezone for accurate display
+                    let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
+                    start_date.set(date);
+                    start_time.set(time);
+                    timezone.set(tz.to_string());
                 }
             }
         }
@@ -250,8 +252,14 @@ pub fn CalendarEventNew() -> Element {
                 IcsDateTime::Date(date_str) => {
                     end_date.set(date_str.clone());
                 }
-                IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+                IcsDateTime::DateTime(ts) => {
                     let (date, time) = timestamp_to_date_time(*ts);
+                    end_date.set(date);
+                    end_time.set(time);
+                }
+                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                    // Convert to event's timezone for accurate display
+                    let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     end_date.set(date);
                     end_time.set(time);
                 }
@@ -791,7 +799,7 @@ pub fn CalendarEventNew() -> Element {
                         if !participants.read().is_empty() {
                             div {
                                 class: "space-y-2",
-                                for (idx, (pubkey, display, role)) in participants.read().iter().enumerate() {
+                                for (_idx, (pubkey, display, role)) in participants.read().iter().enumerate() {
                                     div {
                                         class: "flex items-center gap-2 p-2 bg-muted/50 rounded-lg",
                                         key: "{pubkey}",
@@ -826,7 +834,10 @@ pub fn CalendarEventNew() -> Element {
                                         }
                                         button {
                                             class: "p-1 text-red-500 hover:text-red-600",
-                                            onclick: move |_| remove_participant(idx),
+                                            onclick: {
+                                                let pubkey_for_remove = pubkey.clone();  // Capture stable unique ID
+                                                move |_| remove_participant(pubkey_for_remove.clone())
+                                            },
                                             "✕"
                                         }
                                     }
@@ -905,7 +916,7 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     (js_date.get_time() / 1000.0) as u64
 }
 
-/// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings
+/// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time
 fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     let year = date.get_full_year();
@@ -918,6 +929,67 @@ fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let time_str = format!("{:02}:{:02}", hours, minutes);
 
     (date_str, time_str)
+}
+
+/// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in a specific timezone
+/// Uses JavaScript's Intl.DateTimeFormat for proper timezone handling
+fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
+    use wasm_bindgen::JsValue;
+
+    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+
+    // Try to use Intl.DateTimeFormat for timezone conversion
+    // Falls back to local time if timezone is invalid
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"timeZone".into(), &JsValue::from_str(tz)).ok();
+    js_sys::Reflect::set(&options, &"year".into(), &"numeric".into()).ok();
+    js_sys::Reflect::set(&options, &"month".into(), &"2-digit".into()).ok();
+    js_sys::Reflect::set(&options, &"day".into(), &"2-digit".into()).ok();
+    js_sys::Reflect::set(&options, &"hour".into(), &"2-digit".into()).ok();
+    js_sys::Reflect::set(&options, &"minute".into(), &"2-digit".into()).ok();
+    js_sys::Reflect::set(&options, &"hour12".into(), &JsValue::FALSE).ok();
+
+    // Format the date parts using Intl API
+    let formatter = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &options);
+    let parts = formatter.format_to_parts(&date);
+
+    let mut year = String::new();
+    let mut month = String::new();
+    let mut day = String::new();
+    let mut hour = String::new();
+    let mut minute = String::new();
+
+    for i in 0..parts.length() {
+        if let Some(part) = parts.get(i).dyn_ref::<js_sys::Object>() {
+            let part_type = js_sys::Reflect::get(part, &"type".into())
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default();
+            let part_value = js_sys::Reflect::get(part, &"value".into())
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default();
+
+            match part_type.as_str() {
+                "year" => year = part_value,
+                "month" => month = part_value,
+                "day" => day = part_value,
+                "hour" => hour = part_value,
+                "minute" => minute = part_value,
+                _ => {}
+            }
+        }
+    }
+
+    if !year.is_empty() && !month.is_empty() && !day.is_empty() {
+        return (
+            format!("{}-{}-{}", year, month, day),
+            format!("{}:{}", hour, minute),
+        );
+    }
+
+    // Fallback to local time conversion if Intl fails
+    timestamp_to_date_time(ts)
 }
 
 /// Format ICS datetime for display

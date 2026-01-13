@@ -831,6 +831,7 @@ fn UploadModal(
                 }) as Box<dyn FnOnce()>);
 
                 input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+                closure.forget(); // Keep closure alive until JS callback fires (Dioxus pattern)
                 input.click();
 
                 // Wait for file selection with timeout to prevent hanging

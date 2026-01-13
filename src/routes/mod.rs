@@ -803,6 +803,13 @@ fn Layout() -> Element {
     let is_home_page = matches!(current_route, Route::Home { .. });
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
 
+    // Pages that use wide layout (full width, no max-width constraint)
+    let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page
+        || is_podcast_page || is_radio_page || is_nips_page || is_badges_page
+        || is_code_page || is_p2p_page || is_community_page || is_events_page
+        || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page
+        || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
+
     // Check if music player is visible to add bottom padding
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
@@ -1257,14 +1264,11 @@ fn Layout() -> Element {
 
                 // Center Content Area
                 main {
-                    class: {
-                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
-                        match (is_wide_page, music_player_visible) {
-                            (true, true) => "w-full flex-1 border-r border-border pb-24",
-                            (true, false) => "w-full flex-1 border-r border-border",
-                            (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
-                            (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
-                        }
+                    class: match (is_wide_page, music_player_visible) {
+                        (true, true) => "w-full flex-1 border-r border-border pb-24",
+                        (true, false) => "w-full flex-1 border-r border-border",
+                        (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
+                        (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
                     },
 
                     // Mobile header
@@ -1291,8 +1295,8 @@ fn Layout() -> Element {
                     Outlet::<Route> {}
                 }
 
-                // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, Shop, and Settings pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_blossom_page && !is_bible_page && !is_settings_page && !is_creation_page {
+                // Right Sidebar (Trending & Search) - Hidden on wide pages and settings
+                if !is_wide_page && !is_settings_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {

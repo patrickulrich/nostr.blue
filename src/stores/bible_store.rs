@@ -217,16 +217,19 @@ pub async fn load_books(translation: &str) -> StdResult<Vec<Book>, String> {
 
     match fetch_books(translation).await {
         Ok(books) => {
-            // Only update global state if still the latest request
+            // Only update global state if still the latest request (nostr-sdk double-check pattern)
             if *LATEST_REQUESTED_TRANSLATION.read() == translation {
                 *CURRENT_BOOKS.write() = books.clone();
                 *CURRENT_TRANSLATION.write() = translation.to_string();
+                *LOADING_BOOKS.write() = false;
             }
-            *LOADING_BOOKS.write() = false;
             Ok(books)
         }
         Err(e) => {
-            *LOADING_BOOKS.write() = false;
+            // Only clear loading if still the latest request
+            if *LATEST_REQUESTED_TRANSLATION.read() == translation {
+                *LOADING_BOOKS.write() = false;
+            }
             Err(e)
         }
     }

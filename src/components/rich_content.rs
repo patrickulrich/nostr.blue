@@ -71,7 +71,12 @@ pub fn RichContent(
                 ContentToken::NostrBluePodcastEpisode(_) | ContentToken::NostrBlueArticle(_) |
                 ContentToken::NostrBlueRecipe(_) | ContentToken::NostrBlueWiki(_) |
                 ContentToken::NostrBluePublication(_) | ContentToken::NostrBluePinboard(_) |
-                ContentToken::NostrBlueProduct(_) | ContentToken::NostrBlueCodeRepo(_)
+                ContentToken::NostrBlueProduct(_) | ContentToken::NostrBlueCodeRepo(_) |
+                ContentToken::NostrBlueVoice(_) | ContentToken::NostrBlueMusicPlaylist(_) |
+                ContentToken::NostrBlueRadioStation(_) | ContentToken::NostrBlueNote(_) |
+                ContentToken::NostrBlueProfile(_) | ContentToken::NostrBlueCalendarEvent(_) |
+                ContentToken::NostrBlueBadge(_) | ContentToken::NostrBlueRssPodcastEpisode(_, _) |
+                ContentToken::NostrBlueRssPodcastShow(_)
             )
         }).count();
 
@@ -5662,7 +5667,7 @@ fn NostrBlueCommunityRenderer(id: String) -> Element {
     let parts: Vec<&str> = id.split(':').collect();
     let is_valid = parts.len() == 3
         && parts[0].parse::<u32>().is_ok()  // kind is numeric
-        && parts[1].len() == 64;  // pubkey is 64 hex chars
+        && PublicKey::from_hex(parts[1]).is_ok();  // validate hex pubkey
 
     rsx! {
         div {

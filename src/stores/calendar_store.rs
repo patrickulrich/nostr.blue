@@ -1420,10 +1420,20 @@ pub async fn publish_event_comment(
 // NIP-50 Search
 // ============================================================================
 
+/// Maximum search result limit to prevent excessive relay load
+const MAX_SEARCH_LIMIT: usize = 500;
+
+/// Maximum query length to prevent abuse
+const MAX_QUERY_LEN: usize = 256;
+
 /// Search calendar events using NIP-50 relay search
 /// Searches across title, description, and content fields
 /// Uses fetch_events_from_relays to bypass cache for fresh search results
 pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+    // Validate and clamp inputs
+    let query = &query[..query.len().min(MAX_QUERY_LEN)];
+    let limit = limit.min(MAX_SEARCH_LIMIT);
+
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -1462,6 +1472,10 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
 /// Uses fetch_events_from_relays to bypass cache for fresh search results
 pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
     use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM, KIND_MEETING_SPACE};
+
+    // Validate and clamp inputs
+    let query = &query[..query.len().min(MAX_QUERY_LEN)];
+    let limit = limit.min(MAX_SEARCH_LIMIT);
 
     if query.trim().is_empty() {
         return Ok(Vec::new());

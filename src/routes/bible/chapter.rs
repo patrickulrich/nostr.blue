@@ -73,10 +73,16 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
             let t = translation_for_effect.clone();
             let b = book_for_effect.clone();
             let c = chapter;
+            let request_key = current_key.clone();  // Capture for verification (nostr-sdk double-check pattern)
 
             // Spawn the async load
             spawn(async move {
                 let result = bible_store::load_chapter(&t, &b, c).await;
+
+                // Double-check guard: only update if still the latest request
+                if *loaded_key.peek() != request_key {
+                    return;  // Navigation happened, discard stale result
+                }
 
                 // Set chapter data immediately so content renders
                 let load_succeeded = result.is_ok();
