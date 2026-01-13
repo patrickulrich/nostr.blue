@@ -48,6 +48,12 @@ fn render_badges(event: &UnifiedEvent) -> Element {
                     "UPCOMING"
                 }
             },
+            EventStatus::HappeningNow => rsx! {
+                div {
+                    class: "absolute top-2 left-2 px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded",
+                    "HAPPENING NOW"
+                }
+            },
             EventStatus::Ended => rsx! {
                 div {
                     class: "absolute top-2 left-2 px-2 py-1 bg-gray-500 text-white text-xs font-bold rounded opacity-75",
@@ -543,6 +549,7 @@ fn get_location_info(event: &UnifiedEvent) -> Option<(String, bool)> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum EventStatus {
     Live,
+    HappeningNow,
     Upcoming,
     Ended,
     None,
@@ -569,13 +576,13 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
         let end_ts = event.end_timestamp()
             .unwrap_or(start_ts + 86400);
 
-        if end_ts < now_secs {
+        if end_ts <= now_secs {
             EventStatus::Ended
         } else if start_ts > now_secs {
             EventStatus::Upcoming
         } else {
             // Event is happening now (started but not ended)
-            EventStatus::None
+            EventStatus::HappeningNow
         }
     } else {
         EventStatus::None

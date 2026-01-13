@@ -83,8 +83,11 @@ pub fn RichContent(
                     } else {
                         "whitespace-pre-wrap break-words space-y-2 max-h-[24em] overflow-hidden"
                     },
-                    for token in tokens.iter() {
-                        {render_token(token)}
+                    for (idx, token) in tokens.iter().enumerate() {
+                        div {
+                            key: "{idx}",
+                            {render_token(token)}
+                        }
                     }
                 }
                 // Show More button - only visible when collapsed
@@ -107,8 +110,11 @@ pub fn RichContent(
         rsx! {
             div {
                 class: "whitespace-pre-wrap break-words space-y-2",
-                for token in tokens.iter() {
-                    {render_token(token)}
+                for (idx, token) in tokens.iter().enumerate() {
+                    div {
+                        key: "{idx}",
+                        {render_token(token)}
+                    }
                 }
             }
         }
@@ -4121,6 +4127,11 @@ fn NostrBlueLiveStreamRenderer(id: String) -> Element {
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
+            // Reset state for new fetch
+            loading.set(true);
+            event.set(None);
+            error.set(None);
+
             match Nip19::from_bech32(&id_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
                     let relay_hints: Vec<String> = coord.relays.iter()
@@ -4170,6 +4181,11 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
+            // Reset state for new fetch
+            loading.set(true);
+            event.set(None);
+            error.set(None);
+
             // Try parsing as nevent first, then as hex event ID
             let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
                 Nip19::from_bech32(&id_clone)
@@ -4189,7 +4205,13 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
-                                event.set(Some(e));
+                                // Validate kind 21 (horizontal video) or 22 (vertical video)
+                                let kind = e.kind.as_u16();
+                                if kind == 21 || kind == 22 {
+                                    event.set(Some(e));
+                                } else {
+                                    error.set(Some("Not a video event".to_string()));
+                                }
                             } else {
                                 error.set(Some("Video not found".to_string()));
                             }
@@ -4228,6 +4250,11 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
+            // Reset state for new fetch
+            loading.set(true);
+            event.set(None);
+            error.set(None);
+
             let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
                 Nip19::from_bech32(&id_clone)
                     .ok()
@@ -4246,7 +4273,12 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
-                                event.set(Some(e));
+                                // Validate kind 20 (photo)
+                                if e.kind.as_u16() == 20 {
+                                    event.set(Some(e));
+                                } else {
+                                    error.set(Some("Not a photo event".to_string()));
+                                }
                             } else {
                                 error.set(Some("Photo not found".to_string()));
                             }
@@ -4285,6 +4317,11 @@ fn NostrBlueVoiceRenderer(id: String) -> Element {
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
+            // Reset state for new fetch
+            loading.set(true);
+            event.set(None);
+            error.set(None);
+
             let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
                 Nip19::from_bech32(&id_clone)
                     .ok()
@@ -4303,7 +4340,12 @@ fn NostrBlueVoiceRenderer(id: String) -> Element {
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
-                                event.set(Some(e));
+                                // Validate kind 1040 (voice message)
+                                if e.kind.as_u16() == 1040 {
+                                    event.set(Some(e));
+                                } else {
+                                    error.set(Some("Not a voice message".to_string()));
+                                }
                             } else {
                                 error.set(Some("Voice message not found".to_string()));
                             }
@@ -4708,6 +4750,11 @@ fn NostrBlueRadioStationRenderer(id: String) -> Element {
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
+            // Reset state for new fetch
+            loading.set(true);
+            event.set(None);
+            error.set(None);
+
             match Nip19::from_bech32(&id_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
                     let relay_hints: Vec<String> = coord.relays.iter()
@@ -4893,7 +4940,6 @@ fn NostrBlueNoteRenderer(id: String) -> Element {
     let mut event = use_signal(|| None::<Event>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let id_for_link = id.clone();
 
     use_effect(move || {
         let id_clone = id.clone();
@@ -4939,8 +4985,8 @@ fn NostrBlueNoteRenderer(id: String) -> Element {
             } else if let Some(err) = error.read().as_ref() {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = event.read().as_ref() {
-                // Render as a compact note card with preview
-                {render_note_minicard(ev, &id_for_link)}
+                // Render as a compact note card with preview using canonical hex id
+                {render_note_minicard(ev, &ev.id.to_hex())}
             }
         }
     }
