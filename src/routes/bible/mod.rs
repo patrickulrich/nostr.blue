@@ -10,7 +10,7 @@ pub use search::BibleSearch;
 use dioxus::prelude::*;
 
 use crate::stores::bible_store::{
-    self, Book, ENGLISH_TRANSLATIONS, CURRENT_BOOKS,
+    self, Book, ENGLISH_TRANSLATIONS, CURRENT_BOOKS, CURRENT_TRANSLATION,
     LOADING_TRANSLATIONS, LOADING_BOOKS, BIBLE_STORE_INITIALIZED,
     split_books_by_testament,
 };
@@ -34,9 +34,24 @@ pub fn BibleHome() -> Element {
         }
     });
 
-    // Load books when translation changes
+    // Load books when translation changes (only after store is initialized)
     use_effect(move || {
         let translation = selected_translation.read().clone();
+        let store_initialized = *BIBLE_STORE_INITIALIZED.read();
+        let current_translation = CURRENT_TRANSLATION.read().clone();
+        let books_loaded = !CURRENT_BOOKS.read().is_empty();
+
+        // Skip if:
+        // 1. Store not initialized yet (initialize() will handle default translation)
+        // 2. Translation already loaded (current_translation matches)
+        // 3. Books already loaded for default translation (prevents race with initialize())
+        if !store_initialized
+            || translation == current_translation
+            || (translation == bible_store::DEFAULT_TRANSLATION && books_loaded)
+        {
+            return;
+        }
+
         spawn(async move {
             if let Err(e) = bible_store::load_books(&translation).await {
                 log::error!("Failed to load books: {}", e);
@@ -192,19 +207,14 @@ pub fn BibleHome() -> Element {
             }
 
             // Continue Reading (if we have a last position)
-            if let Some((last_trans, last_book, last_chapter)) = bible_store::LAST_POSITION.read().clone() {
+            if let Some((last_trans, last_book, last_book_name, last_chapter)) = bible_store::LAST_POSITION.read().clone() {
                 div { class: "mt-8 p-4 bg-muted/50 rounded-lg",
                     div { class: "flex items-center justify-between",
                         div {
                             p { class: "text-sm text-muted-foreground", "Continue Reading" }
                             p { class: "font-medium",
-                                {
-                                    if let Some(book) = bible_store::get_book(&last_book) {
-                                        format!("{} {} ({})", book.common_name, last_chapter, last_trans)
-                                    } else {
-                                        format!("{} {} ({})", last_book, last_chapter, last_trans)
-                                    }
-                                }
+                                // Use stored book name directly (correct translation)
+                                {format!("{} {} ({})", last_book_name, last_chapter, last_trans)}
                             }
                         }
                         Link {

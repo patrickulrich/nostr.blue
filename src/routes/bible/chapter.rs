@@ -174,6 +174,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                 return;
                             }
                         };
+                        // Note: clipboard() returns Clipboard directly in this web-sys version
+                        // Will throw JS error if not in secure context (handled by JsFuture below)
                         let clipboard = window.navigator().clipboard();
                         let promise = clipboard.write_text(&full_text);
 

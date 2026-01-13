@@ -1354,8 +1354,25 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
     // Use fetch_events_from_relays to bypass cache for fresh comment data
     let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
 
+    // Validate NIP-22 required tags: K (root kind) and A (root coordinate) must be present
+    // Filter out events that don't conform to NIP-22 comment structure
     let mut comments: Vec<CalendarEventComment> = events
         .iter()
+        .filter(|e| {
+            // NIP-22 requires K tag (root kind) to be present
+            let has_k_tag = e.tags.iter().any(|t| {
+                t.as_slice().first().map(|s| s.as_str()) == Some("K")
+            });
+            // NIP-22 requires uppercase A tag for addressable root events
+            let has_a_tag = e.tags.iter().any(|t| {
+                t.as_slice().first().map(|s| s.as_str()) == Some("A")
+            });
+            if !has_k_tag || !has_a_tag {
+                log::debug!("Skipping event {} - missing NIP-22 required tags (K={}, A={})",
+                    e.id, has_k_tag, has_a_tag);
+            }
+            has_k_tag && has_a_tag
+        })
         .map(|e| CalendarEventComment {
             event_id: e.id.to_hex(),
             pubkey: e.pubkey.to_hex(),
@@ -1430,8 +1447,9 @@ const MAX_QUERY_LEN: usize = 256;
 /// Searches across title, description, and content fields
 /// Uses fetch_events_from_relays to bypass cache for fresh search results
 pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
-    // Validate and clamp inputs
-    let query = &query[..query.len().min(MAX_QUERY_LEN)];
+    // Validate and clamp inputs (use chars() to avoid UTF-8 boundary panic)
+    let query: String = query.chars().take(MAX_QUERY_LEN).collect();
+    let query = query.as_str();
     let limit = limit.min(MAX_SEARCH_LIMIT);
 
     if query.trim().is_empty() {
@@ -1473,8 +1491,9 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
 pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
     use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM, KIND_MEETING_SPACE};
 
-    // Validate and clamp inputs
-    let query = &query[..query.len().min(MAX_QUERY_LEN)];
+    // Validate and clamp inputs (use chars() to avoid UTF-8 boundary panic)
+    let query: String = query.chars().take(MAX_QUERY_LEN).collect();
+    let query = query.as_str();
     let limit = limit.min(MAX_SEARCH_LIMIT);
 
     if query.trim().is_empty() {

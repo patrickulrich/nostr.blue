@@ -1593,8 +1593,9 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
             }
 
             // Wait for nostr client AND signer - NIP-98 auth requires a signer
+            // Return distinct error so UI can show "waiting" state instead of "no results"
             if !client_initialized || !has_signer {
-                return Ok(Vec::new());  // Return empty, will re-run when authenticated
+                return Err("__waiting_auth__".to_string());
             }
 
             match podcast_index::search_podcasts(&q, Some(20)).await {
@@ -1621,8 +1622,9 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
                 return Ok::<_, String>(Vec::new());
             }
 
+            // Return distinct error so UI can show "waiting" state instead of "no results"
             if !client_initialized {
-                return Ok(Vec::new());  // Return empty, will re-run when initialized
+                return Err("__waiting_client__".to_string());
             }
 
             match search_nostr_podcasts(&q).await {
@@ -1641,18 +1643,27 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
     // Read API search results from resource
     let api_result = api_search.read();
     let api_feeds = api_result.as_ref().and_then(|r| r.as_ref().ok());
-    let api_loading = api_result.is_none();
+    // Check if API is in "waiting" state (distinct from real errors)
+    let api_waiting = api_result.as_ref().is_some_and(|r| {
+        r.as_ref().err().is_some_and(|e| e.starts_with("__waiting"))
+    });
+    let api_loading = api_result.is_none() || api_waiting;
 
     // Read Nostr search results from resource
     let nostr_result = nostr_search.read();
     let nostr_shows = nostr_result.as_ref().and_then(|r| r.as_ref().ok());
-    let nostr_loading = nostr_result.is_none();
+    // Check if Nostr is in "waiting" state (distinct from real errors)
+    let nostr_waiting = nostr_result.as_ref().is_some_and(|r| {
+        r.as_ref().err().is_some_and(|e| e.starts_with("__waiting"))
+    });
+    let nostr_loading = nostr_result.is_none() || nostr_waiting;
 
     let api_count = api_feeds.map(|r| r.len()).unwrap_or(0);
     let nostr_count = nostr_shows.map(|r| r.len()).unwrap_or(0);
     let total_count = api_count + nostr_count;
+    // Only count as "has data" if we have actual results (not waiting states)
     let has_any_data = api_feeds.is_some() || nostr_shows.is_some();
-    let is_initial_loading = api_loading && !has_any_data;
+    let is_initial_loading = (api_loading || nostr_loading) && !has_any_data;
     let nostr_still_loading = !*nostr_client::CLIENT_INITIALIZED.read() || nostr_loading;
 
     rsx! {
@@ -1683,6 +1694,13 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
                     class: "space-y-2",
                     for i in 0..5 {
                         SearchResultRowSkeleton { key: "{i}" }
+                    }
+                }
+                // Show sign-in message if API search requires auth
+                if api_waiting && (platform_display == "all" || platform_display == "rss") {
+                    div {
+                        class: "text-center py-4 text-sm text-muted-foreground",
+                        "Sign in to search RSS/Podcast Index (requires NIP-98 auth)"
                     }
                 }
             } else if total_count == 0 && has_any_data {

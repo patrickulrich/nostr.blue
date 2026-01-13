@@ -217,37 +217,53 @@ pub struct FootnoteVerseReference {
 // API Functions
 // =============================================================================
 
-/// Fetch all available Bible translations
-pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
+/// Helper to perform HTTP GET request with timeout and abort controller
+/// Reduces code duplication across fetch_translations, fetch_books, fetch_chapter
+async fn fetch_with_timeout(url: &str, error_context: &str) -> Result<gloo_net::http::Response, String> {
     // Create AbortController for proper request cancellation on timeout
     let controller = web_sys::AbortController::new()
         .map_err(|_| "Failed to create AbortController".to_string())?;
     let signal = controller.signal();
 
-    // Set up abort timeout - drops and cancels when async function returns
+    // Set up abort timeout - kept alive across await, cancelled on completion
     let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
+    let timeout = Timeout::new(API_TIMEOUT_MS, move || {
         controller_for_timeout.abort();
     });
 
-    let url = format!("{}/available_translations.json", BIBLE_API_BASE);
-
-    let response = Request::get(&url)
+    let response = match Request::get(url)
         .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| {
+    {
+        Ok(resp) => {
+            // Cancel timeout - request succeeded
+            timeout.cancel();
+            resp
+        }
+        Err(e) => {
+            // Cancel timeout before returning error
+            timeout.cancel();
             // Distinguish timeout from other network errors (nostr-sdk pattern)
-            if signal.aborted() {
+            return Err(if signal.aborted() {
                 "Request timeout".to_string()
             } else {
-                format!("Failed to fetch translations: {}", e)
-            }
-        })?;
+                format!("Failed to {}: {}", error_context, e)
+            });
+        }
+    };
 
     if !response.ok() {
         return Err(format!("API error: {}", response.status()));
     }
+
+    Ok(response)
+}
+
+/// Fetch all available Bible translations
+pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
+    let url = format!("{}/available_translations.json", BIBLE_API_BASE);
+    let response = fetch_with_timeout(&url, "fetch translations").await?;
 
     let data: AvailableTranslationsResponse = response
         .json()
@@ -259,36 +275,9 @@ pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
 
 /// Fetch books for a specific translation
 pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
-    // Create AbortController for proper request cancellation on timeout
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController".to_string())?;
-    let signal = controller.signal();
-
-    // Set up abort timeout - drops and cancels when async function returns
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
-        controller_for_timeout.abort();
-    });
-
     // Percent-encode path segments to prevent URL corruption
     let url = format!("{}/{}/books.json", BIBLE_API_BASE, urlencoding::encode(translation));
-
-    let response = Request::get(&url)
-        .abort_signal(Some(&signal))
-        .send()
-        .await
-        .map_err(|e| {
-            // Distinguish timeout from other network errors (nostr-sdk pattern)
-            if signal.aborted() {
-                "Request timeout".to_string()
-            } else {
-                format!("Failed to fetch books: {}", e)
-            }
-        })?;
-
-    if !response.ok() {
-        return Err(format!("API error: {}", response.status()));
-    }
+    let response = fetch_with_timeout(&url, "fetch books").await?;
 
     let data: TranslationBooksResponse = response
         .json()
@@ -300,17 +289,6 @@ pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
 
 /// Fetch a specific chapter
 pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
-    // Create AbortController for proper request cancellation on timeout
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController".to_string())?;
-    let signal = controller.signal();
-
-    // Set up abort timeout - drops and cancels when async function returns
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(API_TIMEOUT_MS, move || {
-        controller_for_timeout.abort();
-    });
-
     // Percent-encode path segments to prevent URL corruption
     let url = format!(
         "{}/{}/{}/{}.json",
@@ -319,23 +297,7 @@ pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Resul
         urlencoding::encode(book),
         chapter
     );
-
-    let response = Request::get(&url)
-        .abort_signal(Some(&signal))
-        .send()
-        .await
-        .map_err(|e| {
-            // Distinguish timeout from other network errors (nostr-sdk pattern)
-            if signal.aborted() {
-                "Request timeout".to_string()
-            } else {
-                format!("Failed to fetch chapter: {}", e)
-            }
-        })?;
-
-    if !response.ok() {
-        return Err(format!("API error: {}", response.status()));
-    }
+    let response = fetch_with_timeout(&url, "fetch chapter").await?;
 
     let data: ChapterResponse = response
         .json()

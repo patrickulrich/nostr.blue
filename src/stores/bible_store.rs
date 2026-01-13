@@ -114,10 +114,14 @@ pub static LOADING_HIGHLIGHTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 pub static BIBLE_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 /// Last viewed position (for "Continue Reading" feature)
-pub static LAST_POSITION: GlobalSignal<Option<(String, String, u32)>> = GlobalSignal::new(|| None);
+/// Tuple: (translation, book_id, book_common_name, chapter)
+pub static LAST_POSITION: GlobalSignal<Option<(String, String, String, u32)>> = GlobalSignal::new(|| None);
 
 /// Latest requested translation for race guard (prevents stale data on fast navigation)
 static LATEST_REQUESTED_TRANSLATION: GlobalSignal<String> = GlobalSignal::new(String::new);
+
+/// Latest requested chapter key for race guard (prevents stale data on fast navigation)
+static LATEST_REQUESTED_CHAPTER: GlobalSignal<String> = GlobalSignal::new(String::new);
 
 /// Latest requested highlight URL for race guard (prevents stale data on fast navigation)
 static LATEST_REQUESTED_HIGHLIGHT_URL: GlobalSignal<String> = GlobalSignal::new(String::new);
@@ -242,20 +246,34 @@ pub async fn load_chapter(translation: &str, book: &str, chapter: u32) -> StdRes
         return Ok(cached.response);
     }
 
+    // Set this as the latest requested chapter for race prevention
+    let chapter_key = chapter_cache_key(translation, book, chapter);
+    *LATEST_REQUESTED_CHAPTER.write() = chapter_key.clone();
     *LOADING_CHAPTER.write() = true;
 
     match fetch_chapter(translation, book, chapter).await {
         Ok(response) => {
             cache_chapter(translation, book, chapter, response.clone());
-            *LOADING_CHAPTER.write() = false;
 
-            // Update last position
-            *LAST_POSITION.write() = Some((translation.to_string(), book.to_string(), chapter));
+            // Only update loading state if still the latest request (prevents race condition)
+            if *LATEST_REQUESTED_CHAPTER.read() == chapter_key {
+                *LOADING_CHAPTER.write() = false;
+                // Update last position with book's common_name for correct display
+                *LAST_POSITION.write() = Some((
+                    translation.to_string(),
+                    book.to_string(),
+                    response.book.common_name.clone(),
+                    chapter,
+                ));
+            }
 
             Ok(response)
         }
         Err(e) => {
-            *LOADING_CHAPTER.write() = false;
+            // Only clear loading if still the latest request
+            if *LATEST_REQUESTED_CHAPTER.read() == chapter_key {
+                *LOADING_CHAPTER.write() = false;
+            }
             Err(e)
         }
     }
@@ -339,6 +357,9 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHig
 pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighlight>, String> {
     // Set this as the latest requested URL for race prevention
     *LATEST_REQUESTED_HIGHLIGHT_URL.write() = api_url.to_string();
+
+    // Clear stale highlights immediately to prevent showing old data during fetch
+    CURRENT_CHAPTER_HIGHLIGHTS.write().clear();
 
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;

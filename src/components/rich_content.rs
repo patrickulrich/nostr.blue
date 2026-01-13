@@ -4138,7 +4138,8 @@ fn NostrBlueLiveStreamRenderer(id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    use_effect(move || {
+    // use_reactive! ensures effect re-runs when id prop changes
+    use_effect(use_reactive!(|id| {
         let id_clone = id.clone();
         spawn(async move {
             // Reset state for new fetch
@@ -4168,7 +4169,7 @@ fn NostrBlueLiveStreamRenderer(id: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         div {
@@ -4192,7 +4193,8 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    use_effect(move || {
+    // use_reactive! ensures effect re-runs when id prop changes
+    use_effect(use_reactive!(|id| {
         let id_clone = id.clone();
         spawn(async move {
             // Reset state for new fetch
@@ -4237,7 +4239,7 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         div {
@@ -4261,7 +4263,8 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    use_effect(move || {
+    // use_reactive! ensures effect re-runs when id prop changes
+    use_effect(use_reactive!(|id| {
         let id_clone = id.clone();
         spawn(async move {
             // Reset state for new fetch
@@ -4304,7 +4307,7 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         div {
@@ -4933,7 +4936,13 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
     let metadata = extract_recipe_metadata(event);
 
     // Build a_tag for the recipe using identifier
-    let identifier = metadata.identifier.clone().unwrap_or_default();
+    // Guard against empty identifier - use event ID as fallback to ensure uniqueness
+    let identifier = metadata.identifier.clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            log::debug!("Recipe event {} has empty identifier, using event ID as fallback", event.id);
+            event.id.to_hex()
+        });
     let a_tag = format!("30023:{}:{}", event.pubkey.to_hex(), identifier);
 
     let cached = CachedRecipe {
@@ -5057,7 +5066,13 @@ fn NostrBlueProfileRenderer(id: String) -> Element {
                         _ => None,
                     })
             } else {
-                Some(id_clone.clone())
+                // Validate hex pubkey format (64 hex chars = 32 bytes)
+                if id_clone.len() == 64 && id_clone.chars().all(|c| c.is_ascii_hexdigit()) {
+                    Some(id_clone.clone())
+                } else {
+                    log::debug!("Invalid hex pubkey format: {}", id_clone);
+                    None
+                }
             };
 
             if let Some(hex) = pubkey_hex {

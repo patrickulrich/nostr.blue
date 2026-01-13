@@ -936,6 +936,13 @@ fn timestamp_to_date_time(ts: u64) -> (String, String) {
 fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     use wasm_bindgen::JsValue;
 
+    // Validate timezone string - basic sanity check before passing to Intl API
+    // Invalid timezones cause RangeError in Intl.DateTimeFormat
+    if tz.is_empty() || tz.len() > 64 || !tz.chars().all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+') {
+        log::debug!("Invalid timezone format: {}, falling back to local time", tz);
+        return timestamp_to_date_time(ts);
+    }
+
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
 
     // Try to use Intl.DateTimeFormat for timezone conversion
@@ -950,6 +957,8 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     js_sys::Reflect::set(&options, &"hour12".into(), &JsValue::FALSE).ok();
 
     // Format the date parts using Intl API
+    // Note: DateTimeFormat::new may throw RangeError for invalid timezones
+    // that pass basic validation but aren't recognized by the browser
     let formatter = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &options);
     let parts = formatter.format_to_parts(&date);
 

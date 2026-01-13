@@ -1246,6 +1246,7 @@ fn ServerList(
                     placeholder: "https://blossom.example.com",
                     value: "{new_server_url()}",
                     oninput: move |e| new_server_url.set(e.value()),
+                    // Note: Uses same validation as handle_add button (can't directly call closure due to event type)
                     onkeydown: move |e| {
                         if e.key() == Key::Enter {
                             match validate_and_normalize_server_url(&new_server_url()) {
