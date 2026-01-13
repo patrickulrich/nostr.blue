@@ -7,7 +7,6 @@ use dioxus::prelude::*;
 
 use crate::stores::bible_store::{
     self, ChapterContent, VerseContent,
-    get_chapter_api_url,
 };
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
@@ -115,11 +114,9 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
 
             // Fetch highlights in background (don't block chapter render)
             if load_succeeded {
-                let api_url = get_chapter_api_url(&t, &b, c);
-
                 // Spawn highlight fetches separately so they don't block
                 spawn(async move {
-                    let _ = bible_store::fetch_chapter_highlights(&api_url).await;
+                    let _ = bible_store::fetch_chapter_highlights(&t, &b, c).await;
                 });
 
                 // Fetch user's highlights if authenticated
@@ -239,7 +236,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 }
 
                 let book_name = data.book.common_name.clone();
-                let api_url = get_chapter_api_url(&translation, &book, chapter);
 
                 let verse_text_map = build_verse_text_map(&data.chapter.content);
 
@@ -259,9 +255,11 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 };
 
                 let verse_text = text_parts.join(" ");
+                let translation_clone = translation.clone();
+                let book_clone = book.clone();
 
                 spawn(async move {
-                    match bible_store::create_highlight(&verse_text, &reference, &api_url, None).await {
+                    match bible_store::create_highlight(&verse_text, &reference, &translation_clone, &book_clone, chapter, None).await {
                         Ok(_) => {
                             log::info!("Highlight created");
                             highlight_feedback.set(Some((true, "Highlight saved".to_string())));

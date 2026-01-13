@@ -159,20 +159,20 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::Video(url) => format!("vid-{}-{:x}", idx, hash_str(url)),
         ContentToken::Mention(m) => format!("mention-{}-{:x}", idx, hash_str(m)),
         ContentToken::EventMention(m) => format!("event-{}-{:x}", idx, hash_str(m)),
-        ContentToken::Hashtag(tag) => format!("tag-{}", tag),
-        ContentToken::WavlakeTrack(id) => format!("wavlake-track-{}", id),
-        ContentToken::WavlakeAlbum(id) => format!("wavlake-album-{}", id),
-        ContentToken::WavlakeArtist(id) => format!("wavlake-artist-{}", id),
-        ContentToken::WavlakePlaylist(id) => format!("wavlake-playlist-{}", id),
-        ContentToken::TwitterTweet(id) => format!("tweet-{}", id),
-        ContentToken::TwitchStream(ch) => format!("twitch-stream-{}", ch),
-        ContentToken::TwitchClip(slug) => format!("twitch-clip-{}", slug),
-        ContentToken::TwitchVod(id) => format!("twitch-vod-{}", id),
-        ContentToken::YouTube(id) => format!("yt-{}", id),
-        ContentToken::SpotifyTrack(id) => format!("spotify-track-{}", id),
-        ContentToken::SpotifyAlbum(id) => format!("spotify-album-{}", id),
-        ContentToken::SpotifyPlaylist(id) => format!("spotify-playlist-{}", id),
-        ContentToken::SpotifyEpisode(id) => format!("spotify-ep-{}", id),
+        ContentToken::Hashtag(tag) => format!("tag-{}-{}", idx, tag),
+        ContentToken::WavlakeTrack(id) => format!("wavlake-track-{}-{}", idx, id),
+        ContentToken::WavlakeAlbum(id) => format!("wavlake-album-{}-{}", idx, id),
+        ContentToken::WavlakeArtist(id) => format!("wavlake-artist-{}-{}", idx, id),
+        ContentToken::WavlakePlaylist(id) => format!("wavlake-playlist-{}-{}", idx, id),
+        ContentToken::TwitterTweet(id) => format!("tweet-{}-{}", idx, id),
+        ContentToken::TwitchStream(ch) => format!("twitch-stream-{}-{}", idx, ch),
+        ContentToken::TwitchClip(slug) => format!("twitch-clip-{}-{}", idx, slug),
+        ContentToken::TwitchVod(id) => format!("twitch-vod-{}-{}", idx, id),
+        ContentToken::YouTube(id) => format!("yt-{}-{}", idx, id),
+        ContentToken::SpotifyTrack(id) => format!("spotify-track-{}-{}", idx, id),
+        ContentToken::SpotifyAlbum(id) => format!("spotify-album-{}-{}", idx, id),
+        ContentToken::SpotifyPlaylist(id) => format!("spotify-playlist-{}-{}", idx, id),
+        ContentToken::SpotifyEpisode(id) => format!("spotify-ep-{}-{}", idx, id),
         ContentToken::SoundCloud(url) => format!("soundcloud-{}-{:x}", idx, hash_str(url)),
         ContentToken::AppleMusicAlbum(url) => format!("apple-album-{}-{:x}", idx, hash_str(url)),
         ContentToken::AppleMusicPlaylist(url) => format!("apple-playlist-{}-{:x}", idx, hash_str(url)),
@@ -180,42 +180,42 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::MixCloud(user, mix) => format!("mixcloud-{}-{}-{}", idx, user, mix),
         ContentToken::Rumble(url) => format!("rumble-{}-{:x}", idx, hash_str(url)),
         ContentToken::Tidal(url) => format!("tidal-{}-{:x}", idx, hash_str(url)),
-        ContentToken::ZapStream(naddr) => format!("zapstream-{:x}", hash_str(naddr)),
-        ContentToken::ZapCookingRecipe(naddr) => format!("zapcooking-{:x}", hash_str(naddr)),
-        ContentToken::CashuToken(token) => format!("cashu-{:x}", hash_str(token)),
-        ContentToken::Isbn(isbn) => format!("isbn-{}", isbn),
-        ContentToken::Doi(doi) => format!("doi-{:x}", hash_str(doi)),
-        ContentToken::Isan(isan) => format!("isan-{}", isan),
-        ContentToken::PodcastFeed(guid) => format!("podcast-feed-{:x}", hash_str(guid)),
-        ContentToken::PodcastEpisode(guid) => format!("podcast-ep-{:x}", hash_str(guid)),
-        ContentToken::BitcoinTx(txid) => format!("btc-tx-{}", txid),
-        ContentToken::BitcoinAddress(addr) => format!("btc-addr-{}", addr),
-        ContentToken::Geohash(hash) => format!("geo-{}", hash),
+        ContentToken::ZapStream(naddr) => format!("zapstream-{}-{:x}", idx, hash_str(naddr)),
+        ContentToken::ZapCookingRecipe(naddr) => format!("zapcooking-{}-{:x}", idx, hash_str(naddr)),
+        ContentToken::CashuToken(token) => format!("cashu-{}-{:x}", idx, hash_str(token)),
+        ContentToken::Isbn(isbn) => format!("isbn-{}-{}", idx, isbn),
+        ContentToken::Doi(doi) => format!("doi-{}-{:x}", idx, hash_str(doi)),
+        ContentToken::Isan(isan) => format!("isan-{}-{}", idx, isan),
+        ContentToken::PodcastFeed(guid) => format!("podcast-feed-{}-{:x}", idx, hash_str(guid)),
+        ContentToken::PodcastEpisode(guid) => format!("podcast-ep-{}-{:x}", idx, hash_str(guid)),
+        ContentToken::BitcoinTx(txid) => format!("btc-tx-{}-{}", idx, txid),
+        ContentToken::BitcoinAddress(addr) => format!("btc-addr-{}-{}", idx, addr),
+        ContentToken::Geohash(hash) => format!("geo-{}-{}", idx, hash),
         // nostr.blue internal links
-        ContentToken::NostrBlueLiveStream(id) => format!("nb-live-{:x}", hash_str(id)),
-        ContentToken::NostrBlueVideo(id) => format!("nb-video-{:x}", hash_str(id)),
-        ContentToken::NostrBluePhoto(id) => format!("nb-photo-{:x}", hash_str(id)),
-        ContentToken::NostrBlueVoice(id) => format!("nb-voice-{:x}", hash_str(id)),
-        ContentToken::NostrBluePodcastShow(id) => format!("nb-podcast-{:x}", hash_str(id)),
-        ContentToken::NostrBluePodcastEpisode(id) => format!("nb-podcast-ep-{:x}", hash_str(id)),
-        ContentToken::NostrBlueMusicPlaylist(id) => format!("nb-playlist-{:x}", hash_str(id)),
-        ContentToken::NostrBlueRadioStation(id) => format!("nb-radio-{:x}", hash_str(id)),
-        ContentToken::NostrBlueArticle(id) => format!("nb-article-{:x}", hash_str(id)),
-        ContentToken::NostrBlueRecipe(id) => format!("nb-recipe-{:x}", hash_str(id)),
-        ContentToken::NostrBlueNote(id) => format!("nb-note-{:x}", hash_str(id)),
-        ContentToken::NostrBlueProfile(id) => format!("nb-profile-{:x}", hash_str(id)),
-        ContentToken::NostrBlueCalendarEvent(id) => format!("nb-calendar-{:x}", hash_str(id)),
-        ContentToken::NostrBlueWiki(id) => format!("nb-wiki-{:x}", hash_str(id)),
-        ContentToken::NostrBluePublication(id) => format!("nb-pub-{:x}", hash_str(id)),
-        ContentToken::NostrBluePinboard(id) => format!("nb-pinboard-{:x}", hash_str(id)),
-        ContentToken::NostrBlueBadge(id) => format!("nb-badge-{:x}", hash_str(id)),
-        ContentToken::NostrBlueProduct(id) => format!("nb-product-{:x}", hash_str(id)),
-        ContentToken::NostrBlueCodeRepo(id) => format!("nb-repo-{:x}", hash_str(id)),
-        ContentToken::NostrBlueCommunity(id) => format!("nb-community-{:x}", hash_str(id)),
+        ContentToken::NostrBlueLiveStream(id) => format!("nb-live-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueVideo(id) => format!("nb-video-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePhoto(id) => format!("nb-photo-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueVoice(id) => format!("nb-voice-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePodcastShow(id) => format!("nb-podcast-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePodcastEpisode(id) => format!("nb-podcast-ep-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueMusicPlaylist(id) => format!("nb-playlist-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueRadioStation(id) => format!("nb-radio-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueArticle(id) => format!("nb-article-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueRecipe(id) => format!("nb-recipe-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueNote(id) => format!("nb-note-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueProfile(id) => format!("nb-profile-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueCalendarEvent(id) => format!("nb-calendar-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueWiki(id) => format!("nb-wiki-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePublication(id) => format!("nb-pub-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePinboard(id) => format!("nb-pinboard-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueBadge(id) => format!("nb-badge-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueProduct(id) => format!("nb-product-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueCodeRepo(id) => format!("nb-repo-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueCommunity(id) => format!("nb-community-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueRssPodcastEpisode(pid, eid) => {
-            format!("nb-rss-ep-{:x}-{:x}", hash_str(pid), hash_str(eid))
+            format!("nb-rss-ep-{}-{:x}-{:x}", idx, hash_str(pid), hash_str(eid))
         }
-        ContentToken::NostrBlueRssPodcastShow(id) => format!("nb-rss-show-{:x}", hash_str(id)),
+        ContentToken::NostrBlueRssPodcastShow(id) => format!("nb-rss-show-{}-{:x}", idx, hash_str(id)),
     }
 }
 
@@ -4950,25 +4950,36 @@ fn NostrBlueCalendarEventRenderer(id: String) -> Element {
     }
 }
 
-/// Renders a nostr.blue wiki link
+/// Renders a nostr.blue wiki link - dispatches to appropriate renderer based on id type
 #[component]
 fn NostrBlueWikiRenderer(id: String) -> Element {
-    // If it's a topic (not an naddr), render a simple link - no fetch needed
-    if !id.starts_with("naddr1") {
-        return rsx! {
-            div {
-                class: "my-2",
-                onclick: move |e: MouseEvent| e.stop_propagation(),
-                Link {
-                    to: Route::WikiDetail { identifier: id.clone() },
-                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                    "Wiki: {id}"
-                }
-            }
-        };
+    // Branch in RSX to avoid conditional hook calls (Dioxus hook rules)
+    if id.starts_with("naddr1") {
+        rsx! { NostrBlueWikiNaddrRenderer { id: id } }
+    } else {
+        rsx! { NostrBlueWikiTopicRenderer { id: id } }
     }
+}
 
-    // For naddr links, fetch the event
+/// Renders wiki topic links (simple d-tag identifier) - no hooks needed
+#[component]
+fn NostrBlueWikiTopicRenderer(id: String) -> Element {
+    rsx! {
+        div {
+            class: "my-2",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::WikiDetail { identifier: id.clone() },
+                class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                "Wiki: {id}"
+            }
+        }
+    }
+}
+
+/// Renders wiki naddr links with event fetching
+#[component]
+fn NostrBlueWikiNaddrRenderer(id: String) -> Element {
     let id_for_link = id.clone();
     let fetch = use_fetch_event_by_coordinate_with_message(id, "Wiki page not found");
 

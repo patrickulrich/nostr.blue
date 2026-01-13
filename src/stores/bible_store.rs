@@ -52,8 +52,8 @@ pub struct BibleHighlight {
     pub reference: String,
     /// Optional user comment from comment tag
     pub comment: Option<String>,
-    /// API URL for the chapter (from r tag) - used for filtering
-    pub api_url: String,
+    /// Source URL for the chapter (from r tag) - nostr.blue Bible URL for filtering
+    pub source_url: String,
     /// Author's pubkey
     pub pubkey: String,
     /// Created timestamp
@@ -284,10 +284,13 @@ pub async fn load_chapter(translation: &str, book: &str, chapter: u32) -> StdRes
 // ============================================================================
 
 /// Create a highlight event for verse(s)
+/// NIP-84: The r-tag contains the nostr.blue URL (not API URL) so users can navigate to the source.
 pub async fn create_highlight(
     verse_text: &str,
     reference: &str,
-    api_url: &str,
+    translation: &str,
+    book: &str,
+    chapter: u32,
     comment: Option<&str>,
 ) -> StdResult<EventId, String> {
     let client = crate::stores::nostr_client::get_client()
@@ -297,12 +300,14 @@ pub async fn create_highlight(
         return Err("No signer attached - please sign in".to_string());
     }
 
+    // NIP-84: r-tag with "source" attribute points to user-navigable URL
+    let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
+
     // Build event using validated SDK patterns
-    // NIP-84: r-tag with "source" attribute marks this as the highlighted source URL
     let mut builder = EventBuilder::new(Kind::Custom(KIND_HIGHLIGHT), verse_text)
         .tag(Tag::custom(
             TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
-            vec![api_url, "source"]
+            vec![bible_url.as_str(), "source"]
         ))
         .tag(Tag::custom(TagKind::Custom("context".into()), vec![reference]))
         .tag(Tag::hashtag("bible"));
@@ -358,9 +363,11 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHig
 }
 
 /// Fetch all highlights for a specific chapter (from all users)
-pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighlight>, String> {
+pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u32) -> StdResult<Vec<BibleHighlight>, String> {
+    let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
+
     // Set this as the latest requested URL for race prevention
-    *LATEST_REQUESTED_HIGHLIGHT_URL.write() = api_url.to_string();
+    *LATEST_REQUESTED_HIGHLIGHT_URL.write() = bible_url.clone();
 
     // Clear stale highlights immediately to prevent showing old data during fetch
     CURRENT_CHAPTER_HIGHLIGHTS.write().clear();
@@ -370,7 +377,7 @@ pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighl
 
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_HIGHLIGHT))
-        .reference(api_url)
+        .reference(&bible_url)
         .limit(500);
 
     match client.fetch_events(filter, Duration::from_secs(10)).await {
@@ -381,11 +388,11 @@ pub async fn fetch_chapter_highlights(api_url: &str) -> StdResult<Vec<BibleHighl
                 .collect();
 
             // Only update global state if still the latest request
-            if *LATEST_REQUESTED_HIGHLIGHT_URL.read() == api_url {
+            if *LATEST_REQUESTED_HIGHLIGHT_URL.read() == bible_url {
                 *CURRENT_CHAPTER_HIGHLIGHTS.write() = highlights.clone();
             }
 
-            log::info!("Fetched {} chapter highlights for {}", highlights.len(), api_url);
+            log::info!("Fetched {} chapter highlights for {}", highlights.len(), bible_url);
             Ok(highlights)
         }
         Err(e) => {
@@ -435,8 +442,9 @@ fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
             }
         });
 
-    // Extract r tag (API URL) - REQUIRED, non-empty (nostr-sdk pattern: early validation)
-    let api_url = tags.iter()
+    // Extract r tag (source URL) - REQUIRED, non-empty (nostr-sdk pattern: early validation)
+    // NIP-84: This is the nostr.blue URL users can navigate to
+    let source_url = tags.iter()
         .find_map(|tag| {
             let slice = tag.as_slice();
             if slice.first().map(|s| s.as_str()) == Some("r") {
@@ -464,7 +472,7 @@ fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
         verse_text: event.content.clone(),
         reference,
         comment,
-        api_url,
+        source_url,
         pubkey: event.pubkey.to_hex(),
         created_at: event.created_at.as_secs(),
         event: event.clone(),
@@ -505,11 +513,11 @@ fn verse_matches_reference(reference: &str, target_verse: u32) -> bool {
 
 /// Check if a verse is highlighted by the current user
 pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: u32) -> bool {
-    let api_url = get_chapter_api_url(translation, book, chapter);
+    let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().any(|h| {
-        h.api_url == api_url && verse_matches_reference(&h.reference, verse)
+        h.source_url == bible_url && verse_matches_reference(&h.reference, verse)
     })
 }
 
@@ -543,11 +551,11 @@ pub fn get_chapter_highlight_stats() -> ChapterHighlightStats {
 
 /// Get user's highlight for a specific verse (if any)
 pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32, verse: u32) -> Option<BibleHighlight> {
-    let api_url = get_chapter_api_url(translation, book, chapter);
+    let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().find(|h| {
-        h.api_url == api_url && verse_matches_reference(&h.reference, verse)
+        h.source_url == bible_url && verse_matches_reference(&h.reference, verse)
     }).cloned()
 }
 
@@ -664,9 +672,15 @@ pub fn split_books_by_testament(books: &[Book]) -> (Vec<Book>, Vec<Book>) {
     (old_testament, new_testament)
 }
 
-/// Format chapter navigation URL
+/// Format chapter navigation URL (relative path for internal routing)
 pub fn format_bible_url(translation: &str, book: &str, chapter: u32) -> String {
     format!("/bible/{}/{}/{}", translation, book, chapter)
+}
+
+/// Generate the canonical nostr.blue Bible URL for NIP-84 highlights.
+/// This URL is used in r-tags to link back to the source content.
+pub fn get_nostr_blue_bible_url(translation: &str, book: &str, chapter: u32) -> String {
+    format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter)
 }
 
 /// Clear all store state
