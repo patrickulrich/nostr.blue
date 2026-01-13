@@ -16,7 +16,7 @@ use crate::components::{
     ContentShareModal, ContentType,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client::{self, HAS_SIGNER}, auth_store, music_player, nostr_music};
+use crate::stores::{nostr_client, auth_store, music_player, nostr_music};
 use crate::services::podcast_rss::{self, format_duration};
 use crate::utils::podcast::{self, PodcastMetadata};
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
@@ -41,13 +41,12 @@ pub fn PodcastNostrEpisodeDetail(props: PodcastNostrEpisodeDetailProps) -> Eleme
     let mut episode_data = use_signal(|| None::<Result<(DisplayEpisode, PodcastMetadata), String>>);
     let mut loading = use_signal(|| true);
 
-    // Fetch episode when client is initialized AND signer is ready
+    // Fetch episode when client is initialized
     use_effect(move || {
         let naddr = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let has_signer = *HAS_SIGNER.read();
 
-        if !client_initialized || !has_signer {
+        if !client_initialized {
             return;
         }
 
@@ -68,7 +67,7 @@ pub fn PodcastNostrEpisodeDetail(props: PodcastNostrEpisodeDetailProps) -> Eleme
             EpisodeDetailHeader {}
 
             // Content
-            if !*nostr_client::CLIENT_INITIALIZED.read() || !*HAS_SIGNER.read() || *loading.read() {
+            if !*nostr_client::CLIENT_INITIALIZED.read() || *loading.read() {
                 EpisodeDetailSkeleton {}
             } else {
                 match episode_data.read().as_ref() {
