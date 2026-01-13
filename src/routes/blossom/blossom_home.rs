@@ -71,10 +71,16 @@ pub fn BlossomPage() -> Element {
             return;
         }
 
-        files_loaded.set(true);
         spawn(async move {
-            if let Err(e) = blossom_store::list_files().await {
-                log::error!("Failed to load files: {}", e);
+            match blossom_store::list_files().await {
+                Ok(_) => {
+                    // Only set loaded flag on success - allows retry on failure
+                    files_loaded.set(true);
+                }
+                Err(e) => {
+                    log::error!("Failed to load files: {}", e);
+                    // files_loaded stays false, allowing retry on next render
+                }
             }
         });
     });
@@ -94,10 +100,16 @@ pub fn BlossomPage() -> Element {
             return;
         }
 
-        servers_loaded.set(true);
         spawn(async move {
-            if let Err(e) = blossom_store::fetch_user_servers().await {
-                log::warn!("Failed to load servers: {}", e);
+            match blossom_store::fetch_user_servers().await {
+                Ok(_) => {
+                    // Only set loaded flag on success - allows retry on failure
+                    servers_loaded.set(true);
+                }
+                Err(e) => {
+                    log::warn!("Failed to load servers: {}", e);
+                    // servers_loaded stays false, allowing retry on next render
+                }
             }
         });
     });
@@ -823,16 +835,14 @@ fn UploadModal(
                 let input_for_closure = input.clone();
                 let input_for_cleanup = input.clone();
 
-                // Use Closure::once - automatically cleaned up after first call
-                let closure = wasm_bindgen::closure::Closure::once(Box::new(move || {
+                // Use gloo EventListener::once for zero-leak RAII cleanup
+                let _listener = gloo_events::EventListener::once(&input, "change", move |_| {
                     if let Some(tx) = tx.borrow_mut().take() {
                         let file = input_for_closure.files().and_then(|f| f.get(0));
                         let _ = tx.send(file);
                     }
-                }) as Box<dyn FnOnce()>);
+                });
 
-                input.set_onchange(Some(closure.as_ref().unchecked_ref()));
-                closure.forget(); // Keep closure alive until JS callback fires (Dioxus pattern)
                 input.click();
 
                 // Wait for file selection with timeout to prevent hanging
@@ -880,7 +890,7 @@ fn UploadModal(
                     file_data.set(Some((name, data, mime_type)));
                 }
 
-                // Clean up: remove from DOM (closure auto-drops with Closure::once)
+                // Clean up: remove input element from DOM
                 body.remove_child(&input_for_cleanup).ok();
             });
         }

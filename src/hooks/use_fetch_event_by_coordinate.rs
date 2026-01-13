@@ -68,7 +68,15 @@ pub fn use_fetch_event_by_coordinate_with_message(
     naddr: String,
     not_found_message: &'static str,
 ) -> UseFetchEventByCoordinate {
-    let naddr_signal = use_signal(|| naddr);
+    // Create signal to track the prop
+    let mut naddr_signal = use_signal(|| naddr.clone());
+
+    // Sync prop changes to the signal using use_reactive! (Dioxus best practice)
+    use_effect(use_reactive!(|naddr| {
+        naddr_signal.set(naddr);
+    }));
+
+    // use_resource auto-tracks naddr_signal reads and re-runs when it changes
     let resource = use_resource(move || async move { fetch_event_by_coordinate(&naddr_signal()).await });
     UseFetchEventByCoordinate {
         resource,
@@ -113,7 +121,15 @@ pub fn use_fetch_event_by_coordinate(
 
 /// Async helper to fetch event by coordinate
 async fn fetch_event_by_coordinate(naddr: &str) -> Result<Option<NostrEvent>, String> {
-    match Nip19::from_bech32(naddr) {
+    // Normalize: trim whitespace, strip nostr: prefix (NIP-21)
+    // Note: bech32 handles case internally
+    let trimmed = naddr.trim();
+    let normalized = trimmed
+        .strip_prefix("nostr:")
+        .or_else(|| trimmed.strip_prefix("NOSTR:"))
+        .unwrap_or(trimmed);
+
+    match Nip19::from_bech32(normalized) {
         Ok(Nip19::Coordinate(coord)) => {
             let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
 

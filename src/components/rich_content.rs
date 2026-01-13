@@ -5374,6 +5374,7 @@ mod tests {
     /// Test that duplicate URLs at different positions get unique keys (Issue 10 fix verification)
     #[test]
     fn test_token_key_uniqueness_for_duplicates() {
+        // Test Image tokens
         let url = "https://example.com/test.jpg";
         let token1 = ContentToken::Image(url.to_string());
         let token2 = ContentToken::Image(url.to_string());
@@ -5383,7 +5384,60 @@ mod tests {
 
         assert_ne!(
             key1, key2,
-            "Same URL at different positions should have unique keys"
+            "Same Image URL at different positions should have unique keys"
+        );
+
+        // Test Hashtag tokens
+        let hashtag = "nostr";
+        let token3 = ContentToken::Hashtag(hashtag.to_string());
+        let token4 = ContentToken::Hashtag(hashtag.to_string());
+
+        let key3 = token_key(&token3, 0);
+        let key4 = token_key(&token4, 1);
+
+        assert_ne!(
+            key3, key4,
+            "Same Hashtag at different positions should have unique keys"
+        );
+
+        // Test YouTube tokens
+        let youtube_url = "https://youtube.com/watch?v=abc123";
+        let token5 = ContentToken::YouTube(youtube_url.to_string());
+        let token6 = ContentToken::YouTube(youtube_url.to_string());
+
+        let key5 = token_key(&token5, 0);
+        let key6 = token_key(&token6, 1);
+
+        assert_ne!(
+            key5, key6,
+            "Same YouTube URL at different positions should have unique keys"
+        );
+
+        // Test NostrBlueNote tokens
+        let note_id = "note1abc123def456";
+        let token7 = ContentToken::NostrBlueNote(note_id.to_string());
+        let token8 = ContentToken::NostrBlueNote(note_id.to_string());
+
+        let key7 = token_key(&token7, 0);
+        let key8 = token_key(&token8, 1);
+
+        assert_ne!(
+            key7, key8,
+            "Same NostrBlueNote at different positions should have unique keys"
+        );
+
+        // Test NostrBlueRssPodcastEpisode tokens (tuple variant)
+        let feed_url = "https://example.com/feed.xml";
+        let guid = "episode-123";
+        let token9 = ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+        let token10 = ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+
+        let key9 = token_key(&token9, 0);
+        let key10 = token_key(&token10, 1);
+
+        assert_ne!(
+            key9, key10,
+            "Same NostrBlueRssPodcastEpisode at different positions should have unique keys"
         );
     }
 }

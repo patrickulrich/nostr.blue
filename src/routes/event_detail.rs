@@ -200,10 +200,12 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 let now = (js_sys::Date::now() / 1000.0) as u64;
                                 // Generate temporary unique ID for stable UI keys until refresh succeeds
                                 let temp_id = format!("temp-{}-{}", now, uuid::Uuid::new_v4());
+                                // Sanitize content to match what fetched comments would have
+                                let sanitized_content = ammonia::clean(&content);
                                 let optimistic_comment = CalendarEventComment {
                                     event_id: temp_id,
                                     pubkey: my_pubkey,
-                                    content: content.clone(),
+                                    content: sanitized_content.to_string(),
                                     created_at: now,
                                 };
                                 let mut current_comments = comments.read().clone();

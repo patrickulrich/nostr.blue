@@ -149,6 +149,7 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version 
 # RSS feed parsing and podcast support
 quick-xml = "0.37"
 strum = { version = "0.27.2", features = ["derive"] }
+gloo-events = "0.2.0"
 
 [profile.release]
 opt-level = "z"

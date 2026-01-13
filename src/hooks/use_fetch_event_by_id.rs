@@ -45,15 +45,24 @@ impl UseFetchEventById {
 
 /// Parse an event ID from various formats (nevent, note, hex)
 fn parse_event_id(id: &str) -> Option<EventId> {
-    if id.starts_with("nevent1") || id.starts_with("note1") {
-        Nip19::from_bech32(id).ok().and_then(|n| match n {
-            Nip19::Event(e) => Some(e.event_id),
-            Nip19::EventId(id) => Some(id),
-            _ => None,
-        })
-    } else {
-        EventId::from_hex(id).ok()
+    // Normalize: trim whitespace, strip nostr: prefix (NIP-21)
+    let trimmed = id.trim();
+    let normalized = trimmed
+        .strip_prefix("nostr:")
+        .or_else(|| trimmed.strip_prefix("NOSTR:"))
+        .unwrap_or(trimmed);
+
+    // Try hex first (nostr-sdk pattern), then bech32
+    if let Ok(event_id) = EventId::from_hex(normalized) {
+        return Some(event_id);
     }
+
+    // Try bech32 (nevent1, note1) - bech32 handles case internally
+    Nip19::from_bech32(normalized).ok().and_then(|n| match n {
+        Nip19::Event(e) => Some(e.event_id),
+        Nip19::EventId(id) => Some(id),
+        _ => None,
+    })
 }
 
 /// Async helper to fetch event by ID with optional kind validation
@@ -112,7 +121,15 @@ pub fn use_fetch_event_by_id(
     valid_kinds: &'static [u16],
     not_found_message: &'static str,
 ) -> UseFetchEventById {
-    let id_signal = use_signal(|| id);
+    // Create signal to track the prop
+    let mut id_signal = use_signal(|| id.clone());
+
+    // Sync prop changes to the signal using use_reactive! (Dioxus best practice)
+    use_effect(use_reactive!(|id| {
+        id_signal.set(id);
+    }));
+
+    // use_resource auto-tracks id_signal reads and re-runs when it changes
     let resource = use_resource(move || async move { fetch_event_by_id_inner(&id_signal(), valid_kinds).await });
     UseFetchEventById {
         resource,

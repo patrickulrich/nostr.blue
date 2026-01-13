@@ -69,6 +69,9 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut share_url = use_signal(String::new);
     let mut share_content = use_signal(String::new);
 
+    // State for highlight feedback toast (success: bool, message: String)
+    let mut highlight_feedback = use_signal(|| None::<(bool, String)>);
+
     let is_authenticated = auth_store::is_authenticated();
 
     // Use a single key to track chapter identity - computed fresh each render from current props
@@ -259,8 +262,24 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
 
                 spawn(async move {
                     match bible_store::create_highlight(&verse_text, &reference, &api_url, None).await {
-                        Ok(_) => log::info!("Highlight created"),
-                        Err(e) => log::error!("Failed to create highlight: {}", e),
+                        Ok(_) => {
+                            log::info!("Highlight created");
+                            highlight_feedback.set(Some((true, "Highlight saved".to_string())));
+                            // Auto-clear after 2 seconds
+                            spawn(async move {
+                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                highlight_feedback.set(None);
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to create highlight: {}", e);
+                            highlight_feedback.set(Some((false, format!("Failed: {}", e))));
+                            // Auto-clear after 4 seconds for errors
+                            spawn(async move {
+                                gloo_timers::future::TimeoutFuture::new(4000).await;
+                                highlight_feedback.set(None);
+                            });
+                        }
                     }
                 });
 
@@ -642,6 +661,15 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             }
                         }
                     }
+                }
+            }
+
+            // Highlight feedback toast
+            if let Some((success, message)) = highlight_feedback.read().clone() {
+                div {
+                    class: "fixed bottom-36 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg text-sm font-medium",
+                    class: if success { "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200" } else { "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200" },
+                    "{message}"
                 }
             }
 

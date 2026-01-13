@@ -36,6 +36,8 @@ pub fn Events() -> Element {
     let mut searching = use_signal(|| false);
     let mut search_debounce_id = use_signal(|| 0u32);
     let mut show_more_filters = use_signal(|| false);
+    // Track whether user is actively in search mode (separate from having results)
+    let mut search_mode_active = use_signal(|| false);
 
     // Track previous search term to avoid redundant NIP-50 calls
     let mut last_search_term = use_signal(String::new);
@@ -103,11 +105,14 @@ pub fn Events() -> Element {
             search_debounce_id.set(current_id);
             search_results.set(None);
             searching.set(false);
-            // Reset pagination to allow fresh pagination when exiting search
+            // Exit search mode and reset pagination
+            search_mode_active.set(false);
             has_more.set(true);
             return;
         }
 
+        // Enter search mode
+        search_mode_active.set(true);
         // Increment debounce ID to cancel previous searches
         // Use peek() to avoid creating a reactive dependency (would cause infinite loop)
         let current_id = *search_debounce_id.peek() + 1;
@@ -208,7 +213,8 @@ pub fn Events() -> Element {
         let hashtag = selected_hashtag.read().clone();
 
         // Use search results if available (NIP-50 search is active)
-        let from_nip50 = search_results.read().is_some();
+        // Use search_mode_active to determine if we're filtering (not just presence of results)
+        let from_nip50 = *search_mode_active.read();
         let base_events = if let Some(ref results) = *search_results.read() {
             log::info!("[Events] Using NIP-50 search results: {} events", results.len());
             results.clone()
@@ -689,7 +695,8 @@ pub fn Events() -> Element {
             }
 
             // Infinite scroll sentinel (only for Grid view, disabled during NIP-50 search)
-            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() && search_results.peek().is_none() {
+            // Only show infinite scroll when not in search mode (search has its own result set)
+            if *view_mode.read() == ViewMode::Grid && *has_more.read() && !*loading.read() && !filtered_events.read().is_empty() && !*search_mode_active.peek() {
                 div {
                     id: "{sentinel_id}",
                     class: "p-8 flex justify-center",
