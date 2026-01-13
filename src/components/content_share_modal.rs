@@ -22,6 +22,7 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
+    #[cfg(target_arch = "wasm32")]
     BibleVerse,
 }
 
@@ -32,6 +33,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
+            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Bible",
         }
     }
@@ -42,6 +44,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
+            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Share Verses",
         }
     }
@@ -52,6 +55,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
+            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
@@ -62,6 +66,7 @@ impl ContentType {
             ContentType::PodcastEpisode => format!("Check out this episode on nostr.blue: {}", url),
             ContentType::MusicAlbum => format!("Check out this album on nostr.blue: {}", url),
             ContentType::MusicTrack => format!("Check out this track on nostr.blue: {}", url),
+            #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => format!("Check out this Bible passage on nostr.blue: {}", url),
         }
     }
@@ -280,6 +285,7 @@ pub fn ContentShareModal(
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
+                                        #[cfg(target_arch = "wasm32")]
                                         ContentType::BibleVerse => rsx! {
                                             BookOpenIcon { class: "w-6 h-6 text-white" }
                                         },

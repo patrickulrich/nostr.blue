@@ -51,10 +51,18 @@ pub fn BlossomPage() -> Element {
     let mut selected_file = use_signal(|| None::<MediaItem>);
     let mut deleting = use_signal(|| false);
     let mut mirroring = use_signal(|| false);
+    // Guard signals to prevent duplicate fetches when signals change
+    let mut files_loaded = use_signal(|| false);
+    let mut servers_loaded = use_signal(|| false);
 
     // Load files when client is initialized AND signer is ready
     // Signer is required for NIP-98 auth headers when listing files
     use_effect(move || {
+        // Guard against duplicate fetches
+        if *files_loaded.read() {
+            return;
+        }
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *HAS_SIGNER.read();
 
@@ -63,6 +71,7 @@ pub fn BlossomPage() -> Element {
             return;
         }
 
+        files_loaded.set(true);
         spawn(async move {
             if let Err(e) = blossom_store::list_files().await {
                 log::error!("Failed to load files: {}", e);
@@ -72,6 +81,11 @@ pub fn BlossomPage() -> Element {
 
     // Load servers when client is initialized AND signer is ready
     use_effect(move || {
+        // Guard against duplicate fetches
+        if *servers_loaded.read() {
+            return;
+        }
+
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *HAS_SIGNER.read();
 
@@ -80,6 +94,7 @@ pub fn BlossomPage() -> Element {
             return;
         }
 
+        servers_loaded.set(true);
         spawn(async move {
             if let Err(e) = blossom_store::fetch_user_servers().await {
                 log::warn!("Failed to load servers: {}", e);
@@ -577,6 +592,10 @@ fn FileDetailModal(
             aria_modal: "true",
             aria_labelledby: "{title_id}",
             tabindex: "-1",
+            onmounted: move |evt| async move {
+                // Focus the modal for keyboard accessibility (Escape key handling)
+                let _ = evt.set_focus(true).await;
+            },
             onclick: move |_| on_close.call(()),
             onkeydown: move |e| {
                 if e.key() == Key::Escape {

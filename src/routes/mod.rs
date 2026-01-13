@@ -131,8 +131,31 @@ pub mod shop_search;
 // Blossom Media Management (BUD-01/02/04/05)
 pub mod blossom;
 
-// Bible Reading (NIP-84 Highlights)
+// Bible Reading (NIP-84 Highlights) - WASM-only
+#[cfg(target_arch = "wasm32")]
 pub mod bible;
+
+// Stub bible module for non-WASM builds (clippy/check on native targets)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bible {
+    use dioxus::prelude::*;
+
+    #[component]
+    pub fn BibleHome() -> Element {
+        rsx! { div { "Bible requires WASM target" } }
+    }
+
+    #[component]
+    pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
+        let _ = (translation, book, chapter);
+        rsx! { div { "Bible requires WASM target" } }
+    }
+
+    #[component]
+    pub fn BibleSearch() -> Element {
+        rsx! { div { "Bible requires WASM target" } }
+    }
+}
 pub mod code_repositories;
 pub mod code_snippets;
 pub mod code_snippet_detail;

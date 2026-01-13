@@ -14,6 +14,8 @@ pub fn BibleSearch() -> Element {
     let mut query = use_signal(String::new);
     let mut results = use_signal(Vec::<BibleSearchResult>::new);
     let mut has_searched = use_signal(|| false);
+    // Track the trimmed query that was actually used for search (for accurate highlighting)
+    let mut last_searched_query = use_signal(String::new);
 
     // Count cached chapters (uses efficient count-only function, no cloning)
     let cached_count = cached_chapter_count();
@@ -27,9 +29,12 @@ pub fn BibleSearch() -> Element {
             let found = search_cached_verses(&q, 50);
             results.set(found);
             has_searched.set(true);
+            // Store the trimmed query for accurate highlighting
+            last_searched_query.set(q);
         } else {
             results.set(Vec::new());
             has_searched.set(false);
+            last_searched_query.set(String::new());
         }
     };
 
@@ -145,7 +150,7 @@ pub fn BibleSearch() -> Element {
                             SearchResultCard {
                                 key: "{result.translation}-{result.book}-{result.chapter}-{result.verse}",
                                 result: result.clone(),
-                                query: query.read().clone()
+                                query: last_searched_query.read().clone()
                             }
                         }
                     }

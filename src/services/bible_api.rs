@@ -1,7 +1,7 @@
 //! Bible API client for fetching translations, books, and chapters.
 //!
 //! This module is WASM-only as it uses web_sys::AbortController and gloo_net.
-#![cfg(target_arch = "wasm32")]
+//! (Gated in services/mod.rs)
 
 use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;

@@ -45,5 +45,6 @@ pub mod directory_store;    // NKBIP-04 Directory System (kinds 30042-30045)
 pub mod podcast_subscription;  // NIP-51 Podcast Subscriptions (kind 30003)
 pub mod subscription_manager;  // SDK subscription auto-close helpers
 pub mod draft_store;           // NIP-37 Draft Wraps (kind 31234) + Private Relays (kind 10013)
-pub mod bible_store;           // NIP-84 Bible highlights (kind 9802) + HelloAO API
+#[cfg(target_arch = "wasm32")]
+pub mod bible_store;           // NIP-84 Bible highlights (kind 9802) + HelloAO API (WASM-only)
 

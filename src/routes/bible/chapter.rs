@@ -13,6 +13,19 @@ use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 
+/// Build a HashMap mapping verse numbers to plain text for efficient lookup
+fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
+    content.iter()
+        .filter_map(|c| {
+            if let ChapterContent::Verse { number, content: verse_content } = c {
+                Some((*number, verse_to_plain_text(verse_content)))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Bible Chapter Reading View
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
@@ -121,16 +134,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 let book_name = &data.book.common_name;
                 let mut text_parts = Vec::new();
 
-                // Build verse text map once for O(n) lookup instead of O(n²)
-                let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
-                    .filter_map(|content| {
-                        if let ChapterContent::Verse { number, content: verse_content } = content {
-                            Some((*number, verse_to_plain_text(verse_content)))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let verse_text_map = build_verse_text_map(&data.chapter.content);
 
                 for v in verses.iter() {
                     if let Some(text) = verse_text_map.get(v) {
@@ -191,16 +195,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 let book_name = data.book.common_name.clone();
                 let api_url = get_chapter_api_url(&translation, &book, chapter);
 
-                // Build verse text map once for O(n) lookup instead of O(n²)
-                let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
-                    .filter_map(|content| {
-                        if let ChapterContent::Verse { number, content: verse_content } = content {
-                            Some((*number, verse_to_plain_text(verse_content)))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let verse_text_map = build_verse_text_map(&data.chapter.content);
 
                 let mut text_parts = Vec::new();
                 for v in &verses {
@@ -529,16 +524,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                         let first = *verses.first().unwrap_or(&0);
                                         let last = *verses.last().unwrap_or(&0);
 
-                                        // Build verse text map once for O(n) lookup instead of O(n²)
-                                        let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
-                                            .filter_map(|content| {
-                                                if let ChapterContent::Verse { number, content: verse_content } = content {
-                                                    Some((*number, verse_to_plain_text(verse_content)))
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .collect();
+                                        let verse_text_map = build_verse_text_map(&data.chapter.content);
 
                                         let mut text_parts = Vec::new();
                                         for v in verses.iter() {

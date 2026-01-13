@@ -342,6 +342,15 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 onclick: move |e| e.stop_propagation(),
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape {
+                        // Check for search-in-progress before closing (same logic as close_modal)
+                        if *is_searching.read() {
+                            let confirmed = web_sys::window()
+                                .and_then(|w| w.confirm_with_message("A search is in progress. Close anyway?").ok())
+                                .unwrap_or(false);
+                            if !confirmed {
+                                return;
+                            }
+                        }
                         props.show.set(false);
                     }
                 },
