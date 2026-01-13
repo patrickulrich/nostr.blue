@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, PublicKey, FromBech32};
+use std::sync::atomic::{AtomicU32, Ordering};
 use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
@@ -8,6 +9,9 @@ use crate::components::icons::{
     FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon
 };
 use crate::utils::clipboard::copy_to_clipboard;
+
+/// Global counter for generating unique modal IDs
+static SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, PartialEq)]
 enum ShareMode {
@@ -24,6 +28,11 @@ pub fn ShareModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
+    // Generate unique ID suffix for this modal instance
+    let modal_id = use_signal(|| SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let title_id = format!("share-modal-title-{}", modal_id());
+    let desc_id = format!("share-modal-desc-{}", modal_id());
+
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
@@ -242,6 +251,10 @@ pub fn ShareModal(
             // Modal content
             div {
                 class: "bg-card border border-border rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-y-auto",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "{title_id}",
+                aria_describedby: "{desc_id}",
                 tabindex: "-1",
                 onmounted: move |_evt| {
                     #[cfg(target_arch = "wasm32")]
@@ -274,6 +287,7 @@ pub fn ShareModal(
                         ShareIcon { class: "w-5 h-5" }
                         h3 {
                             class: "text-lg font-semibold ml-2",
+                            id: "{title_id}",
                             match *share_mode.read() {
                                 ShareMode::Main => {
                                     if is_recipe { "Share Recipe" }
@@ -301,6 +315,7 @@ pub fn ShareModal(
                         // Content preview card
                         div {
                             class: "bg-accent rounded-lg p-4 flex items-center gap-3",
+                            id: "{desc_id}",
                             div {
                                 class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0",
                                 if is_recipe {

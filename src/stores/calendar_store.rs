@@ -1553,11 +1553,11 @@ pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<Unifi
     );
 
     // Only fail if BOTH fetches failed (following Nostr SDK graceful degradation pattern)
-    if cal_result.is_err() && meeting_result.is_err() {
+    if let (Err(cal_err), Err(meeting_err)) = (&cal_result, &meeting_result) {
         return Err(format!(
             "Search failed - calendar: {}, meetings: {}",
-            cal_result.as_ref().unwrap_err(),
-            meeting_result.as_ref().unwrap_err()
+            cal_err,
+            meeting_err
         ));
     }
 

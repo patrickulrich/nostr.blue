@@ -88,20 +88,34 @@ pub fn RichContent(
         false
     };
 
+    let groups = group_tokens(&tokens);
+
     if collapsible && is_long_content {
         rsx! {
             div {
                 class: "relative",
                 div {
                     class: if *is_expanded.read() {
-                        "whitespace-pre-wrap break-words space-y-2"
+                        "whitespace-pre-wrap break-words"
                     } else {
-                        "whitespace-pre-wrap break-words space-y-2 max-h-[24em] overflow-hidden"
+                        "whitespace-pre-wrap break-words max-h-[24em] overflow-hidden"
                     },
-                    for (idx, token) in tokens.iter().enumerate() {
-                        div {
-                            key: "{token_key(token, idx)}",
-                            {render_token(token)}
+                    for group in groups.iter() {
+                        match group {
+                            TokenGroup::Inline(items) => rsx! {
+                                span {
+                                    key: "inline-{items[0].0}",
+                                    for (_idx, token) in items.iter() {
+                                        {render_token(token)}
+                                    }
+                                }
+                            },
+                            TokenGroup::Block(idx, token) => rsx! {
+                                div {
+                                    key: "{token_key(token, *idx)}",
+                                    {render_token(token)}
+                                }
+                            }
                         }
                     }
                 }
@@ -124,11 +138,23 @@ pub fn RichContent(
     } else {
         rsx! {
             div {
-                class: "whitespace-pre-wrap break-words space-y-2",
-                for (idx, token) in tokens.iter().enumerate() {
-                    div {
-                        key: "{token_key(token, idx)}",
-                        {render_token(token)}
+                class: "whitespace-pre-wrap break-words",
+                for group in groups.iter() {
+                    match group {
+                        TokenGroup::Inline(items) => rsx! {
+                            span {
+                                key: "inline-{items[0].0}",
+                                for (_idx, token) in items.iter() {
+                                    {render_token(token)}
+                                }
+                            }
+                        },
+                        TokenGroup::Block(idx, token) => rsx! {
+                            div {
+                                key: "{token_key(token, *idx)}",
+                                {render_token(token)}
+                            }
+                        }
                     }
                 }
             }
@@ -143,6 +169,46 @@ fn hash_str(s: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Check if a token should be rendered inline (flows with text)
+/// vs block-level (renders on its own line with spacing)
+fn is_inline_token(token: &ContentToken) -> bool {
+    matches!(token,
+        ContentToken::Text(_) |
+        ContentToken::Link(_) |
+        ContentToken::Mention(_) |
+        ContentToken::Hashtag(_)
+    )
+}
+
+/// Represents a group of tokens for rendering purposes
+enum TokenGroup<'a> {
+    /// Consecutive inline tokens that should flow together
+    Inline(Vec<(usize, &'a ContentToken)>),
+    /// A single block-level token that needs its own line
+    Block(usize, &'a ContentToken),
+}
+
+/// Group consecutive inline tokens together for proper text flow
+fn group_tokens(tokens: &[ContentToken]) -> Vec<TokenGroup<'_>> {
+    let mut groups = Vec::new();
+    let mut inline_group: Vec<(usize, &ContentToken)> = Vec::new();
+
+    for (idx, token) in tokens.iter().enumerate() {
+        if is_inline_token(token) {
+            inline_group.push((idx, token));
+        } else {
+            if !inline_group.is_empty() {
+                groups.push(TokenGroup::Inline(std::mem::take(&mut inline_group)));
+            }
+            groups.push(TokenGroup::Block(idx, token));
+        }
+    }
+    if !inline_group.is_empty() {
+        groups.push(TokenGroup::Inline(inline_group));
+    }
+    groups
 }
 
 /// Generate a stable key for a ContentToken to avoid DOM reuse bugs from index-based keys.
@@ -4461,10 +4527,55 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                         // Fall through to search-based approach
                     }
                 }
+            } else {
+                // Non-numeric episode ID - try GUID-based lookup first
+                match podcast_index::get_episode_by_guid(&decoded_episode_id, None).await {
+                    Ok((ep, feed_opt)) => {
+                        // Verify it's from the correct podcast by checking feed_id
+                        if ep.feed_id == Some(feed_id) {
+                            let feed = match feed_opt {
+                                Some(f) => f,
+                                None => {
+                                    // Try to fetch feed info, fall back to minimal feed
+                                    podcast_index::get_podcast_by_id(feed_id).await.unwrap_or_else(|_| {
+                                        podcast_index::PodcastFeed {
+                                            id: feed_id,
+                                            title: ep.feed_title.clone().unwrap_or_default(),
+                                            url: ep.feed_url.clone().unwrap_or_default(),
+                                            original_url: None,
+                                            link: None,
+                                            description: None,
+                                            author: None,
+                                            owner_name: None,
+                                            image: ep.feed_image.clone(),
+                                            artwork: None,
+                                            language: None,
+                                            itunes_id: None,
+                                            podcast_guid: ep.podcast_guid.clone(),
+                                            categories: None,
+                                            episode_count: None,
+                                            trending_score: None,
+                                            value: None,
+                                        }
+                                    })
+                                }
+                            };
+                            let display = DisplayEpisode::from_podcast_index_episode(&ep, &feed);
+                            episode_data.set(Some(display));
+                            loading.set(false);
+                            return;
+                        } else {
+                            log::debug!("GUID lookup returned episode from different feed, falling back to search");
+                        }
+                    }
+                    Err(e) => {
+                        log::debug!("GUID-based episode fetch failed ({}), falling back to search", e);
+                    }
+                }
             }
 
             // Fallback: search through episodes with pagination
-            // This handles non-numeric episode IDs (GUIDs) or when direct fetch fails
+            // This handles when direct/GUID fetch fails
             match podcast_index::get_podcast_by_id(feed_id).await {
                 Ok(feed) => {
                     const MAX_PAGES: u32 = 5;
