@@ -3,6 +3,7 @@ use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigge
 use dioxus_primitives::ContentSide;
 use crate::utils::content_parser::{parse_content, ContentToken};
 use crate::routes::Route;
+use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
 use nostr_sdk::{Tag, FromBech32, ToBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip19::Nip19;
@@ -4134,52 +4135,17 @@ fn nostr_blue_error(message: &str) -> Element {
 /// Renders a nostr.blue livestream link as a LiveStreamCard
 #[component]
 fn NostrBlueLiveStreamRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    // use_reactive! ensures effect re-runs when id prop changes
-    use_effect(use_reactive!(|id| {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Reset state for new fetch
-            loading.set(true);
-            event.set(None);
-            error.set(None);
-
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Livestream not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid livestream address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    }));
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Livestream not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 LiveStreamCard { event: ev.clone() }
             }
         }
@@ -4189,67 +4155,18 @@ fn NostrBlueLiveStreamRenderer(id: String) -> Element {
 /// Renders a nostr.blue video link
 #[component]
 fn NostrBlueVideoRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    // use_reactive! ensures effect re-runs when id prop changes
-    use_effect(use_reactive!(|id| {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Reset state for new fetch
-            loading.set(true);
-            event.set(None);
-            error.set(None);
-
-            // Try parsing as nevent first, then as hex event ID
-            let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
-                Nip19::from_bech32(&id_clone)
-                    .ok()
-                    .and_then(|n| match n {
-                        Nip19::Event(e) => Some(e.event_id),
-                        Nip19::EventId(id) => Some(id),
-                        _ => None,
-                    })
-            } else {
-                EventId::from_hex(&id_clone).ok()
-            };
-
-            match event_id {
-                Some(eid) => {
-                    let filter = Filter::new().id(eid).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            if let Some(e) = events.into_iter().next() {
-                                // Validate kind 21 (horizontal video) or 22 (vertical video)
-                                let kind = e.kind.as_u16();
-                                if kind == 21 || kind == 22 {
-                                    event.set(Some(e));
-                                } else {
-                                    error.set(Some("Not a video event".to_string()));
-                                }
-                            } else {
-                                error.set(Some("Video not found".to_string()));
-                            }
-                        }
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                None => error.set(Some("Invalid video ID".to_string())),
-            }
-            loading.set(false);
-        });
-    }));
+    // Kind 21 = horizontal video, kind 22 = vertical video
+    let fetch = use_fetch_event_by_id(id, &[21, 22], "Video not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 VideoCard { event: ev.clone() }
             }
         }
@@ -4259,65 +4176,18 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
 /// Renders a nostr.blue photo link
 #[component]
 fn NostrBluePhotoRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    // use_reactive! ensures effect re-runs when id prop changes
-    use_effect(use_reactive!(|id| {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Reset state for new fetch
-            loading.set(true);
-            event.set(None);
-            error.set(None);
-
-            let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
-                Nip19::from_bech32(&id_clone)
-                    .ok()
-                    .and_then(|n| match n {
-                        Nip19::Event(e) => Some(e.event_id),
-                        Nip19::EventId(id) => Some(id),
-                        _ => None,
-                    })
-            } else {
-                EventId::from_hex(&id_clone).ok()
-            };
-
-            match event_id {
-                Some(eid) => {
-                    let filter = Filter::new().id(eid).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            if let Some(e) = events.into_iter().next() {
-                                // Validate kind 20 (photo)
-                                if e.kind.as_u16() == 20 {
-                                    event.set(Some(e));
-                                } else {
-                                    error.set(Some("Not a photo event".to_string()));
-                                }
-                            } else {
-                                error.set(Some("Photo not found".to_string()));
-                            }
-                        }
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                None => error.set(Some("Invalid photo ID".to_string())),
-            }
-            loading.set(false);
-        });
-    }));
+    // Kind 20 = photo
+    let fetch = use_fetch_event_by_id(id, &[20], "Photo not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 PhotoCard { event: ev.clone() }
             }
         }
@@ -4327,64 +4197,18 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
 /// Renders a nostr.blue voice message link
 #[component]
 fn NostrBlueVoiceRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Reset state for new fetch
-            loading.set(true);
-            event.set(None);
-            error.set(None);
-
-            let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
-                Nip19::from_bech32(&id_clone)
-                    .ok()
-                    .and_then(|n| match n {
-                        Nip19::Event(e) => Some(e.event_id),
-                        Nip19::EventId(id) => Some(id),
-                        _ => None,
-                    })
-            } else {
-                EventId::from_hex(&id_clone).ok()
-            };
-
-            match event_id {
-                Some(eid) => {
-                    let filter = Filter::new().id(eid).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            if let Some(e) = events.into_iter().next() {
-                                // Validate kind 1040 (voice message)
-                                if e.kind.as_u16() == 1040 {
-                                    event.set(Some(e));
-                                } else {
-                                    error.set(Some("Not a voice message".to_string()));
-                                }
-                            } else {
-                                error.set(Some("Voice message not found".to_string()));
-                            }
-                        }
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                None => error.set(Some("Invalid voice message ID".to_string())),
-            }
-            loading.set(false);
-        });
-    });
+    // Kind 1040 = voice message
+    let fetch = use_fetch_event_by_id(id, &[1040], "Voice message not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 VoiceMessageCard { event: ev.clone() }
             }
         }
@@ -4394,47 +4218,18 @@ fn NostrBlueVoiceRenderer(id: String) -> Element {
 /// Renders a nostr.blue podcast show link
 #[component]
 fn NostrBluePodcastShowRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Podcast not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid podcast address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Podcast not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_podcast_show_card(ev, &id_for_link)}
             }
         }
@@ -4466,47 +4261,18 @@ fn render_podcast_show_card(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue podcast episode link
 #[component]
 fn NostrBluePodcastEpisodeRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Episode not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid episode address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Episode not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_podcast_episode_card(ev, &id_for_link)}
             }
         }
@@ -4700,47 +4466,18 @@ fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
 /// Renders a nostr.blue music playlist link
 #[component]
 fn NostrBlueMusicPlaylistRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Playlist not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid playlist address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Playlist not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 if let Ok(playlist) = parse_playlist_event(ev) {
                     {render_playlist_minicard(&playlist, &id_for_link)}
                 } else {
@@ -4759,52 +4496,18 @@ fn NostrBlueMusicPlaylistRenderer(id: String) -> Element {
 /// Renders a nostr.blue radio station link
 #[component]
 fn NostrBlueRadioStationRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Reset state for new fetch
-            loading.set(true);
-            event.set(None);
-            error.set(None);
-
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Radio station not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid station address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Radio station not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_radio_station_card(ev, &id_for_link)}
             }
         }
@@ -4834,46 +4537,17 @@ fn render_radio_station_card(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue article link
 #[component]
 fn NostrBlueArticleRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Article not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid article address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Article not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 ArticleCard { event: ev.clone() }
             }
         }
@@ -4883,47 +4557,18 @@ fn NostrBlueArticleRenderer(id: String) -> Element {
 /// Renders a nostr.blue recipe link
 #[component]
 fn NostrBlueRecipeRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Recipe not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid recipe address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Recipe not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_recipe_from_event(ev, &id_for_link)}
             }
         }
@@ -4960,60 +4605,18 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue note link
 #[component]
 fn NostrBlueNoteRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            let event_id = if id_clone.starts_with("nevent1") || id_clone.starts_with("note1") {
-                Nip19::from_bech32(&id_clone)
-                    .ok()
-                    .and_then(|n| match n {
-                        Nip19::Event(e) => Some(e.event_id),
-                        Nip19::EventId(id) => Some(id),
-                        _ => None,
-                    })
-            } else {
-                EventId::from_hex(&id_clone).ok()
-            };
-
-            match event_id {
-                Some(eid) => {
-                    let filter = Filter::new().id(eid).limit(1);
-                    match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            if let Some(e) = events.into_iter().next() {
-                                // Validate kind: text note (1), repost (6), generic repost (16)
-                                let kind = e.kind.as_u16();
-                                if kind == 1 || kind == 6 || kind == 16 {
-                                    event.set(Some(e));
-                                } else {
-                                    error.set(Some("Note not found".to_string()));
-                                }
-                            } else {
-                                error.set(Some("Note not found".to_string()));
-                            }
-                        }
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                None => error.set(Some("Invalid note ID".to_string())),
-            }
-            loading.set(false);
-        });
-    });
+    // Kind 1 = text note, 6 = repost, 16 = generic repost
+    let fetch = use_fetch_event_by_id(id, &[1, 6, 16], "Note not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 // Render as a compact note card with preview using canonical hex id
                 {render_note_minicard(ev, &ev.id.to_hex())}
             }
@@ -5143,47 +4746,18 @@ fn render_profile_minicard(profile: Option<&profiles::Profile>, pubkey: &str) ->
 /// Renders a nostr.blue calendar event link
 #[component]
 fn NostrBlueCalendarEventRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Event not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid event address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Event not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 if let Ok(cal_event) = parse_calendar_event(ev) {
                     // Wrap CalendarEvent in UnifiedEvent for the card
                     EventCardCompact { event: UnifiedEvent::Calendar(cal_event), from: None }
@@ -5202,66 +4776,34 @@ fn NostrBlueCalendarEventRenderer(id: String) -> Element {
 /// Renders a nostr.blue wiki link
 #[component]
 fn NostrBlueWikiRenderer(id: String) -> Element {
-    let id_for_link = id.clone();
-
-    // Determine upfront if this is a topic (not an naddr) - no fetch needed
-    let is_topic = !id.starts_with("naddr1");
-
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| !is_topic); // Only load for naddr
-    let mut error = use_signal(|| None::<String>);
-
-    use_effect(use_reactive!(|id| {
-        // Short-circuit for topic links (no fetch needed)
-        if !id.starts_with("naddr1") {
-            return;
-        }
-
-        loading.set(true);
-        event.set(None);
-        error.set(None);
-
-        spawn(async move {
-            match Nip19::from_bech32(&id) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Wiki page not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
+    // If it's a topic (not an naddr), render a simple link - no fetch needed
+    if !id.starts_with("naddr1") {
+        return rsx! {
+            div {
+                class: "my-2",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                Link {
+                    to: Route::WikiDetail { identifier: id.clone() },
+                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                    "Wiki: {id}"
                 }
-                _ => error.set(Some("Invalid wiki address".to_string())),
             }
-            loading.set(false);
-        });
-    }));
+        };
+    }
+
+    // For naddr links, fetch the event
+    let id_for_link = id.clone();
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Wiki page not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-
-            // Check is_topic FIRST (no fetch case)
-            if is_topic {
-                Link {
-                    to: Route::WikiDetail { identifier: id_for_link.clone() },
-                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                    "Wiki: {id_for_link}"
-                }
-            } else if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_wiki_card(ev, &id_for_link)}
             }
         }
@@ -5304,47 +4846,18 @@ fn render_wiki_card(event: &Event, identifier: &str) -> Element {
 /// Renders a nostr.blue publication link
 #[component]
 fn NostrBluePublicationRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Publication not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid publication address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Publication not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 if let Some(pub_index) = parse_publication_index(ev) {
                     PublicationCardCompact { publication: pub_index }
                 } else {
@@ -5362,47 +4875,18 @@ fn NostrBluePublicationRenderer(id: String) -> Element {
 /// Renders a nostr.blue pinboard link
 #[component]
 fn NostrBluePinboardRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Pinboard not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid pinboard address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Pinboard not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 if let Some(pinboard) = parse_pinboard_event(ev, None) {
                     PinBoardCardCompact { board: pinboard }
                 } else {
@@ -5420,47 +4904,18 @@ fn NostrBluePinboardRenderer(id: String) -> Element {
 /// Renders a nostr.blue badge link
 #[component]
 fn NostrBlueBadgeRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Badge not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid badge address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Badge not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_badge_card(ev, &id_for_link)}
             }
         }
@@ -5523,47 +4978,18 @@ fn render_badge_card(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue product link
 #[component]
 fn NostrBlueProductRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Product not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid product address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Product not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 {render_product_card(ev, &id_for_link)}
             }
         }
@@ -5618,47 +5044,18 @@ fn render_product_card(event: &Event, naddr: &str) -> Element {
 /// Renders a nostr.blue code repo link
 #[component]
 fn NostrBlueCodeRepoRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
-
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            match Nip19::from_bech32(&id_clone) {
-                Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
-
-                    match nostr_client::fetch_event_by_coordinate_with_relays(
-                        coord.kind.as_u16(),
-                        coord.public_key.to_hex(),
-                        coord.identifier.clone(),
-                        relay_hints,
-                    ).await {
-                        Ok(Some(e)) => event.set(Some(e)),
-                        Ok(None) => error.set(Some("Repository not found".to_string())),
-                        Err(e) => error.set(Some(e)),
-                    }
-                }
-                Ok(_) => error.set(Some("Invalid repository address".to_string())),
-                Err(e) => error.set(Some(format!("Failed to parse address: {}", e))),
-            }
-            loading.set(false);
-        });
-    });
+    let fetch = use_fetch_event_by_coordinate_with_message(id, "Repository not found");
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
+            if fetch.is_loading() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(err) = error.read().as_ref() {
+            } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
-            } else if let Some(ev) = event.read().as_ref() {
+            } else if let Some(ev) = fetch.event().as_ref() {
                 if let Some(repo) = Repository::from_event(ev) {
                     CodeRepoCardCompact { repo: repo }
                 } else {

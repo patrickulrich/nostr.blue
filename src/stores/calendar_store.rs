@@ -1354,32 +1354,73 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
     // Use fetch_events_from_relays to bypass cache for fresh comment data
     let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
 
-    // Validate NIP-22 required tags: K (root kind) and A (root coordinate) must be present
-    // Filter out events that don't conform to NIP-22 comment structure
-    let mut comments: Vec<CalendarEventComment> = events
-        .iter()
-        .filter(|e| {
-            // NIP-22 requires K tag (root kind) to be present
-            let has_k_tag = e.tags.iter().any(|t| {
-                t.as_slice().first().map(|s| s.as_str()) == Some("K")
-            });
-            // NIP-22 requires uppercase A tag for addressable root events
-            let has_a_tag = e.tags.iter().any(|t| {
-                t.as_slice().first().map(|s| s.as_str()) == Some("A")
-            });
-            if !has_k_tag || !has_a_tag {
-                log::debug!("Skipping event {} - missing NIP-22 required tags (K={}, A={})",
-                    e.id, has_k_tag, has_a_tag);
+    // Validate NIP-22 required tags and filter out malformed events
+    let mut comments: Vec<CalendarEventComment> = Vec::new();
+
+    for e in events.iter() {
+        // Helper to get tag value by name
+        let get_tag_value = |tag_name: &str| -> Option<String> {
+            e.tags.iter()
+                .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
+                .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
+        };
+
+        // NIP-22 requires uppercase tags for root: A (coordinate), K (kind)
+        let root_a = get_tag_value("A");
+        let root_k = get_tag_value("K");
+
+        // NIP-22 requires lowercase tags for parent: a (coordinate), k (kind)
+        let parent_a = get_tag_value("a");
+        let parent_k = get_tag_value("k");
+
+        // Validate required tags are present with values
+        if root_a.is_none() || root_k.is_none() {
+            log::debug!(
+                "Skipping event {} - missing NIP-22 root tags (A={}, K={})",
+                e.id, root_a.is_some(), root_k.is_some()
+            );
+            continue;
+        }
+
+        if parent_a.is_none() || parent_k.is_none() {
+            log::debug!(
+                "Skipping event {} - missing NIP-22 parent tags (a={}, k={})",
+                e.id, parent_a.is_some(), parent_k.is_some()
+            );
+            continue;
+        }
+
+        // Validate lowercase 'a' tag matches the requested coordinate
+        // This ensures the comment is actually for the calendar event we're querying
+        if let Some(ref a_value) = parent_a {
+            if a_value != coordinate {
+                log::warn!(
+                    "Skipping event {} - parent 'a' tag mismatch: expected '{}', got '{}'",
+                    e.id, coordinate, a_value
+                );
+                continue;
             }
-            has_k_tag && has_a_tag
-        })
-        .map(|e| CalendarEventComment {
+        }
+
+        // Validate root K tag contains a valid kind number
+        if let Some(ref k_value) = root_k {
+            if k_value.parse::<u32>().is_err() {
+                log::warn!(
+                    "Skipping event {} - invalid K tag value '{}' (expected kind number)",
+                    e.id, k_value
+                );
+                continue;
+            }
+        }
+
+        // All validations passed - add the comment with sanitized content
+        comments.push(CalendarEventComment {
             event_id: e.id.to_hex(),
             pubkey: e.pubkey.to_hex(),
-            content: e.content.clone(),
+            content: ammonia::clean(&e.content),
             created_at: e.created_at.as_secs(),
-        })
-        .collect();
+        });
+    }
 
     // Sort by created_at (newest first)
     comments.sort_by(|a, b| b.created_at.cmp(&a.created_at));

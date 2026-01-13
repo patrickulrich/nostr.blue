@@ -174,9 +174,18 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                 return;
                             }
                         };
-                        // Note: clipboard() returns Clipboard directly in this web-sys version
-                        // Will throw JS error if not in secure context (handled by JsFuture below)
-                        let clipboard = window.navigator().clipboard();
+
+                        // Check if Clipboard API is available (requires HTTPS or localhost)
+                        let navigator = window.navigator();
+                        let clipboard_exists = js_sys::Reflect::has(&navigator, &"clipboard".into())
+                            .unwrap_or(false);
+
+                        if !clipboard_exists {
+                            log::warn!("Clipboard API unavailable (requires HTTPS or localhost)");
+                            return;
+                        }
+
+                        let clipboard = navigator.clipboard();
                         let promise = clipboard.write_text(&full_text);
 
                         if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
