@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, PublicKey, FromBech32};
 use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -241,6 +242,21 @@ pub fn ShareModal(
             // Modal content
             div {
                 class: "bg-card border border-border rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-y-auto",
+                tabindex: "-1",
+                onmounted: move |_evt| {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                            let _ = html_element.focus();
+                        }
+                    }
+                },
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape {
+                        evt.stop_propagation();
+                        on_close.call(());
+                    }
+                },
                 onclick: move |e| e.stop_propagation(),
 
                 // Header

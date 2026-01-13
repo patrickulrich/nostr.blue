@@ -1,11 +1,14 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_blossom::prelude::*;
-use nostr_sdk::{Url, Filter, Kind, PublicKey, FromBech32, Tag, TagKind};
+use nostr_sdk::{Url, Filter, Kind, PublicKey, FromBech32, Tag, TagKind, Timestamp, EventBuilder};
 use sha2::{Sha256, Digest};
 use image::ImageFormat;
 use std::io::Cursor;
 use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use serde::{Serialize, Deserialize};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use crate::stores::{nostr_client, auth_store};
 
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +23,10 @@ pub const KIND_USER_BLOSSOM_SERVERS: u16 = 10063;
 /// Local storage key for blossom servers (persists across page reloads)
 #[allow(dead_code)] // Used in WASM-only code paths
 const BLOSSOM_SERVERS_STORAGE_KEY: &str = "nostr_blue_blossom_servers";
+
+/// HTTP request timeout in milliseconds
+#[cfg(target_arch = "wasm32")]
+const REQUEST_TIMEOUT_MS: u32 = 10_000; // 10 seconds
 
 /// Save servers to local storage (WASM only)
 #[cfg(target_arch = "wasm32")]
@@ -73,6 +80,127 @@ pub static SERVERS_LOADED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Global signal for upload progress (0-100)
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
+
+// ============================================================================
+// Media Item Types and State
+// ============================================================================
+
+/// Represents a media item stored on Blossom servers (BUD-01/BUD-02 compatible)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MediaItem {
+    /// SHA-256 hash of the file (unique identifier)
+    pub sha256: String,
+    /// MIME type (e.g., "image/png", "video/mp4")
+    pub mime_type: String,
+    /// Primary URL where file is hosted
+    pub url: String,
+    /// File size in bytes
+    pub size: u64,
+    /// Upload timestamp (Unix epoch seconds)
+    pub uploaded: u64,
+    /// List of mirror URLs where file is also available
+    #[serde(default)]
+    pub mirrors: Vec<String>,
+}
+
+/// Media type filter for tab display
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
+pub enum MediaFilter {
+    #[default]
+    All,
+    Images,
+    Videos,
+    Audio,
+    Files, // Non-image, non-video, non-audio files
+}
+
+impl MediaFilter {
+    pub fn matches(&self, mime_type: &str) -> bool {
+        match self {
+            MediaFilter::All => true,
+            MediaFilter::Images => mime_type.starts_with("image/"),
+            MediaFilter::Videos => mime_type.starts_with("video/"),
+            MediaFilter::Audio => mime_type.starts_with("audio/"),
+            MediaFilter::Files => {
+                !mime_type.starts_with("image/")
+                && !mime_type.starts_with("video/")
+                && !mime_type.starts_with("audio/")
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn label(&self) -> &'static str {
+        match self {
+            MediaFilter::All => "All",
+            MediaFilter::Images => "Images",
+            MediaFilter::Videos => "Videos",
+            MediaFilter::Audio => "Audio",
+            MediaFilter::Files => "Files",
+        }
+    }
+}
+
+/// Blossom page tab selection
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BlossomTab {
+    #[default]
+    Images,
+    Videos,
+    Audio,
+    Files,
+    Servers,
+}
+
+impl BlossomTab {
+    pub fn label(&self) -> &'static str {
+        match self {
+            BlossomTab::Images => "Images",
+            BlossomTab::Videos => "Videos",
+            BlossomTab::Audio => "Audio",
+            BlossomTab::Files => "Files",
+            BlossomTab::Servers => "Servers",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn to_filter(self) -> Option<MediaFilter> {
+        match self {
+            BlossomTab::Images => Some(MediaFilter::Images),
+            BlossomTab::Videos => Some(MediaFilter::Videos),
+            BlossomTab::Audio => Some(MediaFilter::Audio),
+            BlossomTab::Files => Some(MediaFilter::Files),
+            BlossomTab::Servers => None,
+        }
+    }
+}
+
+/// Global signal for media items fetched from servers
+pub static MEDIA_ITEMS: GlobalSignal<Vec<MediaItem>> = Signal::global(Vec::new);
+
+/// Global signal for media loading state
+pub static MEDIA_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Global signal for media error state
+pub static MEDIA_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
+
+/// Last time files were fetched (Unix timestamp)
+pub static LAST_FETCH_TIME: GlobalSignal<u64> = Signal::global(|| 0);
+
+/// Kind 24242 - Blossom Authorization Event
+pub const KIND_BLOSSOM_AUTH: u16 = 24242;
+
+/// Extract origin tuple (scheme, host, port) from URL string for comparison
+/// Returns None if URL is invalid, cannot be parsed, or has no host
+fn get_url_origin(url_str: &str) -> Option<(String, String, Option<u16>)> {
+    url::Url::parse(url_str).ok().and_then(|u| {
+        u.host_str().map(|host| (
+            u.scheme().to_string(),
+            host.to_string(),
+            u.port_or_known_default(),
+        ))
+    })
+}
 
 /// Add a custom Blossom server
 pub fn add_server(url: String) {
@@ -525,5 +653,640 @@ pub async fn publish_user_servers() -> Result<String, String> {
             log::error!("Failed to publish Blossom server list: {}", e);
             Err(format!("Failed to publish: {}", e))
         }
+    }
+}
+
+// ============================================================================
+// Media File Operations (BUD-02 / BUD-04 / BUD-05)
+// ============================================================================
+
+/// Response structure from Blossom server /list endpoint
+#[derive(Debug, Deserialize)]
+struct BlobDescriptor {
+    sha256: String,
+    #[serde(rename = "type")]
+    mime_type: Option<String>,
+    url: String,
+    size: u64,
+    uploaded: u64,
+}
+
+/// Create a signed authorization header for Blossom API calls (kind 24242)
+///
+/// # Arguments
+/// * `action` - The action type: "list", "upload", "delete", "get"
+/// * `sha256` - Optional file hash for file-specific operations
+/// * `content` - Human-readable reason for the authorization
+///
+/// # Returns
+/// Authorization header value: "Nostr {base64_event}"
+pub async fn get_auth_header(
+    action: &str,
+    sha256: Option<&str>,
+    content: &str,
+) -> Result<String, String> {
+    let signer = nostr_client::get_signer()
+        .ok_or("Not authenticated. Please sign in.")?;
+
+    // Build tags for the auth event
+    let mut tags: Vec<Tag> = vec![
+        Tag::custom(TagKind::Custom("t".into()), vec![action.to_string()]),
+        Tag::expiration(Timestamp::now() + Duration::from_secs(600)), // 10 minutes (NIP-40)
+    ];
+
+    // Add file hash tag if provided
+    if let Some(hash) = sha256 {
+        // Support comma-separated hashes for batch operations
+        for h in hash.split(',') {
+            let h = h.trim();
+            if !h.is_empty() {
+                // Validate: must be exactly 64 hex characters (BUD-01 spec)
+                if h.len() != 64 {
+                    return Err(format!("Invalid SHA256 hash length: {} (expected 64)", h.len()));
+                }
+                if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err("Invalid SHA256 hash: contains non-hex characters".to_string());
+                }
+                tags.push(Tag::custom(TagKind::Custom("x".into()), vec![h.to_string()]));
+            }
+        }
+    }
+
+    // Create the event builder
+    let builder = EventBuilder::new(Kind::from(KIND_BLOSSOM_AUTH), content)
+        .tags(tags);
+
+    // Sign the event based on signer type
+    let event = match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            builder.sign(&keys).await
+                .map_err(|e| format!("Failed to sign auth event: {}", e))?
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            builder.sign(browser_signer.as_ref()).await
+                .map_err(|e| format!("Failed to sign auth event: {}", e))?
+        }
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
+            builder.sign(nostr_connect.as_ref()).await
+                .map_err(|e| format!("Failed to sign auth event: {}", e))?
+        }
+    };
+
+    // Serialize and base64 encode
+    let event_json = serde_json::to_string(&event)
+        .map_err(|e| format!("Failed to serialize auth event: {}", e))?;
+    let base64_event = BASE64.encode(event_json.as_bytes());
+
+    Ok(format!("Nostr {}", base64_event))
+}
+
+/// Fetch list of files from all configured Blossom servers
+///
+/// Merges results from all servers, tracking mirrors for files that exist on multiple servers.
+/// Uses BUD-05 /list/{pubkey} endpoint.
+pub async fn list_files() -> Result<Vec<MediaItem>, String> {
+    *MEDIA_LOADING.write() = true;
+    *MEDIA_ERROR.write() = None;
+
+    // Use inner function to ensure MEDIA_LOADING is always reset
+    let result = list_files_inner().await;
+
+    // Always reset loading state, even on error
+    *MEDIA_LOADING.write() = false;
+
+    if let Err(ref e) = result {
+        *MEDIA_ERROR.write() = Some(e.clone());
+    }
+
+    result
+}
+
+/// Inner implementation of list_files that can fail without leaving loading state stuck
+async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
+    let pubkey_str = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+
+    let pubkey = PublicKey::from_bech32(&pubkey_str)
+        .or_else(|_| PublicKey::from_hex(&pubkey_str))
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let servers = get_servers();
+    if servers.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get auth header for list operation
+    let auth_header = get_auth_header("list", None, "List files via nostr.blue").await?;
+
+    // Fetch from all servers sequentially, tracking success
+    let mut all_items: HashMap<String, MediaItem> = HashMap::new();
+    let mut success_count = 0;
+    let mut last_error = String::new();
+
+    for server in &servers {
+        let server_url = server.trim_end_matches('/');
+        let list_url = format!("{}/list/{}", server_url, pubkey.to_hex());
+
+        // Parse server origin for validation (security) - includes port
+        let server_origin = match get_url_origin(server_url) {
+            Some(origin) => origin,
+            None => {
+                log::warn!("Invalid server URL {}", server_url);
+                continue;
+            }
+        };
+
+        log::info!("Fetching files from: {}", list_url);
+
+        match fetch_server_list(&list_url, &auth_header).await {
+            Ok(blobs) => {
+                success_count += 1;
+                log::info!("Found {} files on {}", blobs.len(), server);
+                for blob in blobs {
+                    // Validate origin matches server (security) - using helper that includes port
+                    let blob_valid = get_url_origin(&blob.url)
+                        .map(|blob_origin| blob_origin == server_origin)
+                        .unwrap_or(false);
+
+                    if !blob_valid {
+                        log::warn!("Rejecting blob URL with mismatched origin: {}", blob.url);
+                        continue;
+                    }
+
+                    if let Some(existing) = all_items.get_mut(&blob.sha256) {
+                        // File exists on another server, add as mirror
+                        if !existing.mirrors.contains(&blob.url) && existing.url != blob.url {
+                            existing.mirrors.push(blob.url);
+                        }
+                    } else {
+                        // New file
+                        all_items.insert(blob.sha256.clone(), MediaItem {
+                            sha256: blob.sha256,
+                            mime_type: blob.mime_type.unwrap_or_else(|| "application/octet-stream".to_string()),
+                            url: blob.url,
+                            size: blob.size,
+                            uploaded: blob.uploaded,
+                            mirrors: vec![],
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to fetch from {}: {}", server, e);
+                last_error = e;
+            }
+        }
+    }
+
+    // If no server succeeded, return error instead of empty success
+    if success_count == 0 && !servers.is_empty() {
+        return Err(format!(
+            "Failed to fetch from all {} server(s). Last error: {}",
+            servers.len(),
+            last_error
+        ));
+    }
+
+    // Convert to vec and sort by upload time (newest first)
+    let mut items: Vec<MediaItem> = all_items.into_values().collect();
+    items.sort_by(|a, b| b.uploaded.cmp(&a.uploaded));
+
+    // Update global state
+    *MEDIA_ITEMS.write() = items.clone();
+    *LAST_FETCH_TIME.write() = Timestamp::now().as_secs();
+
+    Ok(items)
+}
+
+/// Internal helper to fetch file list from a single server
+#[allow(unused_variables)]
+async fn fetch_server_list(url: &str, auth_header: &str) -> Result<Vec<BlobDescriptor>, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_net::http::Request;
+        use gloo_timers::callback::Timeout;
+
+        // Create AbortController for proper request cancellation on timeout
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout - controller is cloned for the closure
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
+
+        // Send request with abort signal - request is actually cancelled on timeout
+        let response = Request::get(url)
+            .header("Authorization", auth_header)
+            .abort_signal(Some(&signal))
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
+                } else {
+                    format!("Request failed: {}", e)
+                }
+            })?;
+
+        if !response.ok() {
+            return Err(format!("Server returned status: {}", response.status()));
+        }
+
+        let blobs: Vec<BlobDescriptor> = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        Ok(blobs)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Non-WASM implementation using reqwest or similar
+        Err("Not implemented for non-WASM targets".to_string())
+    }
+}
+
+/// Delete a single file from all configured servers
+///
+/// Uses BUD-02 DELETE /{sha256} endpoint with kind 24242 auth.
+pub async fn delete_file(sha256: &str) -> Result<(), String> {
+    let servers = get_servers();
+    if servers.is_empty() {
+        return Err("No servers configured".to_string());
+    }
+
+    // Get auth header for delete operation
+    let auth_header = get_auth_header("delete", Some(sha256), "Delete file via nostr.blue").await?;
+
+    let mut success_count = 0;
+    let mut last_error = String::new();
+
+    for server in &servers {
+        let server_url = server.trim_end_matches('/');
+        let delete_url = format!("{}/{}", server_url, sha256);
+
+        log::info!("Deleting {} from {}", sha256, server);
+
+        match delete_from_server(&delete_url, &auth_header).await {
+            Ok(_) => {
+                log::info!("Successfully deleted from {}", server);
+                success_count += 1;
+            }
+            Err(e) => {
+                log::warn!("Failed to delete from {}: {}", server, e);
+                last_error = e;
+            }
+        }
+    }
+
+    if success_count == servers.len() {
+        // Full success - safe to remove from local state
+        MEDIA_ITEMS.write().retain(|item| item.sha256 != sha256);
+        Ok(())
+    } else if success_count > 0 {
+        // Partial success - file may still exist on some servers
+        log::warn!(
+            "Deleted from {}/{} servers, refreshing file list to reconcile",
+            success_count,
+            servers.len()
+        );
+        // Refresh list to get accurate state (file might still be on some servers)
+        if let Err(e) = list_files().await {
+            log::error!("Failed to refresh file list after partial delete: {}", e);
+        }
+        Ok(()) // Return Ok since at least one delete succeeded
+    } else {
+        Err(format!("Failed to delete from all servers: {}", last_error))
+    }
+}
+
+/// Delete multiple files from all configured servers
+pub async fn delete_files(sha256_list: &[String]) -> Result<usize, String> {
+    let mut deleted_count = 0;
+
+    for sha256 in sha256_list {
+        match delete_file(sha256).await {
+            Ok(_) => deleted_count += 1,
+            Err(e) => log::warn!("Failed to delete {}: {}", sha256, e),
+        }
+    }
+
+    Ok(deleted_count)
+}
+
+/// Internal helper to delete file from a single server
+#[allow(unused_variables)]
+async fn delete_from_server(url: &str, auth_header: &str) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_net::http::Request;
+        use gloo_timers::callback::Timeout;
+
+        // Create AbortController for proper request cancellation on timeout
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout - controller is cloned for the closure
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
+
+        // Send request with abort signal - request is actually cancelled on timeout
+        let response = Request::delete(url)
+            .header("Authorization", auth_header)
+            .abort_signal(Some(&signal))
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
+                } else {
+                    format!("Request failed: {}", e)
+                }
+            })?;
+
+        if response.ok() {
+            Ok(())
+        } else {
+            Err(format!("Server returned status: {}", response.status()))
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err("Not implemented for non-WASM targets".to_string())
+    }
+}
+
+/// Mirror a file to other servers that don't have it yet
+///
+/// Uses BUD-04 PUT /mirror endpoint.
+///
+/// # Arguments
+/// * `sha256` - Hash of the file to mirror
+/// * `source_url` - URL of the file on its current server
+/// * `target_servers` - Optional list of servers to mirror to (uses all configured servers if None)
+pub async fn mirror_file(
+    sha256: &str,
+    source_url: &str,
+    target_servers: Option<Vec<String>>,
+) -> Result<Vec<String>, String> {
+    // Validate source_url scheme
+    let source_parsed = url::Url::parse(source_url)
+        .map_err(|_| "Invalid source URL")?;
+
+    if source_parsed.scheme() != "http" && source_parsed.scheme() != "https" {
+        return Err("Source URL must use http or https scheme".to_string());
+    }
+
+    let source_origin = get_url_origin(source_url)
+        .ok_or("Could not parse source URL origin")?;
+
+    // Build set of allowed origins from:
+    // 1. Configured blossom servers
+    // 2. Existing media item's URL and mirrors (if found by sha256)
+    let servers = target_servers.clone().unwrap_or_else(get_servers);
+    let mut allowed_origins: HashSet<(String, String, Option<u16>)> =
+        servers.iter().filter_map(|s| get_url_origin(s)).collect();
+
+    // Also allow origins from existing media item locations
+    {
+        let items = MEDIA_ITEMS.read();
+        if let Some(item) = items.iter().find(|i| i.sha256 == sha256) {
+            if let Some(origin) = get_url_origin(&item.url) {
+                allowed_origins.insert(origin);
+            }
+            for mirror in &item.mirrors {
+                if let Some(origin) = get_url_origin(mirror) {
+                    allowed_origins.insert(origin);
+                }
+            }
+        }
+    }
+
+    // Validate source origin is in allowed set
+    if !allowed_origins.contains(&source_origin) {
+        return Err("Source URL origin not in allowed servers list".to_string());
+    }
+
+    let servers = target_servers.unwrap_or_else(get_servers);
+    if servers.is_empty() {
+        return Err("No target servers".to_string());
+    }
+
+    // Get auth header for upload (mirroring is treated as upload)
+    let auth_header = get_auth_header("upload", Some(sha256), "Mirror file via nostr.blue").await?;
+
+    let mut new_mirrors: Vec<String> = vec![];
+
+    for server in &servers {
+        let server_url = server.trim_end_matches('/');
+
+        // Skip if same origin (scheme + host + port) - proper URL comparison
+        let server_origin = get_url_origin(server_url);
+        if server_origin.as_ref() == Some(&source_origin) {
+            log::debug!("Skipping {} - same origin as source", server_url);
+            continue;
+        }
+
+        let mirror_url = format!("{}/mirror", server_url);
+
+        log::info!("Mirroring {} to {}", sha256, server);
+
+        match mirror_to_server(&mirror_url, source_url, &auth_header).await {
+            Ok(new_url) => {
+                log::info!("Successfully mirrored to {}: {}", server, new_url);
+                new_mirrors.push(new_url.clone());
+
+                // Update local state
+                let mut items = MEDIA_ITEMS.write();
+                if let Some(item) = items.iter_mut().find(|i| i.sha256 == sha256) {
+                    if !item.mirrors.contains(&new_url) {
+                        item.mirrors.push(new_url);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to mirror to {}: {}", server, e);
+            }
+        }
+    }
+
+    // Empty vec is valid - file may already be on all servers
+    Ok(new_mirrors)
+}
+
+/// Response from mirror endpoint
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct MirrorResponse {
+    url: String,
+    #[allow(dead_code)]
+    sha256: Option<String>,
+}
+
+/// Internal helper to mirror file to a single server
+#[allow(unused_variables)]
+async fn mirror_to_server(mirror_url: &str, source_url: &str, auth_header: &str) -> Result<String, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_net::http::Request;
+        use gloo_timers::callback::Timeout;
+
+        // Create AbortController for proper request cancellation
+        let controller = web_sys::AbortController::new()
+            .map_err(|_| "Failed to create AbortController".to_string())?;
+        let signal = controller.signal();
+
+        // Set up abort timeout
+        let controller_for_timeout = controller.clone();
+        let _timeout = Timeout::new(REQUEST_TIMEOUT_MS, move || {
+            controller_for_timeout.abort();
+        });
+
+        let body = serde_json::json!({ "url": source_url });
+
+        // Send request with abort signal (abort_signal must be before body)
+        let response = Request::put(mirror_url)
+            .header("Authorization", auth_header)
+            .header("Content-Type", "application/json")
+            .abort_signal(Some(&signal))
+            .body(body.to_string())
+            .map_err(|e| format!("Failed to build request: {}", e))?
+            .send()
+            .await
+            .map_err(|e| {
+                if signal.aborted() {
+                    "Request timeout".to_string()
+                } else {
+                    format!("Request failed: {}", e)
+                }
+            })?;
+
+        if !response.ok() {
+            return Err(format!("Server returned status: {}", response.status()));
+        }
+        let mirror_response: MirrorResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        Ok(mirror_response.url)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err("Not implemented for non-WASM targets".to_string())
+    }
+}
+
+/// Mirror multiple files to all servers
+pub async fn mirror_files(items: &[MediaItem]) -> Result<usize, String> {
+    let mut mirrored_count = 0;
+
+    for item in items {
+        match mirror_file(&item.sha256, &item.url, None).await {
+            Ok(mirrors) => {
+                if !mirrors.is_empty() {
+                    mirrored_count += 1;
+                }
+            }
+            Err(e) => log::warn!("Failed to mirror {}: {}", item.sha256, e),
+        }
+    }
+
+    Ok(mirrored_count)
+}
+
+/// Check if a media item is fully mirrored (exists on all configured servers)
+/// Compares full origins (scheme, host, port) for accuracy
+pub fn is_fully_mirrored(item: &MediaItem) -> bool {
+    let servers = get_servers();
+    if servers.len() <= 1 {
+        return true; // Only one server, already "fully mirrored"
+    }
+
+    // Collect origins where file exists (using full origin comparison)
+    let mut file_origins: HashSet<(String, String, Option<u16>)> = HashSet::new();
+
+    // Add primary URL's origin
+    if let Some(origin) = get_url_origin(&item.url) {
+        file_origins.insert(origin);
+    }
+
+    // Add mirror URL origins
+    for mirror in &item.mirrors {
+        if let Some(origin) = get_url_origin(mirror) {
+            file_origins.insert(origin);
+        }
+    }
+
+    // Collect configured server origins (only valid ones)
+    let configured_origins: HashSet<(String, String, Option<u16>)> = servers
+        .iter()
+        .filter_map(|s| get_url_origin(s))
+        .collect();
+
+    // If we couldn't parse any configured servers, return false (can't determine)
+    if configured_origins.is_empty() {
+        log::warn!("No valid server URLs configured - cannot determine mirror status");
+        return false;
+    }
+
+    // Check if all configured origins are covered by file locations
+    configured_origins.is_subset(&file_origins)
+}
+
+/// Get count of media items by filter type
+#[allow(dead_code)]
+pub fn get_media_counts() -> HashMap<MediaFilter, usize> {
+    let items = MEDIA_ITEMS.read();
+    let mut counts = HashMap::new();
+
+    counts.insert(MediaFilter::All, items.len());
+    counts.insert(
+        MediaFilter::Images,
+        items.iter().filter(|i| MediaFilter::Images.matches(&i.mime_type)).count(),
+    );
+    counts.insert(
+        MediaFilter::Videos,
+        items.iter().filter(|i| MediaFilter::Videos.matches(&i.mime_type)).count(),
+    );
+    counts.insert(
+        MediaFilter::Audio,
+        items.iter().filter(|i| MediaFilter::Audio.matches(&i.mime_type)).count(),
+    );
+    counts.insert(
+        MediaFilter::Files,
+        items.iter().filter(|i| MediaFilter::Files.matches(&i.mime_type)).count(),
+    );
+
+    counts
+}
+
+/// Get total storage used across all media items
+pub fn get_total_storage() -> u64 {
+    MEDIA_ITEMS.read().iter().map(|i| i.size).sum()
+}
+
+/// Format bytes as human-readable string
+pub fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
     }
 }

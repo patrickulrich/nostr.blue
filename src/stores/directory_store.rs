@@ -625,8 +625,8 @@ pub async fn fetch_directory_by_address(address: &str) -> StdResult<Option<Direc
         return Ok(Some(dir));
     }
 
-    // Parse address: "kind:pubkey:d-tag"
-    let parts: Vec<&str> = address.split(':').collect();
+    // Parse address: "kind:pubkey:d-tag" (splitn to handle identifiers with colons)
+    let parts: Vec<&str> = address.splitn(3, ':').collect();
     if parts.len() < 3 {
         return Err("Invalid directory address format".to_string());
     }

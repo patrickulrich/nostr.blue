@@ -4,7 +4,7 @@ use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
     ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    Link2Icon, ArrowLeftIcon, RssIcon, MusicIcon
+    Link2Icon, ArrowLeftIcon, RssIcon, MusicIcon, BookOpenIcon
 };
 use crate::utils::clipboard::copy_to_clipboard;
 
@@ -22,6 +22,8 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
+    #[cfg(target_arch = "wasm32")]
+    BibleVerse,
 }
 
 impl ContentType {
@@ -31,6 +33,8 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
+            #[cfg(target_arch = "wasm32")]
+            ContentType::BibleVerse => "Bible",
         }
     }
 
@@ -40,6 +44,8 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
+            #[cfg(target_arch = "wasm32")]
+            ContentType::BibleVerse => "Share Verses",
         }
     }
 
@@ -49,6 +55,8 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
+            #[cfg(target_arch = "wasm32")]
+            ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
 
@@ -58,6 +66,8 @@ impl ContentType {
             ContentType::PodcastEpisode => format!("Check out this episode on nostr.blue: {}", url),
             ContentType::MusicAlbum => format!("Check out this album on nostr.blue: {}", url),
             ContentType::MusicTrack => format!("Check out this track on nostr.blue: {}", url),
+            #[cfg(target_arch = "wasm32")]
+            ContentType::BibleVerse => format!("Check out this Bible passage on nostr.blue: {}", url),
         }
     }
 }
@@ -73,6 +83,9 @@ pub fn ContentShareModal(
     content_type: ContentType,
     /// Optional image URL for preview
     image_url: Option<String>,
+    /// Optional content text (e.g., verse text for Bible verses)
+    #[props(default)]
+    content: Option<String>,
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
@@ -87,14 +100,20 @@ pub fn ContentShareModal(
     let has_signer = *HAS_SIGNER.read();
 
     let handle_copy_link = {
-        let url_copy = url.clone();
+        // For Bible verses, copy the formatted verse text with reference
+        // For other content types, copy the URL
+        let copy_text = if let Some(ref text) = content {
+            format!("{}\n\n— {}", text, title)
+        } else {
+            url.clone()
+        };
         move |_| {
-            let url = url_copy.clone();
+            let text_to_copy = copy_text.clone();
             spawn(async move {
-                match copy_to_clipboard(&url).await {
+                match copy_to_clipboard(&text_to_copy).await {
                     Ok(_) => {
                         copied.set(true);
-                        log::info!("Link copied to clipboard");
+                        log::info!("Content copied to clipboard");
                         #[cfg(target_arch = "wasm32")]
                         {
                             spawn(async move {
@@ -266,6 +285,10 @@ pub fn ContentShareModal(
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
+                                        #[cfg(target_arch = "wasm32")]
+                                        ContentType::BibleVerse => rsx! {
+                                            BookOpenIcon { class: "w-6 h-6 text-white" }
+                                        },
                                     }
                                 }
                             }
@@ -389,9 +412,32 @@ pub fn ContentShareModal(
                                 }
                             }
 
-                            // Link format button
+                            // Insert buttons
                             div {
                                 class: "flex flex-wrap gap-2",
+                                // Add Verse button (only for Bible verses with content)
+                                if let Some(ref verse_content) = content {
+                                    {
+                                        let verse_text = verse_content.clone();
+                                        let verse_title = title.clone();
+                                        rsx! {
+                                            button {
+                                                class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                                onclick: move |_| {
+                                                    let mut current = nostr_text.read().clone();
+                                                    if !current.is_empty() {
+                                                        current.push_str("\n\n");
+                                                    }
+                                                    current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
+                                                    nostr_text.set(current);
+                                                },
+                                                BookOpenIcon { class: "w-3 h-3" }
+                                                "Add Verse"
+                                            }
+                                        }
+                                    }
+                                }
+                                // Add Link button
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: {

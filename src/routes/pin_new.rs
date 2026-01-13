@@ -238,8 +238,8 @@ fn validate_board_address(input: &str) -> std::result::Result<String, String> {
             Err(e) => Err(format!("Invalid naddr: {}", e)),
         }
     } else if trimmed.starts_with("30067:") {
-        // Coordinate format - validate structure
-        let parts: Vec<&str> = trimmed.split(':').collect();
+        // Coordinate format - validate structure (splitn to handle identifiers with colons)
+        let parts: Vec<&str> = trimmed.splitn(3, ':').collect();
         if parts.len() != 3 {
             return Err("Invalid coordinate format (expected 30067:pubkey:d-tag)".to_string());
         }

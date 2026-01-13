@@ -1557,8 +1557,8 @@ pub async fn fetch_collection_products(collection: &ProductCollection) -> Result
     let mut products = Vec::new();
 
     for coord in &collection.products {
-        // Parse coordinate: "30402:pubkey:d-tag"
-        let parts: Vec<&str> = coord.split(':').collect();
+        // Parse coordinate: "30402:pubkey:d-tag" (splitn to handle identifiers with colons)
+        let parts: Vec<&str> = coord.splitn(3, ':').collect();
         if parts.len() >= 3 {
             let pubkey = PublicKey::parse(parts[1]).ok();
             let d_tag = parts[2];

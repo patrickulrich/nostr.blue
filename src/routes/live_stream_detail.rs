@@ -491,8 +491,8 @@ fn parse_naddr(note_id: &str) -> (String, String) {
         return (coord.public_key.to_hex(), coord.identifier.clone());
     }
 
-    // Fall back to colon-split logic for non-bech32 formats
-    let parts: Vec<&str> = note_id.split(':').collect();
+    // Fall back to colon-split logic for non-bech32 formats (splitn to handle identifiers with colons)
+    let parts: Vec<&str> = note_id.splitn(3, ':').collect();
 
     if parts.len() >= 3 {
         // Full naddr format: "30311:pubkey:dtag"

@@ -130,6 +130,30 @@ pub enum ContentToken {
     BitcoinTx(String),       // bitcoin:tx:a1075db55d416d3ca...
     BitcoinAddress(String),  // bitcoin:address:1HQ3Go3ggs8pF...
     Geohash(String),         // geo:u4pruydqqvj
+    // nostr.blue internal links - comprehensive content types
+    NostrBlueLiveStream(String),     // naddr from /videos/live/{naddr}
+    NostrBlueVideo(String),          // note_id from /videos/{video_id}
+    NostrBluePhoto(String),          // note_id from /photos/{photo_id}
+    NostrBlueVoice(String),          // note_id from /voicemessages/{voice_id}
+    NostrBluePodcastShow(String),    // naddr from /podcast/nostr/{naddr}
+    NostrBluePodcastEpisode(String), // naddr from /podcast/nostr/episode/{naddr}
+    NostrBlueMusicPlaylist(String),  // naddr from /music/playlist/{naddr}
+    NostrBlueRadioStation(String),   // naddr from /radio/{naddr}
+    NostrBlueArticle(String),        // naddr from /articles/{naddr}
+    NostrBlueRecipe(String),         // naddr from /recipes/{naddr}
+    NostrBlueNote(String),           // note_id from /note/{note_id}
+    NostrBlueProfile(String),        // pubkey from /profile/{pubkey}
+    NostrBlueCalendarEvent(String),  // naddr from /calendar/{naddr}
+    NostrBlueWiki(String),           // identifier from /wiki/{identifier}
+    NostrBluePublication(String),    // naddr from /publications/{naddr}
+    NostrBluePinboard(String),       // naddr from /pinboards/{naddr}
+    NostrBlueBadge(String),          // naddr from /badges/{naddr}
+    NostrBlueProduct(String),        // naddr from /marketplace/product/{naddr}
+    NostrBlueCodeRepo(String),       // naddr from /code/repo/{naddr}
+    NostrBlueCommunity(String),      // a_tag from /community/{a_tag}
+    // RSS podcast links (via Podcast Index API)
+    NostrBlueRssPodcastEpisode(String, String), // (podcast_id, episode_id) from /podcast/rss/episode/{podcast_id}/{episode_id}
+    NostrBlueRssPodcastShow(String),            // podcast_id from /podcast/rss/{podcast_id}
 }
 
 /// Parse note content into structured tokens
@@ -184,6 +208,8 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             ContentToken::ZapStream(naddr)
         } else if let Some(naddr) = extract_zapcooking(&url) {
             ContentToken::ZapCookingRecipe(naddr)
+        } else if let Some(nostr_blue_token) = extract_nostr_blue(&url) {
+            nostr_blue_token
         } else {
             ContentToken::Link(url)
         };
@@ -916,6 +942,178 @@ fn extract_zapcooking(url: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Check if URL host is a valid nostr.blue domain (including localhost for development)
+fn is_nostr_blue_host(url_str: &str) -> bool {
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+        .map(|h| {
+            h == "nostr.blue"
+                || h.ends_with(".nostr.blue")
+                || h == "localhost"
+                || h == "127.0.0.1"
+        })
+        .unwrap_or(false)
+}
+
+/// Extract content type and identifier from nostr.blue URLs
+/// Returns appropriate ContentToken variant based on URL path
+fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
+    if !is_nostr_blue_host(url) {
+        return None;
+    }
+    let parsed = Url::parse(url).ok()?;
+    let path = parsed.path();
+
+    // Order matters: more specific paths first
+    // Livestreams
+    if path.starts_with("/videos/live/") {
+        return extract_id_from_path(path, "/videos/live/")
+            .map(ContentToken::NostrBlueLiveStream);
+    }
+    // Videos (non-live)
+    if path.starts_with("/videos/")
+        && !path.starts_with("/videos/live")
+        && !path.starts_with("/videos/new")
+    {
+        return extract_id_from_path(path, "/videos/").map(ContentToken::NostrBlueVideo);
+    }
+    // Photos
+    if path.starts_with("/photos/") && !path.starts_with("/photos/new") {
+        return extract_id_from_path(path, "/photos/").map(ContentToken::NostrBluePhoto);
+    }
+    // Voice messages
+    if path.starts_with("/voicemessages/") && !path.starts_with("/voicemessages/new") {
+        return extract_id_from_path(path, "/voicemessages/").map(ContentToken::NostrBlueVoice);
+    }
+    // RSS Podcast episode (must be before /podcast/rss/ and Nostr podcast routes)
+    if path.starts_with("/podcast/rss/episode/") {
+        // Extract: /podcast/rss/episode/{podcast_id}/{episode_id}
+        if let Some(remainder) = path.strip_prefix("/podcast/rss/episode/") {
+            let parts: Vec<&str> = remainder.split('/').collect();
+            if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                let podcast_id = parts[0].to_string();
+                let episode_id = parts[1].split(['?', '#']).next().unwrap_or(parts[1]).to_string();
+                return Some(ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id));
+            }
+        }
+    }
+    // RSS Podcast show
+    if path.starts_with("/podcast/rss/") && !path.starts_with("/podcast/rss/episode/") {
+        return extract_id_from_path(path, "/podcast/rss/")
+            .map(ContentToken::NostrBlueRssPodcastShow);
+    }
+    // Nostr Podcast episode (must be before /podcast/nostr/)
+    if path.starts_with("/podcast/nostr/episode/") {
+        return extract_id_from_path(path, "/podcast/nostr/episode/")
+            .map(ContentToken::NostrBluePodcastEpisode);
+    }
+    // Nostr Podcast show
+    if path.starts_with("/podcast/nostr/") {
+        return extract_id_from_path(path, "/podcast/nostr/")
+            .map(ContentToken::NostrBluePodcastShow);
+    }
+    // Music playlist
+    if path.starts_with("/music/playlist/") && !path.starts_with("/music/playlist/new") {
+        return extract_id_from_path(path, "/music/playlist/")
+            .map(ContentToken::NostrBlueMusicPlaylist);
+    }
+    // Radio station
+    if path.starts_with("/radio/") && !path.starts_with("/radio/new") {
+        return extract_id_from_path(path, "/radio/").map(ContentToken::NostrBlueRadioStation);
+    }
+    // Articles
+    if path.starts_with("/articles/") && !path.starts_with("/articles/new") {
+        return extract_id_from_path(path, "/articles/").map(ContentToken::NostrBlueArticle);
+    }
+    // Recipes
+    if path.starts_with("/recipes/")
+        && !path.starts_with("/recipes/new")
+        && !path.starts_with("/recipes/fork")
+        && !path.starts_with("/recipes/all")
+        && !path.starts_with("/recipes/tag")
+        && !path.starts_with("/recipes/chef")
+    {
+        return extract_id_from_path(path, "/recipes/").map(ContentToken::NostrBlueRecipe);
+    }
+    // Notes
+    if path.starts_with("/note/") {
+        return extract_id_from_path(path, "/note/").map(ContentToken::NostrBlueNote);
+    }
+    // Profiles
+    if path.starts_with("/profile/") {
+        return extract_id_from_path(path, "/profile/").map(ContentToken::NostrBlueProfile);
+    }
+    // Calendar events
+    if path.starts_with("/calendar/") && !path.starts_with("/calendar/new") && path != "/calendar" {
+        return extract_id_from_path(path, "/calendar/").map(ContentToken::NostrBlueCalendarEvent);
+    }
+    // Wiki
+    if path.starts_with("/wiki/")
+        && !path.starts_with("/wiki/new")
+        && !path.starts_with("/wiki/author")
+    {
+        return extract_id_from_path(path, "/wiki/").map(ContentToken::NostrBlueWiki);
+    }
+    // Publications
+    if path.starts_with("/publications/")
+        && !path.starts_with("/publications/new")
+        && !path.starts_with("/publications/search")
+    {
+        return extract_id_from_path(path, "/publications/")
+            .map(ContentToken::NostrBluePublication);
+    }
+    // Pinboards - check full path for /edit before extraction (extraction stops at /)
+    if path.starts_with("/pinboards/")
+        && !path.starts_with("/pinboards/new")
+        && !path.starts_with("/pinboards/pin")
+        && !path.starts_with("/pinboards/pins")
+        && !path.contains("/edit")
+    {
+        return extract_id_from_path(path, "/pinboards/")
+            .map(ContentToken::NostrBluePinboard);
+    }
+    // Badges
+    if path.starts_with("/badges/") && !path.starts_with("/badges/new") {
+        return extract_id_from_path(path, "/badges/").map(ContentToken::NostrBlueBadge);
+    }
+    // Products
+    if path.starts_with("/marketplace/product/")
+        && !path.starts_with("/marketplace/product/new")
+        && !path.starts_with("/marketplace/product/edit")
+    {
+        return extract_id_from_path(path, "/marketplace/product/")
+            .map(ContentToken::NostrBlueProduct);
+    }
+    // Code repos
+    if path.starts_with("/code/repo/") {
+        // Extract just the naddr part (before /commits, /issues, etc.)
+        let remainder = path.strip_prefix("/code/repo/")?;
+        let naddr = remainder.split('/').next()?;
+        if !naddr.is_empty() {
+            return Some(ContentToken::NostrBlueCodeRepo(naddr.to_string()));
+        }
+    }
+    // Communities
+    if path.starts_with("/community/") {
+        return extract_id_from_path(path, "/community/").map(ContentToken::NostrBlueCommunity);
+    }
+
+    None
+}
+
+/// Helper to extract an identifier from URL path after a given prefix
+fn extract_id_from_path(path: &str, prefix: &str) -> Option<String> {
+    let remainder = path.strip_prefix(prefix)?;
+    // Extract just the identifier (stop at query params, hash, or slash)
+    let id = remainder.split(['?', '#', '/']).next()?;
+    if !id.is_empty() {
+        Some(id.to_string())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

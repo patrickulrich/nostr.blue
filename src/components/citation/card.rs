@@ -3,6 +3,7 @@
 //! Supports Internal (kind 30), External (kind 31), Hardcopy (kind 32), and Prompt (kind 33)
 
 use dioxus::prelude::*;
+use url::Url;
 use crate::stores::citation_store::CachedCitation;
 use crate::utils::nkbip03::{Citation, CitationType};
 use crate::components::icons::ExternalLinkIcon;
@@ -103,6 +104,7 @@ pub fn CitationCard(
     };
 
     let citation_clone = citation.clone();
+    let citation_clone2 = citation.clone();
     let handle_click = move |_| {
         if let Some(ref handler) = on_click {
             handler.call(citation_clone.clone());
@@ -111,11 +113,33 @@ pub fn CitationCard(
 
     let is_clickable = on_click.is_some();
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
+    // Accessibility Fix #8: Keyboard handler for clickable cards
+    let tabindex_val = if is_clickable { "0" } else { "-1" };
+
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
 
     rsx! {
         div {
             class: "group relative bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg {cursor_class}",
+            tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
+            onkeydown: move |evt: KeyboardEvent| {
+                // Handle both Enter and Space keys for accessibility
+                // Key::Character(" ") covers spacebar on most platforms
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
+                    evt.prevent_default();
+                    if let Some(ref handler) = on_click {
+                        handler.call(citation_clone2.clone());
+                    }
+                }
+            },
 
             // Menu button (top-right)
             div {
@@ -197,13 +221,15 @@ pub fn CitationCardCompact(
     let citation_type = citation.citation.citation_type();
     let short_display = citation.citation.short_display();
 
-    // Type-specific secondary info
+    // Type-specific secondary info (Cleanup Fix #19 - use url crate for domain extraction)
     let secondary_info = match &citation.citation {
         Citation::ExternalWeb(c) => {
-            // Extract domain from URL
-            c.url.split("//").nth(1)
-                .and_then(|s| s.split('/').next())
-                .map(|s| s.to_string())
+            // Extract domain from URL using url crate for proper parsing
+            // Handle scheme-less URLs by retrying with https:// prefix
+            Url::parse(&c.url)
+                .or_else(|_| Url::parse(&format!("https://{}", c.url)))
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
         },
         Citation::Hardcopy(c) => c.published_by.clone(),
         Citation::Prompt(c) => Some(c.llm.clone()),
@@ -211,6 +237,7 @@ pub fn CitationCardCompact(
     };
 
     let citation_clone = citation.clone();
+    let citation_clone2 = citation.clone();
     let handle_click = move |_| {
         if let Some(ref handler) = on_click {
             handler.call(citation_clone.clone());
@@ -219,11 +246,31 @@ pub fn CitationCardCompact(
 
     let is_clickable = on_click.is_some();
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
+    // Accessibility Fix #8: Keyboard handler for clickable cards
+    let tabindex_val = if is_clickable { "0" } else { "-1" };
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
 
     rsx! {
         div {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors {cursor_class}",
+            tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
+            onkeydown: move |evt: KeyboardEvent| {
+                // Handle both Enter and Space keys for accessibility
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
+                    evt.prevent_default();
+                    if let Some(ref handler) = on_click {
+                        handler.call(citation_clone2.clone());
+                    }
+                }
+            },
 
             // Type icon
             {
@@ -281,18 +328,40 @@ pub fn CitationBadge(
     let short_display = citation.citation.short_display();
 
     let citation_clone = citation.clone();
+    let citation_clone2 = citation.clone();
     let handle_click = move |_| {
         if let Some(ref handler) = on_click {
             handler.call(citation_clone.clone());
         }
     };
 
-    let cursor_class = if on_click.is_some() { "cursor-pointer" } else { "" };
+    let is_clickable = on_click.is_some();
+    let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
+    // Accessibility Fix #8: Keyboard handler for clickable cards
+    let tabindex_val = if is_clickable { "0" } else { "-1" };
+    // Accessibility: role="button" only when clickable
+    let role_val = if is_clickable { "button" } else { "" };
 
     rsx! {
         span {
             class: "inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-border hover:bg-accent transition-colors {cursor_class}",
+            tabindex: "{tabindex_val}",
+            role: "{role_val}",
             onclick: handle_click,
+            onkeydown: move |evt: KeyboardEvent| {
+                // Handle both Enter and Space keys for accessibility
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
+                    evt.prevent_default();
+                    if let Some(ref handler) = on_click {
+                        handler.call(citation_clone2.clone());
+                    }
+                }
+            },
 
             span {
                 {get_citation_style(&citation_type).emoji}
