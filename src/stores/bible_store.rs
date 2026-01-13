@@ -545,6 +545,8 @@ pub struct BibleSearchResult {
 
 /// Search cached chapters for verses containing query
 pub fn search_cached_verses(query: &str, limit: usize) -> Vec<BibleSearchResult> {
+    // Trim whitespace to prevent whitespace-only queries passing length check
+    let query = query.trim();
     // Use chars().count() for Unicode-safe length check (not bytes)
     if query.chars().count() < 3 {
         return Vec::new();

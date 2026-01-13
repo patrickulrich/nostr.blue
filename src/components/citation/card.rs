@@ -126,7 +126,14 @@ pub fn CitationCard(
             role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
-                if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
+                // Handle both Enter and Space keys for accessibility
+                // Key::Character(" ") covers spacebar on most platforms
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
                     if let Some(ref handler) = on_click {
                         handler.call(citation_clone2.clone());
@@ -251,7 +258,13 @@ pub fn CitationCardCompact(
             role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
-                if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
+                // Handle both Enter and Space keys for accessibility
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
                     if let Some(ref handler) = on_click {
                         handler.call(citation_clone2.clone());
@@ -336,7 +349,13 @@ pub fn CitationBadge(
             role: "{role_val}",
             onclick: handle_click,
             onkeydown: move |evt: KeyboardEvent| {
-                if on_click.is_some() && (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) {
+                // Handle both Enter and Space keys for accessibility
+                let is_activation_key = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(ref ch) if ch == " " => true,
+                    _ => false,
+                };
+                if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
                     if let Some(ref handler) = on_click {
                         handler.call(citation_clone2.clone());

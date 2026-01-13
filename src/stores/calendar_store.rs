@@ -564,6 +564,7 @@ impl EventFilterState {
             && self.location_filter == LocationFilter::All
             && self.event_type_filter == EventTypeFilter::All
             && self.hashtag.is_none()
+            && !self.include_private // false means using default (not including private)
             && self.hide_ended // true means using default (hiding ended)
     }
 

@@ -182,6 +182,8 @@ pub fn CalendarEventNew() -> Element {
                 } else {
                     ics_events.set(events);
                     show_ics_selector.set(true);
+                    // Clear file input after successful parse to allow re-uploads
+                    clear_file_input("ics-file-input");
                 }
             } else {
                 error_message.set(Some("Failed to read ICS file".to_string()));
@@ -494,11 +496,14 @@ pub fn CalendarEventNew() -> Element {
                                 // Event list
                                 div {
                                     class: "p-4 overflow-y-auto max-h-[60vh]",
-                                    for evt in ics_events.read().iter() {
+                                    for (idx, evt) in ics_events.read().iter().enumerate() {
                                         {
                                             let evt_clone = evt.clone();
+                                            // Use index + title as stable key for DOM reconciliation
+                                            let key_str = format!("{}-{}", idx, evt.title);
                                             rsx! {
                                                 button {
+                                                    key: "{key_str}",
                                                     class: "w-full p-3 mb-2 text-left bg-muted/50 hover:bg-muted rounded-lg transition",
                                                     onclick: move |_| apply_ics_event(&evt_clone),
                                                     div {

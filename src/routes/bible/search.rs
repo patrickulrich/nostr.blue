@@ -20,7 +20,8 @@ pub fn BibleSearch() -> Element {
 
     // Perform search
     let mut perform_search = move || {
-        let q = query.read().clone();
+        // Trim whitespace to prevent whitespace-only queries passing length check
+        let q = query.read().trim().to_string();
         // Use chars().count() for Unicode-safe length check (not bytes)
         if q.chars().count() >= 3 {
             let found = search_cached_verses(&q, 50);

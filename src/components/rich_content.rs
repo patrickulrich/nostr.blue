@@ -5021,12 +5021,13 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
 fn NostrBlueProfileRenderer(id: String) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut loading = use_signal(|| true);
-    let id_for_link = id.clone();
+    // Store hex version for route navigation (Route::Profile expects hex, not bech32)
+    let mut pubkey_hex_signal = use_signal(|| id.clone());
 
     use_effect(move || {
         let id_clone = id.clone();
         spawn(async move {
-            // Parse pubkey from various formats
+            // Parse pubkey from various formats to get hex
             let pubkey_hex = if id_clone.starts_with("npub1") || id_clone.starts_with("nprofile1") {
                 Nip19::from_bech32(&id_clone)
                     .ok()
@@ -5040,6 +5041,8 @@ fn NostrBlueProfileRenderer(id: String) -> Element {
             };
 
             if let Some(hex) = pubkey_hex {
+                // Store hex for link navigation
+                pubkey_hex_signal.set(hex.clone());
                 // Fetch from relays (handles cache internally)
                 if let Ok(fetched) = profiles::fetch_profile(hex).await {
                     profile.set(Some(fetched));
@@ -5056,7 +5059,8 @@ fn NostrBlueProfileRenderer(id: String) -> Element {
             if *loading.read() {
                 {nostr_blue_loading_skeleton()}
             } else {
-                {render_profile_minicard(profile.read().as_ref(), &id_for_link)}
+                // Pass hex pubkey for route (not bech32)
+                {render_profile_minicard(profile.read().as_ref(), &pubkey_hex_signal.read())}
             }
         }
     }

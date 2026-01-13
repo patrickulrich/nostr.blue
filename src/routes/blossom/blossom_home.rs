@@ -1142,7 +1142,9 @@ fn ServerList(
         spawn(async move {
             match blossom_store::publish_user_servers().await {
                 Ok(id) => {
-                    publish_result.set(Some(Ok(format!("Published: {}", &id[..16]))));
+                    // Safe character-based slicing to avoid panic on short IDs
+                    let display_id: String = id.chars().take(16).collect();
+                    publish_result.set(Some(Ok(format!("Published: {}...", display_id))));
                 }
                 Err(e) => {
                     publish_result.set(Some(Err(e)));

@@ -23,9 +23,47 @@ fn is_valid_book_version(input: &str) -> bool {
 
 /// Validate book sections input against allowed format.
 /// Only digits, commas, and hyphens are allowed (e.g., "1-5,7,10-12").
+/// Also validates semantic correctness: no empty segments, valid ranges.
 fn is_valid_book_sections(input: &str) -> bool {
-    !input.is_empty()
-        && input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-')
+    if input.is_empty() {
+        return false;
+    }
+
+    // Split by comma to get segments
+    for segment in input.split(',') {
+        let trimmed = segment.trim();
+
+        // Empty segment (e.g., "1,,2" or leading/trailing commas)
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        // Check if it's a single number or range
+        if let Some((start, end)) = trimmed.split_once('-') {
+            // Range format: N-M
+            let start_num: u32 = match start.trim().parse() {
+                Ok(n) if n > 0 => n,
+                _ => return false, // Invalid or zero start
+            };
+            let end_num: u32 = match end.trim().parse() {
+                Ok(n) if n > 0 => n,
+                _ => return false, // Invalid or zero end
+            };
+
+            // Validate range: start <= end
+            if start_num > end_num {
+                return false;
+            }
+        } else {
+            // Single number - must be valid positive integer
+            match trimmed.parse::<u32>() {
+                Ok(n) if n > 0 => {}
+                _ => return false,
+            }
+        }
+    }
+
+    true
 }
 
 /// Validates that a URL is safe for use as an image source.
