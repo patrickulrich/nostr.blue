@@ -1153,7 +1153,9 @@ fn ServerList(
     let mut publishing = use_signal(|| false);
     let mut publish_result = use_signal(|| None::<Result<String, String>>);
 
-    let handle_add = move |_| {
+    // Shared add-server logic - defined once and used by both button click and Enter keypress
+    // Uses Callback for proper Dioxus integration with interior mutability
+    let handle_add = use_callback(move |_: ()| {
         match validate_and_normalize_server_url(&new_server_url()) {
             Ok(normalized) => {
                 on_add_server.call(normalized);
@@ -1164,7 +1166,7 @@ fn ServerList(
                 new_server_error.set(Some(e));
             }
         }
-    };
+    });
 
     let handle_publish = move |_| {
         publishing.set(true);
@@ -1246,25 +1248,15 @@ fn ServerList(
                     placeholder: "https://blossom.example.com",
                     value: "{new_server_url()}",
                     oninput: move |e| new_server_url.set(e.value()),
-                    // Note: Uses same validation as handle_add button (can't directly call closure due to event type)
                     onkeydown: move |e| {
                         if e.key() == Key::Enter {
-                            match validate_and_normalize_server_url(&new_server_url()) {
-                                Ok(normalized) => {
-                                    on_add_server.call(normalized);
-                                    new_server_url.set(String::new());
-                                    new_server_error.set(None);
-                                }
-                                Err(err) => {
-                                    new_server_error.set(Some(err));
-                                }
-                            }
+                            handle_add.call(());
                         }
                     },
                 }
                 button {
                     class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
-                    onclick: handle_add,
+                    onclick: move |_| handle_add.call(()),
                     "Add"
                 }
             }

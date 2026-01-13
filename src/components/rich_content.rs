@@ -100,7 +100,7 @@ pub fn RichContent(
                     },
                     for (idx, token) in tokens.iter().enumerate() {
                         div {
-                            key: "{idx}",
+                            key: "{token_key(token, idx)}",
                             {render_token(token)}
                         }
                     }
@@ -127,12 +127,95 @@ pub fn RichContent(
                 class: "whitespace-pre-wrap break-words space-y-2",
                 for (idx, token) in tokens.iter().enumerate() {
                     div {
-                        key: "{idx}",
+                        key: "{token_key(token, idx)}",
                         {render_token(token)}
                     }
                 }
             }
         }
+    }
+}
+
+/// Simple hash function for generating stable keys (avoids external dependencies)
+fn hash_str(s: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Generate a stable key for a ContentToken to avoid DOM reuse bugs from index-based keys.
+/// Combines variant name with content identifiers for uniqueness.
+fn token_key(token: &ContentToken, idx: usize) -> String {
+    match token {
+        ContentToken::Text(text) => {
+            // For text, use a hash of the first 32 chars to keep keys short but stable
+            let preview: String = text.chars().take(32).collect();
+            format!("text-{}-{:x}", idx, hash_str(&preview))
+        }
+        ContentToken::Link(url) => format!("link-{:x}", hash_str(url)),
+        ContentToken::Image(url) => format!("img-{:x}", hash_str(url)),
+        ContentToken::Video(url) => format!("vid-{:x}", hash_str(url)),
+        ContentToken::Mention(m) => format!("mention-{:x}", hash_str(m)),
+        ContentToken::EventMention(m) => format!("event-{:x}", hash_str(m)),
+        ContentToken::Hashtag(tag) => format!("tag-{}", tag),
+        ContentToken::WavlakeTrack(id) => format!("wavlake-track-{}", id),
+        ContentToken::WavlakeAlbum(id) => format!("wavlake-album-{}", id),
+        ContentToken::WavlakeArtist(id) => format!("wavlake-artist-{}", id),
+        ContentToken::WavlakePlaylist(id) => format!("wavlake-playlist-{}", id),
+        ContentToken::TwitterTweet(id) => format!("tweet-{}", id),
+        ContentToken::TwitchStream(ch) => format!("twitch-stream-{}", ch),
+        ContentToken::TwitchClip(slug) => format!("twitch-clip-{}", slug),
+        ContentToken::TwitchVod(id) => format!("twitch-vod-{}", id),
+        ContentToken::YouTube(id) => format!("yt-{}", id),
+        ContentToken::SpotifyTrack(id) => format!("spotify-track-{}", id),
+        ContentToken::SpotifyAlbum(id) => format!("spotify-album-{}", id),
+        ContentToken::SpotifyPlaylist(id) => format!("spotify-playlist-{}", id),
+        ContentToken::SpotifyEpisode(id) => format!("spotify-ep-{}", id),
+        ContentToken::SoundCloud(url) => format!("soundcloud-{:x}", hash_str(url)),
+        ContentToken::AppleMusicAlbum(url) => format!("apple-album-{:x}", hash_str(url)),
+        ContentToken::AppleMusicPlaylist(url) => format!("apple-playlist-{:x}", hash_str(url)),
+        ContentToken::AppleMusicSong(url) => format!("apple-song-{:x}", hash_str(url)),
+        ContentToken::MixCloud(user, mix) => format!("mixcloud-{}-{}", user, mix),
+        ContentToken::Rumble(url) => format!("rumble-{:x}", hash_str(url)),
+        ContentToken::Tidal(url) => format!("tidal-{:x}", hash_str(url)),
+        ContentToken::ZapStream(naddr) => format!("zapstream-{:x}", hash_str(naddr)),
+        ContentToken::ZapCookingRecipe(naddr) => format!("zapcooking-{:x}", hash_str(naddr)),
+        ContentToken::CashuToken(token) => format!("cashu-{:x}", hash_str(token)),
+        ContentToken::Isbn(isbn) => format!("isbn-{}", isbn),
+        ContentToken::Doi(doi) => format!("doi-{:x}", hash_str(doi)),
+        ContentToken::Isan(isan) => format!("isan-{}", isan),
+        ContentToken::PodcastFeed(guid) => format!("podcast-feed-{:x}", hash_str(guid)),
+        ContentToken::PodcastEpisode(guid) => format!("podcast-ep-{:x}", hash_str(guid)),
+        ContentToken::BitcoinTx(txid) => format!("btc-tx-{}", txid),
+        ContentToken::BitcoinAddress(addr) => format!("btc-addr-{}", addr),
+        ContentToken::Geohash(hash) => format!("geo-{}", hash),
+        // nostr.blue internal links
+        ContentToken::NostrBlueLiveStream(id) => format!("nb-live-{:x}", hash_str(id)),
+        ContentToken::NostrBlueVideo(id) => format!("nb-video-{:x}", hash_str(id)),
+        ContentToken::NostrBluePhoto(id) => format!("nb-photo-{:x}", hash_str(id)),
+        ContentToken::NostrBlueVoice(id) => format!("nb-voice-{:x}", hash_str(id)),
+        ContentToken::NostrBluePodcastShow(id) => format!("nb-podcast-{:x}", hash_str(id)),
+        ContentToken::NostrBluePodcastEpisode(id) => format!("nb-podcast-ep-{:x}", hash_str(id)),
+        ContentToken::NostrBlueMusicPlaylist(id) => format!("nb-playlist-{:x}", hash_str(id)),
+        ContentToken::NostrBlueRadioStation(id) => format!("nb-radio-{:x}", hash_str(id)),
+        ContentToken::NostrBlueArticle(id) => format!("nb-article-{:x}", hash_str(id)),
+        ContentToken::NostrBlueRecipe(id) => format!("nb-recipe-{:x}", hash_str(id)),
+        ContentToken::NostrBlueNote(id) => format!("nb-note-{:x}", hash_str(id)),
+        ContentToken::NostrBlueProfile(id) => format!("nb-profile-{:x}", hash_str(id)),
+        ContentToken::NostrBlueCalendarEvent(id) => format!("nb-calendar-{:x}", hash_str(id)),
+        ContentToken::NostrBlueWiki(id) => format!("nb-wiki-{:x}", hash_str(id)),
+        ContentToken::NostrBluePublication(id) => format!("nb-pub-{:x}", hash_str(id)),
+        ContentToken::NostrBluePinboard(id) => format!("nb-pinboard-{:x}", hash_str(id)),
+        ContentToken::NostrBlueBadge(id) => format!("nb-badge-{:x}", hash_str(id)),
+        ContentToken::NostrBlueProduct(id) => format!("nb-product-{:x}", hash_str(id)),
+        ContentToken::NostrBlueCodeRepo(id) => format!("nb-repo-{:x}", hash_str(id)),
+        ContentToken::NostrBlueCommunity(id) => format!("nb-community-{:x}", hash_str(id)),
+        ContentToken::NostrBlueRssPodcastEpisode(pid, eid) => {
+            format!("nb-rss-ep-{:x}-{:x}", hash_str(pid), hash_str(eid))
+        }
+        ContentToken::NostrBlueRssPodcastShow(id) => format!("nb-rss-show-{:x}", hash_str(id)),
     }
 }
 
@@ -4323,29 +4406,115 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                 .unwrap_or(episode_id);
 
             // Check if podcast_id is numeric (Podcast Index feed ID)
-            if let Ok(feed_id) = podcast_id.parse::<u64>() {
-                // Fetch from Podcast Index API
-                match podcast_index::get_podcast_by_id(feed_id).await {
-                    Ok(feed) => {
-                        match podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await {
+            let feed_id = match podcast_id.parse::<u64>() {
+                Ok(id) => id,
+                Err(_) => {
+                    error.set(Some("Invalid podcast ID format".to_string()));
+                    loading.set(false);
+                    return;
+                }
+            };
+
+            // Try direct episode fetch if episode_id is numeric
+            if let Ok(ep_id) = decoded_episode_id.parse::<u64>() {
+                // Fetch episode directly by ID - more efficient and doesn't miss episodes
+                match podcast_index::get_episode_by_id(ep_id).await {
+                    Ok(ep) => {
+                        // Fetch podcast info for display context
+                        match podcast_index::get_podcast_by_id(feed_id).await {
+                            Ok(feed) => {
+                                let display = DisplayEpisode::from_podcast_index_episode(&ep, &feed);
+                                episode_data.set(Some(display));
+                            }
+                            Err(e) => {
+                                // Episode found but feed fetch failed - still show with limited info
+                                log::warn!("Feed fetch failed but episode found: {}", e);
+                                // Create a minimal feed for display
+                                let minimal_feed = podcast_index::PodcastFeed {
+                                    id: feed_id,
+                                    title: ep.feed_title.clone().unwrap_or_default(),
+                                    url: ep.feed_url.clone().unwrap_or_default(),
+                                    original_url: None,
+                                    link: None,
+                                    description: None,
+                                    author: None,
+                                    owner_name: None,
+                                    image: ep.feed_image.clone(),
+                                    artwork: None,
+                                    language: None,
+                                    itunes_id: None,
+                                    podcast_guid: ep.podcast_guid.clone(),
+                                    categories: None,
+                                    episode_count: None,
+                                    trending_score: None,
+                                    value: None,
+                                };
+                                let display = DisplayEpisode::from_podcast_index_episode(&ep, &minimal_feed);
+                                episode_data.set(Some(display));
+                            }
+                        }
+                        loading.set(false);
+                        return;
+                    }
+                    Err(e) => {
+                        log::debug!("Direct episode fetch failed ({}), falling back to search", e);
+                        // Fall through to search-based approach
+                    }
+                }
+            }
+
+            // Fallback: search through episodes with pagination
+            // This handles non-numeric episode IDs (GUIDs) or when direct fetch fails
+            match podcast_index::get_podcast_by_id(feed_id).await {
+                Ok(feed) => {
+                    const MAX_PAGES: u32 = 5;
+                    const PAGE_SIZE: u32 = 100;
+                    let mut found = false;
+
+                    for page in 0..MAX_PAGES {
+                        // Podcast Index API doesn't have offset, so we use max with increasing limits
+                        // This is inefficient but necessary for thorough search
+                        let fetch_count = PAGE_SIZE * (page + 1);
+                        match podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count)).await {
                             Ok(episodes) => {
-                                // Find episode by ID
-                                if let Some(ep) = episodes.iter()
+                                // Skip episodes we've already checked in previous iterations
+                                let start_idx = if page == 0 { 0 } else { (PAGE_SIZE * page) as usize };
+                                let episodes_to_check = if start_idx < episodes.len() {
+                                    &episodes[start_idx..]
+                                } else {
+                                    // No new episodes, we've exhausted the list
+                                    break;
+                                };
+
+                                if let Some(ep) = episodes_to_check.iter()
                                     .find(|e| e.id.to_string() == decoded_episode_id)
                                 {
                                     let display = DisplayEpisode::from_podcast_index_episode(ep, &feed);
                                     episode_data.set(Some(display));
-                                } else {
-                                    error.set(Some("Episode not found".to_string()));
+                                    found = true;
+                                    break;
+                                }
+
+                                // If we got fewer episodes than requested, we've exhausted the list
+                                if episodes.len() < fetch_count as usize {
+                                    break;
                                 }
                             }
-                            Err(e) => error.set(Some(e)),
+                            Err(e) => {
+                                error.set(Some(format!("Failed to fetch episodes: {}", e)));
+                                break;
+                            }
                         }
                     }
-                    Err(e) => error.set(Some(e)),
+
+                    if !found && error.read().is_none() {
+                        error.set(Some(format!(
+                            "Episode not found (searched {} episodes)",
+                            MAX_PAGES * PAGE_SIZE
+                        )));
+                    }
                 }
-            } else {
-                error.set(Some("Invalid podcast ID format".to_string()));
+                Err(e) => error.set(Some(format!("Failed to fetch podcast: {}", e))),
             }
             loading.set(false);
         });
@@ -4357,16 +4526,23 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
             onclick: move |e: MouseEvent| e.stop_propagation(),
             if *loading.read() {
                 {nostr_blue_loading_skeleton()}
-            } else if let Some(_err) = error.read().as_ref() {
-                // Fallback link on error
-                Link {
-                    to: Route::PodcastRssEpisodeDetail {
-                        podcast_id: podcast_id_for_link.clone(),
-                        episode_id: episode_id_for_link.clone()
-                    },
-                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                    icons::MusicIcon { class: "w-4 h-4" }
-                    "View Episode"
+            } else if let Some(err) = error.read().as_ref() {
+                // Show error message with fallback link
+                div {
+                    class: "p-3 border border-border rounded-lg bg-card",
+                    p {
+                        class: "text-sm text-muted-foreground mb-2",
+                        "{err}"
+                    }
+                    Link {
+                        to: Route::PodcastRssEpisodeDetail {
+                            podcast_id: podcast_id_for_link.clone(),
+                            episode_id: episode_id_for_link.clone()
+                        },
+                        class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                        icons::MusicIcon { class: "w-4 h-4" }
+                        "View Episode"
+                    }
                 }
             } else if let Some(display) = episode_data.read().as_ref() {
                 PodcastEpisodeCard {
@@ -4588,7 +4764,10 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
             log::debug!("Recipe event {} has empty identifier, using event ID as fallback", event.id);
             event.id.to_hex()
         });
-    let a_tag = format!("30023:{}:{}", event.pubkey.to_hex(), identifier);
+    // URL-encode colons in identifier to prevent parsing ambiguity in a_tag format
+    // The a_tag format is "kind:pubkey:identifier" - colons in identifier would break split-based parsing
+    let safe_identifier = identifier.replace(':', "%3A");
+    let a_tag = format!("30023:{}:{}", event.pubkey.to_hex(), safe_identifier);
 
     let cached = CachedRecipe {
         event: event.clone(),

@@ -957,9 +957,38 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     js_sys::Reflect::set(&options, &"hour12".into(), &JsValue::FALSE).ok();
 
     // Format the date parts using Intl API
-    // Note: DateTimeFormat::new may throw RangeError for invalid timezones
-    // that pass basic validation but aren't recognized by the browser
-    let formatter = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &options);
+    // Wrap DateTimeFormat constructor in try-catch to handle RangeError for invalid timezones
+    // that pass basic validation but aren't recognized by the browser.
+    // js_sys::Intl::DateTimeFormat::new() is a direct binding that throws exceptions
+    // which would trap WASM if not caught.
+    let formatter = {
+        use wasm_bindgen::JsCast;
+
+        // Create a function that wraps the constructor in try-catch
+        let try_create_formatter = js_sys::Function::new_with_args(
+            "options",
+            "try { return new Intl.DateTimeFormat([], options); } catch(e) { return null; }",
+        );
+
+        match try_create_formatter.call1(&JsValue::NULL, &options) {
+            Ok(result) if !result.is_null() => {
+                match result.dyn_into::<js_sys::Intl::DateTimeFormat>() {
+                    Ok(f) => f,
+                    Err(_) => {
+                        log::debug!("Failed to cast DateTimeFormat for tz: {}", tz);
+                        return timestamp_to_date_time(ts);
+                    }
+                }
+            }
+            _ => {
+                log::debug!(
+                    "Invalid timezone rejected by browser: {}, falling back to local time",
+                    tz
+                );
+                return timestamp_to_date_time(ts);
+            }
+        }
+    };
     let parts = formatter.format_to_parts(&date);
 
     let mut year = String::new();
