@@ -16,6 +16,9 @@ use nostr_sdk::prelude::ToBech32;
 /// Maximum ICS file size (1MB)
 const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
 
+/// Valid participant roles per NIP-52
+const VALID_ROLES: &[&str] = &["participant", "speaker", "organizer", "moderator"];
+
 /// Event type selection
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum EventType {
@@ -180,6 +183,7 @@ pub fn CalendarEventNew() -> Element {
                     error_message.set(Some("No events found in ICS file".to_string()));
                     clear_file_input("ics-file-input");
                 } else {
+                    error_message.set(None); // Clear any previous error
                     ics_events.set(events);
                     show_ics_selector.set(true);
                     // Clear file input after successful parse to allow re-uploads
@@ -232,6 +236,10 @@ pub fn CalendarEventNew() -> Element {
                     let (date, time) = timestamp_to_date_time(*ts);
                     start_date.set(date);
                     start_time.set(time);
+                    // Preserve timezone from ICS if present
+                    if let Some(tz) = start.timezone() {
+                        timezone.set(tz.to_string());
+                    }
                 }
             }
         }
@@ -757,6 +765,7 @@ pub fn CalendarEventNew() -> Element {
                                 oninput: move |e| participant_input.set(e.value()),
                                 onkeydown: move |e| {
                                     if e.key() == Key::Enter {
+                                        e.prevent_default(); // Prevent form submission
                                         do_add_participant();
                                     }
                                 }
@@ -787,9 +796,15 @@ pub fn CalendarEventNew() -> Element {
                                             onchange: {
                                                 let pubkey = pubkey.clone();
                                                 move |e: Event<FormData>| {
+                                                    let new_role = e.value();
+                                                    // Validate role against allowlist
+                                                    if !VALID_ROLES.contains(&new_role.as_str()) {
+                                                        log::warn!("Invalid role value received: {}", new_role);
+                                                        return;
+                                                    }
                                                     let mut parts = participants.read().clone();
                                                     if let Some(p) = parts.iter_mut().find(|(pk, _, _)| pk == &pubkey) {
-                                                        p.2 = e.value();
+                                                        p.2 = new_role;
                                                     }
                                                     participants.set(parts);
                                                 }

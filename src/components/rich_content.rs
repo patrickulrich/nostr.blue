@@ -665,8 +665,8 @@ fn EventMentionRenderer(mention: String) -> Element {
                         PhotoCard { event: event }
                     }
                 }
-                22 => {
-                    // Video (kind 22)
+                21 | 22 => {
+                    // Video (kind 21 horizontal, kind 22 vertical)
                     rsx! {
                         VideoCard { event: event }
                     }
@@ -4201,7 +4201,7 @@ fn NostrBlueVideoRenderer(id: String) -> Element {
 
             match event_id {
                 Some(eid) => {
-                    let filter = Filter::new().id(eid);
+                    let filter = Filter::new().id(eid).limit(1);
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
@@ -4269,7 +4269,7 @@ fn NostrBluePhotoRenderer(id: String) -> Element {
 
             match event_id {
                 Some(eid) => {
-                    let filter = Filter::new().id(eid);
+                    let filter = Filter::new().id(eid).limit(1);
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
@@ -4336,7 +4336,7 @@ fn NostrBlueVoiceRenderer(id: String) -> Element {
 
             match event_id {
                 Some(eid) => {
-                    let filter = Filter::new().id(eid);
+                    let filter = Filter::new().id(eid).limit(1);
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
@@ -4958,11 +4958,17 @@ fn NostrBlueNoteRenderer(id: String) -> Element {
 
             match event_id {
                 Some(eid) => {
-                    let filter = Filter::new().id(eid);
+                    let filter = Filter::new().id(eid).limit(1);
                     match nostr_client::fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
                         Ok(events) => {
                             if let Some(e) = events.into_iter().next() {
-                                event.set(Some(e));
+                                // Validate kind: text note (1), repost (6), generic repost (16)
+                                let kind = e.kind.as_u16();
+                                if kind == 1 || kind == 6 || kind == 16 {
+                                    event.set(Some(e));
+                                } else {
+                                    error.set(Some("Note not found".to_string()));
+                                }
                             } else {
                                 error.set(Some("Note not found".to_string()));
                             }
@@ -5167,56 +5173,63 @@ fn NostrBlueCalendarEventRenderer(id: String) -> Element {
 /// Renders a nostr.blue wiki link
 #[component]
 fn NostrBlueWikiRenderer(id: String) -> Element {
-    let mut event = use_signal(|| None::<Event>);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
     let id_for_link = id.clone();
 
-    use_effect(move || {
-        let id_clone = id.clone();
-        spawn(async move {
-            // Wiki uses identifier directly, may be naddr or topic name
-            if id_clone.starts_with("naddr1") {
-                match Nip19::from_bech32(&id_clone) {
-                    Ok(Nip19::Coordinate(coord)) => {
-                        let relay_hints: Vec<String> = coord.relays.iter()
-                            .map(|r| r.to_string())
-                            .collect();
+    // Determine upfront if this is a topic (not an naddr) - no fetch needed
+    let is_topic = !id.starts_with("naddr1");
 
-                        match nostr_client::fetch_event_by_coordinate_with_relays(
-                            coord.kind.as_u16(),
-                            coord.public_key.to_hex(),
-                            coord.identifier.clone(),
-                            relay_hints,
-                        ).await {
-                            Ok(Some(e)) => event.set(Some(e)),
-                            Ok(None) => error.set(Some("Wiki page not found".to_string())),
-                            Err(e) => error.set(Some(e)),
-                        }
+    let mut event = use_signal(|| None::<Event>);
+    let mut loading = use_signal(|| !is_topic); // Only load for naddr
+    let mut error = use_signal(|| None::<String>);
+
+    use_effect(use_reactive!(|id| {
+        // Short-circuit for topic links (no fetch needed)
+        if !id.starts_with("naddr1") {
+            return;
+        }
+
+        loading.set(true);
+        event.set(None);
+        error.set(None);
+
+        spawn(async move {
+            match Nip19::from_bech32(&id) {
+                Ok(Nip19::Coordinate(coord)) => {
+                    let relay_hints: Vec<String> = coord.relays.iter()
+                        .map(|r| r.to_string())
+                        .collect();
+
+                    match nostr_client::fetch_event_by_coordinate_with_relays(
+                        coord.kind.as_u16(),
+                        coord.public_key.to_hex(),
+                        coord.identifier.clone(),
+                        relay_hints,
+                    ).await {
+                        Ok(Some(e)) => event.set(Some(e)),
+                        Ok(None) => error.set(Some("Wiki page not found".to_string())),
+                        Err(e) => error.set(Some(e)),
                     }
-                    _ => error.set(Some("Invalid wiki address".to_string())),
                 }
-            } else {
-                // It's a topic name - just show a link
-                error.set(Some("topic".to_string())); // Signal to show link
+                _ => error.set(Some("Invalid wiki address".to_string())),
             }
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *loading.read() {
-                {nostr_blue_loading_skeleton()}
-            } else if error.read().as_ref().map(|e| e == "topic").unwrap_or(false) {
-                // Topic link
+
+            // Check is_topic FIRST (no fetch case)
+            if is_topic {
                 Link {
                     to: Route::WikiDetail { identifier: id_for_link.clone() },
                     class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
                     "Wiki: {id_for_link}"
                 }
+            } else if *loading.read() {
+                {nostr_blue_loading_skeleton()}
             } else if let Some(err) = error.read().as_ref() {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = event.read().as_ref() {
@@ -5636,16 +5649,29 @@ fn NostrBlueCodeRepoRenderer(id: String) -> Element {
 fn NostrBlueCommunityRenderer(id: String) -> Element {
     let id_for_link = id.clone();
 
-    // Communities use a_tag format, just render as a link for now
+    // Validate a_tag format (kind:pubkey:identifier)
+    let parts: Vec<&str> = id.split(':').collect();
+    let is_valid = parts.len() == 3
+        && parts[0].parse::<u32>().is_ok()  // kind is numeric
+        && parts[1].len() == 64;  // pubkey is 64 hex chars
+
     rsx! {
         div {
             class: "my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            Link {
-                to: Route::CommunityPage { a_tag: id_for_link.clone() },
-                class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
-                icons::UsersIcon { class: "w-4 h-4" }
-                "View Community"
+            if is_valid {
+                Link {
+                    to: Route::CommunityPage { a_tag: id_for_link.clone() },
+                    class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                    icons::UsersIcon { class: "w-4 h-4" }
+                    "View Community"
+                }
+            } else {
+                span {
+                    class: "inline-flex items-center gap-2 px-3 py-2 bg-muted text-muted-foreground rounded-lg text-sm",
+                    icons::UsersIcon { class: "w-4 h-4" }
+                    "Invalid Community"
+                }
             }
         }
     }

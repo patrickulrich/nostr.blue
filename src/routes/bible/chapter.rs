@@ -1,6 +1,8 @@
 //! Bible Chapter Reading View
 //! Displays a chapter with verse selection and highlighting
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 
 use crate::stores::bible_store::{
@@ -119,14 +121,20 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 let book_name = &data.book.common_name;
                 let mut text_parts = Vec::new();
 
-                for v in verses.iter() {
-                    for content in &data.chapter.content {
+                // Build verse text map once for O(n) lookup instead of O(n²)
+                let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
+                    .filter_map(|content| {
                         if let ChapterContent::Verse { number, content: verse_content } = content {
-                            if number == v {
-                                let text = verse_to_plain_text(verse_content);
-                                text_parts.push(format!("{} {}", v, text));
-                            }
+                            Some((*number, verse_to_plain_text(verse_content)))
+                        } else {
+                            None
                         }
+                    })
+                    .collect();
+
+                for v in verses.iter() {
+                    if let Some(text) = verse_text_map.get(v) {
+                        text_parts.push(format!("{} {}", v, text));
                     }
                 }
 
@@ -183,15 +191,21 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 let book_name = data.book.common_name.clone();
                 let api_url = get_chapter_api_url(&translation, &book, chapter);
 
-                // Build verse text
+                // Build verse text map once for O(n) lookup instead of O(n²)
+                let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
+                    .filter_map(|content| {
+                        if let ChapterContent::Verse { number, content: verse_content } = content {
+                            Some((*number, verse_to_plain_text(verse_content)))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
                 let mut text_parts = Vec::new();
                 for v in &verses {
-                    for content in &data.chapter.content {
-                        if let ChapterContent::Verse { number, content: verse_content } = content {
-                            if number == v {
-                                text_parts.push(verse_to_plain_text(verse_content));
-                            }
-                        }
+                    if let Some(text) = verse_text_map.get(v) {
+                        text_parts.push(text.clone());
                     }
                 }
 
@@ -352,26 +366,30 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                 }
                             }
                         },
-                        Some(Ok(data)) => rsx! {
-                            // Render chapter content
-                            div { class: "prose prose-lg dark:prose-invert max-w-none leading-relaxed",
-                                for content in data.chapter.content.iter() {
-                                    match content {
-                                        ChapterContent::Heading { content: heading_content } => {
-                                            rsx! {
-                                                h3 { class: "text-lg font-semibold mt-6 mb-3 text-muted-foreground",
-                                                    {heading_content.join(" ")}
+                        Some(Ok(data)) => {
+                            // Precompute highlight stats once for O(n) instead of O(n²)
+                            let highlight_stats = bible_store::get_chapter_highlight_stats();
+
+                            rsx! {
+                                // Render chapter content
+                                div { class: "prose prose-lg dark:prose-invert max-w-none leading-relaxed",
+                                    for content in data.chapter.content.iter() {
+                                        match content {
+                                            ChapterContent::Heading { content: heading_content } => {
+                                                rsx! {
+                                                    h3 { class: "text-lg font-semibold mt-6 mb-3 text-muted-foreground",
+                                                        {heading_content.join(" ")}
+                                                    }
                                                 }
                                             }
-                                        }
-                                        ChapterContent::LineBreak => {
-                                            rsx! { br {} }
-                                        }
-                                        ChapterContent::Verse { number, content: verse_content } => {
-                                            let verse_num = *number;
-                                            let is_selected = selected_verses.read().contains(&verse_num);
-                                            let is_highlighted = bible_store::is_verse_highlighted(&translation, &book, chapter, verse_num);
-                                            let highlight_count = bible_store::get_verse_highlight_count(verse_num);
+                                            ChapterContent::LineBreak => {
+                                                rsx! { br {} }
+                                            }
+                                            ChapterContent::Verse { number, content: verse_content } => {
+                                                let verse_num = *number;
+                                                let is_selected = selected_verses.read().contains(&verse_num);
+                                                let is_highlighted = bible_store::is_verse_highlighted(&translation, &book, chapter, verse_num);
+                                                let highlight_count = *highlight_stats.verse_counts.get(&verse_num).unwrap_or(&0);
 
                                             rsx! {
                                                 span {
@@ -446,6 +464,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     }
                 }
             }
+        }
 
             // Verse Action Toolbar (fixed at bottom)
             if *show_toolbar.read() && !selected_verses.read().is_empty() {
@@ -510,16 +529,21 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                         let first = *verses.first().unwrap_or(&0);
                                         let last = *verses.last().unwrap_or(&0);
 
-                                        // Build verse text (same format as copy button)
+                                        // Build verse text map once for O(n) lookup instead of O(n²)
+                                        let verse_text_map: HashMap<u32, String> = data.chapter.content.iter()
+                                            .filter_map(|content| {
+                                                if let ChapterContent::Verse { number, content: verse_content } = content {
+                                                    Some((*number, verse_to_plain_text(verse_content)))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect();
+
                                         let mut text_parts = Vec::new();
                                         for v in verses.iter() {
-                                            for content in &data.chapter.content {
-                                                if let ChapterContent::Verse { number, content: verse_content } = content {
-                                                    if number == v {
-                                                        let text = verse_to_plain_text(verse_content);
-                                                        text_parts.push(format!("{} {}", v, text));
-                                                    }
-                                                }
+                                            if let Some(text) = verse_text_map.get(v) {
+                                                text_parts.push(format!("{} {}", v, text));
                                             }
                                         }
                                         let verse_text = text_parts.join(" ");
@@ -532,7 +556,13 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                         };
 
                                         // Build nostr.blue URL
-                                        let url = format!("https://nostr.blue/bible/{}/{}/{}", translation, book, chapter);
+                                        // URL-encode translation and book for safe URLs (e.g., books with spaces like "1 Samuel")
+                                        let url = format!(
+                                            "https://nostr.blue/bible/{}/{}/{}",
+                                            urlencoding::encode(&translation),
+                                            urlencoding::encode(&book),
+                                            chapter
+                                        );
 
                                         share_title.set(reference);
                                         share_url.set(url);
