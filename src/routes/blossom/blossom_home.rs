@@ -147,6 +147,7 @@ pub fn BlossomPage() -> Element {
                 }
                 Err(e) => {
                     log::error!("Failed to delete files: {}", e);
+                    *MEDIA_ERROR.write() = Some(format!("Failed to delete files: {}", e));
                 }
             }
             deleting.set(false);
@@ -923,6 +924,10 @@ fn UploadModal(
             aria_modal: "true",
             aria_labelledby: "{title_id}",
             tabindex: "-1",
+            onmounted: move |mounted| async move {
+                // Focus the modal on mount for accessibility
+                let _ = mounted.data().set_focus(true).await;
+            },
             onclick: move |_| {
                 if !uploading() {
                     on_close.call(());

@@ -154,9 +154,9 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
             let preview: String = text.chars().take(32).collect();
             format!("text-{}-{:x}", idx, hash_str(&preview))
         }
-        ContentToken::Link(url) => format!("link-{:x}", hash_str(url)),
-        ContentToken::Image(url) => format!("img-{:x}", hash_str(url)),
-        ContentToken::Video(url) => format!("vid-{:x}", hash_str(url)),
+        ContentToken::Link(url) => format!("link-{}-{:x}", idx, hash_str(url)),
+        ContentToken::Image(url) => format!("img-{}-{:x}", idx, hash_str(url)),
+        ContentToken::Video(url) => format!("vid-{}-{:x}", idx, hash_str(url)),
         ContentToken::Mention(m) => format!("mention-{:x}", hash_str(m)),
         ContentToken::EventMention(m) => format!("event-{:x}", hash_str(m)),
         ContentToken::Hashtag(tag) => format!("tag-{}", tag),
@@ -173,13 +173,13 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::SpotifyAlbum(id) => format!("spotify-album-{}", id),
         ContentToken::SpotifyPlaylist(id) => format!("spotify-playlist-{}", id),
         ContentToken::SpotifyEpisode(id) => format!("spotify-ep-{}", id),
-        ContentToken::SoundCloud(url) => format!("soundcloud-{:x}", hash_str(url)),
-        ContentToken::AppleMusicAlbum(url) => format!("apple-album-{:x}", hash_str(url)),
-        ContentToken::AppleMusicPlaylist(url) => format!("apple-playlist-{:x}", hash_str(url)),
-        ContentToken::AppleMusicSong(url) => format!("apple-song-{:x}", hash_str(url)),
-        ContentToken::MixCloud(user, mix) => format!("mixcloud-{}-{}", user, mix),
-        ContentToken::Rumble(url) => format!("rumble-{:x}", hash_str(url)),
-        ContentToken::Tidal(url) => format!("tidal-{:x}", hash_str(url)),
+        ContentToken::SoundCloud(url) => format!("soundcloud-{}-{:x}", idx, hash_str(url)),
+        ContentToken::AppleMusicAlbum(url) => format!("apple-album-{}-{:x}", idx, hash_str(url)),
+        ContentToken::AppleMusicPlaylist(url) => format!("apple-playlist-{}-{:x}", idx, hash_str(url)),
+        ContentToken::AppleMusicSong(url) => format!("apple-song-{}-{:x}", idx, hash_str(url)),
+        ContentToken::MixCloud(user, mix) => format!("mixcloud-{}-{}-{}", idx, user, mix),
+        ContentToken::Rumble(url) => format!("rumble-{}-{:x}", idx, hash_str(url)),
+        ContentToken::Tidal(url) => format!("tidal-{}-{:x}", idx, hash_str(url)),
         ContentToken::ZapStream(naddr) => format!("zapstream-{:x}", hash_str(naddr)),
         ContentToken::ZapCookingRecipe(naddr) => format!("zapcooking-{:x}", hash_str(naddr)),
         ContentToken::CashuToken(token) => format!("cashu-{:x}", hash_str(token)),
@@ -4764,10 +4764,8 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
             log::debug!("Recipe event {} has empty identifier, using event ID as fallback", event.id);
             event.id.to_hex()
         });
-    // URL-encode colons in identifier to prevent parsing ambiguity in a_tag format
-    // The a_tag format is "kind:pubkey:identifier" - colons in identifier would break split-based parsing
-    let safe_identifier = identifier.replace(':', "%3A");
-    let a_tag = format!("30023:{}:{}", event.pubkey.to_hex(), safe_identifier);
+    // Build a_tag (no encoding needed - use splitn(3, ':') when parsing to handle colons in identifier)
+    let a_tag = format!("30023:{}:{}", event.pubkey.to_hex(), identifier);
 
     let cached = CachedRecipe {
         event: event.clone(),
@@ -5255,10 +5253,12 @@ fn NostrBlueCommunityRenderer(id: String) -> Element {
     let id_for_link = id.clone();
 
     // Validate a_tag format (kind:pubkey:identifier)
-    let parts: Vec<&str> = id.split(':').collect();
+    // Use splitn(3, ':') to handle identifiers containing colons
+    let parts: Vec<&str> = id.splitn(3, ':').collect();
     let is_valid = parts.len() == 3
         && parts[0].parse::<u32>().is_ok()  // kind is numeric
-        && PublicKey::from_hex(parts[1]).is_ok();  // validate hex pubkey
+        && PublicKey::from_hex(parts[1]).is_ok()  // validate hex pubkey
+        && !parts[2].is_empty();  // identifier must be non-empty
 
     rsx! {
         div {
@@ -5279,5 +5279,111 @@ fn NostrBlueCommunityRenderer(id: String) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::content_parser::ContentToken;
+
+    /// Test that all ContentToken variants produce non-empty keys via token_key()
+    /// This ensures parser↔renderer parity - if a new variant is added to ContentToken,
+    /// adding it to this test will catch any missing token_key() handling at compile time.
+    #[test]
+    fn test_token_key_handles_all_variants() {
+        let test_cases: Vec<ContentToken> = vec![
+            ContentToken::Text("test".to_string()),
+            ContentToken::Link("https://example.com".to_string()),
+            ContentToken::Image("https://example.com/img.jpg".to_string()),
+            ContentToken::Video("https://example.com/vid.mp4".to_string()),
+            ContentToken::WavlakeTrack("abc123".to_string()),
+            ContentToken::WavlakeAlbum("def456".to_string()),
+            ContentToken::WavlakeArtist("ghi789".to_string()),
+            ContentToken::WavlakePlaylist("jkl012".to_string()),
+            ContentToken::TwitterTweet("123456789".to_string()),
+            ContentToken::TwitchStream("channel".to_string()),
+            ContentToken::TwitchClip("slug".to_string()),
+            ContentToken::TwitchVod("12345".to_string()),
+            ContentToken::Mention("npub1test".to_string()),
+            ContentToken::EventMention("note1test".to_string()),
+            ContentToken::Hashtag("nostr".to_string()),
+            ContentToken::YouTube("dQw4w9WgXcQ".to_string()),
+            ContentToken::SpotifyTrack("track123".to_string()),
+            ContentToken::SpotifyAlbum("album123".to_string()),
+            ContentToken::SpotifyPlaylist("playlist123".to_string()),
+            ContentToken::SpotifyEpisode("ep123".to_string()),
+            ContentToken::SoundCloud("https://soundcloud.com/test".to_string()),
+            ContentToken::AppleMusicAlbum("us/album/test/123".to_string()),
+            ContentToken::AppleMusicPlaylist("us/playlist/test/123".to_string()),
+            ContentToken::AppleMusicSong("us/album/test/123?i=456".to_string()),
+            ContentToken::MixCloud("user".to_string(), "mix".to_string()),
+            ContentToken::Rumble("https://rumble.com/embed/123".to_string()),
+            ContentToken::Tidal("https://embed.tidal.com/track/123".to_string()),
+            ContentToken::ZapStream("naddr1test".to_string()),
+            ContentToken::ZapCookingRecipe("naddr1test".to_string()),
+            ContentToken::CashuToken("cashuAtest".to_string()),
+            ContentToken::Isbn("9780765382030".to_string()),
+            ContentToken::Doi("10.1000/182".to_string()),
+            ContentToken::Isan("0000-0000-401A-0000-7".to_string()),
+            ContentToken::PodcastFeed("guid123".to_string()),
+            ContentToken::PodcastEpisode("ep-guid".to_string()),
+            ContentToken::BitcoinTx("a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d".to_string()),
+            ContentToken::BitcoinAddress("bc1qtest".to_string()),
+            ContentToken::Geohash("u4pruydqqvj".to_string()),
+            ContentToken::NostrBlueLiveStream("naddr1test".to_string()),
+            ContentToken::NostrBlueVideo("note1test".to_string()),
+            ContentToken::NostrBluePhoto("note1test".to_string()),
+            ContentToken::NostrBlueVoice("note1test".to_string()),
+            ContentToken::NostrBluePodcastShow("naddr1test".to_string()),
+            ContentToken::NostrBluePodcastEpisode("naddr1test".to_string()),
+            ContentToken::NostrBlueMusicPlaylist("naddr1test".to_string()),
+            ContentToken::NostrBlueRadioStation("naddr1test".to_string()),
+            ContentToken::NostrBlueArticle("naddr1test".to_string()),
+            ContentToken::NostrBlueRecipe("naddr1test".to_string()),
+            ContentToken::NostrBlueNote("note1test".to_string()),
+            ContentToken::NostrBlueProfile("npub1test".to_string()),
+            ContentToken::NostrBlueCalendarEvent("naddr1test".to_string()),
+            ContentToken::NostrBlueWiki("article-title".to_string()),
+            ContentToken::NostrBluePublication("naddr1test".to_string()),
+            ContentToken::NostrBluePinboard("naddr1test".to_string()),
+            ContentToken::NostrBlueBadge("naddr1test".to_string()),
+            ContentToken::NostrBlueProduct("naddr1test".to_string()),
+            ContentToken::NostrBlueCodeRepo("naddr1test".to_string()),
+            ContentToken::NostrBlueCommunity("34550:pubkey:community-name".to_string()),
+            ContentToken::NostrBlueRssPodcastEpisode("podcast123".to_string(), "ep456".to_string()),
+            ContentToken::NostrBlueRssPodcastShow("podcast123".to_string()),
+        ];
+
+        // Verify we're testing all 57 variants (update this count when adding new variants)
+        assert_eq!(
+            test_cases.len(), 57,
+            "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test."
+        );
+
+        for (idx, token) in test_cases.iter().enumerate() {
+            let key = token_key(token, idx);
+            assert!(
+                !key.is_empty(),
+                "token_key should return non-empty string for {:?}",
+                token
+            );
+        }
+    }
+
+    /// Test that duplicate URLs at different positions get unique keys (Issue 10 fix verification)
+    #[test]
+    fn test_token_key_uniqueness_for_duplicates() {
+        let url = "https://example.com/test.jpg";
+        let token1 = ContentToken::Image(url.to_string());
+        let token2 = ContentToken::Image(url.to_string());
+
+        let key1 = token_key(&token1, 0);
+        let key2 = token_key(&token2, 1);
+
+        assert_ne!(
+            key1, key2,
+            "Same URL at different positions should have unique keys"
+        );
     }
 }

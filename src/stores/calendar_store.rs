@@ -603,9 +603,11 @@ pub fn filter_events_with_nip50(events: &[UnifiedEvent], filters: &EventFilterSt
         .iter()
         .filter(|event| {
             // Hide ended events filter (skip when explicitly viewing past events)
+            // Uses 24h grace period so recently-ended events still show
             if filters.hide_ended && filters.time_filter != TimeFilter::Past {
                 let end_ts = event.effective_end_timestamp();
-                if end_ts < now_secs {
+                let grace_period = 86400; // 24 hours
+                if end_ts < now_secs.saturating_sub(grace_period) {
                     return false;
                 }
             }
@@ -1342,13 +1344,14 @@ pub struct CalendarEventComment {
 }
 
 /// Fetch comments for a calendar event by naddr
-/// Comments reference the event via 'a' tag (coordinate)
+/// Comments reference the event via 'A' tag (root scope per NIP-22)
 /// Uses fetch_events_from_relays to bypass cache and get fresh data
 pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
-    // Use kind 1111 (NIP-22 comment) with 'a' tag referencing the event coordinate
+    // Use kind 1111 (NIP-22 comment) with uppercase 'A' tag for root scope
+    // This finds all comments in the thread (both top-level and nested replies)
     let filter = Filter::new()
         .kind(Kind::Custom(1111))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string())
+        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), coordinate.to_string())
         .limit(100);
 
     // Use fetch_events_from_relays to bypass cache for fresh comment data
@@ -1365,15 +1368,15 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
                 .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
         };
 
-        // NIP-22 requires uppercase tags for root: A (coordinate), K (kind)
+        // NIP-22 requires uppercase tags for root scope: A (coordinate), K (kind)
         let root_a = get_tag_value("A");
         let root_k = get_tag_value("K");
 
-        // NIP-22 requires lowercase tags for parent: a (coordinate), k (kind)
-        let parent_a = get_tag_value("a");
+        // NIP-22 requires lowercase tags for parent: k (kind)
+        // Note: lowercase 'a' may point to parent comment for nested replies, not the calendar event
         let parent_k = get_tag_value("k");
 
-        // Validate required tags are present with values
+        // Validate root tags are present (required for all NIP-22 comments)
         if root_a.is_none() || root_k.is_none() {
             log::debug!(
                 "Skipping event {} - missing NIP-22 root tags (A={}, K={})",
@@ -1382,20 +1385,21 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
             continue;
         }
 
-        if parent_a.is_none() || parent_k.is_none() {
+        // Validate parent kind tag exists (required per NIP-22)
+        if parent_k.is_none() {
             log::debug!(
-                "Skipping event {} - missing NIP-22 parent tags (a={}, k={})",
-                e.id, parent_a.is_some(), parent_k.is_some()
+                "Skipping event {} - missing NIP-22 parent kind tag (k)",
+                e.id
             );
             continue;
         }
 
-        // Validate lowercase 'a' tag matches the requested coordinate
-        // This ensures the comment is actually for the calendar event we're querying
-        if let Some(ref a_value) = parent_a {
+        // Validate root A tag matches the requested coordinate
+        // (This should always match due to filter, but double-check)
+        if let Some(ref a_value) = root_a {
             if a_value != coordinate {
                 log::warn!(
-                    "Skipping event {} - parent 'a' tag mismatch: expected '{}', got '{}'",
+                    "Skipping event {} - root 'A' tag mismatch: expected '{}', got '{}'",
                     e.id, coordinate, a_value
                 );
                 continue;

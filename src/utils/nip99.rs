@@ -42,8 +42,9 @@ pub fn now_secs() -> u64 {
 /// assert_eq!(extract_product_name_from_coordinate(coord), "vintage-camera");
 /// ```
 pub fn extract_product_name_from_coordinate(coordinate: &str) -> String {
+    // Use splitn(3, ':') to handle identifiers containing colons
     coordinate
-        .split(':')
+        .splitn(3, ':')
         .nth(2)
         .map(|s| s.to_string())
         .unwrap_or_else(|| coordinate.to_string())

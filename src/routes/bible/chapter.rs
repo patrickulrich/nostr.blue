@@ -26,6 +26,31 @@ fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
         .collect()
 }
 
+/// Parse a Bible API link to extract translation, book, and chapter
+/// Format: https://bible.helloao.org/api/{translation}/{book}/{chapter}.json
+fn parse_chapter_api_link(api_link: &str) -> Option<(String, String, u32)> {
+    let path = api_link.strip_suffix(".json")?;
+    let parts: Vec<&str> = path.split('/').collect();
+
+    // Need at least .../translation/book/chapter
+    if parts.len() < 3 {
+        return None;
+    }
+
+    let chapter_str = parts[parts.len() - 1];
+    let book = parts[parts.len() - 2];
+    let translation = parts[parts.len() - 3];
+
+    let chapter = chapter_str.parse::<u32>().ok()?;
+
+    // URL-decode the book and translation (e.g., "1%20Samuel" -> "1 Samuel")
+    Some((
+        urlencoding::decode(translation).ok()?.into_owned(),
+        urlencoding::decode(book).ok()?.into_owned(),
+        chapter,
+    ))
+}
+
 /// Bible Chapter Reading View
 #[component]
 pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
@@ -296,51 +321,55 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         // Nav buttons
                         div { class: "flex gap-2",
                             if let Some(Ok(data)) = &*chapter_data.read() {
-                                // Previous chapter
-                                if data.previous_chapter_api_link.is_some() && chapter > 1 {
-                                    Link {
-                                        to: crate::routes::Route::BibleChapter {
-                                            translation: translation.clone(),
-                                            book: book.clone(),
-                                            chapter: chapter - 1,
-                                        },
-                                        class: "p-2 hover:bg-muted rounded-lg transition",
-                                        svg {
-                                            xmlns: "http://www.w3.org/2000/svg",
-                                            class: "w-5 h-5",
-                                            fill: "none",
-                                            view_box: "0 0 24 24",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            path {
-                                                stroke_linecap: "round",
-                                                stroke_linejoin: "round",
-                                                d: "M15 19l-7-7 7-7"
+                                // Previous chapter - parse API link for cross-book navigation
+                                if let Some(ref prev_link) = data.previous_chapter_api_link {
+                                    if let Some((prev_trans, prev_book, prev_ch)) = parse_chapter_api_link(prev_link) {
+                                        Link {
+                                            to: crate::routes::Route::BibleChapter {
+                                                translation: prev_trans,
+                                                book: prev_book,
+                                                chapter: prev_ch,
+                                            },
+                                            class: "p-2 hover:bg-muted rounded-lg transition",
+                                            svg {
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                class: "w-5 h-5",
+                                                fill: "none",
+                                                view_box: "0 0 24 24",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                path {
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    d: "M15 19l-7-7 7-7"
+                                                }
                                             }
                                         }
                                     }
                                 }
 
-                                // Next chapter
-                                if data.next_chapter_api_link.is_some() {
-                                    Link {
-                                        to: crate::routes::Route::BibleChapter {
-                                            translation: translation.clone(),
-                                            book: book.clone(),
-                                            chapter: chapter + 1,
-                                        },
-                                        class: "p-2 hover:bg-muted rounded-lg transition",
-                                        svg {
-                                            xmlns: "http://www.w3.org/2000/svg",
-                                            class: "w-5 h-5",
-                                            fill: "none",
-                                            view_box: "0 0 24 24",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            path {
-                                                stroke_linecap: "round",
-                                                stroke_linejoin: "round",
-                                                d: "M9 5l7 7-7 7"
+                                // Next chapter - parse API link for cross-book navigation
+                                if let Some(ref next_link) = data.next_chapter_api_link {
+                                    if let Some((next_trans, next_book, next_ch)) = parse_chapter_api_link(next_link) {
+                                        Link {
+                                            to: crate::routes::Route::BibleChapter {
+                                                translation: next_trans,
+                                                book: next_book,
+                                                chapter: next_ch,
+                                            },
+                                            class: "p-2 hover:bg-muted rounded-lg transition",
+                                            svg {
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                class: "w-5 h-5",
+                                                fill: "none",
+                                                view_box: "0 0 24 24",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                path {
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    d: "M9 5l7 7-7 7"
+                                                }
                                             }
                                         }
                                     }

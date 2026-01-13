@@ -299,7 +299,8 @@ pub async fn fetch_badge_definition(naddr: &str) -> Result<BadgeDefinition, Stri
 
 /// Fetch a badge definition by coordinate string ("30009:pubkey:badge_id")
 pub async fn fetch_badge_by_coordinate(coordinate: &str) -> Result<BadgeDefinition, String> {
-    let parts: Vec<&str> = coordinate.split(':').collect();
+    // Use splitn(3, ':') to handle identifiers containing colons
+    let parts: Vec<&str> = coordinate.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Err(format!("Invalid coordinate format: {}", coordinate));
     }

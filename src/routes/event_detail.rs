@@ -97,8 +97,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) = unified_event {
                             if let Some(ref space_coord) = meeting.space_coordinate {
                                 log::info!("[CalendarEventDetail] Fetching parent space: {}", space_coord);
-                                // Convert coordinate to naddr format for fetching
-                                let parts: Vec<&str> = space_coord.split(':').collect();
+                                // Convert coordinate to naddr format for fetching (splitn to handle identifiers with colons)
+                                let parts: Vec<&str> = space_coord.splitn(3, ':').collect();
                                 if parts.len() >= 3 {
                                     // Build naddr from coordinate parts using nostr prelude
                                     use nostr::prelude::*;

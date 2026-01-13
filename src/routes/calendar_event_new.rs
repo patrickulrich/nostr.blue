@@ -207,7 +207,7 @@ pub fn CalendarEventNew() -> Element {
             // Find the last valid UTF-8 char boundary at or before 200 bytes
             let safe_boundary = desc
                 .char_indices()
-                .take_while(|(i, _)| *i <= 200)
+                .take_while(|(i, _)| *i < 200)
                 .last()
                 .map(|(i, c)| i + c.len_utf8())
                 .unwrap_or(desc.len().min(200));

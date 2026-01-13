@@ -298,8 +298,12 @@ pub async fn create_highlight(
     }
 
     // Build event using validated SDK patterns
+    // NIP-84: r-tag with "source" attribute marks this as the highlighted source URL
     let mut builder = EventBuilder::new(Kind::Custom(KIND_HIGHLIGHT), verse_text)
-        .tag(Tag::reference(api_url))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+            vec![api_url, "source"]
+        ))
         .tag(Tag::custom(TagKind::Custom("context".into()), vec![reference]))
         .tag(Tag::hashtag("bible"));
 
@@ -667,10 +671,29 @@ pub fn format_bible_url(translation: &str, book: &str, chapter: u32) -> String {
 
 /// Clear all store state
 pub fn clear_store() {
+    // Data caches
     CHAPTER_CACHE.write().clear();
     *USER_HIGHLIGHTS.write() = Vec::new();
     *CURRENT_CHAPTER_HIGHLIGHTS.write() = Vec::new();
     *CURRENT_BOOKS.write() = Vec::new();
     *LAST_POSITION.write() = None;
+
+    // Translation state
+    *TRANSLATIONS.write() = Vec::new();
+    *ENGLISH_TRANSLATIONS.write() = Vec::new();
+    *CURRENT_TRANSLATION.write() = DEFAULT_TRANSLATION.to_string();
+
+    // Loading flags
+    *LOADING_TRANSLATIONS.write() = false;
+    *LOADING_BOOKS.write() = false;
+    *LOADING_CHAPTER.write() = false;
+    *LOADING_HIGHLIGHTS.write() = false;
+
+    // Race guard signals
+    *LATEST_REQUESTED_TRANSLATION.write() = String::new();
+    *LATEST_REQUESTED_CHAPTER.write() = String::new();
+    *LATEST_REQUESTED_HIGHLIGHT_URL.write() = String::new();
+
+    // Initialization flag (must be last)
     *BIBLE_STORE_INITIALIZED.write() = false;
 }

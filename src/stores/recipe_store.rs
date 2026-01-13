@@ -150,10 +150,8 @@ pub fn parse_recipe_event(event: &NostrEvent) -> Option<CachedRecipe> {
     // Get d-tag (required)
     let d_tag = event.tags.identifier()?;
 
-    // Build a_tag - URL-encode colons in identifier to prevent parsing ambiguity
-    // The a_tag format is "kind:pubkey:identifier" - colons in identifier would break split-based parsing
-    let safe_d_tag = d_tag.replace(':', "%3A");
-    let a_tag = format!("{}:{}:{}", KIND_RECIPE, event.pubkey.to_hex(), safe_d_tag);
+    // Build a_tag (no encoding needed - use splitn(3, ':') when parsing to handle colons in identifier)
+    let a_tag = format!("{}:{}:{}", KIND_RECIPE, event.pubkey.to_hex(), d_tag);
 
     // Build naddr
     let naddr = match Coordinate::new(Kind::LongFormTextNote, event.pubkey)
