@@ -127,6 +127,35 @@ pub mod shop_merchant_orders;
 pub mod shop_collection;
 pub mod shop_collection_new;
 pub mod shop_search;
+
+// Blossom Media Management (BUD-01/02/04/05)
+pub mod blossom;
+
+// Bible Reading (NIP-84 Highlights) - WASM-only
+#[cfg(target_arch = "wasm32")]
+pub mod bible;
+
+// Stub bible module for non-WASM builds (clippy/check on native targets)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bible {
+    use dioxus::prelude::*;
+
+    #[component]
+    pub fn BibleHome() -> Element {
+        rsx! { div { "Bible requires WASM target" } }
+    }
+
+    #[component]
+    pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
+        let _ = (translation, book, chapter);
+        rsx! { div { "Bible requires WASM target" } }
+    }
+
+    #[component]
+    pub fn BibleSearch() -> Element {
+        rsx! { div { "Bible requires WASM target" } }
+    }
+}
 pub mod code_repositories;
 pub mod code_snippets;
 pub mod code_snippet_detail;
@@ -262,6 +291,8 @@ use shop_merchant_orders::ShopMerchantOrders;
 use shop_collection::ShopCollection;
 use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
+use blossom::BlossomPage;
+use bible::{BibleHome, BibleChapter, BibleSearch};
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -656,6 +687,20 @@ pub enum Route {
         #[route("/id/:identifier")]
         Nip19Handler { identifier: String },
 
+        // Blossom Media Management
+        #[route("/blossom")]
+        BlossomPage {},
+
+        // Bible Reading (NIP-84 Highlights)
+        #[route("/bible")]
+        BibleHome {},
+
+        #[route("/bible/:translation/:book/:chapter")]
+        BibleChapter { translation: String, book: String, chapter: u32 },
+
+        #[route("/bible/search")]
+        BibleSearch {},
+
         #[route("/settings")]
         Settings {},
 
@@ -736,6 +781,10 @@ fn Layout() -> Element {
         Route::ShopProductEdit { .. } | Route::ShopCart {} | Route::ShopCheckout {} | Route::ShopOrders {} |
         Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
         Route::ShopCollectionNew {} | Route::ShopSearch { .. }
+    );
+    let is_blossom_page = matches!(current_route, Route::BlossomPage {});
+    let is_bible_page = matches!(current_route,
+        Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
     let is_settings_page = matches!(current_route, Route::Settings {});
 
@@ -992,135 +1041,200 @@ fn Layout() -> Element {
                 if *sidebar_open.read() {
                     div {
                         class: "fixed inset-0 bg-black/50 z-40 lg:hidden",
-                        onclick: move |_| sidebar_open.set(false),
+                        onclick: move |_| {
+                            sidebar_open.set(false);
+                            more_menu_open.set(false);
+                        },
 
                         aside {
-                            class: "w-64 bg-white dark:bg-gray-900 h-full",
+                            class: "w-64 bg-white dark:bg-gray-900 h-full overflow-y-auto",
                             onclick: move |e| e.stop_propagation(),
                             div {
                                 class: "p-4 space-y-6",
 
-                                // Close button
-                                button {
-                                    class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
-                                    onclick: move |_| sidebar_open.set(false),
-                                    "✕ Close"
-                                }
+                                // Show "More" panel when more_menu_open is true
+                                if *more_menu_open.read() {
+                                    // Back button to return to main menu
+                                    button {
+                                        class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2",
+                                        onclick: move |_| more_menu_open.set(false),
+                                        "← Back"
+                                    }
 
-                                // Same navigation as desktop
-                                div {
-                                    class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
-                                    onclick: move |_| {
-                                        sidebar_open.set(false);
-                                        if is_home_page {
-                                            // Already on home page, scroll to top
-                                            if let Some(window) = web_sys::window() {
-                                                window.scroll_to_with_x_and_y(0.0, 0.0);
-                                            }
-                                        } else {
-                                            // Navigate to home
-                                            navigator.push(Route::Home { list: String::new() });
-                                        }
-                                    },
+                                    // Header for More section
                                     div {
-                                        class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
-                                        "N"
+                                        class: "flex items-center gap-2 mb-6",
+                                        crate::components::icons::MoreHorizontalIcon {
+                                            class: "w-8 h-8".to_string()
+                                        }
+                                        span {
+                                            class: "text-2xl font-bold text-gray-900 dark:text-white",
+                                            "More"
+                                        }
                                     }
-                                    span {
-                                        class: "text-2xl font-bold text-gray-900 dark:text-white",
-                                        "nostr.blue"
+
+                                    nav {
+                                        class: "flex flex-col gap-2",
+
+                                        // Render More menu items as full navigation (mobile)
+                                        for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
+                                            {
+                                                if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                    rsx! {
+                                                        Link {
+                                                            key: "{item:?}-mobile-more",
+                                                            to: route,
+                                                            onclick: move |_| {
+                                                                more_menu_open.set(false);
+                                                                sidebar_open.set(false);
+                                                            },
+                                                            class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl",
+                                                            {render_sidebar_icon(&item, "w-7 h-7")}
+                                                            span { "{item.label()}" }
+                                                        }
+                                                    }
+                                                } else {
+                                                    rsx! {}
+                                                }
+                                            }
+                                        }
+
+                                        // Divider before Edit Sidebar
+                                        div { class: "border-t border-border my-2" }
+
+                                        // Edit Sidebar button (mobile)
+                                        button {
+                                            class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full text-left",
+                                            onclick: move |_| {
+                                                more_menu_open.set(false);
+                                                sidebar_open.set(false);
+                                                sidebar_customizer_open.set(true);
+                                            },
+                                            crate::components::icons::SettingsIcon { class: "w-7 h-7" }
+                                            span { "Edit Sidebar" }
+                                        }
                                     }
-                                }
+                                } else {
+                                    // Main sidebar view (default)
 
-                                nav {
-                                    class: "flex flex-col gap-2",
+                                    // Close button
+                                    button {
+                                        class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
+                                        onclick: move |_| sidebar_open.set(false),
+                                        "✕ Close"
+                                    }
 
-                                    // Render main sidebar items dynamically (mobile)
-                                    for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
-                                        {
-                                            use crate::stores::sidebar_store::SidebarItem;
-                                            match item {
-                                                // Home has special scroll-to-top functionality
-                                                SidebarItem::Home => rsx! {
-                                                    div {
-                                                        key: "{item:?}-mobile",
-                                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
-                                                        onclick: move |_| {
-                                                            sidebar_open.set(false);
-                                                            if is_home_page {
-                                                                if let Some(window) = web_sys::window() {
-                                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                                    // Same navigation as desktop
+                                    div {
+                                        class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
+                                        onclick: move |_| {
+                                            sidebar_open.set(false);
+                                            if is_home_page {
+                                                // Already on home page, scroll to top
+                                                if let Some(window) = web_sys::window() {
+                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                }
+                                            } else {
+                                                // Navigate to home
+                                                navigator.push(Route::Home { list: String::new() });
+                                            }
+                                        },
+                                        div {
+                                            class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
+                                            "N"
+                                        }
+                                        span {
+                                            class: "text-2xl font-bold text-gray-900 dark:text-white",
+                                            "nostr.blue"
+                                        }
+                                    }
+
+                                    nav {
+                                        class: "flex flex-col gap-2",
+
+                                        // Render main sidebar items dynamically (mobile)
+                                        for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
+                                            {
+                                                use crate::stores::sidebar_store::SidebarItem;
+                                                match item {
+                                                    // Home has special scroll-to-top functionality
+                                                    SidebarItem::Home => rsx! {
+                                                        div {
+                                                            key: "{item:?}-mobile",
+                                                            class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                                            onclick: move |_| {
+                                                                sidebar_open.set(false);
+                                                                if is_home_page {
+                                                                    if let Some(window) = web_sys::window() {
+                                                                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                                    }
+                                                                } else {
+                                                                    navigator.push(Route::Home { list: String::new() });
                                                                 }
-                                                            } else {
-                                                                navigator.push(Route::Home { list: String::new() });
-                                                            }
-                                                        },
-                                                        {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
-                                                        span { "Home" }
-                                                    }
-                                                },
-                                                // Profile needs pubkey
-                                                SidebarItem::Profile => {
-                                                    if let Some(pubkey) = &auth.pubkey {
-                                                        rsx! {
-                                                            div {
-                                                                key: "{item:?}-mobile",
-                                                                onclick: move |_| sidebar_open.set(false),
-                                                                NavLink {
-                                                                    to: Route::Profile { pubkey: pubkey.clone() },
-                                                                    icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
-                                                                    label: "Profile"
-                                                                }
-                                                            }
+                                                            },
+                                                            {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
+                                                            span { "Home" }
                                                         }
-                                                    } else {
-                                                        rsx! {}
-                                                    }
-                                                },
-                                                // Notifications has badge
-                                                SidebarItem::Notifications => rsx! {
-                                                    div {
-                                                        key: "{item:?}-mobile",
-                                                        onclick: move |_| sidebar_open.set(false),
-                                                        NavLink {
-                                                            to: Route::Notifications {},
-                                                            icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
-                                                            label: "Notifications",
-                                                            badge: Some(*notif_count.read())
-                                                        }
-                                                    }
-                                                },
-                                                // All other items use standard NavLink
-                                                _ => {
-                                                    if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
-                                                        rsx! {
-                                                            div {
-                                                                key: "{item:?}-mobile",
-                                                                onclick: move |_| sidebar_open.set(false),
-                                                                NavLink {
-                                                                    to: route,
-                                                                    icon: render_sidebar_icon(&item, "w-7 h-7"),
-                                                                    label: item.label()
+                                                    },
+                                                    // Profile needs pubkey
+                                                    SidebarItem::Profile => {
+                                                        if let Some(pubkey) = &auth.pubkey {
+                                                            rsx! {
+                                                                div {
+                                                                    key: "{item:?}-mobile",
+                                                                    onclick: move |_| sidebar_open.set(false),
+                                                                    NavLink {
+                                                                        to: Route::Profile { pubkey: pubkey.clone() },
+                                                                        icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
+                                                                        label: "Profile"
+                                                                    }
                                                                 }
                                                             }
+                                                        } else {
+                                                            rsx! {}
                                                         }
-                                                    } else {
-                                                        rsx! {}
+                                                    },
+                                                    // Notifications has badge
+                                                    SidebarItem::Notifications => rsx! {
+                                                        div {
+                                                            key: "{item:?}-mobile",
+                                                            onclick: move |_| sidebar_open.set(false),
+                                                            NavLink {
+                                                                to: Route::Notifications {},
+                                                                icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
+                                                                label: "Notifications",
+                                                                badge: Some(*notif_count.read())
+                                                            }
+                                                        }
+                                                    },
+                                                    // All other items use standard NavLink
+                                                    _ => {
+                                                        if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                            rsx! {
+                                                                div {
+                                                                    key: "{item:?}-mobile",
+                                                                    onclick: move |_| sidebar_open.set(false),
+                                                                    NavLink {
+                                                                        to: route,
+                                                                        icon: render_sidebar_icon(&item, "w-7 h-7"),
+                                                                        label: item.label()
+                                                                    }
+                                                                }
+                                                            }
+                                                        } else {
+                                                            rsx! {}
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    // More button (mobile)
-                                    div {
-                                        class: "relative",
+                                        // More button (mobile) - opens full panel view
                                         button {
                                             class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full",
                                             onclick: move |e| {
                                                 e.stop_propagation();
-                                                let is_open = *more_menu_open.read();
-                                                more_menu_open.set(!is_open);
+                                                more_menu_open.set(true);
                                             },
                                             crate::components::icons::MoreHorizontalIcon {
                                                 class: "w-7 h-7".to_string()
@@ -1128,53 +1242,10 @@ fn Layout() -> Element {
                                             span {
                                                 "More"
                                             }
-                                        }
-
-                                        // Popup menu (mobile) - Dynamic based on user preferences
-                                        if *more_menu_open.read() {
-                                            div {
-                                                class: "absolute left-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
-                                                div {
-                                                    class: "flex flex-col",
-
-                                                    // Render More menu items dynamically (mobile)
-                                                    for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
-                                                        {
-                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
-                                                                rsx! {
-                                                                    Link {
-                                                                        key: "{item:?}-mobile-more",
-                                                                        to: route,
-                                                                        onclick: move |_| {
-                                                                            more_menu_open.set(false);
-                                                                            sidebar_open.set(false);
-                                                                        },
-                                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition",
-                                                                        {render_sidebar_icon(&item, "w-5 h-5")}
-                                                                        span { "{item.label()}" }
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                rsx! {}
-                                                            }
-                                                        }
-                                                    }
-
-                                                    // Divider before Edit Sidebar
-                                                    div { class: "border-t border-border my-1" }
-
-                                                    // Edit Sidebar button (mobile)
-                                                    button {
-                                                        class: "flex items-center gap-3 px-4 py-3 hover:bg-accent transition w-full text-left",
-                                                        onclick: move |_| {
-                                                            more_menu_open.set(false);
-                                                            sidebar_open.set(false);
-                                                            sidebar_customizer_open.set(true);
-                                                        },
-                                                        crate::components::icons::SettingsIcon { class: "w-5 h-5" }
-                                                        span { "Edit Sidebar" }
-                                                    }
-                                                }
+                                            // Arrow indicator to show it opens a submenu
+                                            span {
+                                                class: "ml-auto text-muted-foreground",
+                                                "→"
                                             }
                                         }
                                     }
@@ -1187,7 +1258,7 @@ fn Layout() -> Element {
                 // Center Content Area
                 main {
                     class: {
-                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_creation_page;
+                        let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page || is_podcast_page || is_radio_page || is_nips_page || is_badges_page || is_code_page || is_p2p_page || is_community_page || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
                         match (is_wide_page, music_player_visible) {
                             (true, true) => "w-full flex-1 border-r border-border pb-24",
                             (true, false) => "w-full flex-1 border-r border-border",
@@ -1221,7 +1292,7 @@ fn Layout() -> Element {
                 }
 
                 // Right Sidebar (Trending & Search) - Hidden on DMs, Videos, Wallet, Music, Podcast, Radio, Code, P2P, Communities, Events, Wiki, Publications, Shop, and Settings pages
-                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_settings_page && !is_creation_page {
+                if !is_dms_page && !is_videos_page && !is_wallet_page && !is_music_page && !is_podcast_page && !is_radio_page && !is_nips_page && !is_badges_page && !is_code_page && !is_p2p_page && !is_community_page && !is_events_page && !is_recipes_page && !is_pin_boards_page && !is_wiki_page && !is_publications_page && !is_shop_page && !is_blossom_page && !is_bible_page && !is_settings_page && !is_creation_page {
                     aside {
                         class: "w-[350px] flex-shrink-0 hidden xl:block",
                     div {
@@ -1334,7 +1405,11 @@ fn NavLink(
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
+        (Route::BlossomPage {}, Route::BlossomPage {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
+        (Route::BibleHome {}, Route::BibleHome {}) |
+        (Route::BibleHome {}, Route::BibleChapter { .. }) |
+        (Route::BibleHome {}, Route::BibleSearch {}) => true,
         _ => false,
     };
 
@@ -1758,6 +1833,40 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
         },
         SidebarItem::Shop => rsx! {
             crate::components::icons::ShoppingBagIcon { class: class.to_string() }
+        },
+        SidebarItem::Blossom => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Cloud/storage icon for Blossom
+                path { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" }
+            }
+        },
+        SidebarItem::Bible => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Book with cross icon for Bible
+                path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
+                path { d: "M12 7v6" }
+                path { d: "M9 10h6" }
+            }
         },
     }
 }

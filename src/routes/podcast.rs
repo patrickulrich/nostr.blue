@@ -1594,7 +1594,7 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
 
             // Wait for nostr client AND signer - NIP-98 auth requires a signer
             if !client_initialized || !has_signer {
-                return Err("Waiting for authentication...".to_string());
+                return Ok(Vec::new());  // Return empty, will re-run when authenticated
             }
 
             match podcast_index::search_podcasts(&q, Some(20)).await {
@@ -1622,7 +1622,7 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
             }
 
             if !client_initialized {
-                return Err("Waiting for client initialization...".to_string());
+                return Ok(Vec::new());  // Return empty, will re-run when initialized
             }
 
             match search_nostr_podcasts(&q).await {

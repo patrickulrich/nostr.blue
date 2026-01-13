@@ -921,5 +921,39 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
         SidebarItem::Shop => rsx! {
             ShoppingBagIcon { class: class.to_string() }
         },
+        SidebarItem::Blossom => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Cloud/storage icon for Blossom
+                path { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" }
+            }
+        },
+        SidebarItem::Bible => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Book icon for Bible
+                path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
+                path { d: "M12 7v6" }
+                path { d: "M9 10h6" }
+            }
+        },
     }
 }

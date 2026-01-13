@@ -10,6 +10,7 @@ use crate::stores::community_store::{
 use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
 use crate::stores::auth_store;
 use crate::routes::Route;
+use crate::utils::validation::is_valid_http_url;
 use super::post_card::UserRoleBadge;
 use crate::components::icons::PinIcon;
 
@@ -254,8 +255,8 @@ pub fn CommunityCardWithMembership(
             div {
                 class: "flex items-start gap-3 mb-3",
 
-                // Avatar/Image
-                if let Some(image_url) = &community.image {
+                // Avatar/Image (Security Fix #2 - URL validation)
+                if let Some(image_url) = community.image.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         class: "w-12 h-12 rounded-full object-cover flex-shrink-0",
                         src: "{image_url}",
@@ -391,8 +392,8 @@ pub fn CommunityCard(community: Community) -> Element {
             div {
                 class: "flex items-start gap-3 mb-3",
 
-                // Avatar/Image
-                if let Some(image_url) = &community.image {
+                // Avatar/Image (Security Fix #3 - URL validation)
+                if let Some(image_url) = community.image.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         class: "w-12 h-12 rounded-full object-cover",
                         src: "{image_url}",
@@ -505,8 +506,8 @@ pub fn CommunityCardCompact(community: Community) -> Element {
             to: Route::CommunityPage { a_tag: community.a_tag.clone() },
             class: "flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition",
 
-            // Avatar
-            if let Some(image_url) = &community.image {
+            // Avatar (Security Fix #4 - URL validation)
+            if let Some(image_url) = community.image.as_ref().filter(|u| is_valid_http_url(u)) {
                 img {
                     class: "w-10 h-10 rounded-full object-cover",
                     src: "{image_url}",
