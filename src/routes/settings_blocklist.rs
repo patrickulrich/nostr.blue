@@ -88,7 +88,7 @@ pub fn SettingsBlocklist() -> Element {
 
             // Content
             div {
-                class: "bg-background border border-border rounded-lg shadow-sm",
+                class: "bg-background border border-border rounded-lg shadow-xs",
 
                 // Loading state
                 if *loading.read() {

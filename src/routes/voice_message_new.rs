@@ -186,7 +186,7 @@ pub fn VoiceMessageNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "music, podcast, voicenote (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),
@@ -200,7 +200,7 @@ pub fn VoiceMessageNew() -> Element {
                             "Upload to"
                         }
                         select {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             disabled: *is_publishing.read(),
                             onchange: move |evt| {
                                 selected_server.set(evt.value());

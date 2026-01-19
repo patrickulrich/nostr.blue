@@ -26,6 +26,11 @@ pub fn CreateCookbookModal(
     let handle_submit = move |evt: Event<FormData>| {
         evt.prevent_default();
 
+        // Guard against re-entry while submitting
+        if *is_submitting.read() {
+            return;
+        }
+
         // Validate and sanitize title
         let title_trimmed = title.read().trim().to_string();
         if title_trimmed.is_empty() {
@@ -75,6 +80,7 @@ pub fn CreateCookbookModal(
         spawn(async move {
             match pin_boards_store::publish_pinboard(input, None).await {
                 Ok(naddr) => {
+                    is_submitting.set(false); // Clear before navigation
                     // Navigate to the new cookbook
                     navigator.push(Route::PinBoardDetail { naddr });
                 }
@@ -156,7 +162,7 @@ pub fn CreateCookbookModal(
                             span { class: "text-red-500", "*" }
                         }
                         input {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                             r#type: "text",
                             placeholder: "My Recipe Collection",
                             value: "{title}",
@@ -172,7 +178,7 @@ pub fn CreateCookbookModal(
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none text-sm",
                             rows: "2",
                             placeholder: "What recipes will this cookbook contain?",
                             value: "{description}",
@@ -237,7 +243,7 @@ pub fn CreateCookbookModal(
                             }
                         }
                         input {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                             r#type: "text",
                             placeholder: "italian, desserts, quick-meals (comma separated)",
                             value: "{additional_tags}",

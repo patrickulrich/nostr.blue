@@ -127,7 +127,7 @@ pub fn AsciiDocContent(
 
     // Render content with citations if enabled
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
-        let result = render_content_with_citations(&content, &resolved_citations.read());
+        let result = render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
         let mut html = result.html;
 
         // Process book:: links if enabled

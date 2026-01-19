@@ -89,7 +89,7 @@ pub fn RecipeTagSelector(
 
                     input {
                         r#type: "text",
-                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         placeholder: "Search tags (e.g., Italian, Vegan, Quick)...",
                         value: "{search_query}",
                         oninput: move |evt| {

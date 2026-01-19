@@ -34,7 +34,7 @@ pub struct MentionAutocompleteProps {
     #[props(default = 2)]
     pub rows: u32,
     /// Additional CSS classes for the textarea
-    #[props(default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none".to_string())]
+    #[props(default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-none".to_string())]
     pub class: String,
     /// Whether the textarea is disabled
     #[props(default = false)]
@@ -582,7 +582,7 @@ fn render_dropdown(
 
                                     // Avatar
                                     div {
-                                        class: "flex-shrink-0",
+                                        class: "shrink-0",
                                         if let Some(picture) = &profile.picture {
                                             if is_valid_http_url(picture) {
                                                 img {
@@ -623,12 +623,12 @@ fn render_dropdown(
                                     // Thread/Contact badge
                                     if profile.is_thread_participant {
                                         div {
-                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
+                                            class: "shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
                                             "Thread"
                                         }
                                     } else if profile.is_contact {
                                         div {
-                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
+                                            class: "shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
                                             "Contact"
                                         }
                                     }

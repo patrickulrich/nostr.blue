@@ -183,6 +183,12 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     // Handle insert
     let handle_insert = move |_| {
         if let Some(ref citation) = *selected_citation.read() {
+            // Cancel any pending search task (consistent with close_modal)
+            if let Some(task) = search_task.take() {
+                task.cancel();
+            }
+            is_searching.set(false);
+
             let identifier = citation.naddr.as_ref()
                 .cloned()
                 .unwrap_or_else(|| {
@@ -274,7 +280,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Search by title, author...",
                                 value: "{search_query}",
                                 oninput: move |e| handle_search(e.value()),

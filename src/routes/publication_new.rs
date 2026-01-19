@@ -222,7 +222,7 @@ pub fn PublicationNew() -> Element {
                         "Title"
                     }
                     input {
-                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                         r#type: "text",
                         placeholder: "Publication title",
                         value: "{title}",
@@ -237,7 +237,7 @@ pub fn PublicationNew() -> Element {
                         "Identifier (d-tag)"
                     }
                     input {
-                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm",
+                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring font-mono text-sm",
                         r#type: "text",
                         placeholder: "publication-identifier",
                         value: "{identifier}",
@@ -259,7 +259,7 @@ pub fn PublicationNew() -> Element {
                             "Author Name (optional)"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             r#type: "text",
                             placeholder: "Author name",
                             value: "{author_name}",
@@ -274,7 +274,7 @@ pub fn PublicationNew() -> Element {
                             "Publication Type"
                         }
                         select {
-                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             value: "{pub_type.read().as_str()}",
                             onchange: move |e| {
                                 pub_type.set(match e.value().as_str() {
@@ -304,7 +304,7 @@ pub fn PublicationNew() -> Element {
                         "Summary (optional)"
                     }
                     textarea {
-                        class: "w-full h-24 px-4 py-3 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-y",
+                        class: "w-full h-24 px-4 py-3 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-y",
                         placeholder: "Brief description of the publication",
                         value: "{summary}",
                         oninput: move |e| summary.set(e.value().clone()),
@@ -318,7 +318,7 @@ pub fn PublicationNew() -> Element {
                         "Cover Image URL (optional)"
                     }
                     input {
-                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                        class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                         r#type: "url",
                         placeholder: "https://example.com/cover.jpg",
                         value: "{cover_image}",
@@ -441,7 +441,7 @@ fn SectionEditor(
                             "Section Title"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-3 py-2 bg-background border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring",
                             r#type: "text",
                             placeholder: "Chapter title",
                             value: "{section.title}",
@@ -464,7 +464,7 @@ fn SectionEditor(
                             "Content (AsciiDoc)"
                         }
                         textarea {
-                            class: "w-full h-48 px-3 py-2 bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm resize-y",
+                            class: "w-full h-48 px-3 py-2 bg-background border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring font-mono text-sm resize-y",
                             placeholder: "Section content in AsciiDoc format...",
                             value: "{section.content}",
                             oninput: {

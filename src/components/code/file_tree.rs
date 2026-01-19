@@ -88,17 +88,20 @@ pub fn FileTreeEntry(
     let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
 
+    // URL-encode the path to handle spaces and special characters
+    let encoded_path = urlencoding::encode(&entry.path).into_owned();
+
     let route = if is_dir {
         Route::CodeRepoTree {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: entry.path.clone(),
+            path: encoded_path,
         }
     } else {
         Route::CodeRepoBlob {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: entry.path.clone(),
+            path: encoded_path,
         }
     };
 
@@ -183,13 +186,14 @@ pub fn CodeFileTree(
                         .rsplit_once('/')
                         .map(|(p, _)| p.to_string())
                         .unwrap_or_default();
+                    let encoded_parent_path = urlencoding::encode(&parent_path).into_owned();
 
                     rsx! {
                         Link {
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),
                                 git_ref: git_ref.clone(),
-                                path: parent_path,
+                                path: encoded_parent_path,
                             },
                             class: "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition rounded text-muted-foreground",
 
@@ -251,7 +255,7 @@ pub fn FilePathBreadcrumb(
                     git_ref: git_ref.clone(),
                     path: "".to_string(),
                 },
-                class: "text-blue-400 hover:underline flex-shrink-0",
+                class: "text-blue-400 hover:underline shrink-0",
                 "root"
             }
 
@@ -259,13 +263,14 @@ pub fn FilePathBreadcrumb(
             for (i, part) in parts.iter().enumerate() {
                 {
                     let accumulated_path = parts[..=i].join("/");
+                    let encoded_accumulated_path = urlencoding::encode(&accumulated_path).into_owned();
                     let is_last = i == parts.len() - 1;
 
                     rsx! {
                         // Separator
                         span {
                             key: "sep-{i}",
-                            class: "text-muted-foreground flex-shrink-0",
+                            class: "text-muted-foreground shrink-0",
                             "/"
                         }
 
@@ -282,7 +287,7 @@ pub fn FilePathBreadcrumb(
                                 to: Route::CodeRepoTree {
                                     naddr: naddr.clone(),
                                     git_ref: git_ref.clone(),
-                                    path: accumulated_path,
+                                    path: encoded_accumulated_path,
                                 },
                                 class: "text-blue-400 hover:underline truncate",
                                 "{part}"

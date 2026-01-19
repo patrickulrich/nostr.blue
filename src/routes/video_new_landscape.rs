@@ -233,7 +233,7 @@ pub fn VideoNewLandscape() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Give your video a title",
                             value: "{title}",
                             oninput: move |e| title.set(e.value()),
@@ -247,7 +247,7 @@ pub fn VideoNewLandscape() -> Element {
                             "Description (optional)"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                             rows: 4,
                             placeholder: "Describe your video...",
                             value: "{description}",
@@ -263,7 +263,7 @@ pub fn VideoNewLandscape() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "video, tutorial, nostr (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),

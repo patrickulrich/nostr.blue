@@ -155,10 +155,10 @@ pub fn MusicLeaderboard() -> Element {
 #[component]
 fn LeaderboardCard(entry: LeaderboardEntry) -> Element {
     let rank_class = match entry.rank {
-        1 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-yellow-500 text-yellow-900 flex-shrink-0",
-        2 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-400 text-gray-900 flex-shrink-0",
-        3 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-amber-600 text-amber-100 flex-shrink-0",
-        _ => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-primary/10 text-primary flex-shrink-0",
+        1 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-yellow-500 text-yellow-900 shrink-0",
+        2 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-400 text-gray-900 shrink-0",
+        3 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-amber-600 text-amber-100 shrink-0",
+        _ => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-primary/10 text-primary shrink-0",
     };
 
     let source_badge = match &entry.vote_data.track_ref {
@@ -181,7 +181,7 @@ fn LeaderboardCard(entry: LeaderboardEntry) -> Element {
 
                 // Album art
                 div {
-                    class: "w-14 h-14 bg-muted rounded-lg flex items-center justify-center overflow-hidden relative flex-shrink-0",
+                    class: "w-14 h-14 bg-muted rounded-lg flex items-center justify-center overflow-hidden relative shrink-0",
                     if let Some(ref image) = entry.vote_data.image {
                         img {
                             src: "{image}",

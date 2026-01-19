@@ -749,7 +749,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         .authors(authors)
                         .limit(20);
 
-                    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
                         .await
                         .unwrap_or_default();
 
@@ -776,7 +776,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         .kinds([Kind::Custom(21)])
         .limit(20);
 
-    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
         .unwrap_or_default();
 
@@ -813,7 +813,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     .authors(authors)
                     .limit(20);
 
-                let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
                     .await
                     .unwrap_or_default();
 
@@ -903,8 +903,8 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
 
     // Fetch both concurrently
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_video_events(stream_filter, Duration::from_secs(10))
     );
 
     let mut all_events = Vec::new();
@@ -978,8 +978,8 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
 
     // Fetch both concurrently
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_video_events(stream_filter, Duration::from_secs(10))
     );
 
     let mut all_events = Vec::new();

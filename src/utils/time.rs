@@ -87,12 +87,15 @@ pub fn safe_duration_millis(seconds: f64) -> u32 {
 /// # Examples
 /// - `format_relative_time(ts, false, false)` returns "5m", "2h", "3d" or "Jan 15"
 /// - `format_relative_time(ts, true, true)` returns "5m ago", "2h ago", "3mo ago", "2y ago"
+/// - Future timestamps return "in Xm", "in Xh", "in Xd", etc.
 pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long_format: bool) -> String {
     let now = Utc::now().timestamp() as u64;
     let ts = timestamp.as_secs();
 
-    if now < ts {
-        return "just now".to_string();
+    // Handle future timestamps
+    if ts > now {
+        let diff = ts - now;
+        return format_future_time(diff, use_long_format);
     }
 
     let diff = now - ts;
@@ -130,6 +133,35 @@ pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long
                 .unwrap_or_else(Utc::now);
             dt.format("%b %d").to_string()
         }
+    }
+}
+
+/// Format a future time difference
+fn format_future_time(diff: u64, use_long: bool) -> String {
+    if diff < 60 {
+        return "in a moment".to_string();
+    }
+    if diff < 3600 {
+        let mins = diff / 60;
+        return if use_long {
+            format!("in {} minute{}", mins, if mins == 1 { "" } else { "s" })
+        } else {
+            format!("in {}m", mins)
+        };
+    }
+    if diff < 86400 {
+        let hours = diff / 3600;
+        return if use_long {
+            format!("in {} hour{}", hours, if hours == 1 { "" } else { "s" })
+        } else {
+            format!("in {}h", hours)
+        };
+    }
+    let days = diff / 86400;
+    if use_long {
+        format!("in {} day{}", days, if days == 1 { "" } else { "s" })
+    } else {
+        format!("in {}d", days)
     }
 }
 

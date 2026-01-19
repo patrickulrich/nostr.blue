@@ -278,7 +278,7 @@ pub fn PinBoardsHome() -> Element {
                                 line { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }
                             }
                             input {
-                                class: "w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "Search boards...",
                                 value: "{search_query}",

@@ -256,7 +256,7 @@ pub fn ShopCheckout() -> Element {
                                     for item in cart_items.iter() {
                                         div { class: "p-4 flex gap-4",
                                             // Image
-                                            div { class: "w-16 h-16 bg-muted rounded flex-shrink-0 overflow-hidden",
+                                            div { class: "w-16 h-16 bg-muted rounded shrink-0 overflow-hidden",
                                                 if let Some(img) = item.product.images.first() {
                                                     img {
                                                         src: "{img.url}",
@@ -1143,7 +1143,7 @@ fn LightningInvoiceDisplay(
             // Verification info
             div { class: "bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm",
                 div { class: "flex items-start gap-2",
-                    span { class: "text-blue-500 flex-shrink-0", "ℹ️" }
+                    span { class: "text-blue-500 shrink-0", "ℹ️" }
                     div {
                         p { class: "text-blue-600 dark:text-blue-400",
                             "After payment, the merchant will receive your order and verify the payment before fulfilling it."
@@ -1447,7 +1447,7 @@ fn ShippingStep(
 
                                             // Product info
                                             div { class: "flex items-center gap-3 mb-3",
-                                                div { class: "w-12 h-12 bg-muted rounded flex-shrink-0 overflow-hidden",
+                                                div { class: "w-12 h-12 bg-muted rounded shrink-0 overflow-hidden",
                                                     if let Some(img) = item.product.images.first() {
                                                         img {
                                                             src: "{img.url}",
@@ -1530,7 +1530,7 @@ fn ShippingStep(
                 }
 
                 textarea {
-                    class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                    class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                     placeholder: "Enter your full shipping address...\n\nName\nStreet Address\nCity, State/Province, ZIP\nCountry",
                     value: "{shipping_address}",
                     oninput: move |e| on_address_change.call(e.value())

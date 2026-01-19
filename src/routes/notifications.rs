@@ -506,7 +506,7 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 
@@ -636,7 +636,7 @@ fn RepostNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 
@@ -762,7 +762,7 @@ fn ZapNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 

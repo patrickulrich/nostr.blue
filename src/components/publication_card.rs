@@ -147,7 +147,7 @@ pub fn PublicationCardCompact(publication: PublicationIndex) -> Element {
 
             // Thumbnail
             div {
-                class: "flex-shrink-0 w-16 h-20 rounded overflow-hidden bg-muted",
+                class: "shrink-0 w-16 h-20 rounded overflow-hidden bg-muted",
                 if let Some(ref image) = publication.cover_image {
                     img {
                         class: "w-full h-full object-cover",

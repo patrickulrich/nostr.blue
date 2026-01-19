@@ -8,6 +8,7 @@ use crate::components::{
     PublicationTocDynamic, PublicationTocSkeleton, PublicationProgress, PublicationTocHorizontal,
     PublicationSectionContent, PublicationSectionSkeleton,
     SectionMetadata, SectionNavigation, SectionOutline, CitationMetadata,
+    ShareModal,
 };
 use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon, RefreshIcon, AlertTriangleIcon};
 use crate::utils::clipboard::copy_formatted_content;
@@ -29,6 +30,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut copied = use_signal(|| false);
     let mut citation_count = use_signal(|| 0usize);
+    let mut show_share_modal = use_signal(|| false);
 
     // Current parent section for TOC navigation (None = root level)
     let mut current_toc_parent = use_signal(|| None::<PublicationSection>);
@@ -349,7 +351,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
             // Top navigation bar
             div {
-                class: "flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-background",
+                class: "shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-background",
                 button {
                     class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors",
                     onclick: go_back,
@@ -428,6 +430,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                     button {
                         class: "p-2 rounded-lg hover:bg-accent transition-colors",
                         title: "Share",
+                        onclick: move |_| show_share_modal.set(true),
                         ShareIcon { class: "w-5 h-5" }
                     }
                 }
@@ -455,7 +458,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                     class: "flex-1 flex",
                     // TOC skeleton
                     aside {
-                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
+                        class: "hidden lg:block w-64 shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
                         PublicationTocSkeleton {}
                     }
                     // Content skeleton
@@ -470,7 +473,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
                     // TOC sidebar (desktop) - Dynamic navigation using tree structure
                     aside {
-                        class: "hidden lg:block w-64 flex-shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
+                        class: "hidden lg:block w-64 shrink-0 border-r border-border overflow-y-auto scrollbar-hide",
                         PublicationTocDynamic {
                             tree: pub_tree.clone(),
                             selected: selected_section.read().clone(),
@@ -637,7 +640,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
 
                                 rsx! {
                                     aside {
-                                        class: "hidden xl:block w-56 flex-shrink-0 border-l border-border overflow-y-auto scrollbar-hide p-4",
+                                        class: "hidden xl:block w-56 shrink-0 border-l border-border overflow-y-auto scrollbar-hide p-4",
                                         div {
                                             class: "sticky top-4 space-y-6",
 
@@ -671,7 +674,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                                                 Link {
                                                                     class: "text-sm text-muted-foreground hover:text-foreground transition-colors flex items-start gap-2",
                                                                     to: Route::PublicationSearch { query: book_ref.to_query_string() },
-                                                                    Link2Icon { class: "w-3 h-3 mt-1 flex-shrink-0" }
+                                                                    Link2Icon { class: "w-3 h-3 mt-1 shrink-0" }
                                                                     span {
                                                                         "{book_ref.display_text()}"
                                                                     }
@@ -708,6 +711,16 @@ pub fn PublicationDetail(naddr: String) -> Element {
                             onclick: go_back,
                             "Back to Publications"
                         }
+                    }
+                }
+            }
+
+            // Share modal
+            if *show_share_modal.read() {
+                if let Some(ref pub_tree) = *tree.read() {
+                    ShareModal {
+                        event: pub_tree.root.event.clone(),
+                        on_close: move |_| show_share_modal.set(false),
                     }
                 }
             }

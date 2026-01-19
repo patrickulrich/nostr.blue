@@ -15,7 +15,7 @@ reload_html = true
 index_on_404 = true
 
 [web.resource]
-style = ["public/tailwind.css"]
+style = []
 script = []
 
 [web.resource.dev]

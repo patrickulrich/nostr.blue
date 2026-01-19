@@ -175,7 +175,7 @@ pub fn WikiDetail(identifier: String) -> Element {
                                         // Author avatar
                                         Link {
                                             to: Route::Profile { pubkey: author_hex.clone() },
-                                            class: "flex-shrink-0",
+                                            class: "shrink-0",
                                             if let Some(ref picture) = author_picture {
                                                 img {
                                                     class: "w-12 h-12 rounded-full object-cover",
@@ -251,7 +251,7 @@ pub fn WikiDetail(identifier: String) -> Element {
 
                     // Right sidebar - Table of contents (hidden on smaller screens)
                     aside {
-                        class: "hidden lg:block w-56 flex-shrink-0",
+                        class: "hidden lg:block w-56 shrink-0",
                         div {
                             class: "sticky top-6 space-y-4",
 
@@ -483,7 +483,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
                 // Avatar
                 Link {
                     to: Route::Profile { pubkey: request.pubkey.clone() },
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     if let Some(ref picture) = requester_picture {
                         img {
                             class: "w-10 h-10 rounded-full object-cover",
@@ -509,7 +509,7 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
                             "{requester_name}"
                         }
                         span {
-                            class: "text-xs text-muted-foreground flex-shrink-0",
+                            class: "text-xs text-muted-foreground shrink-0",
                             "• {time_ago}"
                         }
                     }

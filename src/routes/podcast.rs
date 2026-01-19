@@ -66,7 +66,7 @@ pub fn PodcastHome() -> Element {
                     div {
                         class: "relative",
                         input {
-                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search podcasts... (Enter to search)",
                             value: "{search_query}",
@@ -414,7 +414,7 @@ fn TrendingPodcasts(props: TrendingPodcastsProps) -> Element {
                     for i in 0..12 {
                         div {
                             key: "{i}",
-                            class: "flex-shrink-0 w-28 sm:w-32",
+                            class: "shrink-0 w-28 sm:w-32",
                             TrendingPodcastCardSkeleton {}
                         }
                     }
@@ -437,7 +437,7 @@ fn TrendingPodcasts(props: TrendingPodcastsProps) -> Element {
                         for feed in feeds.iter() {
                             div {
                                 key: "{feed.id}",
-                                class: "flex-shrink-0 w-28 sm:w-32",
+                                class: "shrink-0 w-28 sm:w-32",
                                 TrendingPodcastCard {
                                     feed: feed.clone()
                                 }
@@ -655,7 +655,7 @@ fn BrowsePodcastRow(props: BrowsePodcastRowProps) -> Element {
             img {
                 src: "{image}",
                 alt: "{props.title}",
-                class: "w-14 h-14 rounded-lg object-cover flex-shrink-0"
+                class: "w-14 h-14 rounded-lg object-cover shrink-0"
             }
 
             // Info
@@ -679,7 +679,7 @@ fn BrowsePodcastRow(props: BrowsePodcastRowProps) -> Element {
 
             // Badges
             div {
-                class: "flex items-center gap-1.5 flex-shrink-0",
+                class: "flex items-center gap-1.5 shrink-0",
                 if props.has_v4v {
                     span {
                         class: "px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/20 text-amber-500 rounded",
@@ -707,7 +707,7 @@ fn BrowsePodcastRowSkeleton() -> Element {
     rsx! {
         div {
             class: "flex items-center gap-3 p-2 animate-pulse",
-            div { class: "w-14 h-14 rounded-lg bg-muted flex-shrink-0" }
+            div { class: "w-14 h-14 rounded-lg bg-muted shrink-0" }
             div {
                 class: "flex-1 min-w-0 space-y-2",
                 div { class: "h-4 bg-muted rounded w-3/4" }
@@ -884,9 +884,9 @@ fn ApiCategoryTiles(props: ApiCategoryTilesProps) -> Element {
                     // All button
                     button {
                         class: if props.selected.is_none() {
-                            "px-3 py-1.5 rounded-full text-xs font-medium bg-primary text-primary-foreground whitespace-nowrap flex-shrink-0"
+                            "px-3 py-1.5 rounded-full text-xs font-medium bg-primary text-primary-foreground whitespace-nowrap shrink-0"
                         } else {
-                            "px-3 py-1.5 rounded-full text-xs font-medium bg-muted hover:bg-muted/80 text-foreground whitespace-nowrap flex-shrink-0"
+                            "px-3 py-1.5 rounded-full text-xs font-medium bg-muted hover:bg-muted/80 text-foreground whitespace-nowrap shrink-0"
                         },
                         onclick: move |_| props.on_select.call(None),
                         "All"
@@ -897,9 +897,9 @@ fn ApiCategoryTiles(props: ApiCategoryTilesProps) -> Element {
                         button {
                             key: "{api_name}",
                             class: if *is_selected {
-                                "px-3 py-1.5 rounded-full text-xs font-medium bg-primary text-primary-foreground whitespace-nowrap flex-shrink-0"
+                                "px-3 py-1.5 rounded-full text-xs font-medium bg-primary text-primary-foreground whitespace-nowrap shrink-0"
                             } else {
-                                "px-3 py-1.5 rounded-full text-xs font-medium bg-muted hover:bg-muted/80 text-foreground whitespace-nowrap flex-shrink-0"
+                                "px-3 py-1.5 rounded-full text-xs font-medium bg-muted hover:bg-muted/80 text-foreground whitespace-nowrap shrink-0"
                             },
                             onclick: {
                                 let api_name = api_name.clone();
@@ -1807,7 +1807,7 @@ fn SearchResultRow(props: SearchResultRowProps) -> Element {
             img {
                 src: "{image}",
                 alt: "{props.title}",
-                class: "w-12 h-12 rounded object-cover flex-shrink-0"
+                class: "w-12 h-12 rounded object-cover shrink-0"
             }
 
             // Info
@@ -1827,7 +1827,7 @@ fn SearchResultRow(props: SearchResultRowProps) -> Element {
 
             // Badges
             div {
-                class: "flex items-center gap-2 flex-shrink-0",
+                class: "flex items-center gap-2 shrink-0",
 
                 // V4V badge
                 if props.has_v4v {
@@ -1863,7 +1863,7 @@ fn SearchResultRowSkeleton() -> Element {
         div {
             class: "flex items-center gap-3 p-3 animate-pulse",
             div {
-                class: "w-12 h-12 rounded bg-muted flex-shrink-0"
+                class: "w-12 h-12 rounded bg-muted shrink-0"
             }
             div {
                 class: "flex-1 space-y-2",
@@ -2443,7 +2443,7 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
 
             // Cover image
             div {
-                class: "w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                class: "w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0",
                 if let Some(ref img) = image {
                     img {
                         src: "{img}",

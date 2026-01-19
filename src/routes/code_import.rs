@@ -318,7 +318,7 @@ fn EnterUrlStep(
                 div {
                     class: "flex items-start gap-3",
                     div {
-                        class: "w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0",
+                        class: "w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0",
                         svg {
                             class: "w-5 h-5 text-primary",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -353,7 +353,7 @@ fn EnterUrlStep(
                 div {
                     class: "flex gap-2",
                     input {
-                        class: "flex-1 px-4 py-3 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "flex-1 px-4 py-3 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "https://github.com/username/repository",
                         value: "{url_input}",
@@ -565,7 +565,7 @@ fn ConfigureStep(
                 div {
                     class: "flex items-start gap-3",
                     div {
-                        class: "w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0",
+                        class: "w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0",
                         svg {
                             class: "w-4 h-4 text-purple-500",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -600,7 +600,7 @@ fn ConfigureStep(
                     span { class: "text-destructive", "*" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary",
+                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                     r#type: "text",
                     placeholder: "my-project",
                     value: "{repo_id}",
@@ -619,7 +619,7 @@ fn ConfigureStep(
                     "Display Name"
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                     r#type: "text",
                     placeholder: "My Project",
                     value: "{repo_name}",
@@ -634,7 +634,7 @@ fn ConfigureStep(
                     "Description"
                 }
                 textarea {
-                    class: "w-full h-24 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y",
+                    class: "w-full h-24 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary resize-y",
                     placeholder: "A brief description of your project...",
                     value: "{repo_description}",
                     oninput: move |e| repo_description.set(e.value())

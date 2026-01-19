@@ -146,7 +146,7 @@ pub fn ShopSearch(q: String) -> Element {
                             }
                         },
                         input {
-                            class: "w-full pl-10 pr-4 py-3 bg-muted rounded-lg outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full pl-10 pr-4 py-3 bg-muted rounded-lg outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Search products...",
                             r#type: "text",
                             value: "{query}",

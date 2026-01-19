@@ -326,7 +326,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         class: "p-2 border-b border-gray-200 dark:border-gray-700",
                         input {
                             r#type: "text",
-                            class: "w-full px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Search emojis...",
                             value: "{search_query}",
                             oninput: move |evt| search_query.set(evt.value()),

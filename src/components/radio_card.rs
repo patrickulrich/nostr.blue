@@ -186,7 +186,7 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
 
                 // Thumbnail with play overlay
                 div {
-                    class: "relative flex-shrink-0",
+                    class: "relative shrink-0",
                     img {
                         src: "{thumbnail_url}",
                         alt: "{station.name}",
@@ -262,7 +262,7 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
 
                 // Actions
                 div {
-                    class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
+                    class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
 
                     // Zap button
                     button {
@@ -319,7 +319,7 @@ pub fn RadioCardListSkeleton() -> Element {
 
             // Thumbnail skeleton
             div {
-                class: "w-14 h-14 bg-muted rounded flex-shrink-0"
+                class: "w-14 h-14 bg-muted rounded shrink-0"
             }
 
             // Info skeleton

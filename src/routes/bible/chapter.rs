@@ -456,7 +456,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                                     // Keyboard accessibility
                                                     tabindex: 0,
                                                     role: "button",
-                                                    class: "cursor-pointer rounded px-0.5 transition-colors inline focus:outline-none focus:ring-2 focus:ring-primary",
+                                                    class: "cursor-pointer rounded px-0.5 transition-colors inline focus:outline-hidden focus:ring-2 focus:ring-primary",
                                                     class: if is_selected { "bg-primary/20 ring-2 ring-primary" } else if is_highlighted { "bg-yellow-100 dark:bg-yellow-900/30" } else { "" },
                                                     onclick: move |_| handle_verse_click(verse_num),
                                                     onkeydown: move |evt: KeyboardEvent| {

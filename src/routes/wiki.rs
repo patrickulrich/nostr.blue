@@ -151,7 +151,7 @@ pub fn WikiHome() -> Element {
                 class: "relative mb-6",
                 SearchIcon { class: "absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" }
                 input {
-                    class: "w-full pl-10 pr-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                    class: "w-full pl-10 pr-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                     r#type: "text",
                     placeholder: "Search wiki pages (press Enter to search)...",
                     value: "{search_query}",

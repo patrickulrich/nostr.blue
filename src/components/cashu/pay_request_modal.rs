@@ -159,7 +159,7 @@ pub fn CashuPayRequestModal(
                                     "Payment Request"
                                 }
                                 textarea {
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm",
                                     rows: 4,
                                     placeholder: "Paste creqA... payment request",
                                     value: "{request_input}",
@@ -296,7 +296,7 @@ pub fn CashuPayRequestModal(
                                         div {
                                             class: "relative",
                                             input {
-                                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                                 r#type: "number",
                                                 placeholder: "Enter amount",
                                                 value: "{custom_amount}",

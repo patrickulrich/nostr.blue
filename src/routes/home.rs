@@ -1288,7 +1288,7 @@ fn LoginSection() -> Element {
                                 }
                             }
                             button {
-                                class: "w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition shadow-sm",
+                                class: "w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition shadow-xs",
                                 onclick: login_with_extension,
                                 "Connect Extension"
                             }
@@ -1334,7 +1334,7 @@ fn LoginSection() -> Element {
                                 disabled: *connecting_bunker.read()
                             }
                             button {
-                                class: "w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                                class: "w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed",
                                 onclick: login_with_bunker,
                                 disabled: bunker_uri_input.read().is_empty() || *connecting_bunker.read(),
                                 if *connecting_bunker.read() {

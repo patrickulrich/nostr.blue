@@ -294,7 +294,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     "Display Name"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "My Project",
                                     value: "{repo_name}",
@@ -309,7 +309,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     "Description"
                                 }
                                 textarea {
-                                    class: "w-full h-24 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y",
+                                    class: "w-full h-24 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary resize-y",
                                     placeholder: "A brief description of your project...",
                                     value: "{repo_description}",
                                     oninput: move |e| repo_description.set(e.value())
@@ -332,7 +332,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     "Clone URL"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "https://github.com/user/repo.git",
                                     value: "{clone_url}",
@@ -347,7 +347,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     "Web URL"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "https://github.com/user/repo",
                                     value: "{web_url}",
