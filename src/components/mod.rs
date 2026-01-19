@@ -80,6 +80,10 @@ pub mod nip_card;
 pub mod profile_badges;
 pub mod badge_detail_modal;
 
+// Highlight components (NIP-84)
+pub mod highlight_modal;
+pub mod highlight_card;
+
 // Code/Git hosting components (NIP-34 + NIP-C0)
 pub mod code;
 
@@ -224,6 +228,12 @@ pub use book_picker_modal::{BookPickerModal, BookSelection};
 
 // Badge component exports (NIP-58)
 pub use profile_badges::ProfileBadgesSection;
+
+// Highlight component exports (NIP-84)
+#[allow(unused_imports)]
+pub use highlight_modal::HighlightModal;
+#[allow(unused_imports)]
+pub use highlight_card::{HighlightCard, HighlightCardSkeleton};
 
 // P2P trading components (NIP-69)
 pub mod p2p;

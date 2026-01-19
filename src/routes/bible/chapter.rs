@@ -11,6 +11,7 @@ use crate::stores::bible_store::{
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
+use crate::components::HighlightModal;
 
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
@@ -70,6 +71,11 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
 
     // State for highlight feedback toast (success: bool, message: String)
     let mut highlight_feedback = use_signal(|| None::<(bool, String)>);
+
+    // State for highlight modal
+    let mut show_highlight_modal = use_signal(|| false);
+    let mut pending_highlight_text = use_signal(String::new);
+    let mut pending_highlight_reference = use_signal(String::new);
 
     let is_authenticated = auth_store::is_authenticated();
 
@@ -222,12 +228,9 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         }
     };
 
-    // Highlight selected verses
-    let highlight_verses = {
-        let translation = translation_for_highlight;
-        let book = book_for_highlight;
-        let mut selected_verses = selected_verses;
-        let mut show_toolbar = show_toolbar;
+    // Open highlight modal for selected verses
+    let open_highlight_modal = {
+        let translation = translation_for_highlight.clone();
         move |_| {
             if let Some(Ok(ref data)) = *chapter_data.read() {
                 let verses = selected_verses.read().clone();
@@ -255,35 +258,11 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 };
 
                 let verse_text = text_parts.join(" ");
-                let translation_clone = translation.clone();
-                let book_clone = book.clone();
 
-                spawn(async move {
-                    match bible_store::create_highlight(&verse_text, &reference, &translation_clone, &book_clone, chapter, None).await {
-                        Ok(_) => {
-                            log::info!("Highlight created");
-                            highlight_feedback.set(Some((true, "Highlight saved".to_string())));
-                            // Auto-clear after 2 seconds
-                            spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                                highlight_feedback.set(None);
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to create highlight: {}", e);
-                            highlight_feedback.set(Some((false, format!("Failed: {}", e))));
-                            // Auto-clear after 4 seconds for errors
-                            spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(4000).await;
-                                highlight_feedback.set(None);
-                            });
-                        }
-                    }
-                });
-
-                // Clear selection
-                selected_verses.set(Vec::new());
-                show_toolbar.set(false);
+                // Set pending highlight data and show modal
+                pending_highlight_text.set(verse_text);
+                pending_highlight_reference.set(reference);
+                show_highlight_modal.set(true);
             }
         }
     };
@@ -564,7 +543,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                             button {
                                 class: "p-2 hover:bg-muted rounded-lg transition",
                                 title: "Highlight verses",
-                                onclick: highlight_verses,
+                                onclick: open_highlight_modal,
                                 svg {
                                     xmlns: "http://www.w3.org/2000/svg",
                                     class: "w-5 h-5 text-yellow-500",
@@ -680,6 +659,64 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     image_url: None,
                     content: Some(share_content.read().clone()),
                     on_close: move |_| show_share_modal.set(false),
+                }
+            }
+
+            // Highlight Modal
+            if *show_highlight_modal.read() {
+                {
+                    let translation = translation_for_highlight.clone();
+                    let book = book_for_highlight.clone();
+                    rsx! {
+                        HighlightModal {
+                            content: pending_highlight_text.read().clone(),
+                            reference: pending_highlight_reference.read().clone(),
+                            on_confirm: move |comment: Option<String>| {
+                                let text = pending_highlight_text.read().clone();
+                                let reference = pending_highlight_reference.read().clone();
+                                let translation = translation.clone();
+                                let book = book.clone();
+
+                                spawn(async move {
+                                    match bible_store::create_highlight(
+                                        &text,
+                                        &reference,
+                                        &translation,
+                                        &book,
+                                        chapter,
+                                        comment.as_deref(),
+                                    ).await {
+                                        Ok(_) => {
+                                            log::info!("Highlight created");
+                                            highlight_feedback.set(Some((true, "Highlight saved".to_string())));
+                                            // Auto-clear after 2 seconds
+                                            spawn(async move {
+                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                highlight_feedback.set(None);
+                                            });
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to create highlight: {}", e);
+                                            highlight_feedback.set(Some((false, format!("Failed: {}", e))));
+                                            // Auto-clear after 4 seconds for errors
+                                            spawn(async move {
+                                                gloo_timers::future::TimeoutFuture::new(4000).await;
+                                                highlight_feedback.set(None);
+                                            });
+                                        }
+                                    }
+                                });
+
+                                // Clear selection and close modal
+                                selected_verses.set(Vec::new());
+                                show_toolbar.set(false);
+                                show_highlight_modal.set(false);
+                            },
+                            on_cancel: move |_| {
+                                show_highlight_modal.set(false);
+                            },
+                        }
+                    }
                 }
             }
         }

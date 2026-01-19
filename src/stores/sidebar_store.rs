@@ -55,6 +55,7 @@ pub enum SidebarItem {
     Shop,
     Blossom,
     Bible,
+    Highlights,
 }
 
 impl SidebarItem {
@@ -120,6 +121,7 @@ impl SidebarItem {
             SidebarItem::Shop => "Marketplace",
             SidebarItem::Blossom => "Blossom",
             SidebarItem::Bible => "Bible",
+            SidebarItem::Highlights => "Highlights",
         }
     }
 
@@ -163,6 +165,7 @@ impl SidebarItem {
             SidebarItem::Shop => Some(Route::ShopHome {}),
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
             SidebarItem::Bible => Some(Route::BibleHome {}),
+            SidebarItem::Highlights => Some(Route::Highlights {}),
         }
     }
 }
