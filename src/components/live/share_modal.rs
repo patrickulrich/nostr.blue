@@ -84,6 +84,28 @@ pub fn LiveStreamShareModal(
         utf8_index.min(text.len())
     }
 
+    // Convert UTF-8 (Rust) to UTF-16 (JS) index for DOM sync
+    fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
+        text[..utf8_index.min(text.len())].encode_utf16().count()
+    }
+
+    // Set cursor position in DOM textarea
+    #[allow(unused_variables)]
+    fn set_cursor_position(textarea_id: &str, utf16_pos: usize) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(textarea_id) {
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            let _ = textarea.set_selection_range(utf16_pos as u32, utf16_pos as u32);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Helper to insert text at cursor position
     let mut insert_at_cursor = {
         let mut nostr_text = nostr_text;
@@ -98,8 +120,12 @@ pub fn LiveStreamShareModal(
                 (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
-            nostr_text.set(current);
-            cursor_position.set(safe_pos + text.len());
+            let new_cursor_pos = safe_pos + text.len();
+            nostr_text.set(current.clone());
+            cursor_position.set(new_cursor_pos);
+            // Sync DOM cursor position
+            let utf16_pos = utf8_to_utf16_index(&current, new_cursor_pos);
+            set_cursor_position(&textarea_id.read(), utf16_pos);
         }
     };
 

@@ -190,7 +190,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             debounce_counter.set(debounce_counter() + 1); // Invalidate pending searches
             search_results.set(Vec::new());
             is_searching.set(false);
-            fetch_error.set(None); // Clear any previous error
+            // Only clear search-related errors, preserve initial load errors
+            let should_clear = fetch_error.peek()
+                .as_ref()
+                .map(|err| err.starts_with("Search failed:"))
+                .unwrap_or(false);
+            if should_clear {
+                fetch_error.set(None);
+            }
             return;
         }
 
