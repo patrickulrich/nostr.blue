@@ -8,12 +8,12 @@ use once_cell::sync::Lazy;
 #[component]
 pub fn PollNew() -> Element {
     let navigator = navigator();
-    let nav_close = navigator.clone();
-    let nav_publish = navigator.clone();
-    let nav_effect = navigator.clone();
+    let nav_close = navigator;
+    let nav_publish = navigator;
+    let nav_effect = navigator;
 
     // Form state
-    let mut poll_question = use_signal(|| String::new());
+    let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
     let mut options = use_signal(|| vec![
         PollOptionData {
@@ -26,8 +26,8 @@ pub fn PollNew() -> Element {
         },
     ]);
     let mut end_time_preset = use_signal(|| String::from("1day"));
-    let mut custom_end_time = use_signal(|| String::new());
-    let mut hashtags_input = use_signal(|| String::new());
+    let mut custom_end_time = use_signal(String::new);
+    let mut hashtags_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
 
@@ -72,7 +72,7 @@ pub fn PollNew() -> Element {
         is_publishing.set(true);
         error_message.set(None);
 
-        let nav_spawn = nav_publish.clone();
+        let nav_spawn = nav_publish;
         spawn(async move {
             // Calculate end time
             let ends_at = calculate_end_time(&end_time_preset_val, &custom_end_time_val);
@@ -118,7 +118,7 @@ pub fn PollNew() -> Element {
     // Redirect if not authenticated - hoist use_effect to maintain hook order
     use_effect(move || {
         if !*is_authenticated.read() {
-            nav_effect.push(crate::routes::Route::Home {});
+            nav_effect.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 
@@ -207,7 +207,7 @@ pub fn PollNew() -> Element {
                             "Poll Question"
                         }
                         textarea {
-                            class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             placeholder: "What's your question?",
                             rows: "3",
                             value: "{poll_question}",
@@ -330,7 +330,7 @@ pub fn PollNew() -> Element {
                                 class: "mt-3",
                                 input {
                                     r#type: "datetime-local",
-                                    class: "px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "px-4 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     value: "{custom_end_time}",
                                     oninput: move |evt| custom_end_time.set(evt.value()),
                                 }
@@ -350,7 +350,7 @@ pub fn PollNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "bitcoin, nostr, poll (comma separated)",
                             value: "{hashtags_input}",
                             oninput: move |evt| hashtags_input.set(evt.value()),

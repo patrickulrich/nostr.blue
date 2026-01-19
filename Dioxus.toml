@@ -2,17 +2,20 @@
 name = "nostrbluerust"
 default_platform = "web"
 
+# Copy files from public/ to build output root
+asset_dir = "public"
+
 [web.app]
 title = "nostr.blue - Decentralized Social Network"
-base_path = "."
+base_path = ""
 
 [web.watcher]
-watch_path = ["src", "assets"]
+watch_path = ["src", "assets", "public"]
 reload_html = true
 index_on_404 = true
 
 [web.resource]
-style = ["public/tailwind.css"]
+style = []
 script = []
 
 [web.resource.dev]

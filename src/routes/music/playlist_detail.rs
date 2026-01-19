@@ -9,7 +9,7 @@ use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
 #[component]
 pub fn MusicPlaylistDetail(naddr: String) -> Element {
     let mut playlist = use_signal(|| None::<nostr_music::NostrPlaylist>);
-    let mut tracks = use_signal(|| Vec::<music_player::MusicTrack>::new());
+    let mut tracks = use_signal(Vec::<music_player::MusicTrack>::new);
     let mut creator_name = use_signal(|| String::from("Unknown"));
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
@@ -115,7 +115,7 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                     div {
                         class: "flex items-start gap-6 animate-pulse",
                         div {
-                            class: "w-48 h-48 bg-muted rounded-lg flex-shrink-0"
+                            class: "w-48 h-48 bg-muted rounded-lg shrink-0"
                         }
                         div {
                             class: "flex-1 space-y-4",
@@ -183,7 +183,7 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
 
                         // Cover image
                         div {
-                            class: "w-48 h-48 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                            class: "w-48 h-48 rounded-lg overflow-hidden bg-muted shrink-0",
                             if let Some(ref image) = pl.image {
                                 img {
                                     src: "{image}",

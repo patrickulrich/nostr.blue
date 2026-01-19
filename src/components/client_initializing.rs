@@ -37,7 +37,7 @@ fn SkeletonNoteCard() -> Element {
 
                 // Avatar placeholder
                 div {
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     div {
                         class: "w-12 h-12 rounded-full bg-muted"
                     }

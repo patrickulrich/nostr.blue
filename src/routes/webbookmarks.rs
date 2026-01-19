@@ -57,7 +57,7 @@ impl SortOrder {
 #[component]
 pub fn WebBookmarks() -> Element {
     // State for feed events
-    let mut bookmarks = use_signal(|| Vec::<Event>::new());
+    let mut bookmarks = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
@@ -67,7 +67,7 @@ pub fn WebBookmarks() -> Element {
     // Filter and sort state
     let mut filter_tab = use_signal(|| FilterTab::All);
     let mut sort_order = use_signal(|| SortOrder::DateAdded);
-    let mut search_query = use_signal(|| String::new());
+    let mut search_query = use_signal(String::new);
     let mut selected_tag = use_signal(|| Option::<String>::None);
 
     // Modal state
@@ -76,7 +76,7 @@ pub fn WebBookmarks() -> Element {
     let mut editing_event = use_signal(|| Option::<Event>::None);
 
     // Quick-add state
-    let mut quick_url = use_signal(|| String::new());
+    let mut quick_url = use_signal(String::new);
     let mut quick_adding = use_signal(|| false);
 
     // Pagination state for infinite scroll
@@ -439,13 +439,13 @@ pub fn WebBookmarks() -> Element {
                     div {
                         class: "flex gap-2",
                         input {
-                            class: "flex-1 px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "Paste URL to quickly save...",
                             value: "{quick_url}",
                             oninput: move |evt| quick_url.set(evt.value().clone()),
                             onkeypress: {
-                                let mut handle_quick = handle_quick_add.clone();
+                                let mut handle_quick = handle_quick_add;
                                 move |evt: dioxus::prelude::Event<KeyboardData>| {
                                     if evt.key() == Key::Enter {
                                         handle_quick(());
@@ -456,7 +456,7 @@ pub fn WebBookmarks() -> Element {
                         button {
                             class: "px-4 py-2 text-sm bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/90 transition disabled:opacity-50",
                             onclick: {
-                                let mut handle_quick = handle_quick_add.clone();
+                                let mut handle_quick = handle_quick_add;
                                 move |_| handle_quick(())
                             },
                             disabled: *quick_adding.read() || quick_url.read().trim().is_empty(),
@@ -475,7 +475,7 @@ pub fn WebBookmarks() -> Element {
                                 button {
                                     key: "{tab:?}",
                                     class: if *filter_tab.read() == tab {
-                                        "px-3 py-1 text-sm rounded bg-background shadow-sm font-medium"
+                                        "px-3 py-1 text-sm rounded bg-background shadow-xs font-medium"
                                     } else {
                                         "px-3 py-1 text-sm rounded hover:bg-background/50 transition"
                                     },
@@ -487,7 +487,7 @@ pub fn WebBookmarks() -> Element {
 
                         // Search
                         input {
-                            class: "flex-1 min-w-[200px] px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 min-w-[200px] px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search bookmarks...",
                             value: "{search_query}",
@@ -497,7 +497,7 @@ pub fn WebBookmarks() -> Element {
                         // Tag filter
                         if !all_tags.read().is_empty() {
                             select {
-                                class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 onchange: move |evt| {
                                     let value = evt.value().clone();
                                     if value.is_empty() {
@@ -524,7 +524,7 @@ pub fn WebBookmarks() -> Element {
 
                         // Sort
                         select {
-                            class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             onchange: move |evt| {
                                 let value = evt.value();
                                 sort_order.set(match value.as_str() {

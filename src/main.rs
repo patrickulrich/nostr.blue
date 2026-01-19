@@ -1,16 +1,20 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store, reactions_store};
+use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, shop_store, sidebar_store};
 
 // Modules
 mod components;
 mod context;
+mod error;
 mod hooks;
 mod routes;
 mod services;
 mod stores;
 mod utils;
+
+// Re-export error types for convenience
+pub use error::{NostrBlueError, Result};
 
 use components::toast::ToastProvider;
 
@@ -31,6 +35,9 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // Start background scheduler tasks
+    services::scheduler::use_background_scheduler();
+
     // Initialize stores on mount
     use_effect(move || {
         theme_store::init_theme();
@@ -42,14 +49,24 @@ fn App() -> Element {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
                     log::info!("Nostr client initialized");
-                    // Restore signer from stored credentials
+                    // Restore signer from stored credentials (must run first to check auth state)
                     auth_store::restore_session_async().await;
 
-                    // Load user's preferred reactions from Nostr (NIP-78)
-                    reactions_store::load_preferred_reactions().await;
-
-                    // Restore NWC connection from LocalStorage
-                    nwc_store::restore_connection().await;
+                    // Run all remaining operations in parallel for faster startup
+                    futures::join!(
+                        // Load user's preferred reactions from Nostr (NIP-78)
+                        reactions_store::load_preferred_reactions(),
+                        // Load user's sidebar preferences from Nostr (NIP-78)
+                        sidebar_store::load_sidebar_preferences(),
+                        // Restore NWC connection from LocalStorage
+                        nwc_store::restore_connection(),
+                        // Initialize shop store and restore persisted orders
+                        async {
+                            if let Err(e) = shop_store::init_shop_store().await {
+                                log::warn!("Failed to initialize shop store: {}", e);
+                            }
+                        },
+                    );
                 }
                 Err(e) => {
                     log::error!("Failed to initialize client: {}", e);
@@ -62,9 +79,14 @@ fn App() -> Element {
     });
 
     rsx! {
+        // Tailwind CSS (processed by Dioxus built-in Tailwind support)
+        document::Stylesheet { href: asset!("/assets/tailwind.css") }
+
         ToastProvider {
             Router::<routes::Route> {}
         }
+        // NIP-49 password modal for encrypted key unlock/migration
+        components::password_modal::PasswordModal {}
     }
 }
 

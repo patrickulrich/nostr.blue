@@ -1,14 +1,16 @@
 use dioxus::prelude::*;
 use crate::stores::{auth_store, blossom_store};
 use crate::components::VoiceRecorder;
+use crate::utils::format::display_server_url;
 
 #[component]
 pub fn VoiceMessageNew() -> Element {
     let navigator = navigator();
     let mut audio_data = use_signal(|| None::<(Vec<u8>, f64, Vec<u8>, String)>); // (bytes, duration, waveform, mime_type)
-    let mut hashtags = use_signal(|| String::new());
+    let mut hashtags = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
+    let mut selected_server = use_signal(blossom_store::get_primary_server);
 
     // Check if user is authenticated
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
@@ -39,6 +41,7 @@ pub fn VoiceMessageNew() -> Element {
         };
 
         let hashtags_val = hashtags.read().clone();
+        let server_url = selected_server.read().clone();
 
         is_publishing.set(true);
         error_message.set(None);
@@ -52,7 +55,7 @@ pub fn VoiceMessageNew() -> Element {
                 .collect();
 
             // Upload to Blossom with actual MIME type from recorder
-            match blossom_store::upload_audio(bytes, mime_type.clone()).await {
+            match blossom_store::upload_audio(bytes, mime_type.clone(), Some(server_url)).await {
                 Ok(audio_url) => {
                     log::info!("Audio uploaded successfully: {}", audio_url);
 
@@ -88,7 +91,7 @@ pub fn VoiceMessageNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 
@@ -183,10 +186,38 @@ pub fn VoiceMessageNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "music, podcast, voicenote (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),
+                        }
+                    }
+
+                    // Blossom server selector
+                    div {
+                        label {
+                            class: "block text-sm font-medium mb-2",
+                            "Upload to"
+                        }
+                        select {
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
+                            disabled: *is_publishing.read(),
+                            onchange: move |evt| {
+                                selected_server.set(evt.value());
+                            },
+                            {
+                                let servers = blossom_store::get_servers();
+                                let current_server = selected_server.read().clone();
+                                rsx! {
+                                    for server in servers.iter() {
+                                        option {
+                                            value: "{server}",
+                                            selected: *server == current_server,
+                                            "{display_server_url(server)}"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

@@ -8,11 +8,11 @@ use url::Url;
 #[component]
 pub fn LiveStreamNew() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut summary = use_signal(|| String::new());
-    let mut image_url = use_signal(|| String::new());
-    let mut stream_url = use_signal(|| String::new());
-    let mut hashtags = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut summary = use_signal(String::new);
+    let mut image_url = use_signal(String::new);
+    let mut stream_url = use_signal(String::new);
+    let mut hashtags = use_signal(String::new);
     let mut status = use_signal(|| "planned".to_string());
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -28,7 +28,7 @@ pub fn LiveStreamNew() -> Element {
 
         !title_val.is_empty()
             && !stream_url_val.is_empty()
-            && Url::parse(&*stream_url_val)
+            && Url::parse(&stream_url_val)
                 .map(|u| {
                     let scheme = u.scheme();
                     scheme == "http" || scheme == "https" || scheme == "rtmp" || scheme == "rtmps"
@@ -84,7 +84,7 @@ pub fn LiveStreamNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(Route::Home {});
+            navigator.push(Route::Home { list: String::new() });
         }
     });
 
@@ -178,7 +178,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "My Awesome Livestream",
                             value: "{title.read()}",
                             oninput: move |e| title.set(e.value().clone())
@@ -192,7 +192,7 @@ pub fn LiveStreamNew() -> Element {
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 min-h-[120px]",
                             placeholder: "Describe what you'll be streaming...",
                             value: "{summary.read()}",
                             oninput: move |e| summary.set(e.value().clone())
@@ -207,7 +207,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "url",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono text-sm",
                             placeholder: "https://example.com/stream.m3u8",
                             value: "{stream_url.read()}",
                             oninput: move |e| stream_url.set(e.value().clone())
@@ -226,7 +226,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "url",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "https://example.com/thumbnail.jpg",
                             value: "{image_url.read()}",
                             oninput: move |e| image_url.set(e.value().clone())
@@ -251,7 +251,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "gaming, music, tech (comma-separated)",
                             value: "{hashtags.read()}",
                             oninput: move |e| hashtags.set(e.value().clone())
@@ -269,7 +269,7 @@ pub fn LiveStreamNew() -> Element {
                             "Status"
                         }
                         select {
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             value: "{status.read()}",
                             onchange: move |e| status.set(e.value().clone()),
                             option {
@@ -349,11 +349,8 @@ async fn publish_live_stream(
     let _output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
 
-    // Get the author pubkey
-    let signer = client.signer().await
-        .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer.get_public_key().await
-        .map_err(|e| format!("Failed to get public key: {}", e))?;
+    // Get the author pubkey (use cached - no signer call needed)
+    let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Return naddr format for navigation
     let naddr = format!("30311:{}:{}", pubkey.to_hex(), d_tag);

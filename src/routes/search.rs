@@ -46,10 +46,10 @@ impl SortOrder {
 #[component]
 pub fn Search(q: String) -> Element {
     let mut active_tab = use_signal(|| SearchTab::TextNotes);
-    let mut results = use_signal(|| Vec::<ContentSearchResult>::new());
+    let mut results = use_signal(Vec::<ContentSearchResult>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    let mut contact_pubkeys = use_signal(|| Vec::<PublicKey>::new());
+    let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
     let mut query = use_signal(|| q.clone());
     let mut search_version = use_signal(|| 0u64);
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
@@ -220,7 +220,7 @@ pub fn Search(q: String) -> Element {
             }
 
             // Empty state
-            if !*loading.read() && results.read().is_empty() && query.read().len() > 0 {
+            if !*loading.read() && results.read().is_empty() && !query.read().is_empty() {
                 div {
                     class: "flex flex-col items-center justify-center py-16 px-4",
                     div {

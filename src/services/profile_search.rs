@@ -296,9 +296,7 @@ pub async fn get_user_relays() -> Vec<String> {
 
     // Get connected relays from the pool
     let relays = client.pool().relays().await;
-    let relay_urls: Vec<String> = relays
-        .into_iter()
-        .map(|(url, _)| url.to_string())
+    let relay_urls: Vec<String> = relays.into_keys().map(|url| url.to_string())
         .take(3) // Limit to 3 relay hints
         .collect();
 

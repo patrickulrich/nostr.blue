@@ -168,7 +168,7 @@ pub async fn init_wallet() -> Result<(), String> {
                         *WALLET_STATE.write() = Some(WalletState {
                             privkey: Some(wallet_data.privkey.clone()),
                             // Normalize mint URLs on load to ensure consistent lookups
-                            mints: wallet_data.mints.iter().map(|u| normalize_mint_url(&u.to_string())).collect(),
+                            mints: wallet_data.mints.iter().map(|u| normalize_mint_url(u.as_ref())).collect(),
                             initialized: true,
                         });
 

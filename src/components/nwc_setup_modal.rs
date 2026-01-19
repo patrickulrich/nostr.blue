@@ -8,7 +8,7 @@ pub fn NwcSetupModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut nwc_uri = use_signal(|| String::new());
+    let mut nwc_uri = use_signal(String::new);
     let mut is_connecting = use_signal(|| false);
     let mut connection_error = use_signal(|| Option::<String>::None);
     let mut connection_success = use_signal(|| false);
@@ -50,7 +50,7 @@ pub fn NwcSetupModal(
 
     rsx! {
         div {
-            class: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4",
+            class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4",
             onclick: handle_backdrop_click,
 
             div {
@@ -94,7 +94,7 @@ pub fn NwcSetupModal(
                     textarea {
                         class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                                 bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                                focus:outline-none focus:ring-2 focus:ring-purple-500
+                                focus:outline-hidden focus:ring-2 focus:ring-purple-500
                                 font-mono text-sm",
                         rows: 4,
                         placeholder: "nostr+walletconnect://...",

@@ -10,7 +10,7 @@ pub fn PollCreatorModal(
     on_poll_created: EventHandler<String>,
 ) -> Element {
     // Form state
-    let mut poll_question = use_signal(|| String::new());
+    let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
     let mut options = use_signal(|| vec![
         PollOptionData {
@@ -23,8 +23,8 @@ pub fn PollCreatorModal(
         },
     ]);
     let mut end_time_preset = use_signal(|| String::from("1day"));
-    let mut custom_end_time = use_signal(|| String::new());
-    let mut hashtags_input = use_signal(|| String::new());
+    let mut custom_end_time = use_signal(String::new);
+    let mut hashtags_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut show_advanced = use_signal(|| false);
@@ -226,7 +226,7 @@ pub fn PollCreatorModal(
                             "Question"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             placeholder: "What's your question?",
                             rows: "2",
                             value: "{poll_question}",
@@ -295,7 +295,7 @@ pub fn PollCreatorModal(
                                 class: "mt-2",
                                 input {
                                     r#type: "datetime-local",
-                                    class: "px-3 py-1.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                    class: "px-3 py-1.5 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                     value: "{custom_end_time}",
                                     oninput: move |evt| custom_end_time.set(evt.value()),
                                 }
@@ -399,7 +399,7 @@ pub fn PollCreatorModal(
                                 }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                    class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                     placeholder: "bitcoin, nostr (comma separated)",
                                     value: "{hashtags_input}",
                                     oninput: move |evt| hashtags_input.set(evt.value()),

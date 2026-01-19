@@ -440,7 +440,7 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
 #[component]
 pub fn TokenList() -> Element {
     let tokens = cashu::WALLET_TOKENS.read();
-    let mut expanded_mints = use_signal(|| std::collections::HashSet::<String>::new());
+    let mut expanded_mints = use_signal(std::collections::HashSet::<String>::new);
 
     // Check if there are any tokens OR any mints (mints without tokens should still be shown)
     let has_tokens = !tokens.data().read().is_empty();
@@ -478,7 +478,7 @@ pub fn TokenList() -> Element {
         for token in tokens_data.iter() {
             let normalized_url = normalize_mint_url(&token.mint);
             tokens_by_mint.entry(normalized_url)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(token.clone());
         }
 
@@ -487,7 +487,7 @@ pub fn TokenList() -> Element {
         let wallet_mints = cashu::get_mints();
         for mint_url in wallet_mints {
             let normalized_url = normalize_mint_url(&mint_url);
-            tokens_by_mint.entry(normalized_url).or_insert_with(Vec::new);
+            tokens_by_mint.entry(normalized_url).or_default();
         }
 
         // Sort mints by total balance (descending) and wrap in Rc

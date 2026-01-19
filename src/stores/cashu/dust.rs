@@ -199,7 +199,7 @@ pub async fn consolidate_dust(
         .swap(
             None, // Swap all
             SplitTarget::default(),
-            cdk_proofs.into(),
+            cdk_proofs,
             None,  // No spending conditions
             false, // Don't include fee in output
         )

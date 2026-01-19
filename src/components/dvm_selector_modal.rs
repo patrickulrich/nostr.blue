@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 use crate::stores::dvm_store::{DVM_PROVIDERS, DVM_PROVIDERS_LOADING, SELECTED_DVM_PROVIDER};
+use crate::utils::is_valid_http_url;
 
 /// Modal for selecting DVM provider
 #[component]
@@ -15,7 +16,7 @@ pub fn DvmSelectorModal(
 ) -> Element {
     let providers = DVM_PROVIDERS.read().clone();
     let loading = *DVM_PROVIDERS_LOADING.read();
-    let selected = SELECTED_DVM_PROVIDER.read().clone();
+    let selected = *SELECTED_DVM_PROVIDER.read();
 
     rsx! {
         // Modal overlay
@@ -60,7 +61,7 @@ pub fn DvmSelectorModal(
                         div {
                             div {
                                 class: "font-medium",
-                                "Default (Snort's DVM)"
+                                "Default DVM"
                             }
                             div {
                                 class: "text-xs text-muted-foreground",
@@ -106,12 +107,16 @@ pub fn DvmSelectorModal(
 
                                         // Avatar
                                         div {
-                                            class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0",
+                                            class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0",
                                             if let Some(picture) = &provider.picture {
-                                                img {
-                                                    src: "{picture}",
-                                                    class: "w-full h-full object-cover",
-                                                    alt: "{provider.name}"
+                                                if is_valid_http_url(picture) {
+                                                    img {
+                                                        src: "{picture}",
+                                                        class: "w-full h-full object-cover",
+                                                        alt: "{provider.name}"
+                                                    }
+                                                } else {
+                                                    span { class: "text-lg", "\u{26A1}" }
                                                 }
                                             } else {
                                                 span { class: "text-lg", "\u{26A1}" }
@@ -136,7 +141,7 @@ pub fn DvmSelectorModal(
                                         // Selected indicator
                                         if is_selected {
                                             span {
-                                                class: "text-green-500 flex-shrink-0",
+                                                class: "text-green-500 shrink-0",
                                                 "\u{2713}"
                                             }
                                         }
