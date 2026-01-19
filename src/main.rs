@@ -79,6 +79,9 @@ fn App() -> Element {
     });
 
     rsx! {
+        // Tailwind CSS (processed by Dioxus built-in Tailwind support)
+        document::Stylesheet { href: asset!("/assets/tailwind.css") }
+
         ToastProvider {
             Router::<routes::Route> {}
         }

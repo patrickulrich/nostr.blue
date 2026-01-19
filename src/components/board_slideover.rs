@@ -404,7 +404,7 @@ pub fn BoardSlideover(
 
                         // Avatar
                         div {
-                            class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0",
                             if let Some(ref pic_url) = profile_picture().as_ref().filter(|u| is_valid_http_url(u)) {
                                 img {
                                     src: "{pic_url}",

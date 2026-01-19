@@ -98,7 +98,7 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
                     div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                         div { class: "flex items-start gap-6",
                             // Artist image with Wavlake badge
-                            div { class: "relative w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0",
+                            div { class: "relative w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden shrink-0",
                                 if let Some(art_url) = &artist.artist_art_url {
                                     if !art_url.is_empty() {
                                         img {
@@ -344,7 +344,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
                     div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                         div { class: "flex items-start gap-6",
                             // Artist image with Nostr badge
-                            div { class: "relative flex-shrink-0",
+                            div { class: "relative shrink-0",
                                 img {
                                     src: "{artist_image}",
                                     alt: "{artist_name}",

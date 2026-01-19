@@ -141,13 +141,13 @@ pub fn RecipeDirectionsEditor(
 
                             // Step number
                             div {
-                                class: "flex-shrink-0 w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-semibold text-sm mt-1",
+                                class: "shrink-0 w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-semibold text-sm mt-1",
                                 "{idx + 1}"
                             }
 
                             // Textarea for step
                             textarea {
-                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none min-h-[60px]",
+                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm resize-none min-h-[60px]",
                                 placeholder: "Describe step {idx + 1}...",
                                 value: "{text}",
                                 oninput: move |evt| {

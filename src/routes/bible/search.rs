@@ -69,7 +69,7 @@ pub fn BibleSearch() -> Element {
                 input {
                     r#type: "text",
                     placeholder: "Search verses... (min 3 characters)",
-                    class: "w-full px-4 py-3 pr-12 border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-primary bg-background",
+                    class: "w-full px-4 py-3 pr-12 border border-border rounded-full focus:outline-hidden focus:ring-2 focus:ring-primary bg-background",
                     value: "{query}",
                     oninput: move |evt| {
                         query.set(evt.value());

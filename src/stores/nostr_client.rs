@@ -280,6 +280,9 @@ const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.nostr.band",
 ];
 
+/// Video-specific relay for optimal video content discovery
+pub const VIDEO_RELAY: &str = "wss://relay.divine.video";
+
 /// Initialize the Nostr client and connect to relays
 pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     log::info!("Initializing Nostr client with IndexedDB...");
@@ -362,20 +365,17 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
-    // Store client and mark initialized BEFORE connecting
-    // This allows the UI to start loading while relays connect in background
+    // Store client first (so it's available for queries)
     *NOSTR_CLIENT.write() = Some(client.clone());
-    *CLIENT_INITIALIZED.write() = true;
 
-    // Connect to relays in background - spawn the future so it gets polled to completion
-    // In WASM, simply dropping the Future won't reliably execute it
-    log::debug!("Spawning background relay connections...");
+    // Spawn relay connections in background (required for WASM - can't block main thread)
+    log::info!("Spawning relay connections...");
     #[cfg(target_arch = "wasm32")]
     {
         let client_for_connect = client.clone();
         wasm_bindgen_futures::spawn_local(async move {
             client_for_connect.connect().await;
-            log::info!("Background relay connections completed");
+            log::info!("Background relay connections initiated");
         });
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -383,11 +383,67 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         let client_for_connect = client.clone();
         tokio::spawn(async move {
             client_for_connect.connect().await;
-            log::info!("Background relay connections completed (non-WASM)");
+            log::info!("Background relay connections initiated");
         });
     }
 
-    log::info!("Nostr client initialized (relays connecting in background)");
+    // Wait for at least one relay to connect before marking initialized
+    // This ensures CLIENT_INITIALIZED means "ready to fetch events"
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    const TIMEOUT_MS: u64 = 3000;
+    const POLL_INTERVAL_MS: u64 = 100;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_timers::future::TimeoutFuture;
+        let start = instant::Instant::now();
+
+        loop {
+            // Yield to allow background connection task to progress
+            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("First relay connected after {}ms", start.elapsed().as_millis());
+                break;
+            }
+
+            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
+                log::warn!("Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS);
+                break;
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("First relay connected after {:?}", start.elapsed());
+                break;
+            }
+
+            if start.elapsed() > timeout {
+                log::warn!("Relay connection timeout after {:?}, proceeding anyway", timeout);
+                break;
+            }
+        }
+    }
+
+    // Now mark as initialized - relays are ready (or timed out)
+    *CLIENT_INITIALIZED.write() = true;
+
+    log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }
 
@@ -622,6 +678,74 @@ pub async fn fetch_events_aggregated(
         .await
         .map(|events| events.into_iter().collect())
         .map_err(|e| e.to_string())
+}
+
+/// Ensure the video relay is connected
+async fn ensure_video_relay_connected(client: &Client) {
+    // Check if relay already exists and is connected
+    let relays = client.relays().await;
+    if let Some(relay) = relays.iter().find(|(url, _)| url.as_str() == VIDEO_RELAY) {
+        // Relay exists, check if connected
+        if relay.1.status() == nostr_relay_pool::RelayStatus::Connected {
+            return;
+        }
+        // Relay exists but not connected - try to connect
+        log::info!("Video relay exists but not connected, connecting...");
+    } else {
+        // Add video relay with standard options
+        if let Ok(url) = Url::parse(VIDEO_RELAY) {
+            let opts = RelayOptions::new()
+                .max_avg_latency(Some(Duration::from_secs(2)))
+                .reconnect(true);
+            if let Err(e) = client.pool().add_relay(url, opts).await {
+                log::warn!("Failed to add video relay: {}", e);
+                return;
+            }
+            log::info!("Added video relay: {}", VIDEO_RELAY);
+        }
+    }
+
+    // Connect to the video relay and wait briefly for connection
+    if let Ok(url) = Url::parse(VIDEO_RELAY) {
+        if let Err(e) = client.pool().connect_relay(url.clone()).await {
+            log::warn!("Failed to connect to video relay: {}", e);
+            return;
+        }
+
+        // Wait up to 2 seconds for the relay to connect
+        for _ in 0..20 {
+            let relays = client.relays().await;
+            if let Some((_, relay)) = relays.iter().find(|(u, _)| u.as_str() == VIDEO_RELAY) {
+                if relay.status() == nostr_relay_pool::RelayStatus::Connected {
+                    log::info!("Video relay connected successfully");
+                    return;
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            gloo_timers::future::TimeoutFuture::new(100).await;
+            #[cfg(not(target_arch = "wasm32"))]
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        log::warn!("Video relay connection timeout, proceeding anyway");
+    }
+}
+
+/// Fetch video events, ensuring relay.divine.video is included
+///
+/// This function adds the video-specific relay to the pool before fetching,
+/// ensuring video content is discovered from the Divine relay in addition
+/// to relays selected via the outbox model.
+pub async fn fetch_video_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Ensure video relay is in the pool
+    ensure_video_relay_connected(&client).await;
+
+    // Use standard aggregated fetch (DB first, then relays including video relay)
+    fetch_events_aggregated(filter, timeout).await
 }
 
 /// Fetch events directly from relays, bypassing cache

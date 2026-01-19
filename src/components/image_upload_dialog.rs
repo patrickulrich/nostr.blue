@@ -194,7 +194,7 @@ pub fn ImageUploadDialog(props: ImageUploadDialogProps) -> Element {
 
                             input {
                                 id: "image-alt-text",
-                                class: "w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition",
+                                class: "w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/50 focus:border-primary transition",
                                 r#type: "text",
                                 placeholder: "Describe what's in the image...",
                                 value: "{alt_text}",
@@ -224,7 +224,7 @@ pub fn ImageUploadDialog(props: ImageUploadDialogProps) -> Element {
 
                             input {
                                 id: "image-title",
-                                class: "w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition",
+                                class: "w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/50 focus:border-primary transition",
                                 r#type: "text",
                                 placeholder: "Additional context shown on hover...",
                                 value: "{title_text}",

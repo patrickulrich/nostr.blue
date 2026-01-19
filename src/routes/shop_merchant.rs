@@ -187,7 +187,7 @@ pub fn ShopMerchant() -> Element {
                                     // Product row
                                     div { class: "flex items-start gap-4 p-4",
                                         // Product image
-                                        div { class: "w-20 h-20 bg-muted rounded-lg overflow-hidden flex-shrink-0",
+                                        div { class: "w-20 h-20 bg-muted rounded-lg overflow-hidden shrink-0",
                                             if let Some(img) = product.images.first() {
                                                 img {
                                                     src: "{img.url}",
@@ -248,7 +248,7 @@ pub fn ShopMerchant() -> Element {
                                         }
 
                                         // Action buttons
-                                        div { class: "flex items-center gap-2 flex-shrink-0",
+                                        div { class: "flex items-center gap-2 shrink-0",
                                             // Edit button
                                             Link {
                                                 to: Route::ShopProductEdit { naddr: product.naddr.clone() },
@@ -329,7 +329,7 @@ pub fn ShopMerchant() -> Element {
 
                                     div { class: "flex items-start gap-4 p-4",
                                         // Collection image
-                                        div { class: "w-20 h-20 bg-muted rounded-lg overflow-hidden flex-shrink-0",
+                                        div { class: "w-20 h-20 bg-muted rounded-lg overflow-hidden shrink-0",
                                             if let Some(ref img) = collection.image {
                                                 img {
                                                     src: "{img}",
@@ -369,7 +369,7 @@ pub fn ShopMerchant() -> Element {
                                         }
 
                                         // Action buttons
-                                        div { class: "flex items-center gap-2 flex-shrink-0",
+                                        div { class: "flex items-center gap-2 shrink-0",
                                             // Delete collection button
                                             {
                                                 let collection_clone = collection.clone();

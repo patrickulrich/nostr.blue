@@ -277,7 +277,7 @@ pub fn CitationCardCompact(
                 let style = get_citation_style(&citation_type);
                 rsx! {
                     div {
-                        class: "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {style.bg_class}",
+                        class: "shrink-0 w-8 h-8 rounded-full flex items-center justify-center {style.bg_class}",
                         span {
                             class: "text-sm",
                             "{style.emoji}"

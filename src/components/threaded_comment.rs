@@ -372,14 +372,14 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                         if let Some(metadata) = author_metadata.read().as_ref() {
                             if let Some(picture) = &metadata.picture {
                                 img {
-                                    class: "w-8 h-8 rounded-full flex-shrink-0",
+                                    class: "w-8 h-8 rounded-full shrink-0",
                                     src: "{picture}",
                                     alt: "Avatar",
                                     loading: "lazy"
                                 }
                             } else {
                                 div {
-                                    class: "w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0",
+                                    class: "w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0",
                                     if let Some(name) = &metadata.name {
                                         "{name.chars().next().unwrap_or('?').to_uppercase()}"
                                     } else {
@@ -389,7 +389,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             }
                         } else {
                             div {
-                                class: "w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs flex-shrink-0",
+                                class: "w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs shrink-0",
                                 "?"
                             }
                         }
@@ -513,7 +513,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                         onclick: move |e: MouseEvent| e.stop_propagation(),
                                         // Play/Pause button
                                         button {
-                                            class: "flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                                            class: "shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
                                             onclick: toggle_play,
                                             if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id_parsed) {
                                                 // Pause icon

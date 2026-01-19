@@ -702,7 +702,7 @@ pub fn ArticleNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring text-2xl font-bold",
+                            class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring text-2xl font-bold",
                             placeholder: "Enter article title",
                             value: "{title}",
                             oninput: move |e| title.set(e.value()),
@@ -717,7 +717,7 @@ pub fn ArticleNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             placeholder: "unique-article-identifier",
                             value: "{identifier}",
                             oninput: move |e| identifier.set(e.value()),
@@ -735,7 +735,7 @@ pub fn ArticleNew() -> Element {
                             "Summary (optional)"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-none",
                             rows: 3,
                             placeholder: "Brief description of your article",
                             value: "{summary}",
@@ -764,7 +764,7 @@ pub fn ArticleNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             placeholder: "nostr, bitcoin, technology (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),

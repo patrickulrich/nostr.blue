@@ -251,7 +251,7 @@ pub fn FilePathBreadcrumb(
                     git_ref: git_ref.clone(),
                     path: "".to_string(),
                 },
-                class: "text-blue-400 hover:underline flex-shrink-0",
+                class: "text-blue-400 hover:underline shrink-0",
                 "root"
             }
 
@@ -265,7 +265,7 @@ pub fn FilePathBreadcrumb(
                         // Separator
                         span {
                             key: "sep-{i}",
-                            class: "text-muted-foreground flex-shrink-0",
+                            class: "text-muted-foreground shrink-0",
                             "/"
                         }
 

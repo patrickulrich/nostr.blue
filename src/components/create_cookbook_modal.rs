@@ -156,7 +156,7 @@ pub fn CreateCookbookModal(
                             span { class: "text-red-500", "*" }
                         }
                         input {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                             r#type: "text",
                             placeholder: "My Recipe Collection",
                             value: "{title}",
@@ -172,7 +172,7 @@ pub fn CreateCookbookModal(
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none text-sm",
                             rows: "2",
                             placeholder: "What recipes will this cookbook contain?",
                             value: "{description}",
@@ -237,7 +237,7 @@ pub fn CreateCookbookModal(
                             }
                         }
                         input {
-                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                            class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                             r#type: "text",
                             placeholder: "italian, desserts, quick-meals (comma separated)",
                             value: "{additional_tags}",

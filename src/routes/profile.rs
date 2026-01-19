@@ -1337,7 +1337,7 @@ pub fn Profile(pubkey: String) -> Element {
                     }
 
                     textarea {
-                        class: "w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        class: "w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                         rows: "4",
                         placeholder: "Type your message...",
                         value: "{dm_message.read()}",
@@ -1566,7 +1566,7 @@ pub fn Profile(pubkey: String) -> Element {
 fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
         button {
-            class: "flex-shrink-0 px-4 py-4 font-semibold hover:bg-accent transition relative",
+            class: "shrink-0 px-4 py-4 font-semibold hover:bg-accent transition relative",
             onclick: move |e| onclick.call(e),
 
             span {

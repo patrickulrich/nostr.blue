@@ -33,7 +33,7 @@ pub fn RepoHeader(
 
             // Book/repo icon (like gittr's)
             svg {
-                class: "w-4 h-4 text-muted-foreground flex-shrink-0",
+                class: "w-4 h-4 text-muted-foreground shrink-0",
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",
@@ -49,7 +49,7 @@ pub fn RepoHeader(
 
             // Owner avatar (circular with ring)
             div {
-                class: "w-5 h-5 rounded-full overflow-hidden ring-2 ring-primary flex-shrink-0",
+                class: "w-5 h-5 rounded-full overflow-hidden ring-2 ring-primary shrink-0",
                 if let Some(url) = &picture_url {
                     img {
                         class: "w-5 h-5 object-cover",

@@ -159,7 +159,7 @@ fn TabItem(config: TabConfig, is_active: bool) -> Element {
             class: "{base_class}",
 
             span {
-                class: "w-4 h-4 flex-shrink-0",
+                class: "w-4 h-4 shrink-0",
                 dangerous_inner_html: "{config.icon}"
             }
 
@@ -196,7 +196,7 @@ fn OverflowTabItem(config: TabConfig, is_active: bool) -> Element {
             class: "{base_class}",
 
             span {
-                class: "w-4 h-4 flex-shrink-0",
+                class: "w-4 h-4 shrink-0",
                 dangerous_inner_html: "{config.icon}"
             }
 

@@ -275,7 +275,7 @@ pub fn Events() -> Element {
                             class: "flex items-center bg-muted rounded-lg p-1",
                             button {
                                 class: if *view_mode.read() == ViewMode::Grid {
-                                    "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-sm"
+                                    "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs"
                                 } else {
                                     "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition"
                                 },
@@ -284,7 +284,7 @@ pub fn Events() -> Element {
                             }
                             button {
                                 class: if *view_mode.read() == ViewMode::Map {
-                                    "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-sm"
+                                    "px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs"
                                 } else {
                                     "px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition"
                                 },
@@ -299,7 +299,7 @@ pub fn Events() -> Element {
                         class: "flex items-center bg-muted rounded-lg p-1 mb-3",
                         button {
                             class: if filters.read().event_type_filter == EventTypeFilter::All {
-                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-sm"
+                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs"
                             } else {
                                 "flex-1 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition"
                             },
@@ -310,7 +310,7 @@ pub fn Events() -> Element {
                         }
                         button {
                             class: if filters.read().event_type_filter == EventTypeFilter::Calendar {
-                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-sm"
+                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs"
                             } else {
                                 "flex-1 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition"
                             },
@@ -321,7 +321,7 @@ pub fn Events() -> Element {
                         }
                         button {
                             class: if filters.read().event_type_filter == EventTypeFilter::Meetings {
-                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-sm"
+                                "flex-1 px-3 py-1.5 text-sm font-medium bg-background rounded shadow-xs"
                             } else {
                                 "flex-1 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition"
                             },
@@ -374,7 +374,7 @@ pub fn Events() -> Element {
                         input {
                             r#type: "text",
                             placeholder: "Search events...",
-                            class: "w-full pl-10 pr-4 py-2 bg-muted rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full pl-10 pr-4 py-2 bg-muted rounded-lg text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary",
                             value: "{filters.read().search_term}",
                             oninput: move |evt| {
                                 filters.write().search_term = evt.value();
@@ -388,7 +388,7 @@ pub fn Events() -> Element {
 
                         // Time filter dropdown
                         select {
-                            class: "text-sm bg-muted border-none rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "text-sm bg-muted border-none rounded-lg px-3 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-primary",
                             value: "{filters.read().time_filter:?}",
                             onchange: move |evt| {
                                 let value = evt.value();
@@ -412,7 +412,7 @@ pub fn Events() -> Element {
 
                         // Location filter dropdown
                         select {
-                            class: "text-sm bg-muted border-none rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "text-sm bg-muted border-none rounded-lg px-3 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-primary",
                             value: "{filters.read().location_filter:?}",
                             onchange: move |evt| {
                                 let value = evt.value();

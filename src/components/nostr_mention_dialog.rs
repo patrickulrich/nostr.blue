@@ -412,7 +412,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
                             }
 
                             input {
-                                class: "w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring text-sm",
+                                class: "w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring text-sm",
                                 r#type: "text",
                                 placeholder: match *active_tab.read() {
                                     MentionTab::Users => "Search users by name or npub...",
@@ -606,7 +606,7 @@ fn UserResultRow(props: UserResultRowProps) -> Element {
 
             // Avatar
             div {
-                class: "w-10 h-10 rounded-full bg-muted flex-shrink-0 overflow-hidden",
+                class: "w-10 h-10 rounded-full bg-muted shrink-0 overflow-hidden",
 
                 if let Some(url) = picture {
                     img {
@@ -788,7 +788,7 @@ fn ArticleResultRow(props: ArticleResultRowProps) -> Element {
             if let Some(url) = cover_image {
                 img {
                     src: "{url}",
-                    class: "w-16 h-16 rounded object-cover flex-shrink-0",
+                    class: "w-16 h-16 rounded object-cover shrink-0",
                     alt: "Cover image",
                 }
             }

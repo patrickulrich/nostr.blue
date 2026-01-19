@@ -148,7 +148,7 @@ pub fn RecipeIngredientsEditor(
                             // Input field
                             input {
                                 r#type: "text",
-                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                 placeholder: "e.g., 2 cups all-purpose flour",
                                 value: "{text}",
                                 oninput: move |evt| {

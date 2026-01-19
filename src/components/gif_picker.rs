@@ -167,7 +167,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             class: "relative",
                             input {
                                 r#type: "text",
-                                class: "w-full px-4 py-2.5 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm shadow-sm",
+                                class: "w-full px-4 py-2.5 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm shadow-xs",
                                 placeholder: "Search GIFs (powered by NIP-50)...",
                                 value: "{search_query}",
                                 oninput: move |evt| {
@@ -208,7 +208,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                             rsx! {
                                                 button {
                                                     key: "recent-{idx}",
-                                                    class: "flex-shrink-0 relative group",
+                                                    class: "shrink-0 relative group",
                                                     title: "{gif_url}",
                                                     onclick: move |_| {
                                                         props.on_gif_selected.call(gif_url_for_click.clone());
@@ -219,7 +219,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                     img {
                                                         src: "{thumb_url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-24 h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-sm hover:shadow-md",
+                                                        class: "w-24 h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-xs hover:shadow-md",
                                                         loading: "lazy"
                                                     }
                                                 }
@@ -306,7 +306,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                     }
                                                     // Hover overlay
                                                     div {
-                                                        class: "absolute inset-0 bg-blue-500 bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 pointer-events-none"
+                                                        class: "absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/20 transition-all duration-200 pointer-events-none"
                                                     }
                                                 }
                                             }
@@ -325,7 +325,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 class: "flex gap-2",
                                 // Load More button
                                 button {
-                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md flex items-center justify-center gap-2",
+                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xs hover:shadow-md flex items-center justify-center gap-2",
                                     disabled: *gif_loading,
                                     onclick: move |_| {
                                         spawn(async move {
@@ -344,7 +344,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 }
                                 // Upload GIF button
                                 button {
-                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2",
+                                    class: "flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg text-sm font-semibold transition-all shadow-xs hover:shadow-md flex items-center justify-center gap-2",
                                     onclick: move |_| {
                                         show_upload_modal.set(true);
                                     },

@@ -24,7 +24,7 @@ pub fn CookbookCard(cookbook: Pinboard) -> Element {
     rsx! {
         Link {
             to: Route::PinBoardDetail { naddr },
-            class: "flex-shrink-0 w-64 h-40 rounded-xl overflow-hidden relative group cursor-pointer transition-transform duration-200 hover:scale-[1.02]",
+            class: "shrink-0 w-64 h-40 rounded-xl overflow-hidden relative group cursor-pointer transition-transform duration-200 hover:scale-[1.02]",
 
             // Background Image or gradient fallback
             div {
@@ -61,7 +61,7 @@ pub fn CookbookCard(cookbook: Pinboard) -> Element {
 pub fn CookbookCardSkeleton() -> Element {
     rsx! {
         div {
-            class: "flex-shrink-0 w-64 h-40 bg-muted rounded-xl animate-pulse"
+            class: "shrink-0 w-64 h-40 bg-muted rounded-xl animate-pulse"
         }
     }
 }

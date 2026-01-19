@@ -146,7 +146,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                                     onclick: move |e: Event<MouseData>| {
                                         e.stop_propagation();
                                     },
-                                    class: "flex-shrink-0",
+                                    class: "shrink-0",
 
                                     div {
                                         class: "w-8 h-8 rounded-full overflow-hidden bg-muted flex items-center justify-center",
@@ -186,7 +186,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
 
                             // Read time
                             div {
-                                class: "flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0",
+                                class: "flex items-center gap-1 text-xs text-muted-foreground shrink-0",
                                 span { "📄" }
                                 span { "{read_time} min read" }
                             }

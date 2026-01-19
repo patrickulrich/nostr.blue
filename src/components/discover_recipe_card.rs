@@ -49,7 +49,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 
     rsx! {
         div {
-            class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 flex-shrink-0 cursor-pointer",
+            class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 shrink-0 cursor-pointer",
 
             Link {
                 to: Route::RecipeDetail { naddr: naddr.clone() },
@@ -126,7 +126,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 pub fn DiscoverRecipeCardSkeleton() -> Element {
     rsx! {
         div {
-            class: "flex-shrink-0 w-56 h-72 bg-muted rounded-xl animate-pulse"
+            class: "shrink-0 w-56 h-72 bg-muted rounded-xl animate-pulse"
         }
     }
 }

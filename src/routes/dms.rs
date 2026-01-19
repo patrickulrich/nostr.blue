@@ -134,7 +134,7 @@ pub fn DMs() -> Element {
 
             // Header
             div {
-                class: "flex-shrink-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                class: "shrink-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div {
                     class: "px-4 py-3 flex items-center justify-between",
                     h2 {
@@ -221,7 +221,7 @@ pub fn DMs() -> Element {
 
                         // Conversations list (left sidebar)
                         div {
-                            class: "w-full sm:w-80 border-r border-border overflow-y-auto flex-shrink-0 hide-scrollbar",
+                            class: "w-full sm:w-80 border-r border-border overflow-y-auto shrink-0 hide-scrollbar",
                             {
                                 let conversations = dms::get_conversations_sorted();
                                 if conversations.is_empty() && !*new_dm_mode.read() {
@@ -388,7 +388,7 @@ fn ConversationListItem(
                 img {
                     src: "{avatar_url}",
                     alt: "{display_name}",
-                    class: "w-12 h-12 rounded-full object-cover flex-shrink-0",
+                    class: "w-12 h-12 rounded-full object-cover shrink-0",
                 }
 
                 div {
@@ -402,7 +402,7 @@ fn ConversationListItem(
                         }
                         if !time_ago.is_empty() {
                             span {
-                                class: "text-xs text-muted-foreground flex-shrink-0",
+                                class: "text-xs text-muted-foreground shrink-0",
                                 "{time_ago}"
                             }
                         }
@@ -417,7 +417,7 @@ fn ConversationListItem(
                 // Unread indicator
                 if conversation.unread_count > 0 {
                     div {
-                        class: "w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0",
+                        class: "w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0",
                         "{conversation.unread_count}"
                     }
                 }
@@ -662,11 +662,11 @@ fn ConversationView(pubkey: String) -> Element {
 
             // Conversation header
             div {
-                class: "flex-shrink-0 p-4 border-b border-border flex items-center gap-3",
+                class: "shrink-0 p-4 border-b border-border flex items-center gap-3",
                 img {
                     src: "{avatar_url}",
                     alt: "{display_name}",
-                    class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                    class: "w-10 h-10 rounded-full object-cover shrink-0",
                 }
                 div {
                     class: "flex-1 min-w-0",
@@ -751,12 +751,12 @@ fn ConversationView(pubkey: String) -> Element {
 
             // Message input
             div {
-                class: "flex-shrink-0 p-4 border-t border-border",
+                class: "shrink-0 p-4 border-t border-border",
                 div {
                     class: "flex gap-2",
                     input {
                         r#type: "text",
-                        class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                         placeholder: "Type a message...",
                         value: "{message_input.read()}",
                         oninput: move |evt| message_input.set(evt.value().clone()),
@@ -917,7 +917,7 @@ fn MessageBubble(
             img {
                 src: "{avatar_url}",
                 alt: "Avatar",
-                class: "w-8 h-8 rounded-full object-cover flex-shrink-0",
+                class: "w-8 h-8 rounded-full object-cover shrink-0",
             }
             // Message bubble and timestamp
             div {
@@ -1014,7 +1014,7 @@ fn NewDMComposer(
                     }
                     input {
                         r#type: "text",
-                        class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                         placeholder: "npub... or hex pubkey",
                         value: "{recipient_input.read()}",
                         oninput: move |evt| recipient_input.set(evt.value().clone())
@@ -1027,7 +1027,7 @@ fn NewDMComposer(
                         "Message"
                     }
                     textarea {
-                        class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                        class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                         rows: "6",
                         placeholder: "Type your message...",
                         value: "{message_input.read()}",

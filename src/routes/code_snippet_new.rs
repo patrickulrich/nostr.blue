@@ -199,7 +199,7 @@ pub fn CodeSnippetNew() -> Element {
                     div {
                         class: "flex items-start gap-3",
                         div {
-                            class: "w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center flex-shrink-0",
+                            class: "w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-4 h-4 text-green-500",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -233,7 +233,7 @@ pub fn CodeSnippetNew() -> Element {
                         "Language"
                     }
                     select {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{language}",
                         onchange: move |e| language.set(e.value()),
                         for (value, label) in LANGUAGES.iter() {
@@ -253,7 +253,7 @@ pub fn CodeSnippetNew() -> Element {
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "e.g., hello_world.rs",
                         value: "{name}",
@@ -269,7 +269,7 @@ pub fn CodeSnippetNew() -> Element {
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "A brief description of what this code does",
                         value: "{description}",
@@ -285,7 +285,7 @@ pub fn CodeSnippetNew() -> Element {
                         span { class: "text-destructive", "*" }
                     }
                     textarea {
-                        class: "w-full h-64 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary resize-y",
+                        class: "w-full h-64 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary resize-y",
                         placeholder: "Paste or type your code here...",
                         value: "{code}",
                         oninput: move |e| code.set(e.value())
@@ -333,7 +333,7 @@ pub fn CodeSnippetNew() -> Element {
                                 "File Extension"
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g., rs, js, py",
                                 value: "{extension}",
@@ -348,7 +348,7 @@ pub fn CodeSnippetNew() -> Element {
                                 "Dependencies"
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g., tokio, serde",
                                 value: "{dependencies}",
@@ -367,7 +367,7 @@ pub fn CodeSnippetNew() -> Element {
                                 "License"
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g., MIT, Apache-2.0, GPL-3.0",
                                 value: "{license}",
@@ -382,7 +382,7 @@ pub fn CodeSnippetNew() -> Element {
                                 "Repository URL"
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "url",
                                 placeholder: "https://github.com/user/repo",
                                 value: "{repo_url}",

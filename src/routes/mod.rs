@@ -832,7 +832,7 @@ fn Layout() -> Element {
 
                 // Left Sidebar (Navigation)
                 aside {
-                    class: "w-[275px] flex-shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                    class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
                     div {
                         class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
 
@@ -1267,8 +1267,8 @@ fn Layout() -> Element {
                     class: match (is_wide_page, music_player_visible) {
                         (true, true) => "w-full flex-1 border-r border-border pb-24",
                         (true, false) => "w-full flex-1 border-r border-border",
-                        (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
-                        (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
+                        (false, true) => "w-full max-w-[600px] shrink grow border-r border-border pb-24",
+                        (false, false) => "w-full max-w-[600px] shrink grow border-r border-border",
                     },
 
                     // Mobile header
@@ -1298,13 +1298,13 @@ fn Layout() -> Element {
                 // Right Sidebar (Trending & Search) - Hidden on wide pages and settings
                 if !is_wide_page && !is_settings_page {
                     aside {
-                        class: "w-[350px] flex-shrink-0 hidden xl:block",
+                        class: "w-[350px] shrink-0 hidden xl:block",
                     div {
                         class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
 
                         // Search Input
                         div {
-                            class: "flex-shrink-0",
+                            class: "shrink-0",
                             crate::components::SearchInput {}
                         }
 
@@ -1316,7 +1316,7 @@ fn Layout() -> Element {
 
                         // Footer Links
                         div {
-                            class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto flex-shrink-0",
+                            class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto shrink-0",
                             Link {
                                 to: Route::Terms {},
                                 class: "hover:underline",

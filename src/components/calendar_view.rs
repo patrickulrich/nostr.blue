@@ -154,7 +154,7 @@ fn DayView(props: DayViewProps) -> Element {
 
                         // Hour label
                         div {
-                            class: "w-16 pr-2 text-right text-xs text-muted-foreground flex-shrink-0",
+                            class: "w-16 pr-2 text-right text-xs text-muted-foreground shrink-0",
                             "{format_hour(hour)}"
                         }
 
@@ -212,7 +212,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                 class: "flex border-b border-border",
                 // Time gutter
                 div {
-                    class: "w-16 flex-shrink-0"
+                    class: "w-16 shrink-0"
                 }
                 // Day columns
                 for date in week_dates.iter() {
@@ -237,7 +237,7 @@ fn WeekView(props: WeekViewProps) -> Element {
             div {
                 class: "flex border-b border-border bg-muted/30",
                 div {
-                    class: "w-16 flex-shrink-0 p-1 text-xs text-muted-foreground",
+                    class: "w-16 shrink-0 p-1 text-xs text-muted-foreground",
                     "All day"
                 }
                 for date in week_dates.iter() {
@@ -286,7 +286,7 @@ fn WeekView(props: WeekViewProps) -> Element {
 
                     // Time gutter
                     div {
-                        class: "w-16 flex-shrink-0",
+                        class: "w-16 shrink-0",
                         for hour in 0..24 {
                             div {
                                 key: "time-{hour}",
@@ -715,7 +715,7 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
     if naddr.is_empty() {
         return rsx! {
             div {
-                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-default opacity-70 shadow-sm",
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-default opacity-70 shadow-xs",
                 style: "{style}",
                 div {
                     class: "font-medium truncate",
@@ -741,7 +741,7 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
     rsx! {
         Link {
             to: detail_route,
-            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-sm",
+            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
             style: "{style}",
             div {
                 class: "font-medium truncate",

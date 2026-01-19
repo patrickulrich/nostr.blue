@@ -434,7 +434,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Search by title, author...",
                                 value: "{search_query}",
                                 oninput: move |e| handle_search(e.value()),
@@ -507,7 +507,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                     class: "flex items-start gap-3",
                                                     // Cover image or placeholder (with URL validation)
                                                     div {
-                                                        class: "w-12 h-16 flex-shrink-0 rounded bg-muted flex items-center justify-center",
+                                                        class: "w-12 h-16 shrink-0 rounded bg-muted flex items-center justify-center",
                                                         if let Some(ref img) = publication.cover_image {
                                                             if is_safe_image_url(img) {
                                                                 img {
@@ -541,7 +541,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                         }
                                                     }
                                                     if is_selected {
-                                                        ChevronDownIcon { class: "w-5 h-5 text-primary flex-shrink-0 -rotate-90".to_string() }
+                                                        ChevronDownIcon { class: "w-5 h-5 text-primary shrink-0 -rotate-90".to_string() }
                                                     }
                                                 }
                                             }
@@ -569,7 +569,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                 "Chapter/Section (optional)"
                                             }
                                             select {
-                                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                                 value: selected_chapter.read().clone().unwrap_or_default(),
                                                 onchange: move |e| {
                                                     let val = e.value();
@@ -618,9 +618,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     input {
                                         r#type: "text",
                                         class: if *sections_error.read() {
-                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
                                         } else {
-                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50"
                                         },
                                         placeholder: "e.g., 4-9 or 1,3,5",
                                         value: "{selected_sections}",
@@ -648,9 +648,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     input {
                                         r#type: "text",
                                         class: if *version_error.read() {
-                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
                                         } else {
-                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50"
                                         },
                                         placeholder: "e.g., kjv, 1st-edition",
                                         value: "{selected_version}",

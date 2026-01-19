@@ -400,7 +400,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
 
             // Episode image with play button
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{image_url}",
                     alt: "{episode.title}",
@@ -547,7 +547,7 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
 
             // Action buttons (visible on hover)
             div {
-                class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
+                class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
 
                 // Play button (larger, always visible target)
                 button {
@@ -600,7 +600,7 @@ pub fn PodcastEpisodeCardSkeleton() -> Element {
 
             // Image skeleton
             div {
-                class: "w-16 h-16 bg-muted rounded-lg flex-shrink-0"
+                class: "w-16 h-16 bg-muted rounded-lg shrink-0"
             }
 
             // Info skeleton

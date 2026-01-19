@@ -198,7 +198,7 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             "Name"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "My Awesome List",
                             maxlength: "100",
@@ -214,7 +214,7 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             "Description (optional)"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             rows: "2",
                             placeholder: "What is this list for?",
                             maxlength: "500",

@@ -178,7 +178,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                 div {
                     class: "flex items-center gap-2 text-sm text-muted-foreground mb-2",
                     svg {
-                        class: "w-4 h-4 flex-shrink-0",
+                        class: "w-4 h-4 shrink-0",
                         xmlns: "http://www.w3.org/2000/svg",
                         fill: "none",
                         view_box: "0 0 24 24",
@@ -203,7 +203,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                         if *is_online {
                             // Video/online icon
                             svg {
-                                class: "w-4 h-4 flex-shrink-0 text-blue-500",
+                                class: "w-4 h-4 shrink-0 text-blue-500",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 fill: "none",
                                 view_box: "0 0 24 24",
@@ -218,7 +218,7 @@ pub fn EventCard(event: UnifiedEvent, #[props(default)] from: Option<String>) ->
                         } else {
                             // Map pin icon
                             svg {
-                                class: "w-4 h-4 flex-shrink-0 text-green-500",
+                                class: "w-4 h-4 shrink-0 text-green-500",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 fill: "none",
                                 view_box: "0 0 24 24",
@@ -326,7 +326,7 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
                         img {
                             src: "{image_url}",
                             alt: "{event.title()}",
-                            class: "w-12 h-12 rounded object-cover flex-shrink-0",
+                            class: "w-12 h-12 rounded object-cover shrink-0",
                             loading: "lazy",
                             // UX Fix #14: Prevent referrer leakage
                             referrerpolicy: "no-referrer",
@@ -335,7 +335,7 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
                 } else {
                     rsx! {
                         div {
-                            class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0",
+                            class: "w-12 h-12 rounded bg-primary/10 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-6 h-6 text-primary",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -374,7 +374,7 @@ pub fn EventCardCompact(event: UnifiedEvent, #[props(default)] from: Option<Stri
             // Live indicator
             if event.is_live() {
                 div {
-                    class: "w-2 h-2 bg-red-500 rounded-full animate-pulse flex-shrink-0",
+                    class: "w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0",
                 }
             }
         }
@@ -445,7 +445,7 @@ pub fn EventCardCompactSkeleton() -> Element {
 
             // Thumbnail
             div {
-                class: "w-12 h-12 rounded bg-muted flex-shrink-0",
+                class: "w-12 h-12 rounded bg-muted shrink-0",
             }
 
             // Content

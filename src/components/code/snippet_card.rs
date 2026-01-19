@@ -41,7 +41,7 @@ pub fn CodeSnippetCard(
 
                     // File icon
                     svg {
-                        class: "w-4 h-4 text-muted-foreground flex-shrink-0",
+                        class: "w-4 h-4 text-muted-foreground shrink-0",
                         xmlns: "http://www.w3.org/2000/svg",
                         width: "24",
                         height: "24",

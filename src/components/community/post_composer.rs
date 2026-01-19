@@ -210,7 +210,7 @@ pub fn CommunityPostComposer(
 
                 // Content textarea
                 textarea {
-                    class: "w-full p-3 border border-border rounded-lg bg-background min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                    class: "w-full p-3 border border-border rounded-lg bg-background min-h-[150px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                     placeholder: if is_reply { "Write your reply..." } else { "What's on your mind?" },
                     value: "{content}",
                     disabled: !has_signer || *posting.read(),
@@ -366,7 +366,7 @@ pub fn CommunityPostComposerInline(
                 div {
                     class: "flex-1",
                     textarea {
-                        class: "w-full p-3 border border-border rounded-lg bg-background min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                        class: "w-full p-3 border border-border rounded-lg bg-background min-h-[80px] focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                         placeholder: "Share something with the community...",
                         value: "{content}",
                         disabled: *posting.read(),

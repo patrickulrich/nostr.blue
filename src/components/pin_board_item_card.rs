@@ -645,13 +645,13 @@ pub fn PinCardMosaic(
 
             // Content type badge - top left
             div {
-                class: "absolute top-2 left-2 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm shadow-sm",
+                class: "absolute top-2 left-2 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm shadow-xs",
                 ContentTypeIcon { content_type: content_type.clone() }
             }
 
             // Menu (visible on hover) - top right
             div {
-                class: "absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm rounded-full shadow-sm",
+                class: "absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm rounded-full shadow-xs",
                 PinMenu {
                     pin: pin_for_menu.clone(),
                     is_owner: is_owner,

@@ -274,7 +274,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Search by title, author...",
                                 value: "{search_query}",
                                 oninput: move |e| handle_search(e.value()),

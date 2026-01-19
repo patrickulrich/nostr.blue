@@ -180,7 +180,7 @@ pub fn PublicationSearch(query: String) -> Element {
                                 class: "flex items-start gap-4",
                                 // Cover image or placeholder
                                 div {
-                                    class: "w-16 h-20 flex-shrink-0 rounded bg-muted flex items-center justify-center",
+                                    class: "w-16 h-20 shrink-0 rounded bg-muted flex items-center justify-center",
                                     if let Some(ref img) = publication.cover_image {
                                         img {
                                             class: "w-full h-full object-cover rounded",

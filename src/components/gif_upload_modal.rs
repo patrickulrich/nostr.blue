@@ -350,7 +350,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                         class: "flex items-start gap-4",
                                         // GIF preview - use Object URL for efficiency (avoids base64 memory overhead)
                                         div {
-                                            class: "w-24 h-24 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-600 flex-shrink-0",
+                                            class: "w-24 h-24 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-600 shrink-0",
                                             if let Some(url) = preview_url {
                                                 img {
                                                     class: "w-full h-full object-cover",
@@ -394,7 +394,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 "Caption / Search Terms"
                             }
                             input {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                                 r#type: "text",
                                 placeholder: "e.g., funny cat, reaction, celebration...",
                                 value: "{caption}",
@@ -414,7 +414,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 "Upload to"
                             }
                             select {
-                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                                 disabled: *uploading.read(),
                                 onchange: move |evt| {
                                     match evt.value().as_str() {
@@ -444,7 +444,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                     "Blossom Server"
                                 }
                                 select {
-                                    class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                    class: "w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                                     disabled: *uploading.read(),
                                     onchange: move |evt| {
                                         selected_blossom_server.set(evt.value());

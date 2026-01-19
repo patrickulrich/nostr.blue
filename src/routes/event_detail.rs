@@ -396,7 +396,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         div {
                             class: "flex items-center gap-3 text-muted-foreground mb-3",
                             svg {
-                                class: "w-5 h-5 flex-shrink-0",
+                                class: "w-5 h-5 shrink-0",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 fill: "none",
                                 view_box: "0 0 24 24",
@@ -431,7 +431,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         class: "flex items-center gap-3 text-muted-foreground mb-2",
                                         if is_online_location(location) {
                                             svg {
-                                                class: "w-5 h-5 flex-shrink-0 text-blue-500",
+                                                class: "w-5 h-5 shrink-0 text-blue-500",
                                                 xmlns: "http://www.w3.org/2000/svg",
                                                 fill: "none",
                                                 view_box: "0 0 24 24",
@@ -445,7 +445,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                             }
                                         } else {
                                             svg {
-                                                class: "w-5 h-5 flex-shrink-0 text-green-500",
+                                                class: "w-5 h-5 shrink-0 text-green-500",
                                                 xmlns: "http://www.w3.org/2000/svg",
                                                 fill: "none",
                                                 view_box: "0 0 24 24",
@@ -783,7 +783,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         div {
                                             class: "flex gap-2",
                                             textarea {
-                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none text-sm resize-none",
+                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden text-sm resize-none",
                                                 placeholder: "Add a comment...",
                                                 rows: 2,
                                                 value: "{comment_input}",
