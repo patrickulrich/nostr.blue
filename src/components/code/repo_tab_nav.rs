@@ -239,6 +239,7 @@ pub fn RepoTabNavCompact(
 
             for (id, label, route) in tabs.iter() {
                 Link {
+                    key: "{id}",
                     to: route.clone(),
                     class: if active_tab == *id {
                         "px-2 py-1 rounded text-primary font-medium"

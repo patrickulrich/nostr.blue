@@ -56,7 +56,7 @@ jobs:
         run: npm run build:all
 
       - name: Install Dioxus CLI
-        run: cargo install dioxus-cli --locked
+        run: cargo install dioxus-cli --version 0.7.2 --locked
 
       - name: Build with Dioxus
         run: dx build --release

@@ -145,6 +145,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut loading = use_signal(|| false);
     // Error state for fetch/search operations
     let mut fetch_error = use_signal(|| None::<String>);
+    // Version signal to trigger memo re-evaluation when cache updates
+    let mut publications_version = use_signal(|| 0usize);
 
     // Load publications when modal opens
     use_effect(use_reactive(
@@ -155,7 +157,11 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 fetch_error.set(None);
                 spawn(async move {
                     match fetch_publications(100, None).await {
-                        Ok(_) => fetch_error.set(None),
+                        Ok(_) => {
+                            fetch_error.set(None);
+                            // Bump version to trigger memo re-evaluation
+                            publications_version.set(publications_version() + 1);
+                        }
                         Err(e) => {
                             crate::utils::log_fetch_error("publications", e.clone());
                             fetch_error.set(Some(format!("Failed to load publications: {}", e)));
@@ -181,8 +187,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         search_query.set(query.clone());
 
         if query.is_empty() {
+            debounce_counter.set(debounce_counter() + 1); // Invalidate pending searches
             search_results.set(Vec::new());
             is_searching.set(false);
+            fetch_error.set(None); // Clear any previous error
             return;
         }
 
@@ -225,6 +233,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Get publications to display based on tab
     let publications_to_display = use_memo(move || {
+        // Read version to create reactive dependency - Dioxus auto-tracks this read
+        let _ = *publications_version.read();
         if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty() {
             search_results.read().clone()
         } else {
@@ -383,7 +393,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
                     button {
                         class: "p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition-colors",
+                        r#type: "button",
                         onclick: close_modal,
+                        aria_label: "Close",
+                        title: "Close",
                         XIcon { class: "w-5 h-5".to_string() }
                     }
                 }

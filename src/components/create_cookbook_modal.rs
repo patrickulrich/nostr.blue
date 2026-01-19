@@ -75,6 +75,7 @@ pub fn CreateCookbookModal(
         spawn(async move {
             match pin_boards_store::publish_pinboard(input, None).await {
                 Ok(naddr) => {
+                    is_submitting.set(false); // Clear before navigation
                     // Navigate to the new cookbook
                     navigator.push(Route::PinBoardDetail { naddr });
                 }

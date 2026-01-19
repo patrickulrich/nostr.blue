@@ -1107,11 +1107,18 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
 
     // Only show status badges for calendar events
     if event.is_calendar_event() {
-        // Use end timestamp or default to 24 hours after start
-        let end_ts = event.end_timestamp()
-            .unwrap_or(start_ts + 86400);
+        // Use end timestamp or compute default based on event type per NIP-52:
+        // - Kind 31922 (date-based/all-day): default to 24 hours
+        // - Kind 31923 (time-based): default to instantaneous (same as start)
+        let end_ts = event.end_timestamp().unwrap_or_else(|| {
+            if event.is_all_day() {
+                start_ts + 86400 // Date-based: default to end of day
+            } else {
+                start_ts // Time-based: default to instantaneous
+            }
+        });
 
-        if end_ts < now_secs {
+        if end_ts <= now_secs {
             DetailEventStatus::Ended
         } else if start_ts > now_secs {
             DetailEventStatus::Upcoming

@@ -829,9 +829,11 @@ pub fn extract_citation_identifiers(content: &str) -> Vec<String> {
 /// Returns rendered HTML along with citation information.
 /// If `resolved_citations` is provided, citations will be rendered with full data.
 /// Otherwise, citations render as placeholders that can be hydrated later.
+/// The `enable_wikilinks` parameter controls whether [[wikilinks]] are processed.
 pub fn render_content_with_citations(
     content: &str,
     resolved_citations: &HashMap<String, ResolvedCitation>,
+    enable_wikilinks: bool,
 ) -> RenderedContentWithCitations {
     let format = detect_content_format(content);
     let has_citations_flag = has_citations(content);
@@ -848,11 +850,19 @@ pub fn render_content_with_citations(
     // Render the content based on format
     let html = match format {
         ContentFormat::Markdown => {
-            let with_wikilinks = render_wikilinks_to_html(&content_with_citations);
-            render_markdown(&with_wikilinks)
+            if enable_wikilinks {
+                let with_wikilinks = render_wikilinks_to_html(&content_with_citations);
+                render_markdown(&with_wikilinks)
+            } else {
+                render_markdown(&content_with_citations)
+            }
         }
         ContentFormat::AsciiDoc => {
-            render_asciidoc_with_wikilinks(&content_with_citations)
+            if enable_wikilinks {
+                render_asciidoc_with_wikilinks(&content_with_citations)
+            } else {
+                render_asciidoc(&content_with_citations)
+            }
         }
     };
 

@@ -183,6 +183,12 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     // Handle insert
     let handle_insert = move |_| {
         if let Some(ref citation) = *selected_citation.read() {
+            // Cancel any pending search task (consistent with close_modal)
+            if let Some(task) = search_task.take() {
+                task.cancel();
+            }
+            is_searching.set(false);
+
             let identifier = citation.naddr.as_ref()
                 .cloned()
                 .unwrap_or_else(|| {

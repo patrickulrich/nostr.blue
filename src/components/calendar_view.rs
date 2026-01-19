@@ -518,12 +518,10 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let day: i32 = parts[2].parse().unwrap_or(1);
 
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
-    let current_weekday = js_date.get_day() as i32;
+    let current_weekday = js_date.get_day(); // 0 = Sunday, returns u32
 
-    // Go back to Sunday using milliseconds (safer approach)
-    let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-    let sunday_ms = js_date.get_time() - (current_weekday as f64 * ms_per_day);
-    js_date.set_time(sunday_ms);
+    // Move to Sunday using day-level methods (DST-safe)
+    js_date.set_date(js_date.get_date() - current_weekday);
 
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
@@ -533,8 +531,8 @@ fn get_week_dates(date: &str) -> Vec<String> {
             js_date.get_month() + 1,
             js_date.get_date()
         ));
-        // Add one day in milliseconds
-        js_date.set_time(js_date.get_time() + ms_per_day);
+        // Add one day using day-level method (DST-safe)
+        js_date.set_date(js_date.get_date() + 1);
     }
 
     dates

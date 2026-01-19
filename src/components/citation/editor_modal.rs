@@ -84,6 +84,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     // UI state
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // Session token to guard async state mutations against race conditions
+    let mut session_token = use_signal(|| 0u64);
 
     // Extract editing state before closures (avoids borrow issues)
     let is_editing = props.citation_to_edit.is_some();
@@ -151,6 +153,18 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         },
     ));
 
+    // Increment session token when modal opens to invalidate old async operations
+    use_effect(use_reactive(
+        &*props.show.read(),
+        move |is_shown| {
+            if is_shown {
+                let new_token = *session_token.peek() + 1;
+                session_token.set(new_token);
+                saving.set(false); // Reset saving state on open
+            }
+        },
+    ));
+
     // Close modal
     let close_modal = move |_| {
         props.show.set(false);
@@ -205,6 +219,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let on_save = props.on_save;
         let mut show = props.show;
         let existing_d_tag = existing_d_tag.clone();
+        // Capture token before spawn to guard against race conditions
+        let my_token = *session_token.read();
 
         spawn(async move {
             let result = match current_tab {
@@ -248,31 +264,33 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                 }
             };
 
-            match result {
-                Ok(event_id) => {
-                    log::info!("Citation published: {}", event_id);
+            // Guard state mutations: only apply if session token hasn't changed
+            if *session_token.read() == my_token {
+                match result {
+                    Ok(event_id) => {
+                        log::info!("Citation published: {}", event_id);
 
-                    // Refresh user's citations
-                    if let Some(pk) = auth_store::get_pubkey() {
-                        if let Err(e) = fetch_citations_by_author(&pk, 200).await {
-                            crate::utils::log_fetch_error("citations refresh", e);
+                        // Refresh user's citations
+                        if let Some(pk) = auth_store::get_pubkey() {
+                            if let Err(e) = fetch_citations_by_author(&pk, 200).await {
+                                crate::utils::log_fetch_error("citations refresh", e);
+                            }
                         }
-                    }
 
-                    // Callback
-                    if let Some(ref handler) = on_save {
-                        handler.call(event_id);
-                    }
+                        // Callback
+                        if let Some(ref handler) = on_save {
+                            handler.call(event_id);
+                        }
 
-                    show.set(false);
+                        show.set(false);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to publish citation: {}", e);
+                        error.set(Some(e));
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to publish citation: {}", e);
-                    error.set(Some(e));
-                }
+                saving.set(false);
             }
-
-            saving.set(false);
         });
     };
 

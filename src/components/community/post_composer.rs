@@ -7,6 +7,7 @@ use crate::stores::community_store::{
 };
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::RichContent;
+use crate::utils::validation::is_valid_http_url;
 
 /// Post composer modal for communities
 #[component]
@@ -136,10 +137,33 @@ pub fn CommunityPostComposer(
                 div {
                     class: "flex items-center gap-2 mb-4 p-2 bg-accent/50 rounded-lg",
                     if let Some(ref image) = community.image {
-                        img {
-                            class: "w-8 h-8 rounded-full object-cover",
-                            src: "{image}",
-                            alt: "Community"
+                        if is_valid_http_url(image) {
+                            img {
+                                class: "w-8 h-8 rounded-full object-cover",
+                                src: "{image}",
+                                alt: "Community",
+                                referrerpolicy: "no-referrer",
+                            }
+                        } else {
+                            div {
+                                class: "w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white text-sm",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
+                                    circle { cx: "9", cy: "7", r: "4" }
+                                    path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
+                                    path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                                }
+                            }
                         }
                     } else {
                         div {

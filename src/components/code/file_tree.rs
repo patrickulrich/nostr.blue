@@ -88,17 +88,20 @@ pub fn FileTreeEntry(
     let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
 
+    // URL-encode the path to handle spaces and special characters
+    let encoded_path = urlencoding::encode(&entry.path).into_owned();
+
     let route = if is_dir {
         Route::CodeRepoTree {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: entry.path.clone(),
+            path: encoded_path,
         }
     } else {
         Route::CodeRepoBlob {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: entry.path.clone(),
+            path: encoded_path,
         }
     };
 

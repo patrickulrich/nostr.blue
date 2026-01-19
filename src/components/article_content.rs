@@ -3,8 +3,8 @@ use crate::utils::markdown::render_markdown;
 
 #[component]
 pub fn ArticleContent(content: String) -> Element {
-    // Memoize markdown rendering - use_memo automatically tracks captured props
-    let html_content = use_memo(move || render_markdown(&content));
+    // Compute markdown directly - props are not reactive so use_memo wouldn't recompute on changes
+    let html_content = render_markdown(&content);
 
     rsx! {
         div {
