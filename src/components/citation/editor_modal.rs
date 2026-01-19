@@ -324,7 +324,10 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
                     button {
                         class: "p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition-colors",
+                        r#type: "button",
                         onclick: close_modal,
+                        aria_label: "Close",
+                        title: "Close",
                         XIcon { class: "w-5 h-5".to_string() }
                     }
                 }

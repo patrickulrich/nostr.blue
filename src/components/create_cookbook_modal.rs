@@ -26,6 +26,11 @@ pub fn CreateCookbookModal(
     let handle_submit = move |evt: Event<FormData>| {
         evt.prevent_default();
 
+        // Guard against re-entry while submitting
+        if *is_submitting.read() {
+            return;
+        }
+
         // Validate and sanitize title
         let title_trimmed = title.read().trim().to_string();
         if title_trimmed.is_empty() {
