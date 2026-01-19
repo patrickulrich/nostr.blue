@@ -90,7 +90,7 @@ pub fn LiveStreamShareModal(
     }
 
     // Set cursor position in DOM textarea
-    #[allow(unused_variables)]
+    #[allow(unused_variables, dead_code)]
     fn set_cursor_position(textarea_id: &str, utf16_pos: usize) {
         #[cfg(target_arch = "wasm32")]
         {
@@ -102,6 +102,23 @@ pub fn LiveStreamShareModal(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Defer cursor position update until after next render via requestAnimationFrame
+    #[allow(unused_variables)]
+    fn set_cursor_position_deferred(textarea_id: String, utf16_pos: usize) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::prelude::*;
+
+            if let Some(window) = web_sys::window() {
+                let closure = Closure::once(Box::new(move || {
+                    set_cursor_position(&textarea_id, utf16_pos);
+                }) as Box<dyn FnOnce()>);
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                closure.forget(); // prevent closure from being dropped
             }
         }
     }
@@ -123,9 +140,9 @@ pub fn LiveStreamShareModal(
             let new_cursor_pos = safe_pos + text.len();
             nostr_text.set(current.clone());
             cursor_position.set(new_cursor_pos);
-            // Sync DOM cursor position
+            // Sync DOM cursor position after next render
             let utf16_pos = utf8_to_utf16_index(&current, new_cursor_pos);
-            set_cursor_position(&textarea_id.read(), utf16_pos);
+            set_cursor_position_deferred(textarea_id.read().clone(), utf16_pos);
         }
     };
 
