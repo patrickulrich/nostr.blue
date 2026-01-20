@@ -337,7 +337,7 @@ pub fn CommentComposer(
                         } else {
                             "Write your comment...".to_string()
                         },
-                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary".to_string(),
+                        class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-hidden focus:ring-2 focus:ring-primary".to_string(),
                         rows: 8,
                         disabled: !has_signer,
                         thread_participants: thread_participants.clone(),

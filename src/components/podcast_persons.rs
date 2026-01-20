@@ -348,7 +348,7 @@ pub fn PersonAvatar(props: PersonAvatarProps) -> Element {
 
     rsx! {
         div {
-            class: "{size_class} rounded-full overflow-hidden flex-shrink-0 ring-2 ring-background",
+            class: "{size_class} rounded-full overflow-hidden shrink-0 ring-2 ring-background",
             title: "{person.name}",
 
             if let Some(ref img_url) = person.img {

@@ -182,7 +182,7 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
 
                         // Mini avatar
                         div {
-                            class: "w-5 h-5 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-5 h-5 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0",
                             if let Some(ref pic_url) = profile_picture {
                                 img {
                                     src: "{pic_url}",

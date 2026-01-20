@@ -610,7 +610,7 @@ async fn generate_nostr_zap_invoice(
                 vec![
                     RelayUrl::parse("wss://relay.damus.io").ok(),
                     RelayUrl::parse("wss://nos.lol").ok(),
-                    RelayUrl::parse("wss://relay.nostr.band").ok(),
+                    RelayUrl::parse("wss://relay.snort.social").ok(),
                 ].into_iter().flatten().collect()
             } else {
                 // Limit to reasonable number for zap request
@@ -622,7 +622,7 @@ async fn generate_nostr_zap_invoice(
             vec![
                 RelayUrl::parse("wss://relay.damus.io").ok(),
                 RelayUrl::parse("wss://nos.lol").ok(),
-                RelayUrl::parse("wss://relay.nostr.band").ok(),
+                RelayUrl::parse("wss://relay.snort.social").ok(),
             ].into_iter().flatten().collect()
         }
     };

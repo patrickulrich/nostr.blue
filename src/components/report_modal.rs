@@ -115,7 +115,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                                 "Reason for reporting"
                             }
                             select {
-                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 value: "{selected_type}",
                                 onchange: move |e| selected_type.set(e.value().clone()),
 
@@ -135,7 +135,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                                 "Additional details (optional)"
                             }
                             textarea {
-                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 rows: 3,
                                 placeholder: "Provide additional context about why you're reporting this post...",
                                 value: "{details}",

@@ -84,6 +84,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     // UI state
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // Session token to guard async state mutations against race conditions
+    let mut session_token = use_signal(|| 0u64);
 
     // Extract editing state before closures (avoids borrow issues)
     let is_editing = props.citation_to_edit.is_some();
@@ -127,7 +129,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                             title.set(c.base.title.clone());
                             author.set(c.base.author.clone());
                             cited_text.set(c.base.content.clone());
+                            // Clear conversation_summary to avoid stale data from previous edits
                             // Note: conversation_summary is not stored in struct, only passed at publish time
+                            conversation_summary.set(String::new());
                             prompt_url.set(c.url.clone().unwrap_or_default());
                         }
                     }
@@ -147,6 +151,18 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                     prompt_url.set(String::new());
                 }
                 error.set(None);
+            }
+        },
+    ));
+
+    // Increment session token when modal opens to invalidate old async operations
+    use_effect(use_reactive(
+        &*props.show.read(),
+        move |is_shown| {
+            if is_shown {
+                let new_token = *session_token.peek() + 1;
+                session_token.set(new_token);
+                saving.set(false); // Reset saving state on open
             }
         },
     ));
@@ -205,6 +221,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let on_save = props.on_save;
         let mut show = props.show;
         let existing_d_tag = existing_d_tag.clone();
+        // Capture token before spawn to guard against race conditions
+        let my_token = *session_token.read();
 
         spawn(async move {
             let result = match current_tab {
@@ -243,36 +261,40 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         &cited_text_val,
                         if summary_val.is_empty() { None } else { Some(&summary_val) },
                         if prompt_url_val.is_empty() { None } else { Some(&prompt_url_val) },
+                        if title_val.is_empty() { None } else { Some(&title_val) },
+                        if author_val.is_empty() { None } else { Some(&author_val) },
                         existing_d_tag.as_deref(),
                     ).await
                 }
             };
 
-            match result {
-                Ok(event_id) => {
-                    log::info!("Citation published: {}", event_id);
+            // Guard state mutations: only apply if session token hasn't changed
+            if *session_token.read() == my_token {
+                match result {
+                    Ok(event_id) => {
+                        log::info!("Citation published: {}", event_id);
 
-                    // Refresh user's citations
-                    if let Some(pk) = auth_store::get_pubkey() {
-                        if let Err(e) = fetch_citations_by_author(&pk, 200).await {
-                            crate::utils::log_fetch_error("citations refresh", e);
+                        // Refresh user's citations
+                        if let Some(pk) = auth_store::get_pubkey() {
+                            if let Err(e) = fetch_citations_by_author(&pk, 200).await {
+                                crate::utils::log_fetch_error("citations refresh", e);
+                            }
                         }
-                    }
 
-                    // Callback
-                    if let Some(ref handler) = on_save {
-                        handler.call(event_id);
-                    }
+                        // Callback
+                        if let Some(ref handler) = on_save {
+                            handler.call(event_id);
+                        }
 
-                    show.set(false);
+                        show.set(false);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to publish citation: {}", e);
+                        error.set(Some(e));
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to publish citation: {}", e);
-                    error.set(Some(e));
-                }
+                saving.set(false);
             }
-
-            saving.set(false);
         });
     };
 
@@ -306,7 +328,10 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
                     button {
                         class: "p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition-colors",
+                        r#type: "button",
                         onclick: close_modal,
+                        aria_label: "Close",
+                        title: "Close",
                         XIcon { class: "w-5 h-5".to_string() }
                     }
                 }
@@ -367,7 +392,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                     placeholder: "naddr1... or nevent1...",
                                     value: "{coordinate}",
                                     oninput: move |e| coordinate.set(e.value()),
@@ -388,7 +413,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 }
                                 input {
                                     r#type: "url",
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                     placeholder: "https://...",
                                     value: "{url}",
                                     oninput: move |e| url.set(e.value()),
@@ -405,7 +430,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                     placeholder: "Publisher name",
                                     value: "{publisher}",
                                     oninput: move |e| publisher.set(e.value()),
@@ -424,7 +449,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                        class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                         placeholder: "pp. 42-56",
                                         value: "{page_range}",
                                         oninput: move |e| page_range.set(e.value()),
@@ -439,7 +464,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                     }
                                     input {
                                         r#type: "text",
-                                        class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                        class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                         placeholder: "10.1234/...",
                                         value: "{doi}",
                                         oninput: move |e| doi.set(e.value()),
@@ -457,7 +482,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                     placeholder: "e.g., Claude, GPT-4, Llama",
                                     value: "{llm}",
                                     oninput: move |e| llm.set(e.value()),
@@ -473,7 +498,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 }
                                 input {
                                     r#type: "url",
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                     placeholder: "Link to shared conversation (optional)",
                                     value: "{prompt_url}",
                                     oninput: move |e| prompt_url.set(e.value()),
@@ -488,7 +513,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                     "Conversation Summary"
                                 }
                                 textarea {
-                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px] resize-y",
+                                    class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50 min-h-[80px] resize-y",
                                     placeholder: "Brief summary of the conversation context (optional)",
                                     value: "{conversation_summary}",
                                     oninput: move |e| conversation_summary.set(e.value()),
@@ -513,7 +538,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Source title",
                                 value: "{title}",
                                 oninput: move |e| title.set(e.value()),
@@ -532,7 +557,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Author name",
                                 value: "{author}",
                                 oninput: move |e| author.set(e.value()),
@@ -548,7 +573,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                             "Cited Text *"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[120px] resize-y",
+                            class: "w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50 min-h-[120px] resize-y",
                             placeholder: "The quoted or cited content...",
                             value: "{cited_text}",
                             oninput: move |e| cited_text.set(e.value()),

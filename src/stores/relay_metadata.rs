@@ -38,8 +38,8 @@ pub static USER_RELAY_METADATA: GlobalSignal<Option<RelayListMetadata>> =
 /// Default NIP-65 relay URLs
 pub const DEFAULT_NIP65_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
-    "wss://relay.nostr.band",
     "wss://nos.lol",
+    "wss://relay.snort.social",
 ];
 
 /// Default DM inbox relay URLs (NIP-17)

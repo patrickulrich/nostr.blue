@@ -107,7 +107,7 @@ pub fn DvmSelectorModal(
 
                                         // Avatar
                                         div {
-                                            class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0",
+                                            class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0",
                                             if let Some(picture) = &provider.picture {
                                                 if is_valid_http_url(picture) {
                                                     img {
@@ -141,7 +141,7 @@ pub fn DvmSelectorModal(
                                         // Selected indicator
                                         if is_selected {
                                             span {
-                                                class: "text-green-500 flex-shrink-0",
+                                                class: "text-green-500 shrink-0",
                                                 "\u{2713}"
                                             }
                                         }

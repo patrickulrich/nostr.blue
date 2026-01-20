@@ -158,7 +158,7 @@ pub fn MusicPlaylistNew() -> Element {
                     input {
                         r#type: "text",
                         placeholder: "My Awesome Playlist",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{title}",
                         oninput: move |e| title.set(e.value())
                     }
@@ -173,7 +173,7 @@ pub fn MusicPlaylistNew() -> Element {
                     textarea {
                         placeholder: "What's this playlist about?",
                         rows: "3",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                         value: "{description}",
                         oninput: move |e| description.set(e.value())
                     }
@@ -188,7 +188,7 @@ pub fn MusicPlaylistNew() -> Element {
                     input {
                         r#type: "url",
                         placeholder: "https://example.com/cover.jpg",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{image_url}",
                         oninput: move |e| image_url.set(e.value())
                     }
@@ -205,7 +205,7 @@ pub fn MusicPlaylistNew() -> Element {
                         input {
                             r#type: "text",
                             placeholder: "Add a category",
-                            class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                             value: "{category_input}",
                             oninput: move |e| category_input.set(e.value()),
                             onkeydown: move |e| {

@@ -150,7 +150,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 
             // Header
             div {
-                class: "flex-shrink-0 bg-background/95 backdrop-blur-sm border-b border-border p-4",
+                class: "shrink-0 bg-background/95 backdrop-blur-sm border-b border-border p-4",
                 div {
                     class: "flex items-center gap-4",
 

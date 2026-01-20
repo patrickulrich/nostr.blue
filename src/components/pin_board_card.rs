@@ -167,7 +167,7 @@ pub fn PinBoardCard(
 
                         // Avatar
                         div {
-                            class: "w-6 h-6 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-6 h-6 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0",
                             if let Some(ref pic_url) = profile_picture {
                                 img {
                                     src: "{pic_url}",
@@ -277,7 +277,7 @@ pub fn PinBoardCardMosaic(
     rsx! {
         Link {
             to: Route::PinBoardDetail { naddr: naddr.clone() },
-            class: "group relative overflow-hidden rounded-lg bg-muted cursor-pointer break-inside-avoid mb-2 shadow-sm hover:shadow-lg transition-shadow duration-300 block",
+            class: "group relative overflow-hidden rounded-lg bg-muted cursor-pointer break-inside-avoid mb-2 shadow-xs hover:shadow-lg transition-shadow duration-300 block",
 
             // Cover image (always visible) - natural aspect ratio for masonry
             if let Some(ref img_url) = cover_image {
@@ -396,7 +396,7 @@ pub fn PinBoardCardMosaic(
 
                     // Avatar
                     div {
-                        class: "w-5 h-5 rounded-full overflow-hidden bg-white/20 flex items-center justify-center flex-shrink-0",
+                        class: "w-5 h-5 rounded-full overflow-hidden bg-white/20 flex items-center justify-center shrink-0",
                         if let Some(ref pic_url) = profile_picture {
                             img {
                                 src: "{pic_url}",
@@ -444,7 +444,7 @@ pub fn PinBoardCardMosaicSkeleton(
 
     rsx! {
         div {
-            class: "bg-muted rounded-lg overflow-hidden animate-pulse break-inside-avoid mb-2 shadow-sm",
+            class: "bg-muted rounded-lg overflow-hidden animate-pulse break-inside-avoid mb-2 shadow-xs",
             div {
                 class: "w-full {height_class} bg-gradient-to-br from-muted-foreground/10 to-muted-foreground/5",
             }
@@ -578,7 +578,7 @@ pub fn PinBoardCardCompact(
 
             // Thumbnail
             div {
-                class: "w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                class: "w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0",
                 if let Some(ref img_url) = cover_image {
                     img {
                         src: "{img_url}",
@@ -614,7 +614,7 @@ pub fn PinBoardCardCompact(
 
             // Arrow
             svg {
-                class: "w-4 h-4 text-muted-foreground flex-shrink-0",
+                class: "w-4 h-4 text-muted-foreground shrink-0",
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",
@@ -677,7 +677,7 @@ pub fn PinBoardCardCompactSkeleton() -> Element {
 
             // Thumbnail skeleton
             div {
-                class: "w-12 h-12 rounded-lg bg-muted flex-shrink-0"
+                class: "w-12 h-12 rounded-lg bg-muted shrink-0"
             }
 
             // Info skeleton

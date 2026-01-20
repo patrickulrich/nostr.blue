@@ -23,7 +23,9 @@ pub struct ArticleCoverUploaderProps {
 #[component]
 pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
-    let mut image_error = use_signal(|| false);
+    // Track which URL failed, not just whether an error occurred
+    // This allows auto-retry when the cover_url prop changes
+    let mut failed_url: Signal<Option<String>> = use_signal(|| None);
 
     // Generate unique IDs for this uploader instance
     let input_id = use_signal(|| format!("cover-upload-{}", uuid::Uuid::new_v4()));
@@ -31,20 +33,13 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
 
     let has_cover = !props.cover_url.read().is_empty();
 
-    // Compute the for attribute value - need owned String for lifetime
-    let label_for = if props.show_url_input {
-        cover_input_id.read().clone()
-    } else {
-        String::new()
-    };
-
     // Handle successful upload - fills in the URL field
     let handle_upload = {
         let mut cover_url = props.cover_url;
         move |url: String| {
             cover_url.set(url);
             show_upload_modal.set(false);
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -53,7 +48,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         let mut cover_url = props.cover_url;
         move |e: Event<FormData>| {
             cover_url.set(e.value());
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -62,7 +57,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         let mut cover_url = props.cover_url;
         move |_| {
             cover_url.set(String::new());
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -71,14 +66,25 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         div {
             class: "space-y-3",
 
-            // Label - only associate with input when it's rendered
-            label {
-                class: "block text-sm font-medium mb-2",
-                r#for: "{label_for}",
-                "Cover Image"
+            // Label - use <label> with for attribute when input is rendered, otherwise <span>
+            if props.show_url_input {
+                label {
+                    class: "block text-sm font-medium mb-2",
+                    r#for: "{cover_input_id}",
+                    "Cover Image"
+                    span {
+                        class: "text-muted-foreground font-normal ml-1",
+                        "(optional)"
+                    }
+                }
+            } else {
                 span {
-                    class: "text-muted-foreground font-normal ml-1",
-                    "(optional)"
+                    class: "block text-sm font-medium mb-2",
+                    "Cover Image"
+                    span {
+                        class: "text-muted-foreground font-normal ml-1",
+                        "(optional)"
+                    }
                 }
             }
 
@@ -90,7 +96,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 if props.show_url_input {
                     input {
                         id: "{cover_input_id}",
-                        class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         r#type: "url",
                         placeholder: "https://example.com/image.jpg",
                         value: "{props.cover_url}",
@@ -125,21 +131,32 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 div {
                     class: "relative rounded-lg overflow-hidden border border-border",
 
-                    // Image preview
-                    if !*image_error.read() {
-                        img {
-                            src: "{props.cover_url}",
-                            class: "w-full h-48 object-cover",
-                            alt: "Cover image preview",
-                            onerror: move |_| image_error.set(true),
-                        }
-                    } else {
-                        // Fallback for failed image load
-                        div {
-                            class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
-                            span { class: "text-4xl mb-2", "🖼️" }
-                            p { class: "text-sm", "Image failed to load" }
-                            p { class: "text-xs text-muted-foreground truncate max-w-full px-4", "{props.cover_url}" }
+                    // Image preview - check if the current URL is the one that failed
+                    {
+                        let current_url = props.cover_url.read();
+                        let is_current_url_failed = failed_url.read().as_ref() == Some(&*current_url);
+                        if !is_current_url_failed {
+                            rsx! {
+                                img {
+                                    src: "{current_url}",
+                                    class: "w-full h-48 object-cover",
+                                    alt: "Cover image preview",
+                                    onerror: {
+                                        let url = current_url.clone();
+                                        move |_| failed_url.set(Some(url.clone()))
+                                    },
+                                }
+                            }
+                        } else {
+                            // Fallback for failed image load
+                            rsx! {
+                                div {
+                                    class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
+                                    span { class: "text-4xl mb-2", "🖼️" }
+                                    p { class: "text-sm", "Image failed to load" }
+                                    p { class: "text-xs text-muted-foreground truncate max-w-full px-4", "{current_url}" }
+                                }
+                            }
                         }
                     }
 
@@ -151,6 +168,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                             r#type: "button",
                             class: "p-2 bg-red-600/80 hover:bg-red-600 text-white rounded-full transition",
                             title: "Remove cover image",
+                            aria_label: "Remove cover image",
                             onclick: handle_remove,
                             // X icon
                             svg {

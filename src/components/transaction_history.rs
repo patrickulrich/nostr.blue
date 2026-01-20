@@ -59,7 +59,7 @@ pub fn TransactionHistory() -> Element {
 
                                         // Direction icon
                                         div {
-                                            class: "text-2xl flex-shrink-0 mt-1",
+                                            class: "text-2xl shrink-0 mt-1",
                                             "{direction_icon}"
                                         }
 
@@ -104,7 +104,7 @@ pub fn TransactionHistory() -> Element {
 
                                     // Right side: amount
                                     div {
-                                        class: "text-right flex-shrink-0",
+                                        class: "text-right shrink-0",
                                         div {
                                             class: "font-bold text-lg {direction_color}",
                                             "{amount_prefix}{format_sats_with_separator(item.amount)}"

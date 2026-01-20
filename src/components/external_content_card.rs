@@ -187,7 +187,7 @@ fn BookCard(props: BookCardProps) -> Element {
             img {
                 src: "{cover_url}",
                 alt: "Book cover",
-                class: "w-12 h-18 object-cover rounded shadow-sm flex-shrink-0 bg-muted"
+                class: "w-12 h-18 object-cover rounded shadow-xs shrink-0 bg-muted"
             }
 
             div {
@@ -275,7 +275,7 @@ fn PaperCard(props: PaperCardProps) -> Element {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
-                class: "w-10 h-10 rounded bg-blue-500/10 flex items-center justify-center flex-shrink-0",
+                class: "w-10 h-10 rounded bg-blue-500/10 flex items-center justify-center shrink-0",
                 span {
                     class: "w-5 h-5 text-blue-500",
                     dangerous_inner_html: icons::FILE_TEXT
@@ -376,7 +376,7 @@ fn BitcoinTxCard(props: BitcoinTxCardProps) -> Element {
                 onclick: fetch_tx,
 
                 div {
-                    class: "w-10 h-10 rounded bg-orange-500/10 flex items-center justify-center flex-shrink-0",
+                    class: "w-10 h-10 rounded bg-orange-500/10 flex items-center justify-center shrink-0",
                     span {
                         class: "w-5 h-5 text-orange-500",
                         dangerous_inner_html: icons::BITCOIN
@@ -574,7 +574,7 @@ fn BitcoinAddressCard(props: BitcoinAddressCardProps) -> Element {
                 onclick: fetch_addr,
 
                 div {
-                    class: "w-10 h-10 rounded bg-orange-500/10 flex items-center justify-center flex-shrink-0",
+                    class: "w-10 h-10 rounded bg-orange-500/10 flex items-center justify-center shrink-0",
                     span {
                         class: "w-5 h-5 text-orange-500",
                         dangerous_inner_html: icons::BITCOIN
@@ -884,7 +884,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
 
                 // Episode image with play button (NOT inside Link)
                 div {
-                    class: "relative flex-shrink-0",
+                    class: "relative shrink-0",
                     img {
                         src: "{image_url}",
                         alt: "{title}",
@@ -920,7 +920,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
 
                 // Duration and V4V indicator
                 div {
-                    class: "flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0",
+                    class: "flex items-center gap-1 text-xs text-muted-foreground shrink-0",
                     if has_v4v {
                         span {
                             class: "text-amber-500",
@@ -942,7 +942,7 @@ fn PodcastEpisodeGuidCard(props: PodcastEpisodeGuidCardProps) -> Element {
 
             // Episode image with play button (NOT inside Link)
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{image_url}",
                     alt: "{title}",
@@ -1096,7 +1096,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
                     img {
                         src: "{image_url}",
                         alt: "{title}",
-                        class: "w-10 h-10 rounded object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded object-cover shrink-0",
                         loading: "lazy"
                     }
 
@@ -1118,7 +1118,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
                     // V4V indicator
                     if has_v4v {
                         span {
-                            class: "text-amber-500 flex-shrink-0",
+                            class: "text-amber-500 shrink-0",
                             title: "Value 4 Value enabled",
                             dangerous_inner_html: icons::ZAP
                         }
@@ -1141,7 +1141,7 @@ fn PodcastGuidCard(props: PodcastGuidCardProps) -> Element {
                 img {
                     src: "{image_url}",
                     alt: "{title}",
-                    class: "w-16 h-16 rounded-lg object-cover flex-shrink-0",
+                    class: "w-16 h-16 rounded-lg object-cover shrink-0",
                     loading: "lazy"
                 }
 
@@ -1225,7 +1225,7 @@ fn GeohashCard(props: GeohashCardProps) -> Element {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
-                class: "w-10 h-10 rounded bg-green-500/10 flex items-center justify-center flex-shrink-0",
+                class: "w-10 h-10 rounded bg-green-500/10 flex items-center justify-center shrink-0",
                 span {
                     class: "w-5 h-5 text-green-500",
                     dangerous_inner_html: icons::MAP_PIN
@@ -1287,7 +1287,7 @@ fn MovieCard(props: MovieCardProps) -> Element {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
-                class: "w-10 h-10 rounded bg-pink-500/10 flex items-center justify-center flex-shrink-0",
+                class: "w-10 h-10 rounded bg-pink-500/10 flex items-center justify-center shrink-0",
                 span {
                     class: "w-5 h-5 text-pink-500",
                     dangerous_inner_html: icons::FILM
@@ -1350,7 +1350,7 @@ fn GenericContentCard(props: GenericContentCardProps) -> Element {
             class: "flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:bg-muted/50 transition max-w-sm",
 
             div {
-                class: "w-10 h-10 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                class: "w-10 h-10 rounded bg-muted flex items-center justify-center shrink-0",
                 span {
                     class: "w-5 h-5 text-muted-foreground",
                     dangerous_inner_html: icons::EXTERNAL_LINK

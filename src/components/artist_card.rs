@@ -18,7 +18,7 @@ pub fn ArtistCard(props: ArtistCardProps) -> Element {
 
             // Artist image (circular)
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 if let Some(ref art_url) = result.artist_art_url.as_ref().filter(|u| !u.is_empty()) {
                     img {
                         src: "{art_url}",
@@ -55,7 +55,7 @@ pub fn ArtistCardSkeleton() -> Element {
     rsx! {
         div {
             class: "flex items-center gap-3 p-3 rounded-lg animate-pulse",
-            div { class: "w-14 h-14 bg-muted rounded-full flex-shrink-0" }
+            div { class: "w-14 h-14 bg-muted rounded-full shrink-0" }
             div {
                 class: "flex-1 min-w-0 space-y-2",
                 div { class: "h-4 bg-muted rounded w-3/4" }

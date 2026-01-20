@@ -167,7 +167,7 @@ pub fn SearchInput() -> Element {
                 r#type: "text",
                 placeholder: "Search Nostr...",
                 value: "{query}",
-                class: "w-full px-4 py-2 pr-10 bg-muted border border-border rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-ring",
+                class: "w-full px-4 py-2 pr-10 bg-muted border border-border rounded-full text-sm focus:outline-hidden focus:ring-2 focus:ring-ring",
                 oninput: handle_input,
                 onkeydown: handle_keydown,
                 onblur: close_dropdown,
@@ -241,7 +241,7 @@ fn render_dropdown(
 
                                     // Avatar
                                     div {
-                                        class: "flex-shrink-0",
+                                        class: "shrink-0",
                                         if let Some(picture) = &profile.picture {
                                             img {
                                                 src: "{picture}",
@@ -275,7 +275,7 @@ fn render_dropdown(
                                     // Contact badge
                                     if profile.is_contact {
                                         div {
-                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
+                                            class: "shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
                                             "Following"
                                         }
                                     }

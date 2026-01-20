@@ -110,7 +110,7 @@ fn BacklinkItem(page: CachedWikiPage) -> Element {
                     class: "flex items-start gap-2",
                     // Link icon
                     div {
-                        class: "flex-shrink-0 mt-0.5",
+                        class: "shrink-0 mt-0.5",
                         Link2Icon { class: "w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" }
                     }
 

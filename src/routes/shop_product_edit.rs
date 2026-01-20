@@ -127,7 +127,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             label { class: "block text-sm font-medium mb-2", "Product Title *" }
                             input {
                                 r#type: "text",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "Enter product title",
                                 value: "{title}",
                                 oninput: move |e| title.set(e.value())
@@ -138,7 +138,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         div {
                             label { class: "block text-sm font-medium mb-2", "Description" }
                             textarea {
-                                class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                                class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                                 placeholder: "Describe your product...",
                                 value: "{description}",
                                 oninput: move |e| description.set(e.value())
@@ -151,7 +151,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 label { class: "block text-sm font-medium mb-2", "Price *" }
                                 input {
                                     r#type: "number",
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     placeholder: "0",
                                     min: "0",
                                     step: "any",
@@ -162,7 +162,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Currency" }
                                 select {
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     value: "{currency}",
                                     onchange: move |e| currency.set(e.value()),
                                     option { value: "sats", "Sats" }
@@ -177,7 +177,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             label { class: "block text-sm font-medium mb-2", "Image URL" }
                             input {
                                 r#type: "url",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "https://example.com/image.jpg",
                                 value: "{image_url}",
                                 oninput: move |e| image_url.set(e.value())
@@ -226,7 +226,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Condition" }
                                 select {
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     value: "{condition}",
                                     onchange: move |e| condition.set(e.value()),
                                     option { value: "new", "New" }
@@ -243,7 +243,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             label { class: "block text-sm font-medium mb-2", "Stock Quantity (optional)" }
                             input {
                                 r#type: "number",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "Leave empty for unlimited",
                                 min: "0",
                                 value: "{stock}",
@@ -256,7 +256,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                             label { class: "block text-sm font-medium mb-2", "Categories (comma-separated)" }
                             input {
                                 r#type: "text",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "electronics, gadgets, accessories",
                                 value: "{categories}",
                                 oninput: move |e| categories.set(e.value())
@@ -269,7 +269,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 label { class: "block text-sm font-medium mb-2", "Ships to (comma-separated)" }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     placeholder: "Worldwide, US, EU",
                                     value: "{shipping_regions}",
                                     oninput: move |e| shipping_regions.set(e.value())

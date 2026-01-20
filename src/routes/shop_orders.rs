@@ -362,7 +362,7 @@ pub fn ShopOrders() -> Element {
                                                         "{key}"
                                                     }
                                                     button {
-                                                        class: "p-2 hover:bg-accent rounded transition flex-shrink-0",
+                                                        class: "p-2 hover:bg-accent rounded transition shrink-0",
                                                         title: "Copy license key",
                                                         onclick: {
                                                             let key_clone = key.clone();

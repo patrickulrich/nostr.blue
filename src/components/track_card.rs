@@ -64,7 +64,7 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
 
             // Album art
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{track.album_art_url}",
                     alt: "Album art",
@@ -122,13 +122,13 @@ pub fn TrackCard(props: TrackCardProps) -> Element {
 
             // Duration
             div {
-                class: "text-xs text-muted-foreground flex-shrink-0",
+                class: "text-xs text-muted-foreground shrink-0",
                 "{duration_str}"
             }
 
             // Actions (vote, zap)
             div {
-                class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
+                class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
 
                 // Vote button
                 button {
@@ -176,7 +176,7 @@ pub fn TrackCardSkeleton() -> Element {
 
             // Album art skeleton
             div {
-                class: "w-14 h-14 bg-muted rounded flex-shrink-0"
+                class: "w-14 h-14 bg-muted rounded shrink-0"
             }
 
             // Track info skeleton
@@ -192,7 +192,7 @@ pub fn TrackCardSkeleton() -> Element {
 
             // Duration skeleton
             div {
-                class: "w-12 h-3 bg-muted rounded flex-shrink-0"
+                class: "w-12 h-3 bg-muted rounded shrink-0"
             }
         }
     }

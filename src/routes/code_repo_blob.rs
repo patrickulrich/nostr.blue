@@ -74,8 +74,13 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 }
 
+                // Decode URL-encoded path (e.g., %20 → space)
+                let decoded_path = urlencoding::decode(&path)
+                    .map(|s| s.into_owned())
+                    .unwrap_or_else(|_| path.clone());
+
                 // Read file content
-                match git_service().read_file(&repo, &path, Some(&git_ref)).await {
+                match git_service().read_file(&repo, &decoded_path, Some(&git_ref)).await {
                     Ok(file_content) => {
                         content.set(file_content);
                     }

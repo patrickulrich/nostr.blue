@@ -154,7 +154,7 @@ fn DayView(props: DayViewProps) -> Element {
 
                         // Hour label
                         div {
-                            class: "w-16 pr-2 text-right text-xs text-muted-foreground flex-shrink-0",
+                            class: "w-16 pr-2 text-right text-xs text-muted-foreground shrink-0",
                             "{format_hour(hour)}"
                         }
 
@@ -169,7 +169,7 @@ fn DayView(props: DayViewProps) -> Element {
                 div {
                     class: "absolute inset-0 left-16",
                     for pe in positioned.iter() {
-                        {render_positioned_event(pe)}
+                        {render_positioned_event(pe, props.on_event_click)}
                     }
                 }
             }
@@ -212,7 +212,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                 class: "flex border-b border-border",
                 // Time gutter
                 div {
-                    class: "w-16 flex-shrink-0"
+                    class: "w-16 shrink-0"
                 }
                 // Day columns
                 for date in week_dates.iter() {
@@ -237,7 +237,7 @@ fn WeekView(props: WeekViewProps) -> Element {
             div {
                 class: "flex border-b border-border bg-muted/30",
                 div {
-                    class: "w-16 flex-shrink-0 p-1 text-xs text-muted-foreground",
+                    class: "w-16 shrink-0 p-1 text-xs text-muted-foreground",
                     "All day"
                 }
                 for date in week_dates.iter() {
@@ -260,7 +260,8 @@ fn WeekView(props: WeekViewProps) -> Element {
                                                 onclick: {
                                                     let event = event.clone();
                                                     let handler = props.on_event_click;
-                                                    move |_| {
+                                                    move |e| {
+                                                        e.stop_propagation();
                                                         if let Some(h) = &handler {
                                                             h.call(event.clone());
                                                         }
@@ -286,7 +287,7 @@ fn WeekView(props: WeekViewProps) -> Element {
 
                     // Time gutter
                     div {
-                        class: "w-16 flex-shrink-0",
+                        class: "w-16 shrink-0",
                         for hour in 0..24 {
                             div {
                                 key: "time-{hour}",
@@ -318,7 +319,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                                 let positioned = position_day_events(&day_events, date);
                                 rsx! {
                                     for pe in positioned.iter() {
-                                        {render_positioned_event(pe)}
+                                        {render_positioned_event(pe, props.on_event_click)}
                                     }
                                 }
                             }
@@ -518,12 +519,11 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let day: i32 = parts[2].parse().unwrap_or(1);
 
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
-    let current_weekday = js_date.get_day() as i32;
+    let current_weekday = js_date.get_day(); // 0 = Sunday, returns u32
 
-    // Go back to Sunday using milliseconds (safer approach)
-    let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-    let sunday_ms = js_date.get_time() - (current_weekday as f64 * ms_per_day);
-    js_date.set_time(sunday_ms);
+    // Move to Sunday using milliseconds (DST-safe, avoids u32 underflow in set_date binding)
+    const MS_PER_DAY: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
+    js_date.set_time(js_date.get_time() - (current_weekday as f64 * MS_PER_DAY));
 
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
@@ -533,8 +533,8 @@ fn get_week_dates(date: &str) -> Vec<String> {
             js_date.get_month() + 1,
             js_date.get_date()
         ));
-        // Add one day in milliseconds
-        js_date.set_time(js_date.get_time() + ms_per_day);
+        // Add one day using day-level method (DST-safe)
+        js_date.set_date(js_date.get_date() + 1);
     }
 
     dates
@@ -697,7 +697,7 @@ fn get_event_color(event: &UnifiedEvent) -> &'static str {
 }
 
 /// Render a positioned event
-fn render_positioned_event(pe: &PositionedEvent) -> Element {
+fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHandler<UnifiedEvent>>) -> Element {
     let bg_color = get_event_color(&pe.event);
 
     let style = format!(
@@ -709,13 +709,35 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
         bg_color
     );
 
+    // Check for handler first - allows clicking private/unsigned events
+    if let Some(handler) = on_event_click {
+        let event = pe.event.clone();
+        return rsx! {
+            div {
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
+                style: "{style}",
+                onclick: move |_| handler.call(event.clone()),
+                div {
+                    class: "font-medium truncate",
+                    "{pe.event.title()}"
+                }
+                if pe.position.height > 40.0 {
+                    div {
+                        class: "opacity-90 truncate",
+                        "{format_event_time(&pe.event)}"
+                    }
+                }
+            }
+        };
+    }
+
     let naddr = pe.event.naddr();
 
-    // Skip rendering link for events without valid naddr (e.g., private/unsigned events)
+    // No handler and no naddr - render non-clickable div
     if naddr.is_empty() {
         return rsx! {
             div {
-                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-default opacity-70 shadow-sm",
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-default opacity-70 shadow-xs",
                 style: "{style}",
                 div {
                     class: "font-medium truncate",
@@ -731,7 +753,7 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
         };
     }
 
-    // Route livestreams to /videos/live, calendar events to /calendar
+    // No handler but has naddr - render Link for navigation
     let detail_route = if pe.event.is_livestream() {
         Route::LiveStreamDetail { note_id: naddr.to_string() }
     } else {
@@ -741,7 +763,7 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
     rsx! {
         Link {
             to: detail_route,
-            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-sm",
+            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
             style: "{style}",
             div {
                 class: "font-medium truncate",

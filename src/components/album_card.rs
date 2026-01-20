@@ -18,7 +18,7 @@ pub fn AlbumCard(props: AlbumCardProps) -> Element {
 
             // Album art (square)
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 if let Some(ref art_url) = result.album_art_url {
                     img {
                         src: "{art_url}",
@@ -62,7 +62,7 @@ pub fn AlbumCardSkeleton() -> Element {
     rsx! {
         div {
             class: "flex items-center gap-3 p-3 rounded-lg animate-pulse",
-            div { class: "w-14 h-14 bg-muted rounded flex-shrink-0" }
+            div { class: "w-14 h-14 bg-muted rounded shrink-0" }
             div {
                 class: "flex-1 min-w-0 space-y-2",
                 div { class: "h-4 bg-muted rounded w-3/4" }

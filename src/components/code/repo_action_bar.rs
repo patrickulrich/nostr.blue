@@ -29,9 +29,6 @@ pub fn RepoActionBar(
     let mut star_loading = use_signal(|| false);
     let mut show_actions_menu = use_signal(|| false);
 
-    // Check if user is authenticated
-    let has_signer = *HAS_SIGNER.read();
-
     // Clone values needed in closures before they get moved
     let repo_pubkey = repo.pubkey.clone();
     let repo_id = repo.id.clone();
@@ -105,7 +102,8 @@ pub fn RepoActionBar(
             }
             star_loading.set(true);
 
-            if !has_signer {
+            // Read HAS_SIGNER fresh to get current auth state (not stale capture)
+            if !*HAS_SIGNER.read() {
                 star_loading.set(false);
                 toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
                 return;
@@ -211,7 +209,8 @@ pub fn RepoActionBar(
 
     // Zap handler (placeholder - opens ZapModal later)
     let handle_zap = move |_| {
-        if !has_signer {
+        // Read HAS_SIGNER fresh to get current auth state (not stale capture)
+        if !*HAS_SIGNER.read() {
             toast.warning("Sign in to zap repositories".to_string(), ToastOptions::new());
             return;
         }
@@ -246,7 +245,7 @@ pub fn RepoActionBar(
                     label: "{star_text}",
                     count: Some(*star_count.read()),
                     active: *is_starred.read(),
-                    disabled: !has_signer,
+                    disabled: !*HAS_SIGNER.read(),
                     loading: *star_loading.read(),
                     onclick: handle_star.clone(),
                 }
@@ -268,7 +267,7 @@ pub fn RepoActionBar(
                     label: "Zap",
                     count: None,
                     active: false,
-                    disabled: !has_signer,
+                    disabled: !*HAS_SIGNER.read(),
                     loading: false,
                     onclick: handle_zap,
                 }
@@ -326,7 +325,7 @@ pub fn RepoActionBar(
                             icon: if *is_starred.read() { icons::STAR_FILLED } else { icons::STAR },
                             label: "{star_text} ({star_count})",
                             loading: *star_loading.read(),
-                            disabled: !has_signer,
+                            disabled: !*HAS_SIGNER.read(),
                             onclick: handle_star,
                         }
                         MobileMenuItem {
@@ -337,6 +336,7 @@ pub fn RepoActionBar(
                         MobileMenuItem {
                             icon: icons::ZAP,
                             label: "Zap",
+                            disabled: !*HAS_SIGNER.read(),
                             onclick: handle_zap,
                         }
                         MobileMenuItem {

@@ -297,7 +297,7 @@ pub fn WikiNew() -> Element {
                             "Title"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             r#type: "text",
                             placeholder: "Page title",
                             value: "{title}",
@@ -312,7 +312,7 @@ pub fn WikiNew() -> Element {
                             "Identifier (d-tag)"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm",
+                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring font-mono text-sm",
                             r#type: "text",
                             placeholder: "page-identifier",
                             value: "{identifier}",
@@ -331,7 +331,7 @@ pub fn WikiNew() -> Element {
                             "Summary (optional)"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring",
+                            class: "w-full px-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
                             r#type: "text",
                             placeholder: "Brief description of the page",
                             value: "{summary}",
@@ -377,7 +377,7 @@ pub fn WikiNew() -> Element {
                                 class: "flex-1",
                                 textarea {
                                     id: "wiki-content-editor",
-                                    class: "w-full h-96 px-4 py-3 bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm resize-y",
+                                    class: "w-full h-96 px-4 py-3 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring font-mono text-sm resize-y",
                                     placeholder: "= Section Title\n\nWrite your content here using AsciiDoc markup.\n\nLink to other pages with [[wikilinks]].\n\nUse [[citation:...]] or [[book:...]] for references.",
                                     value: "{content}",
                                     oninput: handle_content_change,

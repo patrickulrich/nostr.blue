@@ -191,7 +191,7 @@ pub fn PodcastAddFeedModal(
                         div {
                             class: "flex gap-2",
                             input {
-                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                 r#type: "url",
                                 placeholder: "https://example.com/feed.xml",
                                 value: "{feed_url}",
@@ -231,7 +231,7 @@ pub fn PodcastAddFeedModal(
 
                                 // Cover image
                                 div {
-                                    class: "w-16 h-16 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                                    class: "w-16 h-16 rounded-lg overflow-hidden bg-muted shrink-0",
                                     if let Some(ref img) = podcast.image {
                                         img {
                                             src: "{img}",

@@ -1368,7 +1368,7 @@ fn NaddrMentionRenderer(mention: String) -> Element {
                                 class: "flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-accent/50 transition",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 svg {
-                                    class: "w-8 h-8 text-purple-500 flex-shrink-0",
+                                    class: "w-8 h-8 text-purple-500 shrink-0",
                                     xmlns: "http://www.w3.org/2000/svg",
                                     fill: "none",
                                     view_box: "0 0 24 24",
@@ -1662,7 +1662,7 @@ fn render_wiki_minicard(wiki: &WikiArticle, _naddr: &str, _event: &Event) -> Ele
                 to: Route::WikiDetail { identifier: identifier.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center flex-shrink-0",
+                    class: "w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center shrink-0",
                     icons::BookOpenIcon { class: "w-4 h-4 text-purple-500".to_string() }
                 }
                 div {
@@ -1719,7 +1719,7 @@ fn render_product_minicard(product: &Product, naddr: &str, _event: &Event) -> El
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 // Tiny product image
                 div {
-                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image_url {
                         img {
                             src: "{img}",
@@ -1791,7 +1791,7 @@ fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Element {
                 to: Route::BadgeDetail { naddr: naddr_owned.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-8 h-8 rounded-full bg-amber-500/10 flex-shrink-0 overflow-hidden flex items-center justify-center",
+                    class: "w-8 h-8 rounded-full bg-amber-500/10 shrink-0 overflow-hidden flex items-center justify-center",
                     if let Some(ref img) = image_url {
                         img {
                             src: "{img}",
@@ -1860,7 +1860,7 @@ fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element {
             div {
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
                 div {
-                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image {
                         img {
                             src: "{img}",
@@ -1933,7 +1933,7 @@ fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) -> Element {
                 to: Route::MusicPlaylistDetail { naddr: naddr_owned.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image {
                         img {
                             src: "{img}",
@@ -2007,7 +2007,7 @@ fn render_recipe_minicard(meta: &RecipeMetadata, naddr: &str, _event: &Event) ->
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 // Recipe image
                 div {
-                    class: "w-12 h-12 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-12 h-12 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image_url {
                         img {
                             src: "{img}",
@@ -2088,7 +2088,7 @@ fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &str) -> Ele
                 to: Route::PublicationDetail { naddr: naddr_owned.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-12 h-16 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-12 h-16 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = cover_image {
                         img {
                             src: "{img}",
@@ -2155,7 +2155,7 @@ fn render_pinboard_minicard(board: &Pinboard, naddr: &str) -> Element {
                 to: Route::PinBoardDetail { naddr: naddr_owned.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 overflow-hidden",
+                    class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image {
                         img {
                             src: "{img}",
@@ -2223,7 +2223,7 @@ fn render_collection_minicard(collection: &ProductCollection, naddr: &str) -> El
                 to: Route::ShopCollection { naddr: naddr_owned.clone() },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                 div {
-                    class: "w-10 h-10 rounded bg-muted flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-emerald-500/20",
+                    class: "w-10 h-10 rounded bg-muted shrink-0 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-emerald-500/20",
                     icons::ShoppingBagIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                 }
                 div {
@@ -2274,7 +2274,7 @@ fn render_review_minicard(review: &ProductReview, _naddr: &str) -> Element {
             div {
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
                 div {
-                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    class: "w-8 h-8 rounded bg-muted shrink-0 flex items-center justify-center",
                     span { class: "text-lg", "{rating_display}" }
                 }
                 div {
@@ -2336,7 +2336,7 @@ fn render_issue_minicard(issue: &Issue) -> Element {
             div {
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
                 div {
-                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    class: "w-8 h-8 rounded bg-muted shrink-0 flex items-center justify-center",
                     icons::CommentIcon { class: "w-4 h-4 text-green-500".to_string() }
                 }
                 div {
@@ -2416,7 +2416,7 @@ fn render_pr_minicard(pr: &PullRequest) -> Element {
             div {
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
                 div {
-                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    class: "w-8 h-8 rounded bg-muted shrink-0 flex items-center justify-center",
                     icons::GitMergeIcon { class: "w-4 h-4 text-purple-500".to_string() }
                 }
                 div {
@@ -2515,7 +2515,7 @@ fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>) -> Elemen
 
             div {
                 class: "flex items-start gap-2 p-2 border border-border rounded-lg bg-card",
-                icons::MessageCircleIcon { class: "w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5".to_string() }
+                icons::MessageCircleIcon { class: "w-4 h-4 text-blue-500 shrink-0 mt-0.5".to_string() }
                 div {
                     class: "flex-1 min-w-0",
                     p { class: "text-xs text-muted-foreground", "Comment by {author_name}" }
@@ -2563,7 +2563,7 @@ fn render_citation_minicard(citation: &Citation) -> Element {
             div {
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg bg-card",
                 div {
-                    class: "w-8 h-8 rounded bg-muted flex-shrink-0 flex items-center justify-center",
+                    class: "w-8 h-8 rounded bg-muted shrink-0 flex items-center justify-center",
                     span { class: "text-sm", "{type_icon}" }
                 }
                 div {
@@ -2661,7 +2661,7 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
 
                     // Album art
                     div {
-                        class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted group",
+                        class: "relative w-16 h-16 shrink-0 rounded overflow-hidden bg-muted group",
                         img {
                             src: "{track.album_art_url}",
                             alt: "Album art",
@@ -2705,7 +2705,7 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
 
                     // Duration and Wavlake badge
                     div {
-                        class: "flex flex-col items-end gap-1 flex-shrink-0",
+                        class: "flex flex-col items-end gap-1 shrink-0",
                         div {
                             class: "text-xs text-muted-foreground",
                             {
@@ -2784,11 +2784,11 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
                         img {
                             src: "{art_url}",
                             alt: "Album art",
-                            class: "w-32 h-32 rounded object-cover flex-shrink-0"
+                            class: "w-32 h-32 rounded object-cover shrink-0"
                         }
                     } else {
                         div {
-                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
                             icons::DiscIcon { class: "w-16 h-16 text-muted-foreground" }
                         }
                     }
@@ -2858,7 +2858,7 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
 
                                     // Track number / play icon
                                     div {
-                                        class: "w-8 text-center text-sm text-muted-foreground flex-shrink-0",
+                                        class: "w-8 text-center text-sm text-muted-foreground shrink-0",
                                         span { class: "group-hover:hidden", "{index + 1}" }
                                         div {
                                             class: "hidden group-hover:flex items-center justify-center",
@@ -2881,7 +2881,7 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
 
                                     // Duration
                                     div {
-                                        class: "text-xs text-muted-foreground flex-shrink-0",
+                                        class: "text-xs text-muted-foreground shrink-0",
                                         {
                                             let mins = track_duration / 60;
                                             let secs = track_duration % 60;
@@ -2965,17 +2965,17 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                             img {
                                 src: "{art_url}",
                                 alt: "Artist",
-                                class: "w-20 h-20 rounded-full object-cover flex-shrink-0"
+                                class: "w-20 h-20 rounded-full object-cover shrink-0"
                             }
                         } else {
                             div {
-                                class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center flex-shrink-0",
+                                class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center shrink-0",
                                 icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
                             }
                         }
                     } else {
                         div {
-                            class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center shrink-0",
                             icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
                         }
                     }
@@ -3008,7 +3008,7 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
 
                     // Arrow icon
                     div {
-                        class: "flex-shrink-0 text-muted-foreground",
+                        class: "shrink-0 text-muted-foreground",
                         dangerous_inner_html: r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>"#
                     }
                 }
@@ -3074,11 +3074,11 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                         img {
                             src: "{first_track.album_art_url}",
                             alt: "Playlist cover",
-                            class: "w-32 h-32 rounded object-cover flex-shrink-0"
+                            class: "w-32 h-32 rounded object-cover shrink-0"
                         }
                     } else {
                         div {
-                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
                             icons::MusicIcon { class: "w-16 h-16 text-muted-foreground" }
                         }
                     }
@@ -3132,7 +3132,7 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
 
                                     // Album art thumbnail
                                     div {
-                                        class: "relative w-10 h-10 flex-shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
+                                        class: "relative w-10 h-10 shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
                                         img {
                                             src: "{track_album_art}",
                                             alt: "Album art",
@@ -3159,7 +3159,7 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
 
                                     // Duration
                                     div {
-                                        class: "text-xs text-muted-foreground flex-shrink-0",
+                                        class: "text-xs text-muted-foreground shrink-0",
                                         {
                                             let mins = track_duration / 60;
                                             let secs = track_duration % 60;
@@ -3271,7 +3271,7 @@ fn SpotifyRenderer(content_type: String, content_id: String) -> Element {
                     class: "flex items-center gap-3 p-4 bg-[#1DB954]/10 border border-[#1DB954]/30 rounded-lg cursor-pointer hover:bg-[#1DB954]/20 transition",
                     onclick: move |_| is_visible.set(true),
                     div {
-                        class: "w-12 h-12 bg-[#1DB954] rounded-full flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 bg-[#1DB954] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-black",
                             fill: "currentColor",
@@ -3330,7 +3330,7 @@ fn SoundCloudRenderer(url: String) -> Element {
                     class: "flex items-center gap-3 p-4 bg-[#ff5500]/10 border border-[#ff5500]/30 rounded-lg cursor-pointer hover:bg-[#ff5500]/20 transition",
                     onclick: move |_| is_visible.set(true),
                     div {
-                        class: "w-12 h-12 bg-[#ff5500] rounded-full flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 bg-[#ff5500] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
                             fill: "currentColor",
@@ -3394,7 +3394,7 @@ fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
                     class: "flex items-center gap-3 p-4 bg-gradient-to-r from-[#fc3c44]/10 to-[#fa57c1]/10 border border-[#fc3c44]/30 rounded-lg cursor-pointer hover:from-[#fc3c44]/20 hover:to-[#fa57c1]/20 transition",
                     onclick: move |_| is_visible.set(true),
                     div {
-                        class: "w-12 h-12 bg-gradient-to-br from-[#fc3c44] to-[#fa57c1] rounded-xl flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 bg-gradient-to-br from-[#fc3c44] to-[#fa57c1] rounded-xl flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
                             fill: "currentColor",
@@ -3452,7 +3452,7 @@ fn MixCloudRenderer(username: String, mix_name: String) -> Element {
                     class: "flex items-center gap-3 p-4 bg-[#5000ff]/10 border border-[#5000ff]/30 rounded-lg cursor-pointer hover:bg-[#5000ff]/20 transition",
                     onclick: move |_| is_visible.set(true),
                     div {
-                        class: "w-12 h-12 bg-[#5000ff] rounded-full flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 bg-[#5000ff] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
                             fill: "currentColor",
@@ -3586,7 +3586,7 @@ fn TidalRenderer(embed_url: String) -> Element {
                     class: "flex items-center gap-3 p-4 bg-[#000000]/10 border border-[#000000]/30 dark:bg-white/10 dark:border-white/30 rounded-lg cursor-pointer hover:bg-[#000000]/20 dark:hover:bg-white/20 transition",
                     onclick: move |_| is_visible.set(true),
                     div {
-                        class: "w-12 h-12 bg-black dark:bg-white rounded-full flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 bg-black dark:bg-white rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-6 h-6 text-white dark:text-black",
                             fill: "currentColor",
@@ -3760,7 +3760,7 @@ fn ZapCookingRecipeRenderer(naddr: String) -> Element {
                 div {
                     class: "flex items-center gap-2 p-2 border border-border rounded-lg animate-pulse",
                     div {
-                        class: "w-12 h-12 bg-muted rounded flex-shrink-0"
+                        class: "w-12 h-12 bg-muted rounded shrink-0"
                     }
                     div {
                         class: "flex-1",
@@ -3779,7 +3779,7 @@ fn ZapCookingRecipeRenderer(naddr: String) -> Element {
                     class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     div {
-                        class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center shrink-0",
                         span { class: "text-lg", "🍳" }
                     }
                     div {
@@ -3803,7 +3803,7 @@ fn ZapCookingRecipeRenderer(naddr: String) -> Element {
                             to: Route::RecipeDetail { naddr: naddr_for_render.clone() },
                             class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
                             div {
-                                class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center flex-shrink-0",
+                                class: "w-12 h-12 rounded bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center shrink-0",
                                 span { class: "text-lg", "🍳" }
                             }
                             div {
@@ -3838,7 +3838,7 @@ fn IsbnRenderer(isbn: String) -> Element {
             img {
                 src: "{cover_url}",
                 alt: "Book cover",
-                class: "w-5 h-7 object-cover rounded-sm",
+                class: "w-5 h-7 object-cover rounded-xs",
                 onerror: move |_| {
                     log::debug!("Failed to load book cover for ISBN: {}", isbn);
                 }
@@ -3946,7 +3946,7 @@ fn PodcastFeedRenderer(guid: String) -> Element {
 
                         // Cover art
                         div {
-                            class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted",
+                            class: "relative w-16 h-16 shrink-0 rounded overflow-hidden bg-muted",
                             img {
                                 src: "{image}",
                                 alt: "Podcast cover",
@@ -3977,7 +3977,7 @@ fn PodcastFeedRenderer(guid: String) -> Element {
 
                         // Badge
                         div {
-                            class: "flex flex-col items-end gap-1 flex-shrink-0",
+                            class: "flex flex-col items-end gap-1 shrink-0",
                             div {
                                 class: "flex items-center gap-1 text-xs text-green-500",
                                 dangerous_inner_html: icons::PODCAST,
@@ -4123,7 +4123,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
 
                         // Cover art with play button
                         div {
-                            class: "relative w-16 h-16 flex-shrink-0 rounded overflow-hidden bg-muted group",
+                            class: "relative w-16 h-16 shrink-0 rounded overflow-hidden bg-muted group",
                             img {
                                 src: "{image}",
                                 alt: "Episode art",
@@ -4161,7 +4161,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
 
                         // Duration and badges
                         div {
-                            class: "flex flex-col items-end gap-1 flex-shrink-0",
+                            class: "flex flex-col items-end gap-1 shrink-0",
                             if let Some(ref dur) = duration_str {
                                 div {
                                     class: "text-xs text-muted-foreground",
@@ -4256,7 +4256,7 @@ fn nostr_blue_loading_skeleton() -> Element {
         div {
             class: "flex items-center gap-3 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg animate-pulse",
             div {
-                class: "w-12 h-12 bg-blue-500/30 rounded-lg flex-shrink-0"
+                class: "w-12 h-12 bg-blue-500/30 rounded-lg shrink-0"
             }
             div {
                 class: "flex-1 min-w-0",
@@ -4930,11 +4930,11 @@ fn render_profile_minicard(profile: Option<&profiles::Profile>, valid_pubkey: Op
                 if let Some(ref pic) = picture {
                     img {
                         src: "{pic}",
-                        class: "w-12 h-12 rounded-full object-cover flex-shrink-0"
+                        class: "w-12 h-12 rounded-full object-cover shrink-0"
                     }
                 } else {
                     div {
-                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-medium",
+                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center shrink-0 text-lg font-medium",
                         "{avatar_initial}"
                     }
                 }
@@ -4961,11 +4961,11 @@ fn render_profile_minicard(profile: Option<&profiles::Profile>, valid_pubkey: Op
                 if let Some(ref pic) = picture {
                     img {
                         src: "{pic}",
-                        class: "w-12 h-12 rounded-full object-cover flex-shrink-0"
+                        class: "w-12 h-12 rounded-full object-cover shrink-0"
                     }
                 } else {
                     div {
-                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-medium",
+                        class: "w-12 h-12 rounded-full bg-muted flex items-center justify-center shrink-0 text-lg font-medium",
                         "{avatar_initial}"
                     }
                 }
@@ -5191,16 +5191,16 @@ fn render_badge_card(event: &Event, naddr: &str) -> Element {
                 if let Some(img_url) = image {
                     img {
                         src: "{img_url}",
-                        class: "w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                        class: "w-12 h-12 rounded-lg object-cover shrink-0"
                     }
                 } else if let Some(thumb_url) = thumb {
                     img {
                         src: "{thumb_url}",
-                        class: "w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                        class: "w-12 h-12 rounded-lg object-cover shrink-0"
                     }
                 } else {
                     div {
-                        class: "w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0",
+                        class: "w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0",
                         "🏆"
                     }
                 }
@@ -5264,11 +5264,11 @@ fn render_product_card(event: &Event, naddr: &str) -> Element {
                 if let Some(img_url) = image_url {
                     img {
                         src: "{img_url}",
-                        class: "w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                        class: "w-16 h-16 rounded-lg object-cover shrink-0"
                     }
                 } else {
                     div {
-                        class: "w-16 h-16 rounded-lg bg-muted flex items-center justify-center flex-shrink-0",
+                        class: "w-16 h-16 rounded-lg bg-muted flex items-center justify-center shrink-0",
                         "🛍️"
                     }
                 }

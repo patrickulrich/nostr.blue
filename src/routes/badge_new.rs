@@ -245,7 +245,7 @@ pub fn BadgeNew() -> Element {
                             "Name"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Badge of Honor",
                             value: "{name}",
@@ -268,7 +268,7 @@ pub fn BadgeNew() -> Element {
                             class: "flex gap-2",
 
                             input {
-                                class: "flex-1 px-4 py-2 bg-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono",
+                                class: "flex-1 px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary font-mono",
                                 r#type: "text",
                                 placeholder: "badge-of-honor",
                                 value: "{badge_id}",
@@ -308,7 +308,7 @@ pub fn BadgeNew() -> Element {
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             rows: "3",
                             placeholder: "Describe what this badge represents...",
                             value: "{description}",
@@ -323,7 +323,7 @@ pub fn BadgeNew() -> Element {
                             "Image URL"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "https://example.com/badge.png",
                             value: "{image_url}",
@@ -342,7 +342,7 @@ pub fn BadgeNew() -> Element {
                             "Thumbnail URL"
                         }
                         input {
-                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 bg-muted rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "https://example.com/badge-thumb.png",
                             value: "{thumb_url}",

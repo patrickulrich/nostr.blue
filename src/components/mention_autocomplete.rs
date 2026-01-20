@@ -34,7 +34,7 @@ pub struct MentionAutocompleteProps {
     #[props(default = 2)]
     pub rows: u32,
     /// Additional CSS classes for the textarea
-    #[props(default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none".to_string())]
+    #[props(default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-none".to_string())]
     pub class: String,
     /// Whether the textarea is disabled
     #[props(default = false)]
@@ -67,6 +67,8 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
     let mut dropdown_top = use_signal(|| 0.0);
     let mut dropdown_left = use_signal(|| 0.0);
     let mut show_below = use_signal(|| true);
+    #[allow(unused_mut)] // Mutated only in WASM target
+    let mut is_mobile = use_signal(|| false);
 
     let textarea_id = use_signal(|| Rc::new(format!("mention-textarea-{}", uuid::Uuid::new_v4())));
 
@@ -97,7 +99,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
 
         // Update dropdown position if showing
         if *autocomplete.show.read() {
-            update_dropdown_position(&textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below);
+            update_dropdown_position(&textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below, &mut is_mobile);
         }
     };
 
@@ -115,14 +117,34 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 let current = *autocomplete.selected_index.read();
                 let max = results.len().saturating_sub(1);
                 if current < max {
-                    autocomplete.selected_index.set(current + 1);
+                    let new_index = current + 1;
+                    autocomplete.selected_index.set(new_index);
+                    // Auto-scroll selected item into view
+                    #[cfg(target_family = "wasm")]
+                    {
+                        use dioxus::document;
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index
+                        ));
+                    }
                 }
             }
             Key::ArrowUp => {
                 evt.prevent_default();
                 let current = *autocomplete.selected_index.read();
                 if current > 0 {
-                    autocomplete.selected_index.set(current - 1);
+                    let new_index = current - 1;
+                    autocomplete.selected_index.set(new_index);
+                    // Auto-scroll selected item into view
+                    #[cfg(target_family = "wasm")]
+                    {
+                        use dioxus::document;
+                        let _ = document::eval(&format!(
+                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                            new_index
+                        ));
+                    }
                 }
             }
             Key::Enter => {
@@ -202,6 +224,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                     *dropdown_top.read(),
                     *dropdown_left.read(),
                     *show_below.read(),
+                    *is_mobile.read(),
                     props.content,
                     props.on_input,
                     *autocomplete.start_pos.read(),
@@ -255,7 +278,7 @@ fn detect_mention(
             query, cached_results.len(), thread_pubkeys.len());
 
         // Only query relays if we don't have enough results and query is long enough
-        if query.len() >= 2 && cached_results.len() < 5 {
+        if query.len() >= 3 && cached_results.len() < 5 {
             state.is_searching.set(true);
 
             // Cancel previous relay search task if any
@@ -335,7 +358,7 @@ fn insert_mention(
         let relay_hints: Vec<nostr_sdk::RelayUrl> = [
             "wss://relay.damus.io",
             "wss://nos.lol",
-            "wss://relay.nostr.band",
+            "wss://relay.snort.social",
         ]
         .iter()
         .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
@@ -474,6 +497,7 @@ fn update_dropdown_position(
     dropdown_top: &mut Signal<f64>,
     dropdown_left: &mut Signal<f64>,
     show_below: &mut Signal<bool>,
+    is_mobile: &mut Signal<bool>,
 ) {
     #[cfg(target_family = "wasm")]
     {
@@ -482,24 +506,32 @@ fn update_dropdown_position(
                 if let Some(element) = document.get_element_by_id(textarea_id) {
                     let rect = element.get_bounding_client_rect();
 
-                    // For now, position below the textarea
-                    // TODO: Calculate exact cursor pixel position for more accurate placement
+                    let viewport_width = window
+                        .inner_width()
+                        .ok()
+                        .and_then(|w| w.as_f64())
+                        .unwrap_or(1024.0);
                     let viewport_height = window
                         .inner_height()
                         .ok()
                         .and_then(|h| h.as_f64())
                         .unwrap_or(600.0);
 
+                    // Mobile breakpoint (sm = 640px)
+                    let is_mobile_view = viewport_width < 640.0;
+                    is_mobile.set(is_mobile_view);
+
                     let bottom_space = viewport_height - rect.bottom();
                     let top_space = rect.top();
 
-                    // Show below if there's enough space (300px for dropdown)
-                    if bottom_space >= 300.0 {
+                    // Show below if there's enough space (300px for dropdown, less on mobile)
+                    let dropdown_height = if is_mobile_view { 200.0 } else { 300.0 };
+                    if bottom_space >= dropdown_height {
                         show_below.set(true);
                         dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
-                    } else if top_space >= 300.0 {
+                    } else if top_space >= dropdown_height {
                         show_below.set(false);
-                        dropdown_top.set(rect.top() + window.scroll_y().unwrap_or(0.0) - 300.0);
+                        dropdown_top.set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
                     } else {
                         // Default to below
                         show_below.set(true);
@@ -522,6 +554,7 @@ fn render_dropdown(
     top: f64,
     left: f64,
     _show_below: bool,
+    is_mobile: bool,
     content: Signal<String>,
     on_input: EventHandler<String>,
     mention_start_pos: usize,
@@ -533,10 +566,32 @@ fn render_dropdown(
     // Wrap in Rc for cheap cloning
     let textarea_id_rc = Rc::new(textarea_id);
 
+    let result_count = results.len();
+
     rsx! {
         div {
+            role: "listbox",
+            aria_label: "Profile suggestions",
             class: "fixed bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50",
-            style: "top: {top}px; left: {left}px; max-height: 300px; width: 300px;",
+            class: "w-[calc(100vw-2rem)] sm:w-[300px] max-h-[50vh] sm:max-h-[300px]",
+            style: if is_mobile {
+                format!("top: {}px; left: 1rem; right: 1rem;", top)
+            } else {
+                format!("top: {}px; left: {}px;", top, left)
+            },
+
+            // Result count header
+            if !is_searching && !results.is_empty() {
+                {
+                    let plural = if result_count == 1 { "" } else { "s" };
+                    rsx! {
+                        div {
+                            class: "px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700",
+                            "{result_count} profile{plural} found"
+                        }
+                    }
+                }
+            }
 
             if is_searching {
                 div {
@@ -550,15 +605,19 @@ fn render_dropdown(
                 }
             } else {
                 div {
-                    class: "overflow-y-auto max-h-[300px]",
+                    class: "overflow-y-auto max-h-[calc(50vh-6rem)] sm:max-h-[240px]",
                     for (index , profile) in results.iter().enumerate() {
                         {
                             let profile_clone = profile.clone();
                             let is_selected = index == selected_index;
+                            let option_id = format!("mention-option-{}", index);
 
                             rsx! {
                                 button {
                                     key: "{profile.pubkey.to_hex()}",
+                                    id: "{option_id}",
+                                    role: "option",
+                                    aria_selected: if is_selected { "true" } else { "false" },
                                     class: if is_selected {
                                         "w-full px-4 py-2 flex items-center gap-3 hover:bg-blue-50 dark:hover:bg-blue-900 bg-blue-50 dark:bg-blue-900 cursor-pointer transition"
                                     } else {
@@ -582,7 +641,7 @@ fn render_dropdown(
 
                                     // Avatar
                                     div {
-                                        class: "flex-shrink-0",
+                                        class: "shrink-0",
                                         if let Some(picture) = &profile.picture {
                                             if is_valid_http_url(picture) {
                                                 img {
@@ -623,12 +682,12 @@ fn render_dropdown(
                                     // Thread/Contact badge
                                     if profile.is_thread_participant {
                                         div {
-                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
+                                            class: "shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
                                             "Thread"
                                         }
                                     } else if profile.is_contact {
                                         div {
-                                            class: "flex-shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
+                                            class: "shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
                                             "Contact"
                                         }
                                     }
@@ -636,6 +695,12 @@ fn render_dropdown(
                             }
                         }
                     }
+                }
+
+                // Keyboard hints footer
+                div {
+                    class: "px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
+                    "↑↓ navigate • Enter select • Esc close"
                 }
             }
         }

@@ -161,7 +161,15 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     {
                         Ok(event) => {
                             // Then add the person
-                            add_person_to_list(&event, &pubkey, is_private).await
+                            match add_person_to_list(&event, &pubkey, is_private).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    // List was created but adding person failed
+                                    // Refresh to show the new list
+                                    refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
+                                    Err(format!("List created but adding person failed: {}", e))
+                                }
+                            }
                         }
                         Err(e) => Err(e),
                     }
@@ -342,7 +350,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                     }
                                 } else {
                                     select {
-                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                         onchange: move |e| selected_list_id.set(Some(e.value().clone())),
 
                                         option {
@@ -369,7 +377,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                     "List name"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "e.g., Funny Posts, Interesting Articles...",
                                     value: "{new_list_name}",
@@ -477,7 +485,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                     }
                                 } else {
                                     select {
-                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                         onchange: move |e| {
                                             let value = e.value();
                                             let list = people_lists.read()
@@ -535,7 +543,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                     "List name"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "e.g., Friends, Work Colleagues...",
                                     value: "{new_list_name}",

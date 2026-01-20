@@ -356,7 +356,7 @@ pub fn PhotoCard(event: Event) -> Element {
                 class: "p-3 flex items-center gap-3",
                 Link {
                     to: Route::Profile { pubkey: author_pubkey.clone() },
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     if let Some(pic) = picture_url {
                         img {
@@ -685,7 +685,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     class: "px-3 pb-3 flex items-center gap-2",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     input {
-                        class: "flex-1 bg-transparent border-none outline-none text-sm placeholder:text-muted-foreground",
+                        class: "flex-1 bg-transparent border-none outline-hidden text-sm placeholder:text-muted-foreground",
                         r#type: "text",
                         placeholder: "Add a comment...",
                         value: "{comment_text}",

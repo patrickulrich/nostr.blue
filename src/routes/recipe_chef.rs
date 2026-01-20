@@ -172,7 +172,7 @@ pub fn RecipeChef(npub: String) -> Element {
                     // Chef profile skeleton
                     div {
                         class: "flex items-start gap-4 mb-8 p-4 bg-card border border-border rounded-xl animate-pulse",
-                        div { class: "w-20 h-20 rounded-full bg-muted flex-shrink-0" }
+                        div { class: "w-20 h-20 rounded-full bg-muted shrink-0" }
                         div {
                             class: "flex-1 space-y-3",
                             div { class: "h-6 w-48 bg-muted rounded" }
@@ -221,7 +221,7 @@ pub fn RecipeChef(npub: String) -> Element {
 
                         // Avatar
                         div {
-                            class: "w-20 h-20 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-20 h-20 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0",
                             if let Some(ref pic_url) = profile_picture {
                                 img {
                                     src: "{pic_url}",

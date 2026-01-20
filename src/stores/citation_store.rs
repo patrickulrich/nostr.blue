@@ -727,6 +727,8 @@ pub async fn publish_prompt_citation(
     cited_text: &str,
     conversation_summary: Option<&str>,
     url: Option<&str>,
+    title: Option<&str>,
+    author: Option<&str>,
     existing_d_tag: Option<&str>,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
@@ -755,6 +757,12 @@ pub async fn publish_prompt_citation(
     }
     if let Some(u) = url {
         tags.push(Tag::custom(TagKind::Custom("u".into()), vec![u.to_string()]));
+    }
+    if let Some(t) = title {
+        tags.push(Tag::custom(TagKind::Custom("title".into()), vec![t.to_string()]));
+    }
+    if let Some(a) = author {
+        tags.push(Tag::custom(TagKind::Custom("author".into()), vec![a.to_string()]));
     }
 
     // Add MIME tags

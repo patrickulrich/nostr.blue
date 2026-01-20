@@ -593,7 +593,7 @@ pub fn CalendarEventNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                             placeholder: "What's happening?",
                             value: "{title}",
                             oninput: move |e| title.set(e.value())
@@ -609,7 +609,7 @@ pub fn CalendarEventNew() -> Element {
                             label { class: "block text-sm font-medium mb-2", "Start Date" }
                             input {
                                 r#type: "date",
-                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 value: "{start_date}",
                                 oninput: move |e| start_date.set(e.value())
                             }
@@ -621,7 +621,7 @@ pub fn CalendarEventNew() -> Element {
                                 label { class: "block text-sm font-medium mb-2", "Start Time" }
                                 input {
                                     r#type: "time",
-                                    class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                    class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                     value: "{start_time}",
                                     oninput: move |e| start_time.set(e.value())
                                 }
@@ -633,7 +633,7 @@ pub fn CalendarEventNew() -> Element {
                             label { class: "block text-sm font-medium mb-2", "End Date" }
                             input {
                                 r#type: "date",
-                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 value: "{end_date}",
                                 oninput: move |e| end_date.set(e.value())
                             }
@@ -645,7 +645,7 @@ pub fn CalendarEventNew() -> Element {
                                 label { class: "block text-sm font-medium mb-2", "End Time" }
                                 input {
                                     r#type: "time",
-                                    class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                    class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                     value: "{end_time}",
                                     oninput: move |e| end_time.set(e.value())
                                 }
@@ -660,7 +660,7 @@ pub fn CalendarEventNew() -> Element {
                             label { class: "block text-sm font-medium mb-2", "Timezone" }
                             input {
                                 r#type: "text",
-                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 placeholder: "e.g., America/New_York",
                                 value: "{timezone}",
                                 oninput: move |e| timezone.set(e.value())
@@ -676,7 +676,7 @@ pub fn CalendarEventNew() -> Element {
                             class: "flex gap-2",
                             input {
                                 r#type: "text",
-                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 placeholder: "Address or online link",
                                 value: "{location}",
                                 oninput: move |e| location.set(e.value())
@@ -712,7 +712,7 @@ pub fn CalendarEventNew() -> Element {
                         class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Summary" }
                         textarea {
-                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition resize-none",
+                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition resize-none",
                             rows: "2",
                             placeholder: "Brief description of the event",
                             value: "{summary}",
@@ -725,7 +725,7 @@ pub fn CalendarEventNew() -> Element {
                         class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Details" }
                         textarea {
-                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition resize-none",
+                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition resize-none",
                             rows: "5",
                             placeholder: "Full event description (markdown supported)",
                             value: "{content}",
@@ -777,7 +777,7 @@ pub fn CalendarEventNew() -> Element {
                             class: "flex gap-2 mb-2",
                             input {
                                 r#type: "text",
-                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 placeholder: "npub1... or hex pubkey",
                                 value: "{participant_input}",
                                 oninput: move |e| participant_input.set(e.value()),
@@ -852,7 +852,7 @@ pub fn CalendarEventNew() -> Element {
                         label { class: "block text-sm font-medium mb-2", "Hashtags" }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                            class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                             placeholder: "conference, meetup, bitcoin (comma or space separated)",
                             value: "{hashtags_input}",
                             oninput: move |e| hashtags_input.set(e.value())

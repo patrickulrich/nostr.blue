@@ -201,7 +201,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                     div {
                         class: "flex items-start gap-3",
                         div {
-                            class: "w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0",
+                            class: "w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-4 h-4 text-purple-500",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -270,7 +270,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                                 span { class: "text-muted-foreground font-normal", "(optional)" }
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g., abc1234",
                                 value: "{commit}",
@@ -284,7 +284,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                                 span { class: "text-muted-foreground font-normal", "(optional)" }
                             }
                             input {
-                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g., def5678",
                                 value: "{parent_commit}",
@@ -302,7 +302,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                         span { class: "text-destructive", "*" }
                     }
                     textarea {
-                        class: "w-full h-64 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary resize-y",
+                        class: "w-full h-64 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary resize-y",
                         placeholder: if *is_cover_letter.read() {
                             "Describe the changes in this patch set...\n\nFor example:\n- What problem does this solve?\n- What approach did you take?\n- Any relevant context or notes"
                         } else {
@@ -329,7 +329,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "e.g., feature, refactor, bugfix",
                         value: "{labels}",

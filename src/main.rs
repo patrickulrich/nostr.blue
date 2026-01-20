@@ -44,7 +44,12 @@ fn App() -> Element {
         auth_store::init_auth();
         music_player::init_player();
 
-        // Initialize Nostr client
+        // Load cached preferences immediately (synchronous)
+        // This provides instant UI before async client init
+        sidebar_store::init_sidebar_from_cache();
+        reactions_store::init_reactions_from_cache();
+
+        // Initialize Nostr client (async)
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
@@ -78,7 +83,39 @@ fn App() -> Element {
         });
     });
 
+    // Reactive NIP-78 retry when relay connects
+    use_effect(move || {
+        // Track RELAY_CONNECTED - effect re-runs when this changes
+        let connected = *nostr_client::RELAY_CONNECTED.read();
+
+        if connected {
+            // Use peek() to check state WITHOUT subscribing (avoid re-run loops)
+            let sidebar_state = sidebar_store::SIDEBAR_STATE.peek();
+            let reactions_state = reactions_store::REACTIONS_STATE.peek();
+
+            let sidebar_failed = sidebar_state.is_failed();
+            let reactions_failed = reactions_state.is_failed();
+
+            if sidebar_failed || reactions_failed {
+                log::info!("Relay connected, retrying failed NIP-78 loads");
+                spawn(async move {
+                    // The load functions have their own Loading guard
+                    // to prevent duplicate concurrent fetches
+                    if sidebar_failed {
+                        sidebar_store::load_sidebar_preferences().await;
+                    }
+                    if reactions_failed {
+                        reactions_store::load_preferred_reactions().await;
+                    }
+                });
+            }
+        }
+    });
+
     rsx! {
+        // Tailwind CSS (processed by Dioxus built-in Tailwind support)
+        document::Stylesheet { href: asset!("/assets/tailwind.css") }
+
         ToastProvider {
             Router::<routes::Route> {}
         }
