@@ -1422,6 +1422,7 @@ fn NavLink(
         (Route::BibleHome {}, Route::BibleHome {}) |
         (Route::BibleHome {}, Route::BibleChapter { .. }) |
         (Route::BibleHome {}, Route::BibleSearch {}) => true,
+        (Route::Highlights {}, Route::Highlights {}) => true,
         _ => false,
     };
 

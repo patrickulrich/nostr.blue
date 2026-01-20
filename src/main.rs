@@ -44,7 +44,12 @@ fn App() -> Element {
         auth_store::init_auth();
         music_player::init_player();
 
-        // Initialize Nostr client
+        // Load cached preferences immediately (synchronous)
+        // This provides instant UI before async client init
+        sidebar_store::init_sidebar_from_cache();
+        reactions_store::init_reactions_from_cache();
+
+        // Initialize Nostr client (async)
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {

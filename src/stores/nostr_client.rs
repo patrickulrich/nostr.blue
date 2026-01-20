@@ -426,6 +426,9 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
             if connected {
                 log::info!("First relay connected after {}ms", start.elapsed().as_millis());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
                 break;
             }
 
@@ -449,6 +452,9 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
             if connected {
                 log::info!("First relay connected after {:?}", start.elapsed());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
                 break;
             }
 

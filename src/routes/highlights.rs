@@ -41,6 +41,9 @@ pub fn Highlights() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
+    // Request ID for preventing stale results when feed type changes rapidly
+    let mut request_id = use_signal(|| 0u32);
+
     // Load highlights on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         let _ = refresh_trigger.read();
@@ -57,14 +60,28 @@ pub fn Highlights() -> Element {
         oldest_timestamp.set(None);
         has_more.set(true);
 
+        // Increment request ID to invalidate any in-flight requests
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
+
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_highlights(None).await,
-                FeedType::Global => load_global_highlights(None).await,
+                FeedType::Global => load_global_highlights(None).await.map(|h| (h, false)),
             };
 
+            // Check if this request is still current (discard stale results)
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale highlights result");
+                return;
+            }
+
             match result {
-                Ok(new_highlights) => {
+                Ok((new_highlights, did_fallback)) => {
+                    // Update feed_type if fallback occurred
+                    if did_fallback {
+                        feed_type.set(FeedType::Global);
+                    }
                     // Track oldest timestamp for pagination
                     if let Some(last) = new_highlights.last() {
                         oldest_timestamp.set(Some(last.created_at));
@@ -95,14 +112,28 @@ pub fn Highlights() -> Element {
 
         loading.set(true);
 
+        // Increment request ID to invalidate any in-flight requests
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
+
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_highlights(until).await,
-                FeedType::Global => load_global_highlights(until).await,
+                FeedType::Global => load_global_highlights(until).await.map(|h| (h, false)),
             };
 
+            // Check if this request is still current (discard stale results)
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale load_more highlights result");
+                return;
+            }
+
             match result {
-                Ok(new_highlights) => {
+                Ok((new_highlights, did_fallback)) => {
+                    // Update feed_type if fallback occurred
+                    if did_fallback {
+                        feed_type.set(FeedType::Global);
+                    }
                     // Build existing IDs set FIRST for deduplication
                     let existing_ids: std::collections::HashSet<_> = highlights
                         .read()
@@ -278,13 +309,15 @@ pub fn Highlights() -> Element {
 }
 
 /// Load highlights from people the user follows
-async fn load_following_highlights(until: Option<u64>) -> Result<Vec<Highlight>, String> {
+/// Returns (highlights, did_fallback) where did_fallback is true if we fell back to global
+async fn load_following_highlights(until: Option<u64>) -> Result<(Vec<Highlight>, bool), String> {
     // Get the current user's pubkey - fall back to global if not authenticated
     let pubkey_hex = match auth_store::get_pubkey() {
         Some(pk) => pk,
         None => {
             log::info!("User not authenticated, falling back to global highlights");
-            return load_global_highlights(until).await;
+            let highlights = load_global_highlights(until).await?;
+            return Ok((highlights, true));
         }
     };
 
@@ -293,14 +326,16 @@ async fn load_following_highlights(until: Option<u64>) -> Result<Vec<Highlight>,
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            return load_global_highlights(until).await;
+            let highlights = load_global_highlights(until).await?;
+            return Ok((highlights, true));
         }
     };
 
     // If user doesn't follow anyone, show global feed
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global highlights");
-        return load_global_highlights(until).await;
+        let highlights = load_global_highlights(until).await?;
+        return Ok((highlights, true));
     }
 
     log::info!("User follows {} accounts", contacts.len());
@@ -315,11 +350,13 @@ async fn load_following_highlights(until: Option<u64>) -> Result<Vec<Highlight>,
 
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        return load_global_highlights(until).await;
+        let highlights = load_global_highlights(until).await?;
+        return Ok((highlights, true));
     }
 
     // Fetch highlights from followed users
-    nip84::fetch_highlights_by_authors(authors, 30, until).await
+    let highlights = nip84::fetch_highlights_by_authors(authors, 30, until).await?;
+    Ok((highlights, false))
 }
 
 /// Load global highlights (discovery feed)

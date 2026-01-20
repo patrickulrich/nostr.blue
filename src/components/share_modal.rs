@@ -239,7 +239,14 @@ pub fn ShareModal(
                     copied.set(true);
                     log::info!("Link copied to clipboard");
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                        }
                         copied.set(false);
                     });
                 }

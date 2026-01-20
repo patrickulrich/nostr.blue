@@ -105,6 +105,21 @@ fn cache_reactions(data: &ReactionsData) {
     }
 }
 
+/// Initialize reactions from localStorage cache (synchronous, for instant UI)
+/// Call this during app init BEFORE async client initialization
+pub fn init_reactions_from_cache() {
+    if let Some(cached) = load_cached_reactions() {
+        if !cached.reactions.is_empty() {
+            log::info!("Initialized {} reactions from localStorage", cached.reactions.len());
+            let reactions: Vec<PreferredReaction> = cached.reactions
+                .into_iter()
+                .take(MAX_REACTIONS)
+                .collect();
+            *PREFERRED_REACTIONS.write() = reactions;
+        }
+    }
+}
+
 /// Load preferred reactions from Nostr relays (NIP-78)
 /// Uses a 3-step loading strategy for reliability:
 /// 1. Load from localStorage first for instant UI
@@ -329,6 +344,7 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
 
     // Update global state
     *PREFERRED_REACTIONS.write() = reactions;
+    *REACTIONS_STATE.write() = Nip78LoadState::Loaded;
 
     Ok(())
 }

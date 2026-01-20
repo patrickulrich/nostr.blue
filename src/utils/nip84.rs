@@ -111,10 +111,15 @@ pub fn parse_highlight(event: &NostrEvent) -> Option<Highlight> {
 
 /// Extract source reference from highlight event tags
 fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
-    // Check for 'a' tag (addressable event reference) first
+    // Check for 'a' tag (addressable event reference) first - requires "source" marker
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("a") {
+            // Only accept tags with "source" marker
+            let has_source_marker = slice.iter().any(|s| s == "source");
+            if !has_source_marker {
+                continue;
+            }
             if let Some(coord) = slice.get(1) {
                 // Filter out "source" marker from relay hint
                 let relay = slice.get(2)
@@ -128,10 +133,15 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
         }
     }
 
-    // Check for 'e' tag (event reference)
+    // Check for 'e' tag (event reference) - requires "source" marker
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("e") {
+            // Only accept tags with "source" marker
+            let has_source_marker = slice.iter().any(|s| s == "source");
+            if !has_source_marker {
+                continue;
+            }
             if let Some(id) = slice.get(1) {
                 // Filter out "source" marker from relay hint
                 let relay = slice.get(2)
@@ -145,10 +155,15 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
         }
     }
 
-    // Check for 'r' tag (URL reference)
+    // Check for 'r' tag (URL reference) - requires "source" marker
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("r") {
+            // Only accept tags with "source" marker
+            let has_source_marker = slice.iter().any(|s| s == "source");
+            if !has_source_marker {
+                continue;
+            }
             if let Some(url) = slice.get(1) {
                 return HighlightSource::Url(url.to_string());
             }
@@ -334,13 +349,13 @@ pub async fn create_highlight(
             event_id,
             relay_hint,
         } => {
-            // Use SDK's Tag::event() when possible, fall back to parse for relay hint
+            // Build "e" tag with optional relay hint and "source" marker
+            let mut tag_parts = vec!["e".to_string(), event_id.clone()];
             if let Some(relay) = relay_hint {
-                tags.push(Tag::parse(vec!["e".to_string(), event_id.clone(), relay.clone()]).map_err(|e| e.to_string())?);
-            } else {
-                let id = nostr_sdk::EventId::from_hex(event_id).map_err(|e| e.to_string())?;
-                tags.push(Tag::event(id));
+                tag_parts.push(relay.clone());
             }
+            tag_parts.push("source".to_string());
+            tags.push(Tag::parse(&tag_parts).map_err(|e| e.to_string())?);
         }
         HighlightSource::Url(url) => {
             // Use SDK's reference tag for "r" tag with "source" marker

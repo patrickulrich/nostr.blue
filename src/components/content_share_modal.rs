@@ -237,6 +237,10 @@ pub fn ContentShareModal(
                             {
                                 gloo_timers::future::TimeoutFuture::new(2000).await;
                             }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                            }
                             copied.set(false);
                         });
                     }

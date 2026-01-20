@@ -326,6 +326,18 @@ fn cache_sidebar(data: &SidebarPreferencesData) {
     }
 }
 
+/// Initialize sidebar from localStorage cache (synchronous, for instant UI)
+/// Call this during app init BEFORE async client initialization
+pub fn init_sidebar_from_cache() {
+    if let Some(cached) = load_cached_sidebar() {
+        if !cached.active_items.is_empty() {
+            log::info!("Initialized {} sidebar items from localStorage", cached.active_items.len());
+            *SIDEBAR_ITEMS.write() = cached.active_items;
+            *SIDEBAR_SLOT_COUNT.write() = cached.main_sidebar_count;
+        }
+    }
+}
+
 /// Load sidebar preferences from Nostr relays (NIP-78)
 /// Uses a 3-step loading strategy for reliability:
 /// 1. Load from localStorage first for instant UI

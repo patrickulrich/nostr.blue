@@ -17,10 +17,6 @@ pub struct HighlightModalProps {
     pub on_confirm: EventHandler<Option<String>>,
     /// Called when user cancels
     pub on_cancel: EventHandler<()>,
-    /// Called when async operation completes (true = success, false = failure)
-    /// Parent should call this to reset submitting state
-    #[props(default)]
-    pub on_complete: Option<EventHandler<bool>>,
 }
 
 /// Modal for creating highlights with optional commentary
