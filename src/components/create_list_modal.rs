@@ -124,7 +124,12 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-            onclick: move |_| props.on_close.call(()),
+            onclick: move |_| {
+                // Use peek() to check loading without subscribing
+                if !*loading.peek() {
+                    props.on_close.call(())
+                }
+            },
 
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-lg mx-4 w-full max-h-[90vh] overflow-y-auto",
@@ -138,8 +143,14 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                         "Create New List"
                     }
                     button {
-                        class: "text-muted-foreground hover:text-foreground",
-                        onclick: move |_| props.on_close.call(()),
+                        class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                        disabled: *loading.read(),
+                        aria_busy: "{loading}",
+                        onclick: move |_| {
+                            if !*loading.peek() {
+                                props.on_close.call(())
+                            }
+                        },
                         "✕"
                     }
                 }

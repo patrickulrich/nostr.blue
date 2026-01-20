@@ -59,13 +59,13 @@ pub fn CodeIssueCard(
                 }
             }
 
-            // Labels
+            // Labels (use index for unique keys in case of duplicate labels)
             if !issue.labels.is_empty() {
                 div {
                     class: "mt-2 flex flex-wrap gap-1",
-                    for label in issue.labels.iter() {
+                    for (idx, label) in issue.labels.iter().enumerate() {
                         span {
-                            key: "{label}",
+                            key: "{idx}_{label}",
                             class: "px-2 py-0.5 text-xs rounded-full bg-accent text-accent-foreground",
                             "{label}"
                         }

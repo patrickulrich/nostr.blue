@@ -1,9 +1,11 @@
 use dioxus::prelude::*;
 use dioxus::html::input_data::keyboard_types::Key;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::Cell;
 
-/// Global counter for generating unique modal IDs
-static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+// Thread-local counter for generating unique modal IDs (simpler than AtomicU32 for single-threaded WASM)
+thread_local! {
+    static MODAL_ID_COUNTER: Cell<u32> = const { Cell::new(0) };
+}
 
 /// Reusable confirmation modal component
 #[component]
@@ -16,7 +18,13 @@ pub fn ConfirmModal(
     on_cancel: EventHandler<()>,
 ) -> Element {
     // Generate unique ID suffix for this modal instance
-    let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let modal_id = use_signal(|| {
+        MODAL_ID_COUNTER.with(|c| {
+            let id = c.get();
+            c.set(id.wrapping_add(1));
+            id
+        })
+    });
 
     let title_id = format!("modal-title-{}", modal_id());
     let message_id = format!("modal-message-{}", modal_id());

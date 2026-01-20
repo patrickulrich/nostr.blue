@@ -138,11 +138,18 @@ pub fn RepoHeaderCompact(
                 "{display_name}"
             }
 
-            // Current path if provided
+            // Current path if provided (decode URL-encoded paths for display)
             if let Some(path) = current_path {
                 if !path.is_empty() {
                     span { class: "text-muted-foreground", "/" }
-                    span { class: "text-muted-foreground truncate max-w-[200px]", "{path}" }
+                    {
+                        // Decode percent-encoded characters (e.g., %20 -> space)
+                        let decoded_path = urlencoding::decode(&path)
+                            .unwrap_or_else(|_| std::borrow::Cow::Borrowed(&path));
+                        rsx! {
+                            span { class: "text-muted-foreground truncate max-w-[200px]", "{decoded_path}" }
+                        }
+                    }
                 }
             }
         }

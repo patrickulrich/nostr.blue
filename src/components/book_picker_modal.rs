@@ -2,6 +2,7 @@
 //! Select publications and book references to insert into wiki pages and publications
 
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use gloo_timers::future::TimeoutFuture;
 use crate::stores::publication_store::{
     PublicationIndex, search_publications, get_all_cached_publications,
@@ -130,6 +131,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut is_searching = use_signal(|| false);
     // Debounce counter to cancel stale search requests
     let mut debounce_counter = use_signal(|| 0u32);
+    // Track search task for cancellation on modal close/reopen
+    let mut search_task: Signal<Option<Task>> = use_signal(|| None);
 
     // Selected publication and reference building
     let mut selected_publication = use_signal(|| None::<PublicationIndex>);
@@ -178,6 +181,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 sections_error.set(false);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
+                // Cancel any stale search task and reset debounce state
+                is_searching.set(false);
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                debounce_counter.set(0);
             }
         },
     ));
@@ -206,7 +215,11 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         let current_counter = debounce_counter();
 
         is_searching.set(true);
-        spawn(async move {
+        // Cancel any existing search task before spawning new one
+        if let Some(task) = search_task.take() {
+            task.cancel();
+        }
+        let new_task = spawn(async move {
             // Wait 300ms before searching
             TimeoutFuture::new(300).await;
 
@@ -236,6 +249,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 is_searching.set(false);
             }
         });
+        search_task.set(Some(new_task));
     };
 
     // Get publications to display based on tab

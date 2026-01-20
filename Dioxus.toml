@@ -1,5 +1,5 @@
 [application]
-name = "nostrbluerust"
+name = "nostrblue"
 default_platform = "web"
 
 # Copy files from public/ to build output root

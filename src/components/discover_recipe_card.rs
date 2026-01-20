@@ -36,8 +36,14 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
     // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
+    // Filter out empty/whitespace-only names before use
     let display_name = author_metadata.read().as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(|m| {
+            m.display_name.as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .or(m.name.as_ref().filter(|s| !s.trim().is_empty()))
+                .cloned()
+        })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()

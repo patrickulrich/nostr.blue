@@ -75,8 +75,9 @@ pub fn CodePullCard(
                     }
                 }
 
-                for label in pr.labels.iter() {
+                for (idx, label) in pr.labels.iter().enumerate() {
                     span {
+                        key: "{idx}_{label}",
                         class: "px-2 py-0.5 text-xs rounded-full bg-accent text-accent-foreground",
                         "{label}"
                     }

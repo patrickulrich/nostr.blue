@@ -161,7 +161,15 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                     {
                         Ok(event) => {
                             // Then add the person
-                            add_person_to_list(&event, &pubkey, is_private).await
+                            match add_person_to_list(&event, &pubkey, is_private).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    // List was created but adding person failed
+                                    // Refresh to show the new list
+                                    refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
+                                    Err(format!("List created but adding person failed: {}", e))
+                                }
+                            }
                         }
                         Err(e) => Err(e),
                     }

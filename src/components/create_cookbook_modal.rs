@@ -147,7 +147,7 @@ pub fn CreateCookbookModal(
                     class: "p-4 space-y-4",
 
                     // Error message
-                    if let Some(ref err) = *error.read() {
+                    if let Some(err) = error.read().as_ref() {
                         div {
                             class: "p-3 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm",
                             "{err}"

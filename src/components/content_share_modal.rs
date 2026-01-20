@@ -145,7 +145,38 @@ pub fn ContentShareModal(
         utf8_index.min(text.len())
     }
 
-    // Helper to insert text at cursor position
+    // Helper to insert text with smart spacing (inlined to avoid move issues)
+    let mut insert_with_spacing = {
+        let mut nostr_text = nostr_text;
+        let mut cursor_position = cursor_position;
+        move |text: String| {
+            let mut text_with_space = text.clone();
+            let current = nostr_text.read().clone();
+            let pos = (*cursor_position.read()).min(current.len());
+            // Ensure we're at a char boundary
+            let safe_pos = if current.is_char_boundary(pos) {
+                pos
+            } else {
+                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+            };
+            // Add leading space if previous char is not whitespace
+            if safe_pos > 0 {
+                if let Some(prev_char) = current[..safe_pos].chars().last() {
+                    if !prev_char.is_whitespace() {
+                        text_with_space.insert(0, ' ');
+                    }
+                }
+            }
+            text_with_space.push(' ');
+            // Inline insert logic
+            let mut new_text = current;
+            new_text.insert_str(safe_pos, &text_with_space);
+            nostr_text.set(new_text);
+            cursor_position.set(safe_pos + text_with_space.len());
+        }
+    };
+
+    // Helper to insert text at cursor position (separate closure for emoji insertion)
     let mut insert_at_cursor = {
         let mut nostr_text = nostr_text;
         let mut cursor_position = cursor_position;
@@ -161,34 +192,6 @@ pub fn ContentShareModal(
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
             cursor_position.set(safe_pos + text.len());
-        }
-    };
-
-    // Helper to insert text with smart spacing
-    let mut insert_with_spacing = {
-        let nostr_text = nostr_text;
-        let cursor_position = cursor_position;
-        move |text: String| {
-            let mut text_with_space = text.clone();
-            {
-                let current = nostr_text.read();
-                let pos = (*cursor_position.read()).min(current.len());
-                if pos > 0 {
-                    // Ensure we're at a char boundary for checking previous char
-                    let safe_pos = if current.is_char_boundary(pos) {
-                        pos
-                    } else {
-                        (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
-                    };
-                    if let Some(prev_char) = current[..safe_pos].chars().last() {
-                        if !prev_char.is_whitespace() {
-                            text_with_space.insert(0, ' ');
-                        }
-                    }
-                }
-            }
-            text_with_space.push(' ');
-            insert_at_cursor(text_with_space);
         }
     };
 
