@@ -5,11 +5,11 @@ use crate::components::MediaUploader;
 #[component]
 pub fn VideoNewPortrait() -> Element {
     let navigator = navigator();
-    let mut title = use_signal(|| String::new());
-    let mut description = use_signal(|| String::new());
+    let mut title = use_signal(String::new);
+    let mut description = use_signal(String::new);
     let mut video_url = use_signal(|| Option::<String>::None);
-    let mut thumbnail_url = use_signal(|| String::new());
-    let mut hashtags = use_signal(|| String::new());
+    let mut thumbnail_url = use_signal(String::new);
+    let mut hashtags = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut show_video_uploader = use_signal(|| true);
     let mut show_thumbnail_uploader = use_signal(|| false);
@@ -90,7 +90,7 @@ pub fn VideoNewPortrait() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {});
+            navigator.push(crate::routes::Route::Home { list: String::new() });
         }
     });
 
@@ -238,7 +238,7 @@ pub fn VideoNewPortrait() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Give your short a title",
                             value: "{title}",
                             oninput: move |e| title.set(e.value()),
@@ -252,7 +252,7 @@ pub fn VideoNewPortrait() -> Element {
                             "Description (optional)"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                             rows: 4,
                             placeholder: "Describe your short...",
                             value: "{description}",
@@ -268,7 +268,7 @@ pub fn VideoNewPortrait() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "shorts, viral, funny (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),

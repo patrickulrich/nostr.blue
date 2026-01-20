@@ -1,0 +1,306 @@
+// Radio Home - Main radio stations page with genre filters and station grid
+use dioxus::prelude::*;
+use crate::routes::Route;
+use crate::components::{RadioCard, RadioCardSkeleton};
+use crate::components::icons;
+use crate::utils::radio::{RadioStation as RadioStationData, fetch_radio_stations, search_radio_stations};
+use crate::stores::{auth_store, nostr_client};
+
+/// Common radio genres for filtering
+const GENRES: &[&str] = &[
+    "all", "rock", "pop", "jazz", "electronic", "classical",
+    "hip-hop", "country", "ambient", "metal", "folk", "indie",
+    "blues", "reggae", "latin", "world", "news", "talk"
+];
+
+#[component]
+pub fn RadioHome() -> Element {
+    let mut selected_genre = use_signal(|| "all".to_string());
+    let mut stations = use_signal(Vec::<RadioStationData>::new);
+    let mut is_loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+    let mut search_query = use_signal(String::new);
+    let mut search_input = use_signal(String::new);
+    let mut is_searching = use_signal(|| false);
+    let mut refetch_trigger = use_signal(|| 0u32);
+
+    let is_logged_in = auth_store::get_pubkey().is_some();
+
+    // Fetch stations when client is initialized and genre/search changes
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        // Subscribe to refetch trigger for manual retry
+        let _ = refetch_trigger.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        let genre = selected_genre.read().clone();
+        let query = search_query.read().clone();
+        let in_search_mode = !query.is_empty();
+
+        is_loading.set(true);
+        error.set(None);
+
+        spawn(async move {
+            let result = if in_search_mode {
+                // NIP-50 search mode
+                search_radio_stations(&query, 50).await
+            } else {
+                // Genre browsing mode
+                let genre_filter = if genre.as_str() == "all" { None } else { Some(genre.clone()) };
+                fetch_radio_stations(genre_filter.as_deref(), 50).await
+            };
+
+            match result {
+                Ok(fetched_stations) => {
+                    stations.set(fetched_stations);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch radio stations: {}", e);
+                    error.set(Some(e));
+                }
+            }
+
+            is_loading.set(false);
+        });
+    });
+
+    // Handle search submission
+    let on_search_submit = move |e: Event<FormData>| {
+        e.prevent_default();
+        let query = search_input.read().trim().to_string();
+        if !query.is_empty() {
+            is_searching.set(true);
+            search_query.set(query);
+        }
+    };
+
+    // Clear search and return to browse
+    let clear_search = move |_| {
+        search_input.set(String::new());
+        search_query.set(String::new());
+        is_searching.set(false);
+    };
+
+    rsx! {
+        div {
+            class: "min-h-screen",
+
+            // Header
+            div {
+                class: "sticky top-0 z-40 bg-background/80 backdrop-blur-sm border-b border-border",
+                div {
+                    class: "px-4 py-3",
+                    div {
+                        class: "flex items-center justify-between",
+                        div {
+                            class: "flex items-center gap-3",
+                            div {
+                                class: "w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center",
+                                span {
+                                    class: "text-red-500",
+                                    dangerous_inner_html: icons::RADIO
+                                }
+                            }
+                            div {
+                                h1 {
+                                    class: "text-xl font-bold",
+                                    "Internet Radio"
+                                }
+                                p {
+                                    class: "text-xs text-muted-foreground",
+                                    "Live streaming stations from the Nostr network"
+                                }
+                            }
+                        }
+
+                        // Add station button (auth-gated)
+                        if is_logged_in {
+                            Link {
+                                to: Route::RadioStationNew {},
+                                class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                span {
+                                    class: "w-4 h-4",
+                                    dangerous_inner_html: icons::PLUS
+                                }
+                                "Add Station"
+                            }
+                        }
+                    }
+                }
+
+                // Search bar
+                div {
+                    class: "px-4 py-2",
+                    form {
+                        class: "flex gap-2",
+                        onsubmit: on_search_submit,
+                        div {
+                            class: "relative flex-1",
+                            input {
+                                r#type: "text",
+                                placeholder: "Search stations (NIP-50)...",
+                                class: "w-full px-4 py-2 pl-10 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
+                                value: "{search_input}",
+                                oninput: move |e| search_input.set(e.value())
+                            }
+                            span {
+                                class: "absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground",
+                                dangerous_inner_html: icons::SEARCH
+                            }
+                        }
+                        if *is_searching.read() {
+                            button {
+                                r#type: "button",
+                                class: "px-3 py-2 bg-muted hover:bg-muted/80 rounded-lg transition flex items-center gap-1",
+                                onclick: clear_search,
+                                span {
+                                    class: "w-4 h-4",
+                                    dangerous_inner_html: icons::X
+                                }
+                                "Clear"
+                            }
+                        }
+                    }
+                }
+
+                // Search results indicator or genre filter pills
+                if *is_searching.read() {
+                    div {
+                        class: "px-4 pb-3",
+                        div {
+                            class: "flex items-center gap-2 text-sm text-muted-foreground",
+                            span { "Searching for: " }
+                            span {
+                                class: "font-medium text-foreground",
+                                "{search_query}"
+                            }
+                            if !*is_loading.read() {
+                                {
+                                    let count = stations.read().len();
+                                    rsx! {
+                                        span {
+                                            class: "text-xs",
+                                            "({count} results)"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Genre filter pills
+                    div {
+                        class: "px-4 pb-3 overflow-x-auto scrollbar-hide",
+                        div {
+                            class: "flex gap-2",
+                            for genre in GENRES.iter() {
+                                button {
+                                    key: "{genre}",
+                                    class: if *selected_genre.read() == *genre {
+                                        "px-3 py-1.5 rounded-full text-sm font-medium bg-primary text-primary-foreground whitespace-nowrap transition"
+                                    } else {
+                                        "px-3 py-1.5 rounded-full text-sm font-medium bg-muted hover:bg-muted/80 whitespace-nowrap transition"
+                                    },
+                                    onclick: {
+                                        let g = genre.to_string();
+                                        move |_| selected_genre.set(g.clone())
+                                    },
+                                    "{genre}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Content
+            div {
+                class: "p-4",
+
+                // Loading state (also show while client initializes)
+                if !*nostr_client::CLIENT_INITIALIZED.read() || *is_loading.read() {
+                    div {
+                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4",
+                        for _ in 0..10 {
+                            RadioCardSkeleton {}
+                        }
+                    }
+                } else if let Some(err) = error.read().as_ref() {
+                    // Error state
+                    div {
+                        class: "flex flex-col items-center justify-center py-12 text-center",
+                        div {
+                            class: "w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4",
+                            span {
+                                class: "text-destructive text-2xl",
+                                "!"
+                            }
+                        }
+                        p {
+                            class: "text-lg font-medium text-destructive",
+                            "Failed to load stations"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground mt-1",
+                            "{err}"
+                        }
+                        button {
+                            class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                            onclick: move |_| {
+                                // Trigger refetch by incrementing trigger signal
+                                refetch_trigger.set(refetch_trigger() + 1);
+                            },
+                            "Try Again"
+                        }
+                    }
+                } else if stations.read().is_empty() {
+                    // Empty state
+                    div {
+                        class: "flex flex-col items-center justify-center py-12 text-center",
+                        div {
+                            class: "w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4",
+                            span {
+                                class: "text-muted-foreground",
+                                dangerous_inner_html: icons::RADIO
+                            }
+                        }
+                        p {
+                            class: "text-lg font-medium",
+                            "No stations found"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground mt-1",
+                            if *selected_genre.read() == "all" {
+                                "Be the first to add a radio station!"
+                            } else {
+                                "No stations found for this genre. Try another genre or add one!"
+                            }
+                        }
+                        if is_logged_in {
+                            Link {
+                                to: Route::RadioStationNew {},
+                                class: "mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
+                                "Add a Station"
+                            }
+                        }
+                    }
+                } else {
+                    // Station grid
+                    div {
+                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4",
+                        for station in stations.read().iter() {
+                            RadioCard {
+                                key: "{station.coordinate}",
+                                station: station.clone(),
+                                compact: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,30 +1,57 @@
 use dioxus::prelude::*;
 use crate::services::trending::{TrendingNote, get_trending_notes, truncate_content};
-use crate::stores::profiles;
+use crate::stores::{nostr_client, profiles};
 use crate::routes::Route;
 use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn TrendingNotes() -> Element {
-    let mut trending_notes = use_signal(|| Vec::<TrendingNote>::new());
+    let mut trending_notes = use_signal(Vec::<TrendingNote>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| false);
 
-    // Fetch trending notes on mount
+    // Fetch trending notes on mount - wait for client initialization
     use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Wait for client to initialize before fetching
+        if !client_initialized {
+            return;
+        }
+
         spawn(async move {
             loading.set(true);
             error.set(false);
 
-            match get_trending_notes(Some(10)).await {
+            match get_trending_notes(Some(15)).await {
                 Ok(notes) => {
-                    trending_notes.set(notes.clone());
+                    // Filter out blocked users and muted posts
+                    let blocked_users = nostr_client::get_blocked_users().await.unwrap_or_default();
+                    let muted_posts = nostr_client::get_muted_posts().await.unwrap_or_default();
+
+                    let filtered_notes: Vec<TrendingNote> = notes
+                        .into_iter()
+                        .filter(|note| {
+                            // Filter out posts from blocked users
+                            if blocked_users.contains(&note.event.pubkey) {
+                                return false;
+                            }
+                            // Filter out muted posts
+                            if muted_posts.contains(&note.event.id) {
+                                return false;
+                            }
+                            true
+                        })
+                        .take(10) // Limit to 10 after filtering
+                        .collect();
+
+                    trending_notes.set(filtered_notes.clone());
                     loading.set(false);
 
                     // Prefetch author metadata for trending notes
                     use crate::utils::profile_prefetch;
                     use nostr_sdk::PublicKey;
-                    let pubkeys: Vec<PublicKey> = notes.iter()
+                    let pubkeys: Vec<PublicKey> = filtered_notes.iter()
                         .filter_map(|note| PublicKey::from_hex(&note.event.pubkey).ok())
                         .collect();
 
@@ -49,7 +76,7 @@ pub fn TrendingNotes() -> Element {
 
             // Header
             div {
-                class: "px-4 py-3 border-b border-border flex-shrink-0",
+                class: "px-4 py-3 border-b border-border shrink-0",
                 h3 {
                     class: "text-xl font-bold flex items-center gap-2",
                     span { "📈" }
@@ -95,7 +122,7 @@ pub fn TrendingNotes() -> Element {
             // Show more button - always visible at bottom
             if !*loading.read() && !*error.read() && !trending_notes.read().is_empty() {
                 div {
-                    class: "border-t border-border flex-shrink-0",
+                    class: "border-t border-border shrink-0",
                     Link {
                         to: Route::Trending {},
                         class: "block w-full px-4 py-3 text-blue-500 hover:bg-accent/50 transition-colors text-left text-sm",
@@ -161,7 +188,7 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
                 img {
                     src: "{picture}",
                     alt: "{author_name}",
-                    class: "w-10 h-10 rounded-full flex-shrink-0 object-cover",
+                    class: "w-10 h-10 rounded-full shrink-0 object-cover",
                     loading: "lazy"
                 }
 
