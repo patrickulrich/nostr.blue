@@ -17,6 +17,10 @@ pub struct HighlightModalProps {
     pub on_confirm: EventHandler<Option<String>>,
     /// Called when user cancels
     pub on_cancel: EventHandler<()>,
+    /// Called when async operation completes (true = success, false = failure)
+    /// Parent should call this to reset submitting state
+    #[props(default)]
+    pub on_complete: Option<EventHandler<bool>>,
 }
 
 /// Modal for creating highlights with optional commentary
@@ -24,6 +28,15 @@ pub struct HighlightModalProps {
 pub fn HighlightModal(props: HighlightModalProps) -> Element {
     let mut comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
+
+    // Cancel helper - resets submitting state before calling on_cancel
+    let do_cancel = {
+        let on_cancel = props.on_cancel;
+        move || {
+            is_submitting.set(false);
+            on_cancel.call(());
+        }
+    };
 
     // Extract submit logic into a helper closure that doesn't require event
     let do_submit = {
@@ -50,10 +63,13 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
         }
     };
 
-    let handle_keydown = move |evt: KeyboardEvent| {
-        if evt.key() == Key::Escape {
-            evt.stop_propagation();
-            props.on_cancel.call(());
+    let handle_keydown = {
+        let mut do_cancel = do_cancel;
+        move |evt: KeyboardEvent| {
+            if evt.key() == Key::Escape {
+                evt.stop_propagation();
+                do_cancel();
+            }
         }
     };
 
@@ -61,7 +77,10 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
         // Backdrop
         div {
             class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
-            onclick: move |_| props.on_cancel.call(()),
+            onclick: {
+                let mut do_cancel = do_cancel;
+                move |_| do_cancel()
+            },
             onkeydown: handle_keydown,
 
             // Modal container
@@ -92,7 +111,10 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                     button {
                         class: "p-1 hover:bg-accent rounded transition",
                         "aria-label": "Close",
-                        onclick: move |_| props.on_cancel.call(()),
+                        onclick: {
+                            let mut do_cancel = do_cancel;
+                            move |_| do_cancel()
+                        },
                         svg {
                             xmlns: "http://www.w3.org/2000/svg",
                             class: "w-5 h-5",
@@ -166,7 +188,10 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                     button {
                         class: "px-4 py-2 rounded-lg hover:bg-accent transition-colors",
                         disabled: *is_submitting.read(),
-                        onclick: move |_| props.on_cancel.call(()),
+                        onclick: {
+                            let mut do_cancel = do_cancel;
+                            move |_| do_cancel()
+                        },
                         "Cancel"
                     }
                     button {

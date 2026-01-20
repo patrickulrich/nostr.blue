@@ -166,7 +166,13 @@ fn get_source_display(source: &HighlightSource) -> Option<(&'static str, String,
                 .next()
                 .unwrap_or(url)
                 .to_string();
-            Some(("🔗", display, Some(url.clone())))
+            // Only return href if URL has valid http/https scheme (prevents javascript: etc.)
+            let href = if is_valid_http_url(url) {
+                Some(url.clone())
+            } else {
+                None
+            };
+            Some(("🔗", display, href))
         }
         HighlightSource::Article { .. } => {
             // Could link to naddr in the future

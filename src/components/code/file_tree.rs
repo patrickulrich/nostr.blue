@@ -182,7 +182,11 @@ pub fn CodeFileTree(
             // Parent directory link if not at root
             if !current_path.is_empty() {
                 {
-                    let parent_path = current_path
+                    // Decode current_path first to handle URL-encoded paths from routes
+                    let decoded_current = urlencoding::decode(&current_path)
+                        .map(|s| s.into_owned())
+                        .unwrap_or_else(|_| current_path.clone());
+                    let parent_path = decoded_current
                         .rsplit_once('/')
                         .map(|(p, _)| p.to_string())
                         .unwrap_or_default();
@@ -242,7 +246,11 @@ pub fn FilePathBreadcrumb(
     git_ref: String,
     path: String,
 ) -> Element {
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    // Decode path once at entry to prevent double-encoding if path came from URL
+    let decoded_path = urlencoding::decode(&path)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| path.clone());
+    let parts: Vec<&str> = decoded_path.split('/').filter(|s| !s.is_empty()).collect();
 
     rsx! {
         nav {
@@ -310,6 +318,13 @@ pub fn BranchSelector(
 ) -> Element {
     let mut is_open = use_signal(|| false);
 
+    // Decode path once at entry to prevent double-encoding if path came from URL
+    let decoded_path = urlencoding::decode(&path)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| path.clone());
+    // Encode once for use in routes
+    let encoded_path = urlencoding::encode(&decoded_path).into_owned();
+
     rsx! {
         div {
             class: "relative",
@@ -370,8 +385,6 @@ pub fn BranchSelector(
 
                     for branch in branches.iter() {
                         {
-                            // Encode path to handle spaces and special characters
-                            let encoded_path = urlencoding::encode(&path).into_owned();
                             rsx! {
                                 Link {
                                     key: "{branch}",

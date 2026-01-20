@@ -116,7 +116,10 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("a") {
             if let Some(coord) = slice.get(1) {
-                let relay = slice.get(2).map(|s| s.to_string());
+                // Filter out "source" marker from relay hint
+                let relay = slice.get(2)
+                    .filter(|s| *s != "source")
+                    .map(|s| s.to_string());
                 return HighlightSource::Article {
                     coordinate: coord.to_string(),
                     relay_hint: relay,
@@ -130,7 +133,10 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("e") {
             if let Some(id) = slice.get(1) {
-                let relay = slice.get(2).map(|s| s.to_string());
+                // Filter out "source" marker from relay hint
+                let relay = slice.get(2)
+                    .filter(|s| *s != "source")
+                    .map(|s| s.to_string());
                 return HighlightSource::Event {
                     event_id: id.to_string(),
                     relay_hint: relay,

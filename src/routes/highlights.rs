@@ -103,26 +103,30 @@ pub fn Highlights() -> Element {
 
             match result {
                 Ok(new_highlights) => {
-                    // Track oldest timestamp from new events
-                    if let Some(last) = new_highlights.last() {
-                        oldest_timestamp.set(Some(last.created_at));
-                    }
-
-                    // Determine if there are more events to load
-                    has_more.set(new_highlights.len() >= 30);
-
-                    // Deduplicate by event ID and append
+                    // Build existing IDs set FIRST for deduplication
                     let existing_ids: std::collections::HashSet<_> = highlights
                         .read()
                         .iter()
                         .map(|h| h.event.id)
                         .collect();
 
+                    // Filter unique items BEFORE setting has_more
                     let unique: Vec<_> = new_highlights
-                        .into_iter()
+                        .iter()
                         .filter(|h| !existing_ids.contains(&h.event.id))
+                        .cloned()
                         .collect();
 
+                    // Update oldest_timestamp with saturating_sub to make until exclusive
+                    // (Filter::until is inclusive, so we subtract 1 to avoid re-fetching boundary)
+                    if let Some(last) = new_highlights.last() {
+                        oldest_timestamp.set(Some(last.created_at.saturating_sub(1)));
+                    }
+
+                    // has_more: got full page AND actually have new unique items
+                    has_more.set(new_highlights.len() >= 30 && !unique.is_empty());
+
+                    // Extend with unique items
                     let mut current = highlights.read().clone();
                     current.extend(unique);
                     highlights.set(current);
@@ -275,9 +279,14 @@ pub fn Highlights() -> Element {
 
 /// Load highlights from people the user follows
 async fn load_following_highlights(until: Option<u64>) -> Result<Vec<Highlight>, String> {
-    // Get the current user's pubkey
-    let pubkey_hex = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    // Get the current user's pubkey - fall back to global if not authenticated
+    let pubkey_hex = match auth_store::get_pubkey() {
+        Some(pk) => pk,
+        None => {
+            log::info!("User not authenticated, falling back to global highlights");
+            return load_global_highlights(until).await;
+        }
+    };
 
     // Fetch the user's contact list (people they follow)
     let contacts = match nostr_client::fetch_contacts(pubkey_hex.clone()).await {
