@@ -60,8 +60,8 @@ pub fn CashuWallet() -> Element {
         }
 
         // Terms already checked - if accepted, init wallet
-        if terms == Some(true) {
-            if matches!(*cashu::WALLET_STATUS.read(), cashu::WalletStatus::Uninitialized) {
+        if terms == Some(true)
+            && matches!(*cashu::WALLET_STATUS.read(), cashu::WalletStatus::Uninitialized) {
                 // Mark init as started to prevent duplicate spawns
                 init_started.set(true);
                 spawn(async move {
@@ -70,7 +70,6 @@ pub fn CashuWallet() -> Element {
                     }
                 });
             }
-        }
     });
 
     // Check if we should show setup wizard

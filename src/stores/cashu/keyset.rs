@@ -335,7 +335,7 @@ pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationRe
     let swap_result = wallet.swap(
         None, // No specific amount, swap all
         SplitTarget::default(),
-        cdk_proofs.clone().into(),
+        cdk_proofs.clone(),
         None, // No spending conditions
         true, // Include fee
     ).await

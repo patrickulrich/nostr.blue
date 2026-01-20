@@ -253,7 +253,7 @@ impl ProofPaginator {
 
     /// Get number of batches
     pub fn batch_count(&self) -> usize {
-        (self.proofs.len() + self.batch_size - 1) / self.batch_size
+        self.proofs.len().div_ceil(self.batch_size)
     }
 
     /// Get current batch index

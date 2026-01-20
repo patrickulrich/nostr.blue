@@ -12,14 +12,20 @@ pub struct ProfileEditorModalProps {
 #[component]
 pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     // Form fields
-    let mut name = use_signal(|| String::new());
-    let mut display_name = use_signal(|| String::new());
-    let mut about = use_signal(|| String::new());
-    let mut picture = use_signal(|| String::new());
-    let mut banner = use_signal(|| String::new());
-    let mut website = use_signal(|| String::new());
-    let mut nip05 = use_signal(|| String::new());
-    let mut lud16 = use_signal(|| String::new());
+    let mut name = use_signal(String::new);
+    let mut display_name = use_signal(String::new);
+    let mut about = use_signal(String::new);
+    let mut picture = use_signal(String::new);
+    let mut banner = use_signal(String::new);
+    let mut website = use_signal(String::new);
+    let mut nip05 = use_signal(String::new);
+    let mut lud16 = use_signal(String::new);
+
+    // NIP-24 fields
+    let mut is_bot = use_signal(|| false);
+    let mut birthday_year = use_signal(|| None::<u16>);
+    let mut birthday_month = use_signal(|| None::<u8>);
+    let mut birthday_day = use_signal(|| None::<u8>);
 
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -43,6 +49,17 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             website.set(profile.website.unwrap_or_default());
                             nip05.set(profile.nip05.unwrap_or_default());
                             lud16.set(profile.lud16.unwrap_or_default());
+                            // NIP-24 fields
+                            is_bot.set(profile.bot.unwrap_or(false));
+                            if let Some(bday) = profile.birthday {
+                                birthday_year.set(bday.year);
+                                birthday_month.set(bday.month);
+                                birthday_day.set(bday.day);
+                            } else {
+                                birthday_year.set(None);
+                                birthday_month.set(None);
+                                birthday_day.set(None);
+                            }
                         }
                         Err(e) => {
                             log::error!("Failed to load profile for editing: {}", e);
@@ -76,6 +93,29 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
             }
             if let Ok(url) = nostr_sdk::Url::parse(&website.read().clone()) {
                 metadata = metadata.website(url);
+            }
+
+            // NIP-24: Add bot field to custom metadata if true
+            if *is_bot.read() {
+                metadata.custom.insert("bot".to_string(), serde_json::Value::Bool(true));
+            }
+
+            // NIP-24: Add birthday to custom metadata if any field is set
+            let year = *birthday_year.read();
+            let month = *birthday_month.read();
+            let day = *birthday_day.read();
+            if year.is_some() || month.is_some() || day.is_some() {
+                let mut birthday_obj = serde_json::Map::new();
+                if let Some(y) = year {
+                    birthday_obj.insert("year".to_string(), serde_json::Value::Number(y.into()));
+                }
+                if let Some(m) = month {
+                    birthday_obj.insert("month".to_string(), serde_json::Value::Number(m.into()));
+                }
+                if let Some(d) = day {
+                    birthday_obj.insert("day".to_string(), serde_json::Value::Number(d.into()));
+                }
+                metadata.custom.insert("birthday".to_string(), serde_json::Value::Object(birthday_obj));
             }
 
             match nostr_client::publish_metadata(metadata).await {
@@ -128,7 +168,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     rsx! {
         // Modal overlay
         div {
-            class: "fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4",
+            class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
             onclick: close_modal,
 
             // Modal content
@@ -325,6 +365,116 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             placeholder: "user@getalby.com",
                             value: "{lud16}",
                             oninput: move |evt| lud16.set(evt.value())
+                        }
+                    }
+
+                    // Bot Account Toggle (NIP-24)
+                    div {
+                        class: "flex items-center justify-between",
+                        div {
+                            label {
+                                class: "block text-sm font-medium text-gray-700 dark:text-gray-300",
+                                "Bot Account"
+                            }
+                            p {
+                                class: "text-xs text-gray-500 dark:text-gray-400",
+                                "Mark this account as a bot or automated account"
+                            }
+                        }
+                        button {
+                            class: if *is_bot.read() {
+                                "relative inline-flex h-6 w-11 items-center rounded-full bg-blue-600 transition"
+                            } else {
+                                "relative inline-flex h-6 w-11 items-center rounded-full bg-gray-300 dark:bg-gray-600 transition"
+                            },
+                            r#type: "button",
+                            onclick: move |_| {
+                                let current = *is_bot.read();
+                                is_bot.set(!current);
+                            },
+                            span {
+                                class: if *is_bot.read() {
+                                    "inline-block h-4 w-4 transform rounded-full bg-white transition translate-x-6"
+                                } else {
+                                    "inline-block h-4 w-4 transform rounded-full bg-white transition translate-x-1"
+                                }
+                            }
+                        }
+                    }
+
+                    // Birthday (NIP-24)
+                    div {
+                        label {
+                            class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2",
+                            "Birthday (optional)"
+                        }
+                        div {
+                            class: "flex gap-2",
+                            // Month
+                            select {
+                                class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500",
+                                onchange: move |evt| {
+                                    let val = evt.value();
+                                    birthday_month.set(val.parse::<u8>().ok());
+                                },
+                                option {
+                                    value: "",
+                                    selected: birthday_month.read().is_none(),
+                                    "Month"
+                                }
+                                option { value: "1", selected: *birthday_month.read() == Some(1), "January" }
+                                option { value: "2", selected: *birthday_month.read() == Some(2), "February" }
+                                option { value: "3", selected: *birthday_month.read() == Some(3), "March" }
+                                option { value: "4", selected: *birthday_month.read() == Some(4), "April" }
+                                option { value: "5", selected: *birthday_month.read() == Some(5), "May" }
+                                option { value: "6", selected: *birthday_month.read() == Some(6), "June" }
+                                option { value: "7", selected: *birthday_month.read() == Some(7), "July" }
+                                option { value: "8", selected: *birthday_month.read() == Some(8), "August" }
+                                option { value: "9", selected: *birthday_month.read() == Some(9), "September" }
+                                option { value: "10", selected: *birthday_month.read() == Some(10), "October" }
+                                option { value: "11", selected: *birthday_month.read() == Some(11), "November" }
+                                option { value: "12", selected: *birthday_month.read() == Some(12), "December" }
+                            }
+                            // Day
+                            select {
+                                class: "w-20 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500",
+                                onchange: move |evt| {
+                                    let val = evt.value();
+                                    birthday_day.set(val.parse::<u8>().ok());
+                                },
+                                option {
+                                    value: "",
+                                    selected: birthday_day.read().is_none(),
+                                    "Day"
+                                }
+                                {(1..=31).map(|d| rsx! {
+                                    option {
+                                        value: "{d}",
+                                        selected: *birthday_day.read() == Some(d),
+                                        "{d}"
+                                    }
+                                })}
+                            }
+                            // Year
+                            select {
+                                class: "w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500",
+                                onchange: move |evt| {
+                                    let val = evt.value();
+                                    birthday_year.set(val.parse::<u16>().ok());
+                                },
+                                option {
+                                    value: "",
+                                    selected: birthday_year.read().is_none(),
+                                    "Year"
+                                }
+                                {(1920..=2024).rev().map(|y| rsx! {
+                                    option {
+                                        value: "{y}",
+                                        selected: *birthday_year.read() == Some(y),
+                                        "{y}"
+                                    }
+                                })}
+                            }
                         }
                     }
 

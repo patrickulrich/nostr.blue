@@ -2,11 +2,12 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, nostr_client, relay_metadata};
+use crate::stores::nostr_client::PublishResult;
 use std::time::Duration;
 use std::collections::HashMap;
 
-/// Represents a message in a conversation, handling both NIP-04 and NIP-17
+/// Represents a message in a conversation, handling NIP-04 and NIP-17
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationMessage {
     /// NIP-04 legacy encrypted direct message
@@ -43,6 +44,14 @@ impl ConversationMessage {
         match self {
             Self::Nip04 { event } => event.pubkey,
             Self::Nip17 { sender, .. } => *sender,
+        }
+    }
+
+    /// Get the encryption type for display
+    pub fn encryption_type(&self) -> &'static str {
+        match self {
+            Self::Nip04 { .. } => "NIP-04",
+            Self::Nip17 { .. } => "NIP-17",
         }
     }
 }
@@ -214,7 +223,7 @@ pub async fn init_dms() -> Result<(), String> {
 
     // Sort messages in each conversation by timestamp (uses actual rumor timestamp for NIP-17)
     for conversation in conversations.values_mut() {
-        conversation.messages.sort_by(|a, b| a.created_at().cmp(&b.created_at()));
+        conversation.messages.sort_by_key(|a| a.created_at());
     }
 
     log::info!("Organized into {} conversations", conversations.len());
@@ -224,7 +233,12 @@ pub async fn init_dms() -> Result<(), String> {
 }
 
 /// Send an encrypted DM to a recipient (NIP-17 compliant with sender copy)
-pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), String> {
+/// Returns PublishResult with combined relay statistics from both gift wraps
+///
+/// Per NIP-17, this sends to inbox relays (Kind 10050) for privacy:
+/// - Receiver's gift wrap -> recipient's inbox relays
+/// - Sender's copy -> sender's inbox relays
+pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<PublishResult, String> {
     use nostr_sdk::EventBuilder;
 
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
@@ -245,6 +259,34 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
 
     log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
 
+    // Fetch inbox relays (Kind 10050) for both parties
+    // client is already Arc<Client> from NOSTR_CLIENT
+    let client_arc = client.clone();
+
+    // Fetch recipient's inbox relays
+    let recipient_inbox_relays = match relay_metadata::fetch_relay_list(recipient_pk, client_arc.clone()).await {
+        Ok(metadata) if !metadata.dm_relays.is_empty() => {
+            log::info!("Using {} inbox relays for recipient", metadata.dm_relays.len());
+            metadata.dm_relays
+        }
+        _ => {
+            log::warn!("No inbox relays (10050) found for recipient, using defaults");
+            relay_metadata::default_dm_relays()
+        }
+    };
+
+    // Fetch sender's inbox relays
+    let sender_inbox_relays = match relay_metadata::fetch_relay_list(sender_pk, client_arc.clone()).await {
+        Ok(metadata) if !metadata.dm_relays.is_empty() => {
+            log::info!("Using {} inbox relays for sender copy", metadata.dm_relays.len());
+            metadata.dm_relays
+        }
+        _ => {
+            log::warn!("No inbox relays (10050) found for sender, using defaults");
+            relay_metadata::default_dm_relays()
+        }
+    };
+
     // Build the rumor (kind 14 unsigned message)
     let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
         .build(sender_pk);
@@ -259,20 +301,83 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
 
-    // With gossip, the client automatically routes to appropriate DM inbox relays (NIP-17)
-    log::debug!("Sending DM gift wraps using gossip routing");
+    // Send pre-signed gift wrap to recipient's inbox relays (preserves original signature)
+    log::info!("Sending receiver gift wrap to {} inbox relays", recipient_inbox_relays.len());
+    let receiver_result = nostr_client::send_presigned_event_to_relays(
+        receiver_gift_wrap.clone(),
+        recipient_inbox_relays.clone(),
+    ).await;
 
-    // Send gift wrap to receiver's inbox relays (NIP-17 compliant)
-    let receiver_result = client.send_event(&receiver_gift_wrap).await
-        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+    let receiver_result = match receiver_result {
+        Ok(result) => {
+            log::info!("Sent gift wrap to receiver: {} ({} success, {} failed)",
+                result.event_id,
+                result.success_count(),
+                result.failed_relays.len()
+            );
+            result
+        }
+        Err(e) => {
+            log::error!("Failed to send to recipient inbox relays: {}", e);
+            // Fallback to broadcast
+            log::warn!("Falling back to broadcast for receiver gift wrap");
+            let output = client.send_event(&receiver_gift_wrap).await
+                .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+            PublishResult::from_output(output)
+        }
+    };
 
-    log::info!("Sent gift wrap to receiver: {:?}", receiver_result.val);
+    // Send pre-signed gift wrap to sender's inbox relays (preserves original signature)
+    log::info!("Sending sender gift wrap to {} inbox relays", sender_inbox_relays.len());
+    let sender_result = nostr_client::send_presigned_event_to_relays(
+        sender_gift_wrap.clone(),
+        sender_inbox_relays.clone(),
+    ).await;
 
-    // Send gift wrap to sender's inbox relays for their own copy
-    let sender_result = client.send_event(&sender_gift_wrap).await
-    .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+    let sender_result = match sender_result {
+        Ok(result) => {
+            log::info!("Sent gift wrap to sender: {} ({} success, {} failed)",
+                result.event_id,
+                result.success_count(),
+                result.failed_relays.len()
+            );
+            result
+        }
+        Err(e) => {
+            log::error!("Failed to send to sender inbox relays: {}", e);
+            // Fallback to broadcast
+            log::warn!("Falling back to broadcast for sender gift wrap");
+            let output = client.send_event(&sender_gift_wrap).await
+                .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+            PublishResult::from_output(output)
+        }
+    };
 
-    log::info!("Sent gift wrap to sender (copy): {:?}", sender_result.val);
+    // Combine relay results from both gift wraps
+    let mut successful_relays: Vec<String> = receiver_result.successful_relays.iter()
+        .chain(sender_result.successful_relays.iter())
+        .cloned()
+        .collect();
+    successful_relays.sort();
+    successful_relays.dedup();
+
+    let mut failed_relays: Vec<(String, String)> = receiver_result.failed_relays.iter()
+        .chain(sender_result.failed_relays.iter())
+        .cloned()
+        .collect();
+    failed_relays.sort_by(|a, b| a.0.cmp(&b.0));
+    failed_relays.dedup_by(|a, b| a.0 == b.0);
+
+    let combined_result = PublishResult {
+        event_id: receiver_result.event_id, // Use receiver's event ID as primary
+        successful_relays,
+        failed_relays,
+    };
+
+    log::info!("DM sent: {} relays succeeded, {} failed",
+        combined_result.success_count(),
+        combined_result.failed_relays.len()
+    );
 
     // Refresh conversations to include new message
     if let Err(e) = init_dms().await {
@@ -280,10 +385,10 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<(), St
         // Continue despite refresh failure - message was sent successfully
     }
 
-    Ok(())
+    Ok(combined_result)
 }
 
-/// Decrypt a DM message (supports both NIP-04 and NIP-17)
+/// Decrypt a DM message (supports NIP-04 and NIP-17)
 pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
     // NIP-17: Content is already available from the unwrapped rumor
     if let ConversationMessage::Nip17 { rumor, .. } = msg {

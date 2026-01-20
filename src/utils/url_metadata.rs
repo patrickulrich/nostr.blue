@@ -353,9 +353,7 @@ fn clean_text(text: &str) -> String {
         if ch == '&' && chars.peek() == Some(&'#') {
             let hash_ch = chars.next().unwrap(); // consume '#'
 
-            let (is_hex, hex_ch) = if chars.peek() == Some(&'x') {
-                (true, Some(chars.next().unwrap()))
-            } else if chars.peek() == Some(&'X') {
+            let (is_hex, hex_ch) = if chars.peek() == Some(&'x') || chars.peek() == Some(&'X') {
                 (true, Some(chars.next().unwrap()))
             } else {
                 (false, None)

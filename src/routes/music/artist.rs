@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
+use std::sync::Arc;
 use crate::routes::Route;
 use crate::components::icons::*;
 use crate::components::UnifiedTrackCard;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
 use crate::stores::music_player::MusicTrack;
 use crate::stores::{nostr_client, nostr_music, profiles};
+use crate::utils::truncate_pubkey;
 
 /// Check if the ID is a 64-char hex string (nostr pubkey)
 fn is_nostr_pubkey(id: &str) -> bool {
@@ -96,7 +98,7 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
                     div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                         div { class: "flex items-start gap-6",
                             // Artist image with Wavlake badge
-                            div { class: "relative w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0",
+                            div { class: "relative w-32 h-32 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden shrink-0",
                                 if let Some(art_url) = &artist.artist_art_url {
                                     if !art_url.is_empty() {
                                         img {
@@ -240,7 +242,7 @@ fn WavlakeArtistSection(artist_id: String) -> Element {
 #[component]
 fn NostrArtistSection(pubkey: String) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
-    let mut tracks = use_signal(|| Vec::<nostr_music::NostrTrack>::new());
+    let mut tracks = use_signal(Vec::<nostr_music::NostrTrack>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
@@ -290,7 +292,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
     // Get display info from profile
     let artist_name = profile.read().as_ref()
         .map(|p| p.get_display_name())
-        .unwrap_or_else(|| format!("{}...", &pubkey[..8]));
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let artist_image = profile.read().as_ref()
         .and_then(|p| p.picture.clone())
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
@@ -298,9 +300,9 @@ fn NostrArtistSection(pubkey: String) -> Element {
         .and_then(|p| p.about.clone());
 
     // Convert tracks to MusicTrack for UnifiedTrackCard
-    let music_tracks: Vec<MusicTrack> = tracks.read().iter()
+    let music_tracks: Arc<Vec<MusicTrack>> = Arc::new(tracks.read().iter()
         .map(|t| t.clone().into())
-        .collect();
+        .collect());
 
     rsx! {
         div { class: "container mx-auto px-4 py-8",
@@ -342,7 +344,7 @@ fn NostrArtistSection(pubkey: String) -> Element {
                     div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                         div { class: "flex items-start gap-6",
                             // Artist image with Nostr badge
-                            div { class: "relative flex-shrink-0",
+                            div { class: "relative shrink-0",
                                 img {
                                     src: "{artist_image}",
                                     alt: "{artist_name}",

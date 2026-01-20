@@ -17,7 +17,6 @@ use super::cashu::{
     TokenData, ProofData, ProofState, WalletTokensStoreStoreExt,
     DleqData, PENDING_BY_MINT_SECRETS, WALLET_STATE,
 };
-use super::indexeddb_database::IndexedDbDatabase;
 
 /// Global MultiMintWallet instance
 /// Replaces the previous WALLET_CACHE HashMap approach
@@ -41,11 +40,11 @@ pub struct WalletBalances {
 }
 
 /// Global signal for balance breakdown
-pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(|| WalletBalances::default());
+pub static WALLET_BALANCES: GlobalSignal<WalletBalances> = Signal::global(WalletBalances::default);
 
 /// Initialize the MultiMintWallet with the given seed and localstore
 pub async fn init_multi_wallet(
-    localstore: Arc<IndexedDbDatabase>,
+    localstore: Arc<super::indexeddb_database::IndexedDbDatabase>,
     seed: [u8; 64],
 ) -> Result<Arc<MultiMintWallet>, String> {
     // Clear CDK-specific state (but NOT WALLET_STATUS - that would trigger init loop)
@@ -82,7 +81,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
     let mint_url = mint_url.parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-    multi_wallet.add_mint(mint_url, None).await
+    multi_wallet.add_mint(mint_url).await
         .map_err(|e| format!("Failed to add mint: {}", e))?;
 
     // Sync state after adding mint

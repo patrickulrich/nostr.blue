@@ -10,6 +10,7 @@ use crate::stores::signer::SIGNER_INFO;
 use crate::components::{ZapModal, VoiceReplyComposer, ReactionButton};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
 use crate::stores::nostr_client::HAS_SIGNER;
+use crate::utils::truncate_pubkey;
 use wasm_bindgen::JsCast;
 use std::time::Duration;
 use js_sys;
@@ -262,10 +263,8 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
             let _ = audio.play().map_err(|e| {
                 log::debug!("Play failed: {:?}", e);
             });
-        } else {
-            if let Err(e) = audio.pause() {
-                log::debug!("Pause failed: {:?}", e);
-            }
+        } else if let Err(e) = audio.pause() {
+            log::debug!("Pause failed: {:?}", e);
         }
     });
 
@@ -350,7 +349,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     // Get author display info
     let author_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
-        .unwrap_or_else(|| format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..]));
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let author_username = author_metadata.read().as_ref()
         .and_then(|m| m.name.clone())
@@ -423,7 +422,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 // Avatar
                 Link {
                     to: Route::Profile { pubkey: author_pubkey.clone() },
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     if !author_avatar.is_empty() {
                         img {
                             src: "{author_avatar}",
@@ -450,7 +449,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                             if !author_username.is_empty() && author_username != author_name {
                                 span { class: "text-muted-foreground text-sm truncate", "@{author_username}" }
                             }
-                            span { class: "text-muted-foreground text-sm flex-shrink-0", "· {time_ago}" }
+                            span { class: "text-muted-foreground text-sm shrink-0", "· {time_ago}" }
                         }
                     }
                 }
@@ -477,7 +476,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
                     // Play/Pause button
                     button {
-                        class: "flex-shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
                         onclick: toggle_play,
                         if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
                             // Pause icon

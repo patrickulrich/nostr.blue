@@ -2,11 +2,13 @@
 // Handles both Wavlake and Nostr tracks with source-aware zaps and prominent sats display
 
 use dioxus::prelude::*;
+use std::sync::Arc;
 use crate::routes::Route;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
 use crate::components::icons;
+use crate::components::{ContentShareModal, ContentType};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct UnifiedTrackCardProps {
@@ -17,9 +19,9 @@ pub struct UnifiedTrackCardProps {
     pub show_source_badge: bool,
     #[props(default = true)]
     pub show_sats: bool,
-    /// Optional playlist to enable continuous playback
+    /// Optional playlist to enable continuous playback (uses Arc for efficient sharing)
     #[props(default)]
-    pub playlist: Option<Vec<MusicTrack>>,
+    pub playlist: Option<Arc<Vec<MusicTrack>>>,
 }
 
 /// Unified track card that handles both Wavlake and Nostr tracks
@@ -39,6 +41,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             false
         }
     });
+
+    // Share modal state
+    let mut show_share_modal = use_signal(|| false);
 
     // For nostr tracks, we need to fetch the artist profile
     let artist_pubkey = track.artist_npub.clone();
@@ -79,7 +84,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             drop(player_state);
 
             // Otherwise, play this track (with playlist if provided)
-            music_player::play_track(track.clone(), playlist.clone(), None);
+            // Convert Arc to Vec for player (player owns the playlist)
+            let playlist_vec = playlist.as_ref().map(|arc| (**arc).clone());
+            music_player::play_track(track.clone(), playlist_vec, None);
         }
     };
 
@@ -106,16 +113,65 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let source_info = match &track.source {
         TrackSource::Wavlake { .. } => ("W", "Wavlake", "bg-orange-500/20 text-orange-400"),
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
+        TrackSource::NostrPodcast { .. } => ("P", "Nostr Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::RssMusic { .. } => ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400"),
+        TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
     };
 
     // Get artwork URL with fallback
     let artwork_url = track.album_art_url.clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
 
-    // Build artist route based on source (both go to music artist page)
+    // Build share URL and content type based on source
+    let (share_url, share_content_type) = match &track.source {
+        TrackSource::Wavlake { .. } => (
+            // Wavlake tracks use the track.id which is the Wavlake track ID
+            format!("https://wavlake.com/track/{}", track.id),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Nostr { coordinate, .. } => (
+            // Nostr music uses the coordinate for addressable events
+            format!("https://nostr.blue/music/track/{}", coordinate),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::NostrPodcast { coordinate, .. } => (
+            // Nostr podcasts use the coordinate
+            format!("https://nostr.blue/podcast/episode/{}", coordinate),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssPodcast { feed_url, episode_guid, .. } => (
+            format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url), urlencoding::encode(episode_guid)),
+            ContentType::PodcastEpisode,
+        ),
+        TrackSource::RssMusic { feed_id, episode_id, .. } => (
+            format!("https://nostr.blue/music/rss/album/{}#track-{}", feed_id, episode_id),
+            ContentType::MusicTrack,
+        ),
+        TrackSource::Radio { d_tag, .. } => (
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)),
+            ContentType::MusicTrack, // TODO: Add ContentType::RadioStation when available
+        ),
+    };
+
+    // Build artist route based on source (both go to music artist page, podcasts go to profile)
     let artist_route = match &track.source {
         TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist { artist_id: artist_id.clone() },
         TrackSource::Nostr { pubkey, .. } => Route::MusicArtist { artist_id: pubkey.clone() },
+        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile { pubkey: pubkey.clone() },
+        TrackSource::RssPodcast { .. } => {
+            // RSS podcasts don't have a profile page, use home as fallback
+            Route::Home { list: String::new() }
+        }
+        TrackSource::RssMusic { feed_id, .. } => {
+            // RSS music routes to album page
+            Route::MusicRssAlbum { feed_id: *feed_id }
+        }
+        TrackSource::Radio { pubkey, .. } => {
+            // Radio stations route to station owner's profile
+            Route::Profile { pubkey: pubkey.clone() }
+        }
     };
 
     rsx! {
@@ -124,7 +180,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
             // Album art with source badge
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{artwork_url}",
                     alt: "Album art",
@@ -189,7 +245,18 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                                         "{album}"
                                     }
                                 },
-                                TrackSource::Nostr { .. } => rsx! {
+                                TrackSource::RssMusic { feed_id, .. } => rsx! {
+                                    Link {
+                                        to: Route::MusicRssAlbum { feed_id: *feed_id },
+                                        class: "hover:text-foreground hover:underline",
+                                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                                        "{album}"
+                                    }
+                                },
+                                TrackSource::Nostr { .. } |
+                                TrackSource::NostrPodcast { .. } |
+                                TrackSource::RssPodcast { .. } |
+                                TrackSource::Radio { .. } => rsx! {
                                     span { "{album}" }
                                 }
                             }
@@ -202,7 +269,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             if props.show_sats {
                 if let Some(sats) = &sats_display {
                     div {
-                        class: "flex items-center gap-1 text-xs font-medium text-amber-500 flex-shrink-0",
+                        class: "flex items-center gap-1 text-xs font-medium text-amber-500 shrink-0",
                         dangerous_inner_html: icons::ZAP,
                         span { "{sats}" }
                     }
@@ -211,13 +278,13 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
             // Duration
             div {
-                class: "text-xs text-muted-foreground flex-shrink-0",
+                class: "text-xs text-muted-foreground shrink-0",
                 "{duration_str}"
             }
 
             // Actions (vote, zap)
             div {
-                class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
+                class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
 
                 // Vote button
                 button {
@@ -251,6 +318,28 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
                     },
                     dangerous_inner_html: icons::ZAP
                 }
+
+                // Share button
+                button {
+                    class: "p-2 hover:bg-muted rounded-full transition",
+                    title: "Share this track",
+                    onclick: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        show_share_modal.set(true);
+                    },
+                    dangerous_inner_html: icons::SHARE
+                }
+            }
+
+            // Share modal
+            if *show_share_modal.read() {
+                ContentShareModal {
+                    title: format!("{} - {}", track.title, track.artist),
+                    url: share_url.clone(),
+                    content_type: share_content_type,
+                    image_url: track.album_art_url.clone(),
+                    on_close: move |_| show_share_modal.set(false)
+                }
             }
         }
     }
@@ -265,7 +354,7 @@ pub fn UnifiedTrackCardSkeleton() -> Element {
 
             // Album art skeleton
             div {
-                class: "w-14 h-14 bg-muted rounded flex-shrink-0"
+                class: "w-14 h-14 bg-muted rounded shrink-0"
             }
 
             // Track info skeleton
@@ -281,12 +370,12 @@ pub fn UnifiedTrackCardSkeleton() -> Element {
 
             // Sats skeleton
             div {
-                class: "w-16 h-4 bg-muted rounded flex-shrink-0"
+                class: "w-16 h-4 bg-muted rounded shrink-0"
             }
 
             // Duration skeleton
             div {
-                class: "w-12 h-3 bg-muted rounded flex-shrink-0"
+                class: "w-12 h-3 bg-muted rounded shrink-0"
             }
         }
     }

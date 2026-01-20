@@ -1,0 +1,319 @@
+//! Highlights Feed Page (NIP-84 Kind 9802)
+//!
+//! Displays a feed of highlights with Following/Global toggle.
+
+use dioxus::prelude::*;
+use crate::stores::{auth_store, nostr_client};
+use crate::components::{HighlightCard, HighlightCardSkeleton, ClientInitializing};
+use crate::hooks::use_infinite_scroll;
+use crate::utils::nip84::{self, Highlight};
+use nostr_sdk::PublicKey;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum FeedType {
+    Following,
+    Global,
+}
+
+impl FeedType {
+    fn label(&self) -> &'static str {
+        match self {
+            FeedType::Following => "Following",
+            FeedType::Global => "Global",
+        }
+    }
+}
+
+#[component]
+pub fn Highlights() -> Element {
+    // Check if client is initialized
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+    // State for highlights
+    let mut highlights = use_signal(Vec::<Highlight>::new);
+    let mut loading = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
+    let mut refresh_trigger = use_signal(|| 0);
+    let mut feed_type = use_signal(|| FeedType::Following);  // Default to Following
+    let mut show_dropdown = use_signal(|| false);
+
+    // Pagination state for infinite scroll
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+
+    // Load highlights on mount and when refresh is triggered or feed type changes
+    use_effect(move || {
+        let _ = refresh_trigger.read();
+        let current_feed_type = *feed_type.read();
+        let is_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Only load if client is initialized
+        if !is_initialized {
+            return;
+        }
+
+        loading.set(true);
+        error.set(None);
+        oldest_timestamp.set(None);
+        has_more.set(true);
+
+        spawn(async move {
+            let result = match current_feed_type {
+                FeedType::Following => load_following_highlights(None).await,
+                FeedType::Global => load_global_highlights(None).await,
+            };
+
+            match result {
+                Ok(new_highlights) => {
+                    // Track oldest timestamp for pagination
+                    if let Some(last) = new_highlights.last() {
+                        oldest_timestamp.set(Some(last.created_at));
+                    }
+
+                    // Determine if there are more events to load
+                    has_more.set(new_highlights.len() >= 30);
+
+                    highlights.set(new_highlights);
+                    loading.set(false);
+                }
+                Err(e) => {
+                    error.set(Some(e));
+                    loading.set(false);
+                }
+            }
+        });
+    });
+
+    // Load more function for infinite scroll
+    let load_more = move || {
+        if *loading.read() || !*has_more.read() {
+            return;
+        }
+
+        let until = *oldest_timestamp.read();
+        let current_feed_type = *feed_type.read();
+
+        loading.set(true);
+
+        spawn(async move {
+            let result = match current_feed_type {
+                FeedType::Following => load_following_highlights(until).await,
+                FeedType::Global => load_global_highlights(until).await,
+            };
+
+            match result {
+                Ok(new_highlights) => {
+                    // Track oldest timestamp from new events
+                    if let Some(last) = new_highlights.last() {
+                        oldest_timestamp.set(Some(last.created_at));
+                    }
+
+                    // Determine if there are more events to load
+                    has_more.set(new_highlights.len() >= 30);
+
+                    // Deduplicate by event ID and append
+                    let existing_ids: std::collections::HashSet<_> = highlights
+                        .read()
+                        .iter()
+                        .map(|h| h.event.id)
+                        .collect();
+
+                    let unique: Vec<_> = new_highlights
+                        .into_iter()
+                        .filter(|h| !existing_ids.contains(&h.event.id))
+                        .collect();
+
+                    let mut current = highlights.read().clone();
+                    current.extend(unique);
+                    highlights.set(current);
+                    loading.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to load more highlights: {}", e);
+                    loading.set(false);
+                }
+            }
+        });
+    };
+
+    // Set up infinite scroll
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+
+    // Show client initializing if not ready
+    if !client_initialized {
+        return rsx! {
+            ClientInitializing {}
+        };
+    }
+
+    rsx! {
+        div { class: "flex flex-col min-h-screen",
+            // Sticky header with dropdown
+            div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
+                div { class: "max-w-[600px] mx-auto px-4 py-3 flex items-center justify-between",
+                    h1 { class: "text-xl font-bold", "Highlights" }
+
+                    // Feed type dropdown
+                    div { class: "relative",
+                        button {
+                            class: "px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/80 flex items-center gap-2 text-sm font-medium transition-colors",
+                            onclick: move |_| show_dropdown.toggle(),
+                            "{feed_type.read().label()}"
+                            svg {
+                                xmlns: "http://www.w3.org/2000/svg",
+                                class: "w-4 h-4",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M19 9l-7 7-7-7"
+                                }
+                            }
+                        }
+
+                        // Dropdown menu
+                        if *show_dropdown.read() {
+                            div {
+                                class: "absolute right-0 mt-2 w-40 bg-card border border-border rounded-lg shadow-lg z-50",
+                                onclick: move |_| show_dropdown.set(false),
+
+                                button {
+                                    class: "w-full px-4 py-2 text-left hover:bg-accent rounded-t-lg transition-colors",
+                                    class: if *feed_type.read() == FeedType::Following { "bg-accent/50" } else { "" },
+                                    onclick: move |_| {
+                                        feed_type.set(FeedType::Following);
+                                        refresh_trigger.set(refresh_trigger() + 1);
+                                    },
+                                    "Following"
+                                }
+                                button {
+                                    class: "w-full px-4 py-2 text-left hover:bg-accent rounded-b-lg transition-colors",
+                                    class: if *feed_type.read() == FeedType::Global { "bg-accent/50" } else { "" },
+                                    onclick: move |_| {
+                                        feed_type.set(FeedType::Global);
+                                        refresh_trigger.set(refresh_trigger() + 1);
+                                    },
+                                    "Global"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Content area
+            div { class: "flex-1 p-4 max-w-[600px] mx-auto w-full",
+                // Error state
+                if let Some(err) = error.read().as_ref() {
+                    div {
+                        class: "text-center py-8 text-destructive",
+                        "Error loading highlights: {err}"
+                    }
+                }
+
+                // Loading state (initial)
+                else if *loading.read() && highlights.read().is_empty() {
+                    div { class: "space-y-4",
+                        for _ in 0..5 {
+                            HighlightCardSkeleton {}
+                        }
+                    }
+                }
+
+                // Empty state
+                else if highlights.read().is_empty() {
+                    div {
+                        class: "text-center py-12 text-muted-foreground",
+                        div { class: "text-4xl mb-4", "📝" }
+                        h2 { class: "text-lg font-semibold mb-2", "No highlights found" }
+                        p { class: "text-sm",
+                            if *feed_type.read() == FeedType::Following {
+                                "People you follow haven't shared any highlights yet."
+                            } else {
+                                "No highlights available. Be the first to highlight something!"
+                            }
+                        }
+                    }
+                }
+
+                // Highlights list
+                else {
+                    div { class: "space-y-4",
+                        for highlight in highlights.read().iter() {
+                            HighlightCard {
+                                key: "{highlight.event.id}",
+                                event: highlight.event.clone()
+                            }
+                        }
+
+                        // Infinite scroll sentinel
+                        div { id: "{sentinel_id}", class: "h-4" }
+
+                        // Loading more indicator
+                        if *loading.read() && !highlights.read().is_empty() {
+                            div { class: "py-4",
+                                HighlightCardSkeleton {}
+                            }
+                        }
+
+                        // End of feed
+                        if !*has_more.read() && !highlights.read().is_empty() {
+                            div {
+                                class: "text-center py-8 text-muted-foreground text-sm",
+                                "You've reached the end"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Load highlights from people the user follows
+async fn load_following_highlights(until: Option<u64>) -> Result<Vec<Highlight>, String> {
+    // Get the current user's pubkey
+    let pubkey_hex = auth_store::get_pubkey()
+        .ok_or("Not authenticated")?;
+
+    // Fetch the user's contact list (people they follow)
+    let contacts = match nostr_client::fetch_contacts(pubkey_hex.clone()).await {
+        Ok(contacts) => contacts,
+        Err(e) => {
+            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            return load_global_highlights(until).await;
+        }
+    };
+
+    // If user doesn't follow anyone, show global feed
+    if contacts.is_empty() {
+        log::info!("User doesn't follow anyone, showing global highlights");
+        return load_global_highlights(until).await;
+    }
+
+    log::info!("User follows {} accounts", contacts.len());
+
+    // Parse contact pubkeys
+    let mut authors = Vec::new();
+    for contact in contacts.iter() {
+        if let Ok(pk) = PublicKey::parse(contact) {
+            authors.push(pk);
+        }
+    }
+
+    if authors.is_empty() {
+        log::warn!("No valid contact pubkeys, falling back to global feed");
+        return load_global_highlights(until).await;
+    }
+
+    // Fetch highlights from followed users
+    nip84::fetch_highlights_by_authors(authors, 30, until).await
+}
+
+/// Load global highlights (discovery feed)
+async fn load_global_highlights(until: Option<u64>) -> Result<Vec<Highlight>, String> {
+    nip84::fetch_global_highlights(30, until).await
+}
