@@ -573,7 +573,8 @@ pub fn ContentShareModal(
                                                         current.push_str("\n\n");
                                                     }
                                                     current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
-                                                    nostr_text.set(current);
+                                                    nostr_text.set(current.clone());
+                                                    cursor_position.set(current.len());
                                                 },
                                                 BookOpenIcon { class: "w-3 h-3" }
                                                 "Add Verse"
@@ -592,7 +593,8 @@ pub fn ContentShareModal(
                                                 current.push(' ');
                                             }
                                             current.push_str(&url_for_button);
-                                            nostr_text.set(current);
+                                            nostr_text.set(current.clone());
+                                            cursor_position.set(current.len());
                                         }
                                     },
                                     Link2Icon { class: "w-3 h-3" }

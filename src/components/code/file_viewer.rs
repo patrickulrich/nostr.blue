@@ -4,7 +4,6 @@
 //! Shows file metadata including detected language label.
 
 use dioxus::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
 /// Extract file extension from filename

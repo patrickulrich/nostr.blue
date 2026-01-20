@@ -167,6 +167,9 @@ pub fn AsciiDocContent(
                 last_notified_metadata.set(Some(metadata.clone()));
                 handler.call(metadata.clone());
             }
+        } else if citation_metadata_for_effect.is_none() {
+            // Clear cached metadata when citations are disabled so re-enabling with same metadata triggers callback
+            last_notified_metadata.set(None);
         }
     }));
 

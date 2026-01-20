@@ -129,7 +129,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                             title.set(c.base.title.clone());
                             author.set(c.base.author.clone());
                             cited_text.set(c.base.content.clone());
+                            // Clear conversation_summary to avoid stale data from previous edits
                             // Note: conversation_summary is not stored in struct, only passed at publish time
+                            conversation_summary.set(String::new());
                             prompt_url.set(c.url.clone().unwrap_or_default());
                         }
                     }

@@ -33,13 +33,6 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
 
     let has_cover = !props.cover_url.read().is_empty();
 
-    // Compute the for attribute value - need owned String for lifetime
-    let label_for = if props.show_url_input {
-        cover_input_id.read().clone()
-    } else {
-        String::new()
-    };
-
     // Handle successful upload - fills in the URL field
     let handle_upload = {
         let mut cover_url = props.cover_url;
@@ -73,14 +66,25 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         div {
             class: "space-y-3",
 
-            // Label - only associate with input when it's rendered
-            label {
-                class: "block text-sm font-medium mb-2",
-                r#for: "{label_for}",
-                "Cover Image"
+            // Label - use <label> with for attribute when input is rendered, otherwise <span>
+            if props.show_url_input {
+                label {
+                    class: "block text-sm font-medium mb-2",
+                    r#for: "{cover_input_id}",
+                    "Cover Image"
+                    span {
+                        class: "text-muted-foreground font-normal ml-1",
+                        "(optional)"
+                    }
+                }
+            } else {
                 span {
-                    class: "text-muted-foreground font-normal ml-1",
-                    "(optional)"
+                    class: "block text-sm font-medium mb-2",
+                    "Cover Image"
+                    span {
+                        class: "text-muted-foreground font-normal ml-1",
+                        "(optional)"
+                    }
                 }
             }
 
@@ -164,6 +168,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                             r#type: "button",
                             class: "p-2 bg-red-600/80 hover:bg-red-600 text-white rounded-full transition",
                             title: "Remove cover image",
+                            aria_label: "Remove cover image",
                             onclick: handle_remove,
                             // X icon
                             svg {
