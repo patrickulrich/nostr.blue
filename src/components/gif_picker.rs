@@ -24,6 +24,8 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut picker_left = use_signal(|| 0.0);
     #[allow(unused_mut)] // Mutated only in WASM target
     let mut picker_right = use_signal(|| 0.0);
+    #[allow(unused_mut)] // Mutated only in WASM target
+    let mut is_mobile = use_signal(|| false);
 
     // Read GIF state from global store
     let gif_results = GIF_RESULTS.read();
@@ -95,29 +97,39 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                             .and_then(|h| h.as_f64())
                                             .unwrap_or(800.0);
 
-                                        let picker_width = 700.0;
-                                        let picker_height = 600.0; // Approximate height
-                                        let margin = 8.0;
+                                        // Mobile breakpoint (sm = 640px)
+                                        let is_mobile_view = viewport_width < 640.0;
+                                        is_mobile.set(is_mobile_view);
 
-                                        // Check if there's space on the right
-                                        let space_on_right = viewport_width - rect.right();
-                                        let has_space_right = space_on_right >= picker_width + margin;
-
-                                        // Calculate vertical position to center on button
-                                        let button_center_y = rect.top() + (rect.height() / 2.0);
-                                        let desired_top = button_center_y - (picker_height / 2.0);
-                                        // Clamp to viewport bounds
-                                        let final_top = desired_top.max(margin).min(viewport_height - picker_height - margin);
-                                        picker_top.set(final_top);
-
-                                        if has_space_right {
-                                            // Position to the right of button
-                                            picker_left.set(rect.right() + margin);
-                                            position_right.set(true);
+                                        if is_mobile_view {
+                                            // On mobile: position at top with margins, CSS handles width
+                                            picker_top.set(16.0); // 1rem from top
                                         } else {
-                                            // Position to the left of button
-                                            picker_right.set(viewport_width - rect.left() + margin);
-                                            position_right.set(false);
+                                            // Desktop: existing left/right positioning logic
+                                            let picker_width = 700.0;
+                                            let picker_height = 600.0; // Approximate height
+                                            let margin = 8.0;
+
+                                            // Check if there's space on the right
+                                            let space_on_right = viewport_width - rect.right();
+                                            let has_space_right = space_on_right >= picker_width + margin;
+
+                                            // Calculate vertical position to center on button
+                                            let button_center_y = rect.top() + (rect.height() / 2.0);
+                                            let desired_top = button_center_y - (picker_height / 2.0);
+                                            // Clamp to viewport bounds
+                                            let final_top = desired_top.max(margin).min(viewport_height - picker_height - margin);
+                                            picker_top.set(final_top);
+
+                                            if has_space_right {
+                                                // Position to the right of button
+                                                picker_left.set(rect.right() + margin);
+                                                position_right.set(true);
+                                            } else {
+                                                // Position to the left of button
+                                                picker_right.set(viewport_width - rect.left() + margin);
+                                                position_right.set(false);
+                                            }
                                         }
                                     }
                                 }
@@ -135,8 +147,12 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
             // GIF picker popover
             if *show_picker.read() {
                 div {
-                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[60] w-[700px]",
-                    style: if *position_right.read() {
+                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[60]",
+                    class: "w-[calc(100vw-2rem)] sm:w-[500px] md:w-[700px]",
+                    style: if *is_mobile.read() {
+                        // Mobile: fixed position, CSS handles width via responsive classes
+                        "top: 1rem; left: 1rem; right: 1rem;".to_string()
+                    } else if *position_right.read() {
                         format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read())
                     } else {
                         format!("top: {}px; right: {}px;", *picker_top.read(), *picker_right.read())
@@ -184,8 +200,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
 
                     // Content area with scrolling
                     div {
-                        class: "overflow-y-auto",
-                        style: "max-height: 500px;",
+                        class: "overflow-y-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-[500px]",
 
                         // Recent GIFs section (if any and no active search)
                         if !recent_gifs.data().read().is_empty() && search_query.read().is_empty() {
@@ -219,7 +234,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                     img {
                                                         src: "{thumb_url}",
                                                         alt: "{alt_text}",
-                                                        class: "w-24 h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-xs hover:shadow-md",
+                                                        class: "w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 object-cover rounded-lg border-2 border-transparent group-hover:border-blue-500 group-hover:scale-105 transition-all duration-200 shadow-xs hover:shadow-md",
                                                         loading: "lazy"
                                                     }
                                                 }
@@ -274,7 +289,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             // GIF grid
                             if !gif_results.data().read().is_empty() {
                                 div {
-                                    class: "grid grid-cols-6 gap-2",
+                                    class: "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2",
                                     for (idx, gif) in gif_results.data().read().iter().enumerate() {
                                         {
                                             let gif_url = gif.url.clone();

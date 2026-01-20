@@ -118,7 +118,7 @@ pub fn CodeImport() -> Element {
                 let relays = [
                     "wss://relay.damus.io",
                     "wss://nos.lol",
-                    "wss://relay.nostr.band",
+                    "wss://relay.snort.social",
                 ];
 
                 let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };

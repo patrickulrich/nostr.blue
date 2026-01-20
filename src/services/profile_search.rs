@@ -69,6 +69,11 @@ pub fn search_cached_profiles(
     let cache = PROFILE_CACHE.read();
 
     for (pubkey_str, profile) in cache.iter() {
+        // Early exit if we have enough results
+        if results.len() >= limit {
+            break;
+        }
+
         let pubkey = match PublicKey::from_hex(pubkey_str) {
             Ok(pk) => pk,
             Err(_) => continue,

@@ -297,7 +297,6 @@ const DEFAULT_RELAYS: &[&str] = &[
     "wss://nos.lol",
     "wss://relay.snort.social",
     "wss://nostr.wine",
-    "wss://relay.nostr.band",
 ];
 
 /// Video-specific relay for optimal video content discovery
