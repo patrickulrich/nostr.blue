@@ -1,6 +1,7 @@
 /// NIP-78: Preferred Reactions Storage
 /// Stores user's preferred reaction emojis on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
+use gloo_storage::{LocalStorage, Storage};
 use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -63,6 +64,9 @@ const APP_DATA_KIND: u16 = 30078;
 /// D tag identifier for reaction preferences
 const REACTIONS_D_TAG: &str = "nostr.blue/reactions";
 
+/// localStorage key for caching reaction preferences
+const REACTIONS_LOCAL_STORAGE_KEY: &str = "nostr_blue_reaction_prefs";
+
 /// Maximum number of preferred reactions
 pub const MAX_REACTIONS: usize = 10;
 
@@ -87,7 +91,25 @@ pub fn get_default_reaction() -> Option<PreferredReaction> {
     PREFERRED_REACTIONS.read().first().cloned()
 }
 
+/// Load cached reaction preferences from localStorage
+fn load_cached_reactions() -> Option<ReactionsData> {
+    LocalStorage::get::<String>(REACTIONS_LOCAL_STORAGE_KEY)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+}
+
+/// Save reaction preferences to localStorage
+fn cache_reactions(data: &ReactionsData) {
+    if let Ok(json) = serde_json::to_string(data) {
+        let _ = LocalStorage::set(REACTIONS_LOCAL_STORAGE_KEY, json);
+    }
+}
+
 /// Load preferred reactions from Nostr relays (NIP-78)
+/// Uses a 3-step loading strategy for reliability:
+/// 1. Load from localStorage first for instant UI
+/// 2. Query local database (nostr-sdk caches events)
+/// 3. Fetch from relays to sync any updates
 pub async fn load_preferred_reactions() {
     // Guard against concurrent loads
     {
@@ -98,11 +120,26 @@ pub async fn load_preferred_reactions() {
         *REACTIONS_STATE.write() = Nip78LoadState::Loading;
     }
 
-    log::info!("Loading preferred reactions from Nostr (NIP-78)...");
+    log::info!("Loading preferred reactions...");
 
-    // Not authenticated - use defaults, don't retry
+    // STEP 1: Try localStorage first for instant UI
+    let mut loaded_from_cache = false;
+    if let Some(cached) = load_cached_reactions() {
+        if !cached.reactions.is_empty() {
+            log::info!("Loaded {} reactions from localStorage", cached.reactions.len());
+            let reactions: Vec<PreferredReaction> = cached.reactions
+                .into_iter()
+                .take(MAX_REACTIONS)
+                .collect();
+            *PREFERRED_REACTIONS.write() = reactions;
+            loaded_from_cache = true;
+        }
+    }
+
+    // Not authenticated - use cache or defaults
     if !auth_store::is_authenticated() {
-        log::info!("Not authenticated, using default reactions");
+        log::info!("Not authenticated, using {} reactions",
+            if loaded_from_cache { "cached" } else { "default" });
         *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
@@ -112,7 +149,11 @@ pub async fn load_preferred_reactions() {
         Some(c) => c.clone(),
         None => {
             log::warn!("Client not initialized");
-            *REACTIONS_STATE.write() = Nip78LoadState::Failed("Client not initialized".into());
+            *REACTIONS_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::Failed("Client not initialized".into())
+            };
             return;
         }
     };
@@ -127,14 +168,22 @@ pub async fn load_preferred_reactions() {
                 Ok(pk) => pk,
                 Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
-                    *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
+                    *REACTIONS_STATE.write() = if loaded_from_cache {
+                        Nip78LoadState::Loaded
+                    } else {
+                        Nip78LoadState::LoadedDefaults
+                    };
                     return;
                 }
             }
         }
         None => {
             log::warn!("No pubkey available");
-            *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
+            *REACTIONS_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::LoadedDefaults
+            };
             return;
         }
     };
@@ -146,45 +195,73 @@ pub async fn load_preferred_reactions() {
         .identifier(REACTIONS_D_TAG)
         .limit(1);
 
-    // Ensure relays are ready before fetching
+    // STEP 2: Query local database first (nostr-sdk best practice)
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if let Some(event) = db_events.into_iter().next() {
+            log::info!("Found reactions preference in local database: {}", event.id);
+            if let Ok(data) = serde_json::from_str::<ReactionsData>(&event.content) {
+                if !data.reactions.is_empty() {
+                    let reactions: Vec<PreferredReaction> = data.reactions
+                        .clone()
+                        .into_iter()
+                        .take(MAX_REACTIONS)
+                        .collect();
+                    *PREFERRED_REACTIONS.write() = reactions;
+                    cache_reactions(&data); // Update localStorage
+                    loaded_from_cache = true;
+                }
+            }
+        }
+    }
+
+    // STEP 3: Fetch from relays to sync any updates
     nostr_client::ensure_relays_ready(&client).await;
 
-    // Fetch reactions event
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                log::info!("Found reactions preference event: {}", event.id);
+                log::info!("Found reactions preference event from relays: {}", event.id);
 
-                // Parse reactions from content
                 match serde_json::from_str::<ReactionsData>(&event.content) {
                     Ok(data) => {
                         if !data.reactions.is_empty() {
-                            // Truncate to MAX_REACTIONS to handle malformed/malicious events
                             let reactions: Vec<PreferredReaction> = data.reactions
+                                .clone()
                                 .into_iter()
                                 .take(MAX_REACTIONS)
                                 .collect();
-                            log::info!("Loaded {} preferred reactions from Nostr", reactions.len());
+                            log::info!("Loaded {} preferred reactions from Nostr relays", reactions.len());
                             *PREFERRED_REACTIONS.write() = reactions;
+                            cache_reactions(&data); // Update localStorage
                         }
                         *REACTIONS_STATE.write() = Nip78LoadState::Loaded;
                     }
                     Err(e) => {
-                        // Parse error - use defaults, don't retry (data is corrupt)
                         log::warn!("Failed to parse reactions data: {}", e);
-                        *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
+                        *REACTIONS_STATE.write() = if loaded_from_cache {
+                            Nip78LoadState::Loaded
+                        } else {
+                            Nip78LoadState::LoadedDefaults
+                        };
                     }
                 }
             } else {
-                // No event found - user has no saved prefs, use defaults
-                log::info!("No reactions preferences found on Nostr, using defaults");
-                *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
+                log::info!("No reactions preferences found on relays");
+                *REACTIONS_STATE.write() = if loaded_from_cache {
+                    Nip78LoadState::Loaded
+                } else {
+                    Nip78LoadState::LoadedDefaults
+                };
             }
         }
         Err(e) => {
-            // Network error - RETRY CANDIDATE
             log::warn!("Failed to fetch reactions preferences: {}", e);
-            *REACTIONS_STATE.write() = Nip78LoadState::Failed(e.to_string());
+            // If we have cached data, consider it a success
+            *REACTIONS_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::Failed(e.to_string())
+            };
         }
     }
 }
@@ -246,6 +323,9 @@ pub async fn save_preferred_reactions(reactions: Vec<PreferredReaction>) -> Resu
             log::warn!("Relay {} failed: {}", relay, error);
         }
     }
+
+    // Cache to localStorage for instant loading next time
+    cache_reactions(&data);
 
     // Update global state
     *PREFERRED_REACTIONS.write() = reactions;
