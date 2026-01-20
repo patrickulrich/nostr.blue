@@ -182,7 +182,11 @@ pub fn CodeFileTree(
             // Parent directory link if not at root
             if !current_path.is_empty() {
                 {
-                    let parent_path = current_path
+                    // Decode current_path first to handle URL-encoded paths from routes
+                    let decoded_current = urlencoding::decode(&current_path)
+                        .map(|s| s.into_owned())
+                        .unwrap_or_else(|_| current_path.clone());
+                    let parent_path = decoded_current
                         .rsplit_once('/')
                         .map(|(p, _)| p.to_string())
                         .unwrap_or_default();
@@ -242,7 +246,11 @@ pub fn FilePathBreadcrumb(
     git_ref: String,
     path: String,
 ) -> Element {
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    // Decode path once at entry to prevent double-encoding if path came from URL
+    let decoded_path = urlencoding::decode(&path)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| path.clone());
+    let parts: Vec<&str> = decoded_path.split('/').filter(|s| !s.is_empty()).collect();
 
     rsx! {
         nav {
@@ -310,6 +318,13 @@ pub fn BranchSelector(
 ) -> Element {
     let mut is_open = use_signal(|| false);
 
+    // Decode path once at entry to prevent double-encoding if path came from URL
+    let decoded_path = urlencoding::decode(&path)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| path.clone());
+    // Encode once for use in routes
+    let encoded_path = urlencoding::encode(&decoded_path).into_owned();
+
     rsx! {
         div {
             class: "relative",
@@ -369,41 +384,45 @@ pub fn BranchSelector(
                     class: "absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-50 py-1",
 
                     for branch in branches.iter() {
-                        Link {
-                            key: "{branch}",
-                            to: Route::CodeRepoTree {
-                                naddr: naddr.clone(),
-                                git_ref: branch.clone(),
-                                path: path.clone(),
-                            },
-                            onclick: move |_| is_open.set(false),
-                            class: if *branch == current_ref {
-                                "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground"
-                            } else {
-                                "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition"
-                            },
+                        {
+                            rsx! {
+                                Link {
+                                    key: "{branch}",
+                                    to: Route::CodeRepoTree {
+                                        naddr: naddr.clone(),
+                                        git_ref: branch.clone(),
+                                        path: encoded_path.clone(),
+                                    },
+                                    onclick: move |_| is_open.set(false),
+                                    class: if *branch == current_ref {
+                                        "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground"
+                                    } else {
+                                        "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition"
+                                    },
 
-                            if *branch == current_ref {
-                                svg {
-                                    class: "w-4 h-4",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    polyline { points: "20 6 9 17 4 12" }
+                                    if *branch == current_ref {
+                                        svg {
+                                            class: "w-4 h-4",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            polyline { points: "20 6 9 17 4 12" }
+                                        }
+                                    } else {
+                                        div { class: "w-4" }
+                                    }
+
+                                    span {
+                                        class: "text-sm truncate",
+                                        "{branch}"
+                                    }
                                 }
-                            } else {
-                                div { class: "w-4" }
-                            }
-
-                            span {
-                                class: "text-sm truncate",
-                                "{branch}"
                             }
                         }
                     }

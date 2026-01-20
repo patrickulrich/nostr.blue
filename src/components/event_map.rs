@@ -44,6 +44,10 @@ export async function loadLeaflet() {
         link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
         link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
         link.crossOrigin = '';
+        link.onerror = () => {
+            window.leafletLoadingPromise = null;
+            reject(new Error('Failed to load Leaflet CSS'));
+        };
         document.head.appendChild(link);
 
         // Load JS
@@ -55,7 +59,10 @@ export async function loadLeaflet() {
             console.log('Leaflet loaded successfully');
             resolve();
         };
-        script.onerror = () => reject(new Error('Failed to load Leaflet'));
+        script.onerror = () => {
+            window.leafletLoadingPromise = null;
+            reject(new Error('Failed to load Leaflet JS'));
+        };
         document.head.appendChild(script);
     });
 
@@ -207,11 +214,6 @@ pub struct GeocodedEvent {
 pub struct EventMapProps {
     /// Events to display on map
     pub events: Vec<UnifiedEvent>,
-    /// Callback when marker is clicked (receives the event's naddr)
-    /// TODO: Connect this to Leaflet marker click events via JS interop
-    #[props(default)]
-    #[allow(dead_code)]
-    pub on_marker_click: Option<EventHandler<String>>,
     /// CSS height for the map container
     #[props(default = "400px".to_string())]
     pub height: String,
@@ -236,10 +238,13 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut processed_event_ids = use_signal(String::new);
     // Cancellation flag for geocoding task - set to true on unmount
     let mut geocode_cancelled = use_signal(|| false);
+    // Unmount flag for Leaflet async tasks - set to true on unmount
+    let mut unmounted = use_signal(|| false);
 
-    // Cancel geocoding task on unmount
+    // Cancel geocoding task and mark unmounted on unmount
     use_drop(move || {
         geocode_cancelled.set(true);
+        unmounted.set(true);
     });
 
     // Memoize events key - recomputes only when props.events changes
@@ -252,6 +257,8 @@ pub fn EventMap(props: EventMapProps) -> Element {
             e.title().hash(&mut hasher);
             e.start_timestamp().hash(&mut hasher);
             // Hash locations for map marker positioning
+            // Include both location() (single) and locations() (multiple) for completeness
+            e.location().hash(&mut hasher);
             for loc in e.locations() {
                 loc.hash(&mut hasher);
             }
@@ -271,9 +278,17 @@ pub fn EventMap(props: EventMapProps) -> Element {
         leaflet_loading.set(true);
         spawn(async move {
             if let Err(e) = loadLeaflet().await {
+                // Check unmount before updating signals
+                if *unmounted.read() {
+                    return;
+                }
                 log::error!("Failed to load Leaflet: {:?}", e);
                 leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
                 leaflet_loading.set(false);
+                return;
+            }
+            // Check unmount before updating signals
+            if *unmounted.read() {
                 return;
             }
             leaflet_loaded.set(true);
@@ -291,6 +306,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
         let id = container_id.read().clone();
         spawn(async move {
             gloo_timers::future::sleep(std::time::Duration::from_millis(100)).await;
+
+            // Check unmount before JS interop and signal updates
+            if *unmounted.read() {
+                return;
+            }
 
             // Default to world view
             if initMap(&id, 20.0, 0.0, 2) {

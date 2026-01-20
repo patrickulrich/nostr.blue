@@ -135,6 +135,9 @@ pub mod blossom;
 #[cfg(target_arch = "wasm32")]
 pub mod bible;
 
+// Highlights (NIP-84 Kind 9802)
+pub mod highlights;
+
 // Stub bible module for non-WASM builds (clippy/check on native targets)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bible {
@@ -293,6 +296,7 @@ use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
 use blossom::BlossomPage;
 use bible::{BibleHome, BibleChapter, BibleSearch};
+use highlights::Highlights;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -700,6 +704,10 @@ pub enum Route {
 
         #[route("/bible/search")]
         BibleSearch {},
+
+        // Highlights (NIP-84 Kind 9802)
+        #[route("/highlights")]
+        Highlights {},
 
         #[route("/settings")]
         Settings {},
@@ -1870,6 +1878,23 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
                 path { d: "M12 7v6" }
                 path { d: "M9 10h6" }
+            }
+        },
+        SidebarItem::Highlights => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Highlighter pen icon
+                path { d: "m9 11-6 6v3h9l3-3" }
+                path { d: "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" }
             }
         },
     }

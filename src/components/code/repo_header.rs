@@ -50,16 +50,27 @@ pub fn RepoHeader(
             // Owner avatar (circular with ring)
             div {
                 class: "w-5 h-5 rounded-full overflow-hidden ring-2 ring-primary shrink-0",
-                if let Some(url) = &picture_url {
-                    img {
-                        class: "w-5 h-5 object-cover",
-                        src: "{url}",
-                        alt: "{owner_name}",
-                    }
-                } else {
-                    div {
-                        class: "w-5 h-5 bg-muted flex items-center justify-center text-xs font-bold",
-                        "{owner_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                {
+                    // Validate URL before rendering img to prevent loading invalid/malicious URLs
+                    let valid_picture = picture_url.as_ref().filter(|url| {
+                        url.starts_with("http://") || url.starts_with("https://")
+                    });
+                    if let Some(url) = valid_picture {
+                        rsx! {
+                            img {
+                                class: "w-5 h-5 object-cover",
+                                src: "{url}",
+                                alt: "{owner_name}",
+                                referrerpolicy: "no-referrer",
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div {
+                                class: "w-5 h-5 bg-muted flex items-center justify-center text-xs font-bold",
+                                "{owner_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                            }
+                        }
                     }
                 }
             }

@@ -31,6 +31,10 @@ pub static HAS_SIGNER: GlobalSignal<bool> = Signal::global(|| false);
 /// The current signer type (if any)
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 
+/// Whether at least one relay has connected (triggers NIP-78 retries)
+/// Once true, stays true for the session (relay may reconnect automatically)
+pub static RELAY_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Contacts cache for faster feed loading (5-minute TTL)
 struct CachedContacts {
     pubkey: String,
@@ -68,6 +72,10 @@ pub async fn ensure_relays_ready(client: &Client) {
 
     if any_connected {
         log::debug!("At least one relay is already connected, proceeding with fetch");
+        // Ensure signal is set for any code checking relay readiness
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
         return;
     }
 
@@ -92,6 +100,10 @@ pub async fn ensure_relays_ready(client: &Client) {
 
             if connected {
                 log::info!("Relay connected after {}ms", start.elapsed().as_millis());
+                // Signal relay connection for reactive retry triggers (one-time)
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
                 return;
             }
 
@@ -114,6 +126,10 @@ pub async fn ensure_relays_ready(client: &Client) {
 
             if connected {
                 log::info!("Relay connected after {:?}", start.elapsed());
+                // Signal relay connection for reactive retry triggers (one-time)
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
                 return;
             }
 
@@ -132,6 +148,10 @@ pub async fn ensure_relays_ready(client: &Client) {
         log::warn!("After timeout: no relays connected - fetches may fail or use cached data");
     } else {
         log::info!("After connection attempt: {} relay(s) connected", connected_count);
+        // Signal relay connection for reactive retry triggers (one-time)
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
     }
 }
 

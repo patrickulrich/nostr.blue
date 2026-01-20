@@ -34,6 +34,7 @@ pub mod nip52;  // NIP-52 Calendar events
 pub mod nip53;  // NIP-53 Live activities
 pub mod nip54;  // NIP-54 Wiki (kind 30818)
 pub mod nip58;  // NIP-58 Badges
+pub mod nip84;  // NIP-84 Highlights (Kind 9802)
 pub mod nip48;  // NIP-48 Proxy Tags (bridged content)
 pub mod ics;    // ICS (iCalendar) import/export
 pub mod recipe;       // Recipe parsing and validation

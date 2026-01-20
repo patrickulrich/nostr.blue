@@ -13,8 +13,12 @@ use super::status_badge::{CodeStatusBadge, BadgeSize, status_color_class};
 pub fn CodePullCard(
     pr: PullRequest,
 ) -> Element {
-    // Extract title from content (first line or subject)
-    let title = pr.content.lines().next().unwrap_or("Untitled patch").to_string();
+    // Extract title from content - skip empty lines to find actual content
+    let title = pr.content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("Untitled patch")
+        .to_string();
 
     rsx! {
         Link {
@@ -85,7 +89,12 @@ pub fn CodePullCard(
 /// Compact PR row for tables
 #[component]
 pub fn CodePullRow(pr: PullRequest) -> Element {
-    let title = pr.content.lines().next().unwrap_or("Untitled patch").to_string();
+    // Extract title from content - skip empty lines to find actual content
+    let title = pr.content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("Untitled patch")
+        .to_string();
 
     rsx! {
         Link {
