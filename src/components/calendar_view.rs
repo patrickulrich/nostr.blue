@@ -709,9 +709,31 @@ fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHan
         bg_color
     );
 
+    // Check for handler first - allows clicking private/unsigned events
+    if let Some(handler) = on_event_click {
+        let event = pe.event.clone();
+        return rsx! {
+            div {
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
+                style: "{style}",
+                onclick: move |_| handler.call(event.clone()),
+                div {
+                    class: "font-medium truncate",
+                    "{pe.event.title()}"
+                }
+                if pe.position.height > 40.0 {
+                    div {
+                        class: "opacity-90 truncate",
+                        "{format_event_time(&pe.event)}"
+                    }
+                }
+            }
+        };
+    }
+
     let naddr = pe.event.naddr();
 
-    // Skip rendering link for events without valid naddr (e.g., private/unsigned events)
+    // No handler and no naddr - render non-clickable div
     if naddr.is_empty() {
         return rsx! {
             div {
@@ -731,48 +753,26 @@ fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHan
         };
     }
 
-    // If on_event_click handler is provided, use it; otherwise use Link navigation
-    if let Some(handler) = on_event_click {
-        let event = pe.event.clone();
-        rsx! {
-            div {
-                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
-                style: "{style}",
-                onclick: move |_| handler.call(event.clone()),
-                div {
-                    class: "font-medium truncate",
-                    "{pe.event.title()}"
-                }
-                if pe.position.height > 40.0 {
-                    div {
-                        class: "opacity-90 truncate",
-                        "{format_event_time(&pe.event)}"
-                    }
-                }
-            }
-        }
+    // No handler but has naddr - render Link for navigation
+    let detail_route = if pe.event.is_livestream() {
+        Route::LiveStreamDetail { note_id: naddr.to_string() }
     } else {
-        // Route livestreams to /videos/live, calendar events to /calendar
-        let detail_route = if pe.event.is_livestream() {
-            Route::LiveStreamDetail { note_id: naddr.to_string() }
-        } else {
-            Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
-        };
+        Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
+    };
 
-        rsx! {
-            Link {
-                to: detail_route,
-                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
-                style: "{style}",
+    rsx! {
+        Link {
+            to: detail_route,
+            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
+            style: "{style}",
+            div {
+                class: "font-medium truncate",
+                "{pe.event.title()}"
+            }
+            if pe.position.height > 40.0 {
                 div {
-                    class: "font-medium truncate",
-                    "{pe.event.title()}"
-                }
-                if pe.position.height > 40.0 {
-                    div {
-                        class: "opacity-90 truncate",
-                        "{format_event_time(&pe.event)}"
-                    }
+                    class: "opacity-90 truncate",
+                    "{format_event_time(&pe.event)}"
                 }
             }
         }

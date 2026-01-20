@@ -386,7 +386,7 @@ async fn create_list(
         String::new()
     };
 
-    let builder = EventBuilder::new(Kind::from(list_type.kind()), content).tags(tags);
+    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content).tags(tags);
 
     client
         .send_event_builder(builder)
