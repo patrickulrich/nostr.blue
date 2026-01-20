@@ -260,7 +260,8 @@ fn WeekView(props: WeekViewProps) -> Element {
                                                 onclick: {
                                                     let event = event.clone();
                                                     let handler = props.on_event_click;
-                                                    move |_| {
+                                                    move |e| {
+                                                        e.stop_propagation();
                                                         if let Some(h) = &handler {
                                                             h.call(event.clone());
                                                         }

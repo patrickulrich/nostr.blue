@@ -89,6 +89,7 @@ pub fn AsciiDocContent(
         }
 
         citations_loading.set(true);
+        citations_error.set(false);  // Clear stale error before fetch
 
         spawn(async move {
             let result = fetch_citations_by_identifiers(&identifiers).await;

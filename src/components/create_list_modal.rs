@@ -94,6 +94,11 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
     let on_created = props.on_created;
 
     let handle_create = move |_| {
+        // Guard against re-entry while already creating
+        if *loading.peek() {
+            return;
+        }
+
         let list_type_val = *list_type.read();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
@@ -356,12 +361,13 @@ async fn create_list(
         ),
     ];
 
-    // Add description if provided
+    // Add description if provided (enforce 500-char limit matching UI)
     let desc = description.trim();
     if !desc.is_empty() {
+        let bounded_desc: String = desc.chars().take(500).collect();
         tags.push(Tag::custom(
             nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
-            vec![desc.to_string()],
+            vec![bounded_desc],
         ));
     }
 
