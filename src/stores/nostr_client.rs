@@ -434,6 +434,9 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
             if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
                 log::warn!("Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS);
+                // Signal false so downstream watchers know init completed without relay
+                // They can retry via ensure_relays_ready when a relay connects later
+                *RELAY_CONNECTED.write() = false;
                 break;
             }
         }
@@ -460,6 +463,9 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
             if start.elapsed() > timeout {
                 log::warn!("Relay connection timeout after {:?}, proceeding anyway", timeout);
+                // Signal false so downstream watchers know init completed without relay
+                // They can retry via ensure_relays_ready when a relay connects later
+                *RELAY_CONNECTED.write() = false;
                 break;
             }
         }
