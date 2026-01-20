@@ -259,6 +259,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         &cited_text_val,
                         if summary_val.is_empty() { None } else { Some(&summary_val) },
                         if prompt_url_val.is_empty() { None } else { Some(&prompt_url_val) },
+                        if title_val.is_empty() { None } else { Some(&title_val) },
+                        if author_val.is_empty() { None } else { Some(&author_val) },
                         existing_d_tag.as_deref(),
                     ).await
                 }

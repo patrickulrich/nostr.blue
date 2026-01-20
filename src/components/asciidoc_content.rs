@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use crate::utils::asciidoc::{
-    render_asciidoc, render_content_auto, content_to_plain_text,
+    render_content_auto_with_options, content_to_plain_text,
     render_content_with_citations, content_has_citations, extract_citation_identifiers,
 };
 use crate::utils::markdown::sanitize_html;
@@ -145,11 +145,8 @@ pub fn AsciiDocContent(
         (html, result.footnotes_html, result.endnotes_html, Some(metadata))
     } else {
         // Process content through our renderers with automatic format detection
-        let mut html = if enable_wikilinks {
-            render_content_auto(&content)
-        } else {
-            render_asciidoc(&content)
-        };
+        // Always use auto-detection, controlling wikilinks separately
+        let mut html = render_content_auto_with_options(&content, enable_wikilinks);
 
         // Process book:: links if enabled
         if enable_book_links {
@@ -240,11 +237,8 @@ pub fn AsciiDocContentCollapsible(
     // Compute rendered content directly - props are not reactive so use_memo wouldn't recompute on changes
     // Sanitize to prevent XSS
     let rendered = {
-        let html = if enable_wikilinks {
-            render_content_auto(&content)
-        } else {
-            render_asciidoc(&content)
-        };
+        // Always use auto-detection, controlling wikilinks separately
+        let html = render_content_auto_with_options(&content, enable_wikilinks);
         sanitize_html(&html)
     };
 

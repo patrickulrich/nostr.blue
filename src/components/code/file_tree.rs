@@ -369,41 +369,47 @@ pub fn BranchSelector(
                     class: "absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-50 py-1",
 
                     for branch in branches.iter() {
-                        Link {
-                            key: "{branch}",
-                            to: Route::CodeRepoTree {
-                                naddr: naddr.clone(),
-                                git_ref: branch.clone(),
-                                path: path.clone(),
-                            },
-                            onclick: move |_| is_open.set(false),
-                            class: if *branch == current_ref {
-                                "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground"
-                            } else {
-                                "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition"
-                            },
+                        {
+                            // Encode path to handle spaces and special characters
+                            let encoded_path = urlencoding::encode(&path).into_owned();
+                            rsx! {
+                                Link {
+                                    key: "{branch}",
+                                    to: Route::CodeRepoTree {
+                                        naddr: naddr.clone(),
+                                        git_ref: branch.clone(),
+                                        path: encoded_path.clone(),
+                                    },
+                                    onclick: move |_| is_open.set(false),
+                                    class: if *branch == current_ref {
+                                        "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground"
+                                    } else {
+                                        "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition"
+                                    },
 
-                            if *branch == current_ref {
-                                svg {
-                                    class: "w-4 h-4",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    polyline { points: "20 6 9 17 4 12" }
+                                    if *branch == current_ref {
+                                        svg {
+                                            class: "w-4 h-4",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            polyline { points: "20 6 9 17 4 12" }
+                                        }
+                                    } else {
+                                        div { class: "w-4" }
+                                    }
+
+                                    span {
+                                        class: "text-sm truncate",
+                                        "{branch}"
+                                    }
                                 }
-                            } else {
-                                div { class: "w-4" }
-                            }
-
-                            span {
-                                class: "text-sm truncate",
-                                "{branch}"
                             }
                         }
                     }

@@ -71,6 +71,10 @@ pub fn BadgeDetailModal(
         // Update target pubkey for race condition detection
         target_pubkey.set(badge_pubkey.clone());
 
+        // Reset profile immediately so UI shows loading state while fetching
+        // This prevents stale data from being shown when pubkey changes
+        issuer_profile.set(None);
+
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
         } else {

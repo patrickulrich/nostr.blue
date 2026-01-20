@@ -3,7 +3,7 @@ const CACHE_NAME = 'nostr-blue-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',  // Required for SPA offline fallback routing
-  '/tailwind.css',
+  // Removed: '/tailwind.css' - built to /assets/tailwind-[hash].css with cache-busting
   // Removed: '/git-worker.js' - 672KB, only needed for /code routes (loaded on-demand)
   '/voice-recorder.js',
   '/manifest.json'

@@ -118,18 +118,33 @@ pub fn detect_content_format(content: &str) -> ContentFormat {
 /// Render content with automatic format detection
 ///
 /// Detects whether content is Markdown or AsciiDoc and renders accordingly.
-/// Also processes wikilinks in both formats.
+/// Optionally processes wikilinks in both formats.
 pub fn render_content_auto(content: &str) -> String {
+    render_content_auto_with_options(content, true)
+}
+
+/// Render content with automatic format detection and optional wikilink support
+///
+/// Detects whether content is Markdown or AsciiDoc and renders accordingly.
+/// When `enable_wikilinks` is true, wikilinks are processed.
+pub fn render_content_auto_with_options(content: &str, enable_wikilinks: bool) -> String {
     let format = detect_content_format(content);
 
     match format {
         ContentFormat::Markdown => {
-            // Process wikilinks first, then render Markdown
-            let with_wikilinks = render_wikilinks_to_html(content);
-            render_markdown(&with_wikilinks)
+            if enable_wikilinks {
+                let with_wikilinks = render_wikilinks_to_html(content);
+                render_markdown(&with_wikilinks)
+            } else {
+                render_markdown(content)
+            }
         }
         ContentFormat::AsciiDoc => {
-            render_asciidoc_with_wikilinks(content)
+            if enable_wikilinks {
+                render_asciidoc_with_wikilinks(content)
+            } else {
+                render_asciidoc(content)
+            }
         }
     }
 }

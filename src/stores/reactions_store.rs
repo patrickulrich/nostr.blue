@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client};
+use crate::stores::sidebar_store::Nip78LoadState;
 use crate::hooks::ReactionEmoji;
 
 /// A user's preferred reaction - either a standard unicode emoji or a custom NIP-30 emoji
@@ -78,8 +79,8 @@ pub fn default_reactions() -> Vec<PreferredReaction> {
 
 /// Global state for preferred reactions
 pub static PREFERRED_REACTIONS: GlobalSignal<Vec<PreferredReaction>> = Signal::global(default_reactions);
-pub static REACTIONS_LOADED: GlobalSignal<bool> = Signal::global(|| false);
-pub static REACTIONS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+/// NIP-78 load state for reaction preferences
+pub static REACTIONS_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
 
 /// Get the user's default reaction (first in the list)
 pub fn get_default_reaction() -> Option<PreferredReaction> {
@@ -88,32 +89,30 @@ pub fn get_default_reaction() -> Option<PreferredReaction> {
 
 /// Load preferred reactions from Nostr relays (NIP-78)
 pub async fn load_preferred_reactions() {
-    // Atomically check and set loading flag to avoid duplicate loads
+    // Guard against concurrent loads
     {
-        let mut loading = REACTIONS_LOADING.write();
-        if *loading {
+        let state = REACTIONS_STATE.read().clone();
+        if state.is_loading() {
             return;
         }
-        *loading = true;
+        *REACTIONS_STATE.write() = Nip78LoadState::Loading;
     }
 
     log::info!("Loading preferred reactions from Nostr (NIP-78)...");
 
-    // Check if authenticated
+    // Not authenticated - use defaults, don't retry
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using default reactions");
-        *REACTIONS_LOADING.write() = false;
-        *REACTIONS_LOADED.write() = true;
+        *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
 
-    // Get client and pubkey
+    // Get client - if not initialized, mark as Failed (will retry via main effect)
     let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
         Some(c) => c.clone(),
         None => {
             log::warn!("Client not initialized");
-            *REACTIONS_LOADING.write() = false;
-            *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
+            *REACTIONS_STATE.write() = Nip78LoadState::Failed("Client not initialized".into());
             return;
         }
     };
@@ -128,16 +127,14 @@ pub async fn load_preferred_reactions() {
                 Ok(pk) => pk,
                 Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
-                    *REACTIONS_LOADING.write() = false;
-                    *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
+                    *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
                     return;
                 }
             }
         }
         None => {
             log::warn!("No pubkey available");
-            *REACTIONS_LOADING.write() = false;
-            *REACTIONS_LOADED.write() = true; // Mark as loaded (with defaults) to prevent retry loops
+            *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
             return;
         }
     };
@@ -170,22 +167,26 @@ pub async fn load_preferred_reactions() {
                             log::info!("Loaded {} preferred reactions from Nostr", reactions.len());
                             *PREFERRED_REACTIONS.write() = reactions;
                         }
+                        *REACTIONS_STATE.write() = Nip78LoadState::Loaded;
                     }
                     Err(e) => {
+                        // Parse error - use defaults, don't retry (data is corrupt)
                         log::warn!("Failed to parse reactions data: {}", e);
+                        *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
                     }
                 }
             } else {
+                // No event found - user has no saved prefs, use defaults
                 log::info!("No reactions preferences found on Nostr, using defaults");
+                *REACTIONS_STATE.write() = Nip78LoadState::LoadedDefaults;
             }
         }
         Err(e) => {
+            // Network error - RETRY CANDIDATE
             log::warn!("Failed to fetch reactions preferences: {}", e);
+            *REACTIONS_STATE.write() = Nip78LoadState::Failed(e.to_string());
         }
     }
-
-    *REACTIONS_LOADING.write() = false;
-    *REACTIONS_LOADED.write() = true;
 }
 
 /// Save preferred reactions to Nostr relays (NIP-78)

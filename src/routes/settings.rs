@@ -489,9 +489,9 @@ pub fn Settings() -> Element {
                 if auth.is_authenticated {
                     div {
                         class: "mt-3 text-xs text-gray-500 dark:text-gray-400",
-                        if *reactions_store::REACTIONS_LOADING.read() {
+                        if reactions_store::REACTIONS_STATE.read().is_loading() {
                             "⏳ Loading..."
-                        } else if *reactions_store::REACTIONS_LOADED.read() {
+                        } else if reactions_store::REACTIONS_STATE.read().is_ready() {
                             "✓ Synced via NIP-78"
                         } else {
                             ""

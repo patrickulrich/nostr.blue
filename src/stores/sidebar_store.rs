@@ -9,6 +9,39 @@ use strum::{EnumIter, IntoEnumIterator};
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
 
+/// State for NIP-78 data loading operations
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Nip78LoadState {
+    /// Initial state, not yet attempted
+    #[default]
+    Pending,
+    /// Currently loading from relays
+    Loading,
+    /// Successfully loaded from relays
+    Loaded,
+    /// Using defaults (not authenticated, no data found, or parse error)
+    LoadedDefaults,
+    /// Network/fetch error - candidate for retry when relay connects
+    Failed(String),
+}
+
+impl Nip78LoadState {
+    /// Returns true if data is ready (loaded, defaults, or pending with defaults)
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Loaded | Self::LoadedDefaults | Self::Pending)
+    }
+
+    /// Returns true if load failed and should be retried
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// Returns true if currently loading (prevents duplicate loads)
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+}
+
 /// All customizable sidebar navigation items
 /// Auth-required items will be filtered at render time when user is logged out
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter)]
@@ -242,8 +275,8 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
 /// Global state for sidebar items
 pub static SIDEBAR_ITEMS: GlobalSignal<Vec<SidebarItem>> = Signal::global(default_sidebar_items);
 pub static SIDEBAR_SLOT_COUNT: GlobalSignal<usize> = Signal::global(|| DEFAULT_MAIN_SIDEBAR_SLOTS);
-pub static SIDEBAR_LOADED: GlobalSignal<bool> = Signal::global(|| false);
-pub static SIDEBAR_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+/// NIP-78 load state for sidebar preferences
+pub static SIDEBAR_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
 
 /// Get visible main sidebar items (up to slot count, filtered by auth)
 pub fn get_main_sidebar_items(is_authenticated: bool) -> Vec<SidebarItem> {
@@ -277,32 +310,30 @@ pub fn get_available_items(active_items: &[SidebarItem]) -> Vec<SidebarItem> {
 
 /// Load sidebar preferences from Nostr relays (NIP-78)
 pub async fn load_sidebar_preferences() {
-    // Atomically check and set loading flag to avoid duplicate loads
+    // Guard against concurrent loads
     {
-        let mut loading = SIDEBAR_LOADING.write();
-        if *loading {
+        let state = SIDEBAR_STATE.read().clone();
+        if state.is_loading() {
             return;
         }
-        *loading = true;
+        *SIDEBAR_STATE.write() = Nip78LoadState::Loading;
     }
 
     log::info!("Loading sidebar preferences from Nostr (NIP-78)...");
 
-    // Check if authenticated
+    // Not authenticated - use defaults, don't retry
     if !auth_store::is_authenticated() {
         log::info!("Not authenticated, using default sidebar");
-        *SIDEBAR_LOADING.write() = false;
-        *SIDEBAR_LOADED.write() = true;
+        *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
 
-    // Get client and pubkey
+    // Get client - if not initialized, mark as Failed (will retry via main effect)
     let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
         Some(c) => c.clone(),
         None => {
             log::warn!("Client not initialized");
-            *SIDEBAR_LOADING.write() = false;
-            *SIDEBAR_LOADED.write() = true;
+            *SIDEBAR_STATE.write() = Nip78LoadState::Failed("Client not initialized".into());
             return;
         }
     };
@@ -317,16 +348,14 @@ pub async fn load_sidebar_preferences() {
                 Ok(pk) => pk,
                 Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
-                    *SIDEBAR_LOADING.write() = false;
-                    *SIDEBAR_LOADED.write() = true;
+                    *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
                     return;
                 }
             }
         }
         None => {
             log::warn!("No pubkey available");
-            *SIDEBAR_LOADING.write() = false;
-            *SIDEBAR_LOADED.write() = true;
+            *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
             return;
         }
     };
@@ -356,22 +385,26 @@ pub async fn load_sidebar_preferences() {
                             *SIDEBAR_ITEMS.write() = data.active_items;
                             *SIDEBAR_SLOT_COUNT.write() = data.main_sidebar_count;
                         }
+                        *SIDEBAR_STATE.write() = Nip78LoadState::Loaded;
                     }
                     Err(e) => {
+                        // Parse error - use defaults, don't retry (data is corrupt)
                         log::warn!("Failed to parse sidebar data: {}", e);
+                        *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
                     }
                 }
             } else {
+                // No event found - user has no saved prefs, use defaults
                 log::info!("No sidebar preferences found on Nostr, using defaults");
+                *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
             }
         }
         Err(e) => {
+            // Network error - RETRY CANDIDATE
             log::warn!("Failed to fetch sidebar preferences: {}", e);
+            *SIDEBAR_STATE.write() = Nip78LoadState::Failed(e.to_string());
         }
     }
-
-    *SIDEBAR_LOADING.write() = false;
-    *SIDEBAR_LOADED.write() = true;
 }
 
 /// Save sidebar preferences to Nostr relays (NIP-78)

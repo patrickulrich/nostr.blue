@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, PublicKey, FromBech32};
+use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
 use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -228,13 +228,14 @@ pub fn ContentShareModal(
                     Ok(_) => {
                         copied.set(true);
                         log::info!("Content copied to clipboard");
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            spawn(async move {
+                        // Reset copied flag after 2 seconds
+                        spawn(async move {
+                            #[cfg(target_arch = "wasm32")]
+                            {
                                 gloo_timers::future::TimeoutFuture::new(2000).await;
-                                copied.set(false);
-                            });
-                        }
+                            }
+                            copied.set(false);
+                        });
                     }
                     Err(e) => {
                         log::error!("Failed to copy to clipboard: {:?}", e);
@@ -299,16 +300,16 @@ pub fn ContentShareModal(
             let url_clone = url_dm.clone();
 
             spawn(async move {
-                // Parse recipient as npub or hex
-                let recipient_hex = if let Ok(pubkey) = PublicKey::from_bech32(&manual_recipient) {
-                    pubkey.to_hex()
-                } else if let Ok(pubkey) = PublicKey::parse(&manual_recipient) {
-                    pubkey.to_hex()
-                } else {
-                    log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                    dm_error.set(Some("Invalid recipient. Please enter a valid npub or hex public key.".to_string()));
-                    is_publishing.set(false);
-                    return;
+                // Parse recipient - PublicKey::parse() handles all formats:
+                // hex, npub (bech32), and nostr: URIs (NIP-21)
+                let recipient_hex = match PublicKey::parse(&manual_recipient) {
+                    Ok(pubkey) => pubkey.to_hex(),
+                    Err(_) => {
+                        log::error!("Invalid recipient pubkey: {}", manual_recipient);
+                        dm_error.set(Some("Invalid recipient. Please enter a valid npub, hex, or nostr: URI.".to_string()));
+                        is_publishing.set(false);
+                        return;
+                    }
                 };
 
                 let message = content_type_dm.dm_message(&url_clone);

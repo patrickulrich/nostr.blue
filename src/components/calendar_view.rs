@@ -169,7 +169,7 @@ fn DayView(props: DayViewProps) -> Element {
                 div {
                     class: "absolute inset-0 left-16",
                     for pe in positioned.iter() {
-                        {render_positioned_event(pe)}
+                        {render_positioned_event(pe, props.on_event_click)}
                     }
                 }
             }
@@ -318,7 +318,7 @@ fn WeekView(props: WeekViewProps) -> Element {
                                 let positioned = position_day_events(&day_events, date);
                                 rsx! {
                                     for pe in positioned.iter() {
-                                        {render_positioned_event(pe)}
+                                        {render_positioned_event(pe, props.on_event_click)}
                                     }
                                 }
                             }
@@ -696,7 +696,7 @@ fn get_event_color(event: &UnifiedEvent) -> &'static str {
 }
 
 /// Render a positioned event
-fn render_positioned_event(pe: &PositionedEvent) -> Element {
+fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHandler<UnifiedEvent>>) -> Element {
     let bg_color = get_event_color(&pe.event);
 
     let style = format!(
@@ -730,26 +730,48 @@ fn render_positioned_event(pe: &PositionedEvent) -> Element {
         };
     }
 
-    // Route livestreams to /videos/live, calendar events to /calendar
-    let detail_route = if pe.event.is_livestream() {
-        Route::LiveStreamDetail { note_id: naddr.to_string() }
-    } else {
-        Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
-    };
-
-    rsx! {
-        Link {
-            to: detail_route,
-            class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
-            style: "{style}",
+    // If on_event_click handler is provided, use it; otherwise use Link navigation
+    if let Some(handler) = on_event_click {
+        let event = pe.event.clone();
+        rsx! {
             div {
-                class: "font-medium truncate",
-                "{pe.event.title()}"
-            }
-            if pe.position.height > 40.0 {
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
+                style: "{style}",
+                onclick: move |_| handler.call(event.clone()),
                 div {
-                    class: "opacity-90 truncate",
-                    "{format_event_time(&pe.event)}"
+                    class: "font-medium truncate",
+                    "{pe.event.title()}"
+                }
+                if pe.position.height > 40.0 {
+                    div {
+                        class: "opacity-90 truncate",
+                        "{format_event_time(&pe.event)}"
+                    }
+                }
+            }
+        }
+    } else {
+        // Route livestreams to /videos/live, calendar events to /calendar
+        let detail_route = if pe.event.is_livestream() {
+            Route::LiveStreamDetail { note_id: naddr.to_string() }
+        } else {
+            Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
+        };
+
+        rsx! {
+            Link {
+                to: detail_route,
+                class: "block text-white rounded-md p-1 overflow-hidden text-xs cursor-pointer hover:opacity-90 transition shadow-xs",
+                style: "{style}",
+                div {
+                    class: "font-medium truncate",
+                    "{pe.event.title()}"
+                }
+                if pe.position.height > 40.0 {
+                    div {
+                        class: "opacity-90 truncate",
+                        "{format_event_time(&pe.event)}"
+                    }
                 }
             }
         }

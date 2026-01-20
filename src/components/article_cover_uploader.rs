@@ -23,7 +23,9 @@ pub struct ArticleCoverUploaderProps {
 #[component]
 pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
-    let mut image_error = use_signal(|| false);
+    // Track which URL failed, not just whether an error occurred
+    // This allows auto-retry when the cover_url prop changes
+    let mut failed_url: Signal<Option<String>> = use_signal(|| None);
 
     // Generate unique IDs for this uploader instance
     let input_id = use_signal(|| format!("cover-upload-{}", uuid::Uuid::new_v4()));
@@ -44,7 +46,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         move |url: String| {
             cover_url.set(url);
             show_upload_modal.set(false);
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -53,7 +55,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         let mut cover_url = props.cover_url;
         move |e: Event<FormData>| {
             cover_url.set(e.value());
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -62,7 +64,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         let mut cover_url = props.cover_url;
         move |_| {
             cover_url.set(String::new());
-            image_error.set(false);
+            failed_url.set(None);
         }
     };
 
@@ -125,21 +127,32 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 div {
                     class: "relative rounded-lg overflow-hidden border border-border",
 
-                    // Image preview
-                    if !*image_error.read() {
-                        img {
-                            src: "{props.cover_url}",
-                            class: "w-full h-48 object-cover",
-                            alt: "Cover image preview",
-                            onerror: move |_| image_error.set(true),
-                        }
-                    } else {
-                        // Fallback for failed image load
-                        div {
-                            class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
-                            span { class: "text-4xl mb-2", "🖼️" }
-                            p { class: "text-sm", "Image failed to load" }
-                            p { class: "text-xs text-muted-foreground truncate max-w-full px-4", "{props.cover_url}" }
+                    // Image preview - check if the current URL is the one that failed
+                    {
+                        let current_url = props.cover_url.read();
+                        let is_current_url_failed = failed_url.read().as_ref() == Some(&*current_url);
+                        if !is_current_url_failed {
+                            rsx! {
+                                img {
+                                    src: "{current_url}",
+                                    class: "w-full h-48 object-cover",
+                                    alt: "Cover image preview",
+                                    onerror: {
+                                        let url = current_url.clone();
+                                        move |_| failed_url.set(Some(url.clone()))
+                                    },
+                                }
+                            }
+                        } else {
+                            // Fallback for failed image load
+                            rsx! {
+                                div {
+                                    class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
+                                    span { class: "text-4xl mb-2", "🖼️" }
+                                    p { class: "text-sm", "Image failed to load" }
+                                    p { class: "text-xs text-muted-foreground truncate max-w-full px-4", "{current_url}" }
+                                }
+                            }
                         }
                     }
 

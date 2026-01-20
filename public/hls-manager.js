@@ -25,9 +25,9 @@ window.hlsManager = window.hlsManager || {
 
         this.hlsLoading = new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js';
+            script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js';
             script.crossOrigin = 'anonymous';
-            script.integrity = 'sha384-1B+J55elPxu+trIhW7QThjZg3evX8C5P6zjB82Xnn46RKPAXpL+vkanRSjCidsJv';
+            script.integrity = 'sha384-z+tuLqMWl1/cPv7O+39RO0EURSNvorimpcCaMgeNwU+qFBx+AlUIl7jaAwg0cYil';
             script.onload = () => {
                 console.log('[HLS Manager] hls.js loaded');
                 this.hlsLoaded = true;
