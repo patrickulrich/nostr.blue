@@ -252,7 +252,6 @@ pub fn ContentShareModal(
         }
     };
 
-    let url_for_nostr = url.clone();
     let handle_share_to_nostr = move |_| {
         let text = nostr_text.read().trim().to_string();
         if text.is_empty() {
@@ -593,7 +592,7 @@ pub fn ContentShareModal(
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: {
-                                        let url_for_button = url_for_nostr.clone();
+                                        let url_for_button = url.clone();
                                         move |_| {
                                             let mut current = nostr_text.read().clone();
                                             if !current.is_empty() {

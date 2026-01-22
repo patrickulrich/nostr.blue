@@ -29,29 +29,50 @@ pub fn RepoActionBar(
     let mut star_loading = use_signal(|| false);
     let mut show_actions_menu = use_signal(|| false);
 
-    // Clone values needed in closures before they get moved
-    let repo_pubkey = repo.pubkey.clone();
-    let repo_id = repo.id.clone();
+    // Store prop values in signals to make them reactive across re-renders
+    // When navigating between repos, signals ensure memos and effects recompute
+    let mut repo_pubkey_signal = use_signal(|| repo.pubkey.clone());
+    let mut repo_id_signal = use_signal(|| repo.id.clone());
+
+    // Update signals when props change (triggers dependent memos/effects)
+    {
+        let current_pubkey = repo.pubkey.clone();
+        let current_id = repo.id.clone();
+        if *repo_pubkey_signal.read() != current_pubkey {
+            repo_pubkey_signal.set(current_pubkey);
+        }
+        if *repo_id_signal.read() != current_id {
+            repo_id_signal.set(current_id);
+        }
+    }
+
+    // Clone values needed in closures
     #[cfg(target_arch = "wasm32")]
-    let repo_pubkey_for_watch = repo_pubkey.clone();
+    let repo_pubkey_for_watch = repo.pubkey.clone();
     #[cfg(target_arch = "wasm32")]
-    let repo_id_for_watch = repo_id.clone();
+    let repo_id_for_watch = repo.id.clone();
     #[cfg(target_arch = "wasm32")]
-    let repo_pubkey_for_handler = repo_pubkey.clone();
+    let repo_pubkey_for_handler = repo.pubkey.clone();
     #[cfg(target_arch = "wasm32")]
     let repo_id_for_handler = repo.id.clone();
 
-    // Build coordinate for the repository
+    // Build coordinate for the repository (reactive via signal reads)
     let coordinate = use_memo(move || {
-        if let Ok(pk) = PublicKey::from_hex(&repo_pubkey) {
-            Some(Coordinate::new(Kind::GitRepoAnnouncement, pk).identifier(&repo_id))
+        let pubkey_str = repo_pubkey_signal.read();
+        let id_str = repo_id_signal.read();
+        if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
+            // Need explicit deref for identifier() which requires Into<String>
+            Some(Coordinate::new(Kind::GitRepoAnnouncement, pk).identifier(&*id_str))
         } else {
             None
         }
     });
 
-    // Check initial star status
+    // Check star status when coordinate changes (reactive via memo read)
     use_effect(move || {
+        // Reset starred state for new repo
+        is_starred.set(false);
+
         let coord = coordinate.read().clone();
         if let Some(coord) = coord {
             let coord_str = format!(

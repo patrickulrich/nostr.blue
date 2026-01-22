@@ -105,8 +105,12 @@ window.hlsManager = window.hlsManager || {
             liveMaxLatencyDurationCount: 10,
         });
 
+        // Track instance immediately to prevent orphaned workers on timeout
+        this.instances.set(audioId, hls);
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
+                this.instances.delete(audioId);
                 hls.destroy();
                 reject(new Error('HLS stream timeout - stream may be offline'));
             }, 15000);
@@ -121,7 +125,7 @@ window.hlsManager = window.hlsManager || {
             hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
                 clearTimeout(timeout);
                 console.log('[HLS Manager] Manifest parsed, levels:', data.levels.length);
-                this.instances.set(audioId, hls);
+                // Instance already tracked above; no need to set again
                 resolve({ type: 'hls.js', levels: data.levels.length, url: streamUrl });
             });
 

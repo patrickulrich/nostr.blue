@@ -83,8 +83,10 @@ pub fn BoardSlideover(
             pins.set(Vec::new());
             pins_loading.set(true);  // Set to true so loading shows on reopen
             pins_error.set(None);
-            // Invalidate any in-flight requests by resetting request_id to 0
-            request_id.set(0);
+            // Invalidate any in-flight requests by incrementing request_id
+            // This prevents a quickly reopened slideover from reusing the same ID
+            let next = request_id.read().wrapping_add(1);
+            request_id.set(if next == 0 { 1 } else { next });
         }
     });
 

@@ -351,7 +351,14 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                                 } else {
                                     select {
                                         class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
-                                        onchange: move |e| selected_list_id.set(Some(e.value().clone())),
+                                        onchange: move |e| {
+                                            let value = e.value();
+                                            if value.is_empty() {
+                                                selected_list_id.set(None);
+                                            } else {
+                                                selected_list_id.set(Some(value.clone()));
+                                            }
+                                        },
 
                                         option {
                                             value: "",

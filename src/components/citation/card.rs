@@ -103,13 +103,10 @@ pub fn CitationCard(
         Citation::Internal(c) => Some(("Ref", c.coordinate.clone())),
     };
 
-    let citation_clone = citation.clone();
-    let citation_clone2 = citation.clone();
-    let handle_click = move |_| {
-        if let Some(ref handler) = on_click {
-            handler.call(citation_clone.clone());
-        }
-    };
+    // Clone citation for each closure that needs it (CachedCitation is not Copy)
+    // EventHandler is Copy, so on_click can be used directly in both closures
+    let citation_for_click = citation.clone();
+    let citation_for_key = citation.clone();
 
     let is_clickable = on_click.is_some();
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
@@ -124,7 +121,11 @@ pub fn CitationCard(
             class: "group relative bg-card rounded-lg border border-border overflow-hidden hover:border-primary/50 transition-all duration-200 hover:shadow-lg {cursor_class}",
             tabindex: "{tabindex_val}",
             role: "{role_val}",
-            onclick: handle_click,
+            onclick: move |_| {
+                if let Some(handler) = on_click {
+                    handler.call(citation_for_click.clone());
+                }
+            },
             onkeydown: move |evt: KeyboardEvent| {
                 // Handle both Enter and Space keys for accessibility
                 // Key::Character(" ") covers spacebar on most platforms
@@ -135,8 +136,8 @@ pub fn CitationCard(
                 };
                 if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
-                    if let Some(ref handler) = on_click {
-                        handler.call(citation_clone2.clone());
+                    if let Some(handler) = on_click {
+                        handler.call(citation_for_key.clone());
                     }
                 }
             },
@@ -236,13 +237,10 @@ pub fn CitationCardCompact(
         Citation::Internal(_) => Some("Nostr".to_string()),
     };
 
-    let citation_clone = citation.clone();
-    let citation_clone2 = citation.clone();
-    let handle_click = move |_| {
-        if let Some(ref handler) = on_click {
-            handler.call(citation_clone.clone());
-        }
-    };
+    // Clone citation for each closure that needs it (CachedCitation is not Copy)
+    // EventHandler is Copy, so on_click can be used directly in both closures
+    let citation_for_click = citation.clone();
+    let citation_for_key = citation.clone();
 
     let is_clickable = on_click.is_some();
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
@@ -256,7 +254,11 @@ pub fn CitationCardCompact(
             class: "flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors {cursor_class}",
             tabindex: "{tabindex_val}",
             role: "{role_val}",
-            onclick: handle_click,
+            onclick: move |_| {
+                if let Some(handler) = on_click {
+                    handler.call(citation_for_click.clone());
+                }
+            },
             onkeydown: move |evt: KeyboardEvent| {
                 // Handle both Enter and Space keys for accessibility
                 let is_activation_key = match evt.key() {
@@ -266,8 +268,8 @@ pub fn CitationCardCompact(
                 };
                 if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
-                    if let Some(ref handler) = on_click {
-                        handler.call(citation_clone2.clone());
+                    if let Some(handler) = on_click {
+                        handler.call(citation_for_key.clone());
                     }
                 }
             },
@@ -327,13 +329,10 @@ pub fn CitationBadge(
     let citation_type = citation.citation.citation_type();
     let short_display = citation.citation.short_display();
 
-    let citation_clone = citation.clone();
-    let citation_clone2 = citation.clone();
-    let handle_click = move |_| {
-        if let Some(ref handler) = on_click {
-            handler.call(citation_clone.clone());
-        }
-    };
+    // Clone citation for each closure that needs it (CachedCitation is not Copy)
+    // EventHandler is Copy, so on_click can be used directly in both closures
+    let citation_for_click = citation.clone();
+    let citation_for_key = citation.clone();
 
     let is_clickable = on_click.is_some();
     let cursor_class = if is_clickable { "cursor-pointer" } else { "" };
@@ -347,7 +346,11 @@ pub fn CitationBadge(
             class: "inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-border hover:bg-accent transition-colors {cursor_class}",
             tabindex: "{tabindex_val}",
             role: "{role_val}",
-            onclick: handle_click,
+            onclick: move |_| {
+                if let Some(handler) = on_click {
+                    handler.call(citation_for_click.clone());
+                }
+            },
             onkeydown: move |evt: KeyboardEvent| {
                 // Handle both Enter and Space keys for accessibility
                 let is_activation_key = match evt.key() {
@@ -357,8 +360,8 @@ pub fn CitationBadge(
                 };
                 if on_click.is_some() && is_activation_key {
                     evt.prevent_default();
-                    if let Some(ref handler) = on_click {
-                        handler.call(citation_clone2.clone());
+                    if let Some(handler) = on_click {
+                        handler.call(citation_for_key.clone());
                     }
                 }
             },

@@ -37,15 +37,19 @@ use nostr_sdk::Event;
 // ============================================================================
 
 /// Maximum items per feed type
+#[cfg(target_arch = "wasm32")]
 pub const MAX_ITEMS_PER_FEED: usize = 500;
 
 /// Maximum total items across all feeds
+#[cfg(target_arch = "wasm32")]
 pub const MAX_TOTAL_ITEMS: usize = 5000;
 
 /// Number of items to evict when over limit
+#[cfg(target_arch = "wasm32")]
 const EVICTION_BATCH_SIZE: usize = 100;
 
 /// Minimum age (in seconds) before item can be evicted
+#[cfg(target_arch = "wasm32")]
 const MIN_AGE_BEFORE_EVICTION_SECS: u64 = 3600; // 1 hour
 
 // ============================================================================
@@ -79,6 +83,7 @@ pub enum FeedCacheKey {
 
 impl FeedCacheKey {
     /// Convert to string key for IndexedDB storage
+    #[cfg(target_arch = "wasm32")]
     pub fn to_string_key(&self) -> String {
         match self {
             FeedCacheKey::Following { pubkey } => format!("following:{}", pubkey),
@@ -152,6 +157,7 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)] // Stub for API consistency with wasm32
 pub async fn touch_items(_event_ids: &[String]) -> Result<(), String> {
     // No-op on native
     Ok(())

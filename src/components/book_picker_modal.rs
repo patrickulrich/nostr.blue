@@ -291,10 +291,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             }
 
             // Add sections only if valid
+            // Note: is_valid_book_sections() forbids spaces, so no trimming needed
             let sections_str = selected_sections.read();
             if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
                 for section in sections_str.split(',') {
-                    let section = section.trim();
                     if !section.is_empty() {
                         reference = reference.with_section(section);
                     }
