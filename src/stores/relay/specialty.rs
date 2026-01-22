@@ -136,8 +136,7 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
     }
 
     log::warn!("Specialty relay connection timeout: {}", relay_url);
-    // Return true anyway - relay is added and may connect later
-    true
+    false  // Relay not confirmed connected
 }
 
 // === Convenience functions for well-known relays ===

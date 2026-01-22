@@ -170,21 +170,24 @@ pub fn Videos() -> Element {
 
             match result {
                 Ok((video_events, page_has_more, did_fallback)) => {
-                    // Update feed_type if fallback occurred (no contacts or error)
-                    if did_fallback {
+                    // Compute effective cache key based on fallback
+                    let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global videos feed");
                         feed_type.set(FeedType::Global);
-                    }
+                        FeedCacheKey::VideosGlobal
+                    } else {
+                        cache_key.clone()
+                    };
 
                     if let Some(last_event) = video_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // STEP 3: Store to cache
+                    // STEP 3: Store to cache using effective key
                     let feed_items: Vec<FeedItem> = video_events.iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
-                    let cache_key_for_store = cache_key.clone();
+                    let cache_key_for_store = effective_cache_key;
                     spawn(async move {
                         let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;

@@ -137,8 +137,15 @@ pub async fn persist_relay_stats(client: &Client) {
 
         // Update connected time if currently connected
         if relay.is_connected() {
+            // Only count as new connection if there was a gap (>60s since last seen)
+            let is_new_connection = snapshot.last_seen_connected
+                .map(|last| now_ms.saturating_sub(last) > 60_000)
+                .unwrap_or(true);
+
+            if is_new_connection {
+                snapshot.connection_count = snapshot.connection_count.saturating_add(1);
+            }
             snapshot.last_seen_connected = Some(now_ms);
-            snapshot.connection_count = snapshot.connection_count.saturating_add(1);
         }
 
         snapshots.insert(url_str, snapshot);

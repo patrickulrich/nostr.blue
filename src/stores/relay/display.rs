@@ -85,7 +85,7 @@ pub async fn get_relay_display_info(client: &Client) -> Vec<RelayDisplayInfo> {
             is_gossip: flags.has_gossip(),
             connection_attempts: stats.attempts(),
             successful_connections: stats.success(),
-            success_rate: stats.success_rate(),
+            success_rate: stats.success_rate() * 100.0,
         });
     }
 

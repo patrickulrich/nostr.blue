@@ -23,6 +23,26 @@ fn is_relay_blocked(url: &str) -> bool {
     })
 }
 
+/// Remove any connected relays that are in the blocked list
+/// Call this after NIP-51 blocked relay list is loaded to clean up
+/// any relays that were added before the blocked list was available.
+pub async fn remove_blocked_relays_from_pool(client: &Client) {
+    let blocked = super::nip65::BLOCKED_RELAYS.peek().clone();
+    if blocked.is_empty() {
+        return;
+    }
+
+    let relays = client.relays().await;
+    for (url, _) in relays {
+        let url_str = url.to_string();
+        let normalized = url_str.trim_end_matches('/');
+        if blocked.iter().any(|b| b.trim_end_matches('/') == normalized) {
+            log::info!("Removing blocked relay from pool: {}", url_str);
+            let _ = client.remove_relay(url).await;
+        }
+    }
+}
+
 /// Default relays to connect to
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -53,13 +73,19 @@ pub async fn add_relay(client: &Client, relay_url: &str) -> std::result::Result<
     let store = RELAY_POOL.read();
     let mut data = store.data();
     let mut relays = data.write();
-    relays.push(RelayInfo::with_flags(
-        relay_url.to_string(),
-        RelayStatus::Connecting,
-        true,
-        true,
-        RelaySource::Manual,
-    ));
+
+    // Check if already exists to avoid duplicates
+    let normalized_url = relay_url.trim_end_matches('/');
+    let exists = relays.iter().any(|r| r.url.trim_end_matches('/') == normalized_url);
+    if !exists {
+        relays.push(RelayInfo::with_flags(
+            relay_url.to_string(),
+            RelayStatus::Connecting,
+            true,
+            true,
+            RelaySource::Manual,
+        ));
+    }
 
     log::info!("Added relay: {}", relay_url);
     Ok(())
@@ -90,13 +116,19 @@ pub async fn add_relay_with_opts(
     let store = RELAY_POOL.read();
     let mut data = store.data();
     let mut relays = data.write();
-    relays.push(RelayInfo::with_flags(
-        relay_url.to_string(),
-        RelayStatus::Connecting,
-        true,
-        true,
-        RelaySource::Manual,
-    ));
+
+    // Check if already exists to avoid duplicates
+    let normalized_url = relay_url.trim_end_matches('/');
+    let exists = relays.iter().any(|r| r.url.trim_end_matches('/') == normalized_url);
+    if !exists {
+        relays.push(RelayInfo::with_flags(
+            relay_url.to_string(),
+            RelayStatus::Connecting,
+            true,
+            true,
+            RelaySource::Manual,
+        ));
+    }
 
     log::info!("Added relay with opts: {}", relay_url);
     Ok(())

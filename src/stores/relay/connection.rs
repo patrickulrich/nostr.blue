@@ -177,10 +177,7 @@ pub async fn fetch_events_from_relays(
         .collect();
 
     if urls.is_empty() {
-        log::warn!("No valid relay URLs for targeted fetch, falling back to gossip routing");
-        return client.fetch_events(filter, timeout).await
-            .map(|events| events.into_iter().collect())
-            .map_err(|e| e.to_string());
+        return Err("No valid relay URLs provided for targeted fetch".to_string());
     }
 
     log::info!("Fetching events from {} specific relays: {:?}", urls.len(), urls);

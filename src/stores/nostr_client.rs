@@ -390,9 +390,12 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
         }
 
         // Load NIP-51 relay lists (search/blocked) - non-blocking for feed
-        if let Err(e) = relay::init_nip51_relay_lists(client_clone).await {
+        if let Err(e) = relay::init_nip51_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load NIP-51 relay lists: {}", e);
         }
+
+        // After NIP-51 lists load, remove any blocked relays that were added before
+        relay::pool::remove_blocked_relays_from_pool(&client_clone).await;
     });
 
     // Load user's pinned notes (kind 10001) in background

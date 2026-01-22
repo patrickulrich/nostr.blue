@@ -96,16 +96,30 @@ pub fn default_search_relays() -> Vec<String> {
 /// Reset general relays to defaults (local change only)
 pub fn reset_general_relays_to_default() {
     let mut metadata = USER_RELAY_METADATA.write();
-    if let Some(m) = metadata.as_mut() {
-        m.relays = default_relays();
+    match metadata.as_mut() {
+        Some(m) => m.relays = default_relays(),
+        None => {
+            *metadata = Some(RelayListMetadata {
+                relays: default_relays(),
+                dm_relays: default_dm_relays(),
+                updated_at: 0,
+            });
+        }
     }
 }
 
 /// Reset DM relays to defaults (local change only)
 pub fn reset_dm_relays_to_default() {
     let mut metadata = USER_RELAY_METADATA.write();
-    if let Some(m) = metadata.as_mut() {
-        m.dm_relays = default_dm_relays();
+    match metadata.as_mut() {
+        Some(m) => m.dm_relays = default_dm_relays(),
+        None => {
+            *metadata = Some(RelayListMetadata {
+                relays: default_relays(),
+                dm_relays: default_dm_relays(),
+                updated_at: 0,
+            });
+        }
     }
 }
 
@@ -293,6 +307,7 @@ pub async fn fetch_relay_list(pubkey: PublicKey, client: Arc<Client>) -> Result<
             if let Some(event) = events.into_iter().next() {
                 log::info!("Parsing kind 10050 event with {} tags", event.tags.len());
                 dm_relays = parse_dm_relay_list(&event);
+                updated_at = updated_at.max(event.created_at.as_secs());  // Use max of both events
                 log::info!("Parsed {} DM relays from kind 10050", dm_relays.len());
                 for relay in &dm_relays {
                     log::debug!("  - {}", relay);

@@ -200,6 +200,9 @@ pub fn Home(list: String) -> Element {
                 return;
             }
 
+            // Helper to check staleness after any await point
+            let is_stale = || *request_id.peek() != current_id;
+
             match current_feed_type {
                 FeedType::Following => {
                     // Get pubkey for cache key
@@ -210,6 +213,9 @@ pub fn Home(list: String) -> Element {
                     let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
                         .await
                         .unwrap_or_default();
+
+                    // Check staleness after cache load
+                    if is_stale() { return; }
 
                     // Show cached items immediately if available
                     let mut accumulated_items = if !cached_items.is_empty() {
@@ -229,13 +235,19 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(accumulated_items.clone()));
                     }).await;
 
+                    // Check staleness after network load
+                    if is_stale() { return; }
+
                     match result {
                         Ok((feed_items, did_fallback)) => {
-                            // Update feed_type if fallback occurred (no contacts or error)
-                            if did_fallback {
+                            // Compute effective cache key based on fallback
+                            let effective_cache_key = if did_fallback {
                                 log::info!("No contacts, switched to Global feed");
                                 feed_type.set(FeedType::Global);
-                            }
+                                FeedCacheKey::Global
+                            } else {
+                                cache_key.clone()
+                            };
 
                             // Track oldest timestamp for pagination
                             if let Some(last_item) = feed_items.last() {
@@ -248,37 +260,43 @@ pub fn Home(list: String) -> Element {
                             // Final state update with sorted items
                             feed_state.set(DataState::Loaded(feed_items.clone()));
 
-                            // STEP 3: Store to cache in background
-                            let cache_key_for_store = cache_key.clone();
-                            let items_for_cache = feed_items.clone();
-                            spawn(async move {
-                                if let Err(e) = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await {
-                                    log::warn!("Failed to store feed to cache: {}", e);
-                                }
-                                if let Err(e) = feed_cache::run_eviction_if_needed().await {
-                                    log::warn!("Failed to run cache eviction: {}", e);
-                                }
-                            });
+                            // STEP 3: Store to cache in background using effective key
+                            if !is_stale() {
+                                let cache_key_for_store = effective_cache_key;
+                                let items_for_cache = feed_items.clone();
+                                spawn(async move {
+                                    if let Err(e) = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await {
+                                        log::warn!("Failed to store feed to cache: {}", e);
+                                    }
+                                    if let Err(e) = feed_cache::run_eviction_if_needed().await {
+                                        log::warn!("Failed to run cache eviction: {}", e);
+                                    }
+                                });
+                            }
 
                             // Batch fetch interaction counts for all events
-                            let items_for_counts = feed_items.clone();
-                            spawn(async move {
-                                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                let counts = if is_first_load {
-                                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
-                                } else {
-                                    sync_interaction_counts(event_ids, Duration::from_secs(5)).await
-                                };
-                                if let Ok(counts) = counts {
-                                    interaction_counts.set(counts);
-                                    interactions_loaded.set(true);
-                                }
-                            });
+                            if !is_stale() {
+                                let items_for_counts = feed_items.clone();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+                            }
 
                             // Spawn non-blocking background prefetch for metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&feed_items).await;
-                            });
+                            if !is_stale() {
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
                         }
                         Err(e) => {
                             // On error, keep cached data visible if we have it
@@ -300,19 +318,30 @@ pub fn Home(list: String) -> Element {
                         .await
                         .unwrap_or_default();
 
+                    // Check staleness after cache load
+                    if is_stale() { return; }
+
                     if !cached_items.is_empty() {
                         log::info!("Loaded {} items from cache for FollowingWithReplies feed", cached_items.len());
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
                     // STEP 2: Load from network
-                    match load_following_with_replies(None).await {
+                    let result = load_following_with_replies(None).await;
+
+                    // Check staleness after network load
+                    if is_stale() { return; }
+
+                    match result {
                         Ok((feed_items, did_fallback)) => {
-                            // Update feed_type if fallback occurred (no contacts or error)
-                            if did_fallback {
+                            // Compute effective cache key based on fallback
+                            let effective_cache_key = if did_fallback {
                                 log::info!("No contacts, switched to Global feed");
                                 feed_type.set(FeedType::Global);
-                            }
+                                FeedCacheKey::Global
+                            } else {
+                                cache_key.clone()
+                            };
 
                             // Track oldest timestamp for pagination
                             if let Some(last_item) = feed_items.last() {
@@ -325,33 +354,39 @@ pub fn Home(list: String) -> Element {
                             // Display feed immediately
                             feed_state.set(DataState::Loaded(feed_items.clone()));
 
-                            // STEP 3: Store to cache
-                            let cache_key_for_store = cache_key.clone();
-                            let items_for_cache = feed_items.clone();
-                            spawn(async move {
-                                let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
-                                let _ = feed_cache::run_eviction_if_needed().await;
-                            });
+                            // STEP 3: Store to cache using effective key
+                            if !is_stale() {
+                                let cache_key_for_store = effective_cache_key;
+                                let items_for_cache = feed_items.clone();
+                                spawn(async move {
+                                    let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
+                                    let _ = feed_cache::run_eviction_if_needed().await;
+                                });
+                            }
 
                             // Batch fetch interaction counts for all events
-                            let items_for_counts = feed_items.clone();
-                            spawn(async move {
-                                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                let counts = if is_first_load {
-                                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
-                                } else {
-                                    sync_interaction_counts(event_ids, Duration::from_secs(5)).await
-                                };
-                                if let Ok(counts) = counts {
-                                    interaction_counts.set(counts);
-                                    interactions_loaded.set(true);
-                                }
-                            });
+                            if !is_stale() {
+                                let items_for_counts = feed_items.clone();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+                            }
 
                             // Spawn non-blocking background prefetch for metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&feed_items).await;
-                            });
+                            if !is_stale() {
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
                         }
                         Err(e) => {
                             // On error, keep cached data visible if we have it
@@ -371,13 +406,21 @@ pub fn Home(list: String) -> Element {
                         .await
                         .unwrap_or_default();
 
+                    // Check staleness after cache load
+                    if is_stale() { return; }
+
                     if !cached_items.is_empty() {
                         log::info!("Loaded {} items from cache for Global feed", cached_items.len());
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
                     // STEP 2: Load from network
-                    match load_global_feed(None).await {
+                    let result = load_global_feed(None).await;
+
+                    // Check staleness after network load
+                    if is_stale() { return; }
+
+                    match result {
                         Ok(feed_items) => {
                             // Track oldest timestamp for pagination
                             if let Some(last_item) = feed_items.last() {
@@ -391,32 +434,38 @@ pub fn Home(list: String) -> Element {
                             feed_state.set(DataState::Loaded(feed_items.clone()));
 
                             // STEP 3: Store to cache
-                            let items_for_cache = feed_items.clone();
-                            spawn(async move {
-                                let _ = feed_cache::store_feed_items(&FeedCacheKey::Global, &items_for_cache).await;
-                                let _ = feed_cache::run_eviction_if_needed().await;
-                            });
+                            if !is_stale() {
+                                let items_for_cache = feed_items.clone();
+                                spawn(async move {
+                                    let _ = feed_cache::store_feed_items(&FeedCacheKey::Global, &items_for_cache).await;
+                                    let _ = feed_cache::run_eviction_if_needed().await;
+                                });
+                            }
 
                             // Batch fetch interaction counts for all events
-                            let items_for_counts = feed_items.clone();
-                            let is_first_load = !*interactions_loaded.peek();
-                            spawn(async move {
-                                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                let counts = if is_first_load {
-                                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
-                                } else {
-                                    sync_interaction_counts(event_ids, Duration::from_secs(5)).await
-                                };
-                                if let Ok(counts) = counts {
-                                    interaction_counts.set(counts);
-                                    interactions_loaded.set(true);
-                                }
-                            });
+                            if !is_stale() {
+                                let items_for_counts = feed_items.clone();
+                                let is_first_load = !*interactions_loaded.peek();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+                            }
 
                             // Spawn non-blocking background prefetch for metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&feed_items).await;
-                            });
+                            if !is_stale() {
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
                         }
                         Err(e) => {
                             // On error, keep cached data visible if we have it
@@ -441,13 +490,21 @@ pub fn Home(list: String) -> Element {
                         .await
                         .unwrap_or_default();
 
+                    // Check staleness after cache load
+                    if is_stale() { return; }
+
                     if !cached_items.is_empty() {
                         log::info!("Loaded {} items from cache for PeopleList feed", cached_items.len());
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
                     // STEP 2: Load from network
-                    match load_people_list_feed(&list, None).await {
+                    let result = load_people_list_feed(&list, None).await;
+
+                    // Check staleness after network load
+                    if is_stale() { return; }
+
+                    match result {
                         Ok(feed_items) => {
                             // Track oldest timestamp for pagination
                             if let Some(last_item) = feed_items.last() {
@@ -461,32 +518,38 @@ pub fn Home(list: String) -> Element {
                             feed_state.set(DataState::Loaded(feed_items.clone()));
 
                             // STEP 3: Store to cache
-                            let cache_key_for_store = cache_key.clone();
-                            let items_for_cache = feed_items.clone();
-                            spawn(async move {
-                                let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
-                                let _ = feed_cache::run_eviction_if_needed().await;
-                            });
+                            if !is_stale() {
+                                let cache_key_for_store = cache_key.clone();
+                                let items_for_cache = feed_items.clone();
+                                spawn(async move {
+                                    let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
+                                    let _ = feed_cache::run_eviction_if_needed().await;
+                                });
+                            }
 
                             // Batch fetch interaction counts for all events
-                            let items_for_counts = feed_items.clone();
-                            spawn(async move {
-                                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                                let counts = if is_first_load {
-                                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
-                                } else {
-                                    sync_interaction_counts(event_ids, Duration::from_secs(5)).await
-                                };
-                                if let Ok(counts) = counts {
-                                    interaction_counts.set(counts);
-                                    interactions_loaded.set(true);
-                                }
-                            });
+                            if !is_stale() {
+                                let items_for_counts = feed_items.clone();
+                                spawn(async move {
+                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let counts = if is_first_load {
+                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                    } else {
+                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                    };
+                                    if let Ok(counts) = counts {
+                                        interaction_counts.set(counts);
+                                        interactions_loaded.set(true);
+                                    }
+                                });
+                            }
 
                             // Spawn non-blocking background prefetch for metadata
-                            spawn(async move {
-                                prefetch_author_metadata(&feed_items).await;
-                            });
+                            if !is_stale() {
+                                spawn(async move {
+                                    prefetch_author_metadata(&feed_items).await;
+                                });
+                            }
                         }
                         Err(e) => {
                             // On error, keep cached data visible if we have it
