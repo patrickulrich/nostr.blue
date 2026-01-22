@@ -3,6 +3,14 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use ::url::Url;
 
+// Validation constants
+/// Minimum length for npub identifiers to be considered valid for display
+const MIN_NPUB_LENGTH: usize = 16;
+/// Minimum length for naddr identifiers to be considered valid
+const MIN_NADDR_LENGTH: usize = 10;
+/// YouTube video IDs are exactly 11 characters
+const YOUTUBE_VIDEO_ID_LENGTH: usize = 11;
+
 // Precompiled regexes for content parsing - compiled once at startup
 static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex")
@@ -487,7 +495,7 @@ pub fn extract_mention_name(mention: &str, _tags: &[Tag]) -> Option<String> {
     // Try to extract from nostr: URI
     if let Some(npub) = mention.strip_prefix("nostr:") {
         // For now, return shortened version
-        if npub.len() > 16 {
+        if npub.len() > MIN_NPUB_LENGTH {
             return Some(format!("@{}...{}", &npub[0..8], &npub[npub.len()-4..]));
         }
     }
@@ -635,7 +643,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('&').next()?;
         let id = id.split('#').next()?;
         // YouTube IDs are exactly 11 characters
-        if !id.is_empty() && id.len() == 11 {
+        if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
             return Some(id.to_string());
         }
     }
@@ -648,7 +656,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
             let id = id.split('?').next()?;
             let id = id.split('#').next()?;
             // YouTube IDs are exactly 11 characters
-            if !id.is_empty() && id.len() == 11 {
+            if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
                 return Some(id.to_string());
             }
         }
@@ -662,7 +670,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
         // YouTube IDs are exactly 11 characters
-        if !id.is_empty() && id.len() == 11 {
+        if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
             return Some(id.to_string());
         }
     }
@@ -675,7 +683,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
         // YouTube IDs are exactly 11 characters
-        if !id.is_empty() && id.len() == 11 {
+        if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
             return Some(id.to_string());
         }
     }
@@ -688,7 +696,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
         // YouTube IDs are exactly 11 characters
-        if !id.is_empty() && id.len() == 11 {
+        if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
             return Some(id.to_string());
         }
     }
@@ -701,7 +709,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
         let id = id.split('#').next()?;
         let id = id.split('/').next()?;
         // YouTube IDs are exactly 11 characters
-        if !id.is_empty() && id.len() == 11 {
+        if !id.is_empty() && id.len() == YOUTUBE_VIDEO_ID_LENGTH {
             return Some(id.to_string());
         }
     }
@@ -899,7 +907,7 @@ fn extract_zapstream(url: &str) -> Option<String> {
         // Extract just the naddr (stop at query params or hash)
         let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
         // Validate the extracted string still starts with naddr1 and has reasonable length
-        if naddr.starts_with("naddr1") && naddr.len() > 10 {
+        if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
         }
     }
@@ -936,7 +944,7 @@ fn extract_zapcooking(url: &str) -> Option<String> {
         // Extract just the naddr (stop at query params or hash)
         let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
         // Validate the extracted string still starts with naddr1 and has reasonable length
-        if naddr.starts_with("naddr1") && naddr.len() > 10 {
+        if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
         }
     }

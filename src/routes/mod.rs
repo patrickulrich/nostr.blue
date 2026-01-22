@@ -6,6 +6,7 @@ pub mod note;
 pub mod settings;
 pub mod settings_blocklist;
 pub mod settings_muted;
+pub mod settings_relays;
 pub mod notifications;
 pub mod bookmarks;
 pub mod dms;
@@ -183,6 +184,7 @@ use note::Note;
 use settings::Settings;
 use settings_blocklist::SettingsBlocklist;
 use settings_muted::SettingsMuted;
+use settings_relays::SettingsRelays;
 use notifications::Notifications;
 use bookmarks::Bookmarks;
 use dms::DMs;
@@ -718,6 +720,9 @@ pub enum Route {
         #[route("/settings/muted")]
         SettingsMuted {},
 
+        #[route("/settings/relays")]
+        SettingsRelays {},
+
         #[route("/terms")]
         Terms {},
 
@@ -794,7 +799,7 @@ fn Layout() -> Element {
     let is_bible_page = matches!(current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
-    let is_settings_page = matches!(current_route, Route::Settings {});
+    let is_settings_page = matches!(current_route, Route::Settings {} | Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(

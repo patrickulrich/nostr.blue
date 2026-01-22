@@ -3,6 +3,7 @@ use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
 use crate::stores::nostr_client;
+use crate::stores::relay::DEFAULT_RELAYS;
 use crate::services::wavlake::WavlakeAPI;
 use crate::services::lnurl;
 use crate::utils::podcast::ValueBlock;
@@ -10,6 +11,13 @@ use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use nostr_sdk::{PublicKey, RelayUrl};
 use nostr_sdk::nips::nip01::Coordinate;
+
+/// Convert DEFAULT_RELAYS to parsed RelayUrls
+fn default_relay_urls() -> Vec<RelayUrl> {
+    DEFAULT_RELAYS.iter()
+        .filter_map(|s| RelayUrl::parse(s).ok())
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LnurlPayParams {
@@ -607,11 +615,7 @@ async fn generate_nostr_zap_invoice(
             let mut urls: Vec<RelayUrl> = client_relays.keys().cloned().collect();
             if urls.is_empty() {
                 // Fallback to defaults
-                vec![
-                    RelayUrl::parse("wss://relay.damus.io").ok(),
-                    RelayUrl::parse("wss://nos.lol").ok(),
-                    RelayUrl::parse("wss://relay.snort.social").ok(),
-                ].into_iter().flatten().collect()
+                default_relay_urls()
             } else {
                 // Limit to reasonable number for zap request
                 urls.truncate(5);
@@ -619,11 +623,7 @@ async fn generate_nostr_zap_invoice(
             }
         } else {
             // No client, use defaults
-            vec![
-                RelayUrl::parse("wss://relay.damus.io").ok(),
-                RelayUrl::parse("wss://nos.lol").ok(),
-                RelayUrl::parse("wss://relay.snort.social").ok(),
-            ].into_iter().flatten().collect()
+            default_relay_urls()
         }
     };
 

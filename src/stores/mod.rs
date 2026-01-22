@@ -17,13 +17,15 @@ pub mod music_player;
 pub mod nostr_music;
 pub mod emoji_store;
 pub mod gif_store;
-pub mod relay_metadata;
+pub mod relay;           // Organized relay management (signals, pool, connection, nip65, display)
 pub mod voice_messages_store;
 pub mod webbookmarks;
 pub mod cashu_cdk_bridge;
 pub mod cashu;  // NIP-60 Cashu wallet
 pub mod nwc_store;
 pub mod indexeddb_database;
+pub mod feed_cache_db;  // IndexedDB feed cache database
+pub mod feed_cache;     // Feed cache service API
 pub mod reactions_store;  // NIP-78 preferred reactions
 pub mod dvm_store;  // NIP-90 Data Vending Machines
 pub mod nip96_store;  // NIP-96 HTTP File Storage

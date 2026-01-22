@@ -1,0 +1,139 @@
+//! Relay management module
+//!
+//! This module provides centralized relay state management for the Nostr client.
+//! It is organized into submodules for different concerns:
+//!
+//! - `signals` - Reactive state signals for relay pool and connection status
+//! - `pool` - Functions for adding/removing relays and applying relay lists
+//! - `connection` - Connection management and fetching from specific relays
+//! - `nip65` - NIP-65 relay list metadata and NIP-17 DM relay lists
+//! - `display` - Display-friendly relay info for UI components
+//! - `scoring` - Relay performance scoring (internal, not re-exported)
+//!
+//! # Design Principles
+//!
+//! **IMPORTANT**: All functions in this module take `client: &Client` as a parameter
+//! rather than calling `nostr_client::get_client()` internally. This avoids circular
+//! dependencies and makes the code more testable.
+//!
+//! ```rust,ignore
+//! // WRONG - creates circular dependency
+//! pub async fn add_relay(url: &str) {
+//!     let client = nostr_client::get_client().unwrap();  // DON'T DO THIS
+//! }
+//!
+//! // CORRECT - parameterized, no circular dependency
+//! pub async fn add_relay(client: &Client, url: &str) {
+//!     // Works correctly
+//! }
+//! ```
+
+#![allow(unused_imports)]  // Re-exports are public API for external consumers
+
+pub mod connection;
+pub mod display;
+pub mod hints;
+pub mod nip65;
+pub mod pool;
+pub mod scoring;
+pub mod signals;
+pub mod specialty;
+
+// Re-export commonly used types from signals
+pub use signals::{
+    RelayInfo,
+    RelayPoolStore,
+    // Re-export the auto-generated Store trait for accessing RELAY_POOL.data()
+    RelayPoolStoreStoreExt,
+    RelaySource,
+    RelayStatus,
+    RELAY_CONNECTED,
+    RELAY_POOL,
+    USER_RELAYS_APPLIED,
+};
+
+// Re-export pool functions
+pub use pool::{
+    add_relay,
+    apply_relay_lists_to_client,
+    remove_relay,
+    DEFAULT_RELAYS,
+};
+
+// Re-export connection functions
+pub use connection::{
+    disconnect,
+    ensure_relays_ready,
+    ensure_video_relay_connected,
+    fetch_events_from_relays,
+    fetch_event_by_coordinate_with_relays,
+    reconnect,
+};
+
+// Re-export hints functions
+pub use hints::{
+    get_write_relay_hints,
+    make_naddr_with_hints,
+};
+
+// Re-export specialty relay functions
+pub use specialty::{
+    add_relays,
+    add_relays_from_strings,
+    ensure_connected,
+    ensure_gif_relay,
+    ensure_video_relay,
+    get_connected,
+    remove_relays,
+    urls as specialty_urls,
+};
+
+// Re-export nip65 types and functions
+pub use nip65::{
+    // Types
+    RelayConfig,
+    RelayListMetadata,
+    // Signals
+    USER_RELAY_METADATA,
+    SEARCH_RELAYS,
+    BLOCKED_RELAYS,
+    LOCAL_RELAYS,
+    // Constants
+    DEFAULT_DM_RELAYS,
+    DEFAULT_NIP65_RELAYS,
+    DEFAULT_SEARCH_RELAYS,
+    // Default generators
+    default_dm_relays,
+    default_relays,
+    default_search_relays,
+    // Helpers (Phase 2)
+    get_dm_relays,
+    get_read_relays,
+    get_write_relays,
+    // Reset functions
+    reset_dm_relays_to_default,
+    reset_general_relays_to_default,
+    // Parsing
+    parse_dm_relay_list,
+    parse_relay_list_event,
+    // Fetching
+    fetch_relay_list,
+    fetch_search_relays,
+    fetch_blocked_relays,
+    // Publishing
+    publish_dm_relay_list,
+    publish_relay_list,
+    publish_search_relays,
+    publish_blocked_relays,
+    // Initialization
+    init_user_relay_lists,
+    init_nip51_relay_lists,
+    // Local relays
+    load_local_relays,
+    save_local_relays,
+    init_local_relays_from_cache,
+    apply_local_relays_to_client,
+};
+
+// Re-export display types and functions
+pub use display::{get_relay_display_info, RelayDisplayInfo};

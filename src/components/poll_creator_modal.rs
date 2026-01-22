@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::{nostr_client, relay_metadata};
+use crate::stores::{nostr_client, relay};
 use crate::components::{PollOptionList, PollOptionData};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use nostr_sdk::{nips::nip19::Nip19Event, nips::nip88::{PollType, PollOption}, EventId, ToBech32};
@@ -114,7 +114,7 @@ pub fn PollCreatorModal(
             let hashtags: Vec<String> = extract_hashtags(&question, &hashtags_val);
 
             // Get user's write relays for poll discoverability (NIP-88 relay hints)
-            let relays: Vec<String> = relay_metadata::USER_RELAY_METADATA.read()
+            let relays: Vec<String> = relay::USER_RELAY_METADATA.read()
                 .as_ref()
                 .map(|m| m.relays.iter()
                     .filter(|r| r.write)
