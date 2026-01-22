@@ -143,7 +143,11 @@ pub async fn persist_relay_stats(client: &Client) {
         });
 
         // Update with current stats
-        snapshot.lifetime_success_rate = stats.success_rate();
+        // Guard against NaN/Inf - fall back to 0.0 if not finite
+        snapshot.lifetime_success_rate = {
+            let rate = stats.success_rate();
+            if rate.is_finite() { rate } else { 0.0 }
+        };
         snapshot.total_bytes_transferred = stats.bytes_sent() + stats.bytes_received();
 
         // Update connected time if currently connected
