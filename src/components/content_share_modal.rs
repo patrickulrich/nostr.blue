@@ -258,6 +258,13 @@ pub fn ContentShareModal(
     };
 
     let handle_share_to_nostr = move |_| {
+        // Defensive check: verify signer exists before attempting to post
+        if !*HAS_SIGNER.read() {
+            log::error!("Attempted to share to Nostr without a signer");
+            nostr_error.set(Some("No signer available. Please log in first.".to_string()));
+            return;
+        }
+
         let text = nostr_text.read().trim().to_string();
         if text.is_empty() {
             return;
