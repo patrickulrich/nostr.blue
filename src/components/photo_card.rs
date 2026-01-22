@@ -10,6 +10,70 @@ use crate::components::{ZapModal, ReactionButton};
 use crate::utils::{format_sats_compact, format_relative_time_or, truncate_pubkey};
 use std::time::Duration;
 
+/// Skeleton loader for PhotoCard - prevents layout shift during loading
+#[component]
+pub fn PhotoCardSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "border-b border-border bg-background mb-4 animate-pulse",
+
+            // Author header skeleton
+            div {
+                class: "p-3 flex items-center gap-3",
+                // Avatar
+                div {
+                    class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700"
+                }
+                // Name
+                div {
+                    class: "flex-1",
+                    div {
+                        class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"
+                    }
+                }
+                // Timestamp
+                div {
+                    class: "h-3 bg-gray-300 dark:bg-gray-700 rounded w-16"
+                }
+            }
+
+            // Image area skeleton (square aspect ratio like Instagram)
+            div {
+                class: "relative bg-gray-300 dark:bg-gray-700 aspect-square max-h-[600px]"
+            }
+
+            // Action buttons skeleton
+            div {
+                class: "flex items-center gap-4 px-3 py-2",
+                for _ in 0..4 {
+                    div {
+                        class: "w-6 h-6 bg-gray-300 dark:bg-gray-700 rounded"
+                    }
+                }
+            }
+
+            // Like count skeleton
+            div {
+                class: "px-3 pb-2",
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-20"
+                }
+            }
+
+            // Caption skeleton
+            div {
+                class: "px-3 pb-3 space-y-2",
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-3/4"
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ImageMeta {
     pub url: String,

@@ -152,6 +152,9 @@ quick-xml = "0.37"
 strum = { version = "0.27.2", features = ["derive"] }
 gloo-events = "0.2.0"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "5.0"
+
 [profile.release]
 opt-level = "z"
 lto = true

@@ -113,8 +113,6 @@ pub fn ContentShareModal(
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
 
-    let has_signer = *HAS_SIGNER.read();
-
     // Helper to get cursor position from DOM (returns UTF-16 index)
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
@@ -219,11 +217,18 @@ pub fn ContentShareModal(
     let handle_copy_link = {
         // For Bible verses, copy the formatted verse text with reference
         // For other content types, copy the URL
-        let copy_text = if let Some(ref text) = content {
-            format!("{}\n\n— {}", text, title)
+        #[cfg(target_arch = "wasm32")]
+        let copy_text = if matches!(content_type, ContentType::BibleVerse) {
+            if let Some(ref text) = content {
+                format!("{}\n\n— {}", text, title)
+            } else {
+                url.clone()
+            }
         } else {
             url.clone()
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let copy_text = url.clone();
         move |_| {
             let text_to_copy = copy_text.clone();
             spawn(async move {
@@ -252,8 +257,14 @@ pub fn ContentShareModal(
         }
     };
 
-    let url_for_nostr = url.clone();
     let handle_share_to_nostr = move |_| {
+        // Defensive check: verify signer exists before attempting to post
+        if !*HAS_SIGNER.read() {
+            log::error!("Attempted to share to Nostr without a signer");
+            nostr_error.set(Some("No signer available. Please log in first.".to_string()));
+            return;
+        }
+
         let text = nostr_text.read().trim().to_string();
         if text.is_empty() {
             return;
@@ -459,13 +470,13 @@ pub fn ContentShareModal(
 
                             // Share to Nostr button
                             button {
-                                class: if has_signer {
+                                class: if *HAS_SIGNER.read() {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
                                 } else {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
                                 },
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
-                                disabled: !has_signer,
+                                disabled: !*HAS_SIGNER.read(),
                                 MessageCircleIcon { class: "w-5 h-5 text-purple-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -475,7 +486,7 @@ pub fn ContentShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer {
+                                        if *HAS_SIGNER.read() {
                                             "Post about this content"
                                         } else {
                                             "Login required"
@@ -486,13 +497,13 @@ pub fn ContentShareModal(
 
                             // Send via DM button
                             button {
-                                class: if has_signer {
+                                class: if *HAS_SIGNER.read() {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
                                 } else {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
                                 },
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
-                                disabled: !has_signer,
+                                disabled: !*HAS_SIGNER.read(),
                                 SendIcon { class: "w-5 h-5 text-pink-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -502,7 +513,7 @@ pub fn ContentShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Send privately to someone" } else { "Login required" }
+                                        if *HAS_SIGNER.read() { "Send privately to someone" } else { "Login required" }
                                     }
                                 }
                             }
@@ -567,33 +578,44 @@ pub fn ContentShareModal(
                             div {
                                 class: "flex flex-wrap gap-2",
                                 // Add Verse button (only for Bible verses with content)
-                                if let Some(ref verse_content) = content {
-                                    {
-                                        let verse_text = verse_content.clone();
-                                        let verse_title = title.clone();
-                                        rsx! {
-                                            button {
-                                                class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
-                                                onclick: move |_| {
-                                                    let mut current = nostr_text.read().clone();
-                                                    if !current.is_empty() {
-                                                        current.push_str("\n\n");
-                                                    }
-                                                    current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
-                                                    nostr_text.set(current.clone());
-                                                    cursor_position.set(current.len());
-                                                },
-                                                BookOpenIcon { class: "w-3 h-3" }
-                                                "Add Verse"
+                                {
+                                    #[cfg(target_arch = "wasm32")]
+                                    let show_verse_button = matches!(content_type, ContentType::BibleVerse);
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    let show_verse_button = false;
+
+                                    if show_verse_button {
+                                        if let Some(ref verse_content) = content {
+                                            let verse_text = verse_content.clone();
+                                            let verse_title = title.clone();
+                                            rsx! {
+                                                button {
+                                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                                    onclick: move |_| {
+                                                        let mut current = nostr_text.read().clone();
+                                                        if !current.is_empty() {
+                                                            current.push_str("\n\n");
+                                                        }
+                                                        current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
+                                                        nostr_text.set(current.clone());
+                                                        cursor_position.set(current.len());
+                                                    },
+                                                    BookOpenIcon { class: "w-3 h-3" }
+                                                    "Add Verse"
+                                                }
                                             }
+                                        } else {
+                                            rsx! {}
                                         }
+                                    } else {
+                                        rsx! {}
                                     }
                                 }
                                 // Add Link button
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: {
-                                        let url_for_button = url_for_nostr.clone();
+                                        let url_for_button = url.clone();
                                         move |_| {
                                             let mut current = nostr_text.read().clone();
                                             if !current.is_empty() {

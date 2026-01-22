@@ -90,6 +90,23 @@ function getCorsProxy(url) {
 }
 
 /**
+ * Validate directory path to prevent path traversal attacks.
+ * Checks for null bytes, '..' sequences, and absolute paths.
+ * @param {string} dir - Directory path to validate
+ * @throws {Error} If path is invalid
+ */
+function validateRepoDir(dir) {
+  if (!dir || dir.includes('..') || dir.startsWith('/') || dir.includes('\0')) {
+    throw new Error('Invalid directory path');
+  }
+  const normalized = dir.split('/').filter(p => p && p !== '.').join('/');
+  if (normalized !== dir || normalized.includes('..')) {
+    throw new Error('Invalid directory path');
+  }
+  return normalized;
+}
+
+/**
  * RPC methods exposed to main thread
  */
 const methods = {
@@ -102,6 +119,9 @@ const methods = {
    * @param {number} [options.timeout=60000] - Timeout in milliseconds (default 60s)
    */
   async clone({ url, dir, depth = 1, timeout = 60000 }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
+
     console.log(`[GitWorker] Cloning ${url} to ${dir} (depth: ${depth}, timeout: ${timeout}ms)`);
 
     // Set up abort controller for timeout
@@ -147,6 +167,9 @@ const methods = {
    * List files in a directory at a given ref
    */
   async listFiles({ dir, ref = 'HEAD', path = '' }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
+
     // Resolve ref to commit OID with fallback
     let commitOid;
     try {
@@ -193,6 +216,9 @@ const methods = {
    * Read file content at a given ref
    */
   async readFile({ dir, ref = 'HEAD', filepath }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
+
     let commitOid;
     try {
       commitOid = await resolveRefWithFallback(dir, ref);
@@ -217,6 +243,9 @@ const methods = {
    * Get commit log
    */
   async log({ dir, ref = 'HEAD', depth = 50 }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
+
     let commits;
     try {
       commits = await git.log({ fs, dir, ref, depth });
@@ -237,6 +266,8 @@ const methods = {
    * List branches
    */
   async branches({ dir }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
     return await git.listBranches({ fs, dir });
   },
 
@@ -244,6 +275,8 @@ const methods = {
    * Get current branch
    */
   async currentBranch({ dir }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
     return await git.currentBranch({ fs, dir });
   },
 
@@ -251,6 +284,8 @@ const methods = {
    * Check if repo exists in cache
    */
   async status({ dir }) {
+    // Validate directory path to prevent path traversal attacks
+    validateRepoDir(dir);
     try {
       await git.currentBranch({ fs, dir });
       return { exists: true };
@@ -263,16 +298,11 @@ const methods = {
    * Delete a cached repo
    */
   async deleteRepo({ dir }) {
-    // Validate dir parameter to prevent path traversal attacks
-    // Check for null bytes, '..' sequences, and absolute paths
-    if (!dir || dir.includes('..') || dir.startsWith('/') || dir.includes('\0')) {
-      return { success: false, error: 'Invalid directory path' };
-    }
-
-    // Normalize the path and verify it doesn't escape the allowed directory
-    const normalized = dir.split('/').filter(p => p && p !== '.').join('/');
-    if (normalized !== dir || normalized.includes('..')) {
-      return { success: false, error: 'Invalid directory path' };
+    // Validate directory path to prevent path traversal attacks
+    try {
+      validateRepoDir(dir);
+    } catch (e) {
+      return { success: false, error: e.message };
     }
 
     try {

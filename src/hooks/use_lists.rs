@@ -81,12 +81,19 @@ pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<S
     let refresh_trigger = use_signal(|| 0u32);
 
     use_effect(move || {
-        // Re-run when auth changes OR refresh_trigger changes
+        // Re-run when auth changes OR refresh_trigger changes OR client initializes
         let _trigger = refresh_trigger.read();
+        let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
 
         let auth = auth_store::AUTH_STATE.read();
         if !auth.is_authenticated {
             lists.set(Vec::new());
+            return;
+        }
+
+        // Don't fetch if client not initialized yet
+        // Effect will re-run when CLIENT_INITIALIZED changes
+        if !client_ready {
             return;
         }
 

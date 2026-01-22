@@ -248,6 +248,8 @@ pub async fn fetch_highlights_by_url(url: &str) -> Result<Vec<Highlight>, String
 }
 
 /// Fetch highlights by authors (for Following feed)
+///
+/// Uses fast fetch (bypasses gossip) for many-author queries to avoid 30+ second timeouts.
 pub async fn fetch_highlights_by_authors(
     authors: Vec<PublicKey>,
     limit: usize,
@@ -267,10 +269,21 @@ pub async fn fetch_highlights_by_authors(
         filter = filter.until(Timestamp::from_secs(ts));
     }
 
-    let events = client
-        .fetch_events(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+    // Get connected relay URLs (bypass gossip for many-author queries)
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    let events = if connected_urls.is_empty() {
+        log::warn!("No connected relays for highlights, falling back to gossip");
+        client.fetch_events(filter, Duration::from_secs(10)).await
+    } else {
+        log::info!("Fast fetching highlights from {} connected relays", connected_urls.len());
+        client.fetch_events_from(connected_urls, filter, Duration::from_secs(10)).await
+    }.map_err(|e| format!("Failed to fetch highlights: {}", e))?;
 
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
 

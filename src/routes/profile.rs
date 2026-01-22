@@ -1954,10 +1954,56 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
 }
 
 // Special handling for Likes tab - Relay phase
+// Uses gossip for reactions (single author), connected relays for liked posts (many authors)
 async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
-    load_likes_common(public_key, until, |filter| {
-        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
-    }).await
+    // Step 1: Fetch user's reactions using gossip (single author - fast)
+    let mut filter = Filter::new()
+        .author(public_key)
+        .kind(Kind::Reaction)
+        .limit(50);
+
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+
+    let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+    let relay_count = reactions.len();
+
+    if reactions.is_empty() {
+        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
+    }
+
+    // Extract event IDs from reactions
+    let mut liked_event_ids = Vec::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+    for reaction in reactions.iter() {
+        for event_id in reaction.tags.event_ids() {
+            liked_event_ids.push(*event_id);
+            reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+        }
+    }
+
+    if liked_event_ids.is_empty() {
+        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count });
+    }
+
+    // Step 2: Fetch liked events using connected relays (many authors - bypass gossip)
+    let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
+    let liked_events = nostr_client::fetch_events_from_connected_relays(liked_filter, Duration::from_secs(10)).await?;
+
+    // Sort by reaction time (when user liked the post), not post creation time
+    let mut event_vec: Vec<NostrEvent> = liked_events;
+    event_vec.sort_by(|a, b| {
+        let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+        let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+        time_b.cmp(&time_a)  // Newest likes first
+    });
+
+    let oldest_cursor = event_vec.last()
+        .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
+
+    Ok(LoadOutcome { events: event_vec, oldest_cursor, relay_count })
 }
 
 // Helper function to load events based on tab type (legacy - for pagination/load_more)

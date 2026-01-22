@@ -521,10 +521,17 @@ pub fn AddToCookbookModal(
                                 r#type: "button",
                                 class: if *create_new.read() {
                                     "px-3 py-1 text-sm font-medium border-b-2 border-primary"
+                                } else if *needs_signin.read() {
+                                    "px-3 py-1 text-sm font-medium text-muted-foreground opacity-50 cursor-not-allowed"
                                 } else {
                                     "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground"
                                 },
-                                onclick: move |_| create_new.set(true),
+                                disabled: *needs_signin.read(),
+                                onclick: move |_| {
+                                    if !*needs_signin.read() {
+                                        create_new.set(true);
+                                    }
+                                },
                                 "Create New"
                             }
                         }
@@ -545,7 +552,7 @@ pub fn AddToCookbookModal(
                                         class: "text-center py-6",
                                         span { class: "text-4xl mb-2 block", "🔑" }
                                         p { class: "text-sm text-muted-foreground mb-3", "Sign in to view and manage your cookbooks." }
-                                        p { class: "text-xs text-muted-foreground", "You can still create a new cookbook below." }
+                                        p { class: "text-xs text-muted-foreground", "Sign in to create new cookbooks." }
                                     }
                                 } else if let Some(ref err) = *fetch_error.read() {
                                     // Show error when fetching cookbooks failed

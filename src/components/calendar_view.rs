@@ -614,14 +614,56 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
         }
     }
 
-    // Update widths and positions based on total columns
-    let total_cols = columns.len().max(1);
-    let col_width = 95.0 / total_cols as f32;
+    // Build overlap clusters - events that overlap directly or transitively share a cluster
+    // This prevents isolated events from being squeezed when unrelated events overlap
+    let n = positioned.len();
+    if n == 0 {
+        return positioned;
+    }
 
-    for pe in &mut positioned {
-        pe.position.total_columns = total_cols;
-        pe.position.left = (pe.position.column as f32 * col_width) + 2.0;
-        pe.position.width = col_width - 2.0;
+    // Helper to check if two positioned events overlap vertically
+    let events_overlap = |a: &PositionedEvent, b: &PositionedEvent| -> bool {
+        let a_end = a.position.top + a.position.height;
+        let b_end = b.position.top + b.position.height;
+        !(a_end <= b.position.top || b_end <= a.position.top)
+    };
+
+    // Find connected components using union-find style approach
+    let mut visited = vec![false; n];
+    let mut clusters: Vec<Vec<usize>> = Vec::new();
+
+    for i in 0..n {
+        if visited[i] {
+            continue;
+        }
+        let mut cluster = Vec::new();
+        let mut stack = vec![i];
+        while let Some(idx) = stack.pop() {
+            if visited[idx] {
+                continue;
+            }
+            visited[idx] = true;
+            cluster.push(idx);
+            // Find all events that overlap with this one
+            for j in 0..n {
+                if !visited[j] && events_overlap(&positioned[idx], &positioned[j]) {
+                    stack.push(j);
+                }
+            }
+        }
+        clusters.push(cluster);
+    }
+
+    // Update widths per cluster instead of globally
+    for cluster in clusters {
+        let max_col = cluster.iter().map(|&i| positioned[i].position.column).max().unwrap_or(0);
+        let cluster_total = max_col + 1;
+        let col_width = 95.0 / cluster_total as f32;
+        for &i in &cluster {
+            positioned[i].position.total_columns = cluster_total;
+            positioned[i].position.left = (positioned[i].position.column as f32 * col_width) + 2.0;
+            positioned[i].position.width = col_width - 2.0;
+        }
     }
 
     positioned
@@ -633,7 +675,8 @@ fn get_event_duration(event: &UnifiedEvent) -> f32 {
         UnifiedEvent::Calendar(e) => {
             if let (Some(end), start) = (e.end_timestamp(), e.start_timestamp()) {
                 if end > start {
-                    return ((end - start) / 60) as f32;
+                    // Use floating-point division for sub-minute precision
+                    return (end - start) as f32 / 60.0;
                 }
             }
             60.0 // Default 1 hour
