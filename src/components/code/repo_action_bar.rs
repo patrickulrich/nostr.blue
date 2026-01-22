@@ -44,17 +44,11 @@ pub fn RepoActionBar(
         if *repo_id_signal.read() != current_id {
             repo_id_signal.set(current_id);
         }
+        // Sync star_count when navigating between repos (using peek to avoid subscribing)
+        if *star_count.peek() != repo.star_count {
+            star_count.set(repo.star_count);
+        }
     }
-
-    // Clone values needed in closures
-    #[cfg(target_arch = "wasm32")]
-    let repo_pubkey_for_watch = repo.pubkey.clone();
-    #[cfg(target_arch = "wasm32")]
-    let repo_id_for_watch = repo.id.clone();
-    #[cfg(target_arch = "wasm32")]
-    let repo_pubkey_for_handler = repo.pubkey.clone();
-    #[cfg(target_arch = "wasm32")]
-    let repo_id_for_handler = repo.id.clone();
 
     // Build coordinate for the repository (reactive via signal reads)
     let coordinate = use_memo(move || {
@@ -96,20 +90,26 @@ pub fn RepoActionBar(
         }
     });
 
-    // Load watch status from localStorage
+    // Load watch status from localStorage (reactive to repo changes)
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
         {
+            // Reading signals here subscribes effect to changes
+            let pubkey = repo_pubkey_signal.read().clone();
+            let id = repo_id_signal.read().clone();
+
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(watched_json)) = storage.get_item("nostr_blue_watched_repos") {
                         if let Ok(watched) = serde_json::from_str::<Vec<String>>(&watched_json) {
-                            let coord_str = format!("{}:{}", repo_pubkey_for_watch, repo_id_for_watch);
+                            let coord_str = format!("{}:{}", pubkey, id);
                             is_watching.set(watched.contains(&coord_str));
+                            return; // Early return on success
                         }
                     }
                 }
             }
+            is_watching.set(false); // Default if localStorage unavailable
         }
     });
 
@@ -162,6 +162,7 @@ pub fn RepoActionBar(
                     }
                     Err(e) => {
                         log::error!("Star action failed: {}", e);
+                        toast.error(format!("Failed to update star: {}", e), ToastOptions::new());
                     }
                 }
                 star_loading.set(false);
@@ -171,13 +172,17 @@ pub fn RepoActionBar(
 
     // Watch handler (localStorage only)
     let handle_watch = {
-        #[cfg(target_arch = "wasm32")]
-        let repo_coord = format!("{}:{}", repo_pubkey_for_handler, repo_id_for_handler);
         move |_| {
             let currently_watching = *is_watching.read();
 
             #[cfg(target_arch = "wasm32")]
             {
+                // Read signals fresh inside closure - signals are Copy
+                let repo_coord = format!("{}:{}",
+                    repo_pubkey_signal.read(),
+                    repo_id_signal.read()
+                );
+
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
                         let mut watched: Vec<String> = storage

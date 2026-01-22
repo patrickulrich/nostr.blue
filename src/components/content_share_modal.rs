@@ -113,8 +113,6 @@ pub fn ContentShareModal(
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
 
-    let has_signer = *HAS_SIGNER.read();
-
     // Helper to get cursor position from DOM (returns UTF-16 index)
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
@@ -458,13 +456,13 @@ pub fn ContentShareModal(
 
                             // Share to Nostr button
                             button {
-                                class: if has_signer {
+                                class: if *HAS_SIGNER.read() {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
                                 } else {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
                                 },
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
-                                disabled: !has_signer,
+                                disabled: !*HAS_SIGNER.read(),
                                 MessageCircleIcon { class: "w-5 h-5 text-purple-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -474,7 +472,7 @@ pub fn ContentShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer {
+                                        if *HAS_SIGNER.read() {
                                             "Post about this content"
                                         } else {
                                             "Login required"
@@ -485,13 +483,13 @@ pub fn ContentShareModal(
 
                             // Send via DM button
                             button {
-                                class: if has_signer {
+                                class: if *HAS_SIGNER.read() {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
                                 } else {
                                     "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
                                 },
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
-                                disabled: !has_signer,
+                                disabled: !*HAS_SIGNER.read(),
                                 SendIcon { class: "w-5 h-5 text-pink-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
@@ -501,7 +499,7 @@ pub fn ContentShareModal(
                                     }
                                     p {
                                         class: "text-xs text-muted-foreground",
-                                        if has_signer { "Send privately to someone" } else { "Login required" }
+                                        if *HAS_SIGNER.read() { "Send privately to someone" } else { "Login required" }
                                     }
                                 }
                             }

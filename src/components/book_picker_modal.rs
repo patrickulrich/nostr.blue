@@ -15,6 +15,13 @@ use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon}
 // Input Validation Functions (Security Fix #1)
 // ============================================================================
 
+/// Validate book identifier (d-tag or chapter) against NKBIP-08 format.
+/// Only lowercase letters, digits, and hyphens are allowed.
+fn is_valid_book_id(input: &str) -> bool {
+    !input.is_empty()
+        && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// Validate book version input against allowed format.
 /// Only lowercase letters, digits, and hyphens are allowed (per NKBIP-08).
 fn is_valid_book_version(input: &str) -> bool {
@@ -276,7 +283,13 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Build book reference from selections (pure computation - no side effects)
     let book_reference = use_memo(move || {
-        selected_publication.read().as_ref().map(|pub_| {
+        selected_publication.read().as_ref().and_then(|pub_| {
+            // Validate d_tag from relay data
+            if !is_valid_book_id(&pub_.d_tag) {
+                log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
+                return None;
+            }
+
             let mut reference = BookReference::new(&pub_.d_tag);
 
             // Add version only if valid
@@ -285,9 +298,13 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 reference = reference.with_version(&version_input);
             }
 
-            // Add chapter (validated by dropdown selection)
+            // Add chapter only if valid (validated against same NKBIP-08 format)
             if let Some(ref chapter) = *selected_chapter.read() {
-                reference = reference.with_chapter(chapter);
+                if is_valid_book_id(chapter) {
+                    reference = reference.with_chapter(chapter);
+                } else {
+                    log::warn!("Invalid chapter id: {}", chapter);
+                }
             }
 
             // Add sections only if valid
@@ -301,7 +318,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 }
             }
 
-            reference
+            Some(reference)
         })
     });
 
@@ -443,6 +460,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                 search_query.set(String::new());
                                 search_results.set(Vec::new());
                                 is_searching.set(false);
+                                fetch_error.set(None); // Clear stale search errors
                             },
                             "Browse"
                         }
