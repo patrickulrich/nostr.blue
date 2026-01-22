@@ -63,7 +63,11 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
             let stats = relay.stats();
 
             // Primary score from SDK's live stats
-            let live_score = stats.success_rate();
+            // Guard against NaN - fall back to 0.0 if not finite
+            let live_score = {
+                let rate = stats.success_rate();
+                if rate.is_finite() { rate } else { 0.0 }
+            };
 
             // Boost for currently connected relays
             let connected_boost = if relay.is_connected() { 0.1 } else { 0.0 };

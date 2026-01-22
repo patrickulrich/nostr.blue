@@ -139,12 +139,85 @@ pub async fn disconnect(client: &Client) {
 
 /// Reconnect to all relays
 ///
+/// Initiates connection and polls for at least one connected relay.
+///
 /// # Arguments
 /// * `client` - The Nostr client instance
+///
+/// # Returns
+/// true if at least one relay connected, false otherwise
 #[allow(dead_code)]
-pub async fn reconnect(client: &Client) {
+pub async fn reconnect(client: &Client) -> bool {
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
     client.connect().await;
-    log::info!("Reconnected to relays");
+
+    // Poll for at least one connected relay (similar to ensure_relays_ready)
+    const TIMEOUT_MS: u64 = 3000;
+    const POLL_INTERVAL_MS: u64 = 100;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_timers::future::TimeoutFuture;
+        let start = instant::Instant::now();
+
+        loop {
+            let relays = client.relays().await;
+            let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("Reconnected to relays successfully after {}ms", start.elapsed().as_millis());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
+                return true;
+            }
+
+            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
+                break;
+            }
+
+            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_millis(TIMEOUT_MS);
+
+        loop {
+            let relays = client.relays().await;
+            let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("Reconnected to relays successfully after {:?}", start.elapsed());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
+                return true;
+            }
+
+            if start.elapsed() > timeout {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+        }
+    }
+
+    // Final status check
+    let relays = client.relays().await;
+    let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+    if connected {
+        log::info!("Reconnected to relays successfully");
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
+    } else {
+        log::warn!("Reconnect attempt: no relays connected after timeout");
+    }
+    connected
 }
 
 /// Fetch events from specific relays (for privacy-sensitive queries like DMs)

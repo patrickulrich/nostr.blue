@@ -31,6 +31,7 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
         return;
     }
 
+    // Remove from SDK client
     let relays = client.relays().await;
     for (url, _) in relays {
         let url_str = url.to_string();
@@ -40,6 +41,16 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
             let _ = client.remove_relay(url).await;
         }
     }
+
+    // Also prune RELAY_POOL to keep UI state in sync
+    let store = RELAY_POOL.read();
+    let mut data = store.data();
+    let mut relays = data.write();
+    relays.retain(|r| {
+        let normalized = r.url.trim_end_matches('/');
+        !blocked.iter().any(|b| b.trim_end_matches('/') == normalized)
+    });
+    log::debug!("Pruned blocked relays from RELAY_POOL, {} remaining", relays.len());
 }
 
 /// Default relays to connect to
@@ -146,11 +157,12 @@ pub async fn remove_relay(client: &Client, relay_url: &str) -> std::result::Resu
 
     client.remove_relay(url).await.map_err(|e| e.to_string())?;
 
-    // Update relay pool state
+    // Update relay pool state with normalized comparison
     let store = RELAY_POOL.read();
     let mut data = store.data();
     let mut relays = data.write();
-    relays.retain(|r| r.url != relay_url);
+    let normalized_url = relay_url.trim_end_matches('/');
+    relays.retain(|r| r.url.trim_end_matches('/') != normalized_url);
 
     log::info!("Removed relay: {}", relay_url);
     Ok(())
