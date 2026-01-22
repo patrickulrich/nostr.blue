@@ -4,7 +4,7 @@ use crate::routes::Route;
 
 #[component]
 pub fn SettingsMuted() -> Element {
-    let mut muted_posts = use_signal(|| Vec::<String>::new());
+    let mut muted_posts = use_signal(Vec::<String>::new);
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
 
@@ -67,7 +67,7 @@ pub fn SettingsMuted() -> Element {
 
             // Content
             div {
-                class: "bg-background border border-border rounded-lg shadow-sm",
+                class: "bg-background border border-border rounded-lg shadow-xs",
 
                 // Loading state
                 if *loading.read() {

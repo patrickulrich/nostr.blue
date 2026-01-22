@@ -23,7 +23,7 @@ impl FeedType {
 #[component]
 pub fn VoiceMessages() -> Element {
     // State for feed events
-    let mut events = use_signal(|| Vec::<Event>::new());
+    let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
@@ -37,14 +37,39 @@ pub fn VoiceMessages() -> Element {
     // Generation token to prevent stale requests from corrupting the feed
     let mut request_generation = use_signal(|| 0u64);
 
+    // Track last intentional load trigger to guard against spurious re-triggers
+    let mut last_loaded_trigger = use_signal(|| (0i32, FeedType::Following));
+
     // Load feed on mount and when refresh is triggered or feed type changes
-    use_effect(use_reactive((&*refresh_trigger.read(), &*feed_type.read(), &*nostr_client::CLIENT_INITIALIZED.read()), move |(_, current_feed_type, client_initialized)| {
+    use_effect(move || {
+        let refresh = *refresh_trigger.read();
+        let current_feed_type = *feed_type.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
         // Only load if client is initialized
         if !client_initialized {
             return;
         }
 
-        loading.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_feed) = *last_loaded_trigger.peek();
+        let has_data = !events.peek().is_empty();
+
+        let feed_type_changed = current_feed_type != last_feed;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !feed_type_changed && !refresh_changed {
+            log::debug!("Skipping voice messages re-load: data already present, no intentional change");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_trigger.set((refresh, current_feed_type));
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading.set(true);
+        }
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
@@ -64,6 +89,7 @@ pub fn VoiceMessages() -> Element {
 
             // Check if this request is still current before updating state
             if *request_generation.read() != captured_gen {
+                log::debug!("Discarding stale voice messages request {}", captured_gen);
                 return; // Abort - a newer request has been started
             }
 
@@ -86,7 +112,7 @@ pub fn VoiceMessages() -> Element {
                 }
             }
         });
-    }));
+    });
 
     // Load more function for infinite scroll
     let load_more = move || {

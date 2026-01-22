@@ -1,17 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <base href="/">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Decentralized social network on the Nostr protocol">
     <title>nostr.blue - Decentralized Social Network</title>
-    <link data-trunk rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-    <link data-trunk rel="icon" type="image/x-icon" href="assets/favicon.ico">
-    <link data-trunk rel="css" href="public/tailwind.css">
-    <!-- HLS.js for HLS livestream playback -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-    <!-- Voice recorder manager for handling MediaRecorder API -->
-    <script data-trunk src="public/voice-recorder.js"></script>
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="nostr.blue">
+    <link rel="manifest" href="/manifest.json">
+    <!-- Apple touch icon (iOS only supports PNG format) -->
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+    <!-- Preconnect to CDNs for faster dynamic loading -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://vjs.zencdn.net">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://unpkg.com">
+    <link rel="dns-prefetch" href="https://vjs.zencdn.net">
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+
+    <!-- Voice recorder manager for handling MediaRecorder API (deferred) -->
+    <script src="/voice-recorder.js" defer></script>
+    <!-- HLS manager for radio stream playback (deferred) -->
+    <script src="/hls-manager.js" defer></script>
     <style>
         /* Hide scrollbar but keep scrolling functionality */
         .hide-scrollbar {
@@ -40,5 +60,11 @@
 </head>
 <body>
     <div id="main"></div>
+
+    <!-- SPA Redirect Handler for GitHub Pages 404 -->
+    <script src="/spa-redirect.js"></script>
+
+    <!-- Service Worker Registration with Update Notification -->
+    <script src="/sw-register.js" defer></script>
 </body>
 </html>

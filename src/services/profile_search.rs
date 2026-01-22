@@ -4,6 +4,13 @@ use std::time::Duration;
 
 use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
+use crate::stores::relay;
+
+/// Get search relay URLs, returns empty vec if none configured (fallback to all relays)
+fn get_search_relay_urls() -> Vec<String> {
+    // Use peek() for non-component context - safe in async/service code
+    relay::SEARCH_RELAYS.peek().clone()
+}
 
 /// Result type for profile search
 #[derive(Clone, Debug)]
@@ -197,7 +204,16 @@ pub async fn search_profiles(
             .search(query)
             .limit(20);
 
-        match client.fetch_events(filter, Duration::from_secs(3)).await {
+        let search_urls = get_search_relay_urls();
+        let fetch_result = if search_urls.is_empty() {
+            // Fallback to all connected relays
+            client.fetch_events(filter, Duration::from_secs(3)).await
+        } else {
+            // Route to specific search relays
+            client.fetch_events_from(search_urls, filter, Duration::from_secs(3)).await
+        };
+
+        match fetch_result {
             Ok(events) => {
                 log::debug!("Found {} metadata events from relays", events.len());
 
@@ -296,9 +312,7 @@ pub async fn get_user_relays() -> Vec<String> {
 
     // Get connected relays from the pool
     let relays = client.pool().relays().await;
-    let relay_urls: Vec<String> = relays
-        .into_iter()
-        .map(|(url, _)| url.to_string())
+    let relay_urls: Vec<String> = relays.into_keys().map(|url| url.to_string())
         .take(3) // Limit to 3 relay hints
         .collect();
 

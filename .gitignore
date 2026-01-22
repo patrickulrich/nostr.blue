@@ -8,7 +8,7 @@
 
 # Node
 /node_modules/
-package-lock.json
+# Note: package-lock.json is committed for reproducible CI builds
 
 # Environment
 .env
@@ -37,3 +37,7 @@ yarn-error.log*
 
 # CSS (generated)
 /public/tailwind.css
+/assets/tailwind.css
+
+# Agent config
+AGENTS.md

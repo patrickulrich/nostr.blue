@@ -7,7 +7,67 @@ use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
+use crate::utils::truncate_pubkey;
+use crate::utils::duration::format_duration_timecode_padded;
 use std::time::Duration;
+
+/// Skeleton loader for VideoCard - prevents layout shift during loading
+#[component]
+pub fn VideoCardSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "border-b border-border animate-pulse",
+
+            // Author header skeleton
+            div {
+                class: "p-4 flex items-center gap-3",
+                // Avatar
+                div {
+                    class: "w-12 h-12 rounded-full bg-gray-300 dark:bg-gray-700"
+                }
+                // Name and timestamp
+                div {
+                    class: "flex-1 space-y-2",
+                    div {
+                        class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"
+                    }
+                    div {
+                        class: "h-3 bg-gray-300 dark:bg-gray-700 rounded w-1/6"
+                    }
+                }
+            }
+
+            // Video player area skeleton
+            div {
+                class: "relative bg-gray-300 dark:bg-gray-700 aspect-video"
+            }
+
+            // Title and description skeleton
+            div {
+                class: "p-4 space-y-2",
+                div {
+                    class: "h-5 bg-gray-300 dark:bg-gray-700 rounded w-3/4"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-2/3"
+                }
+            }
+
+            // Action buttons skeleton
+            div {
+                class: "px-4 pb-4 flex items-center gap-6",
+                for _ in 0..4 {
+                    div {
+                        class: "w-8 h-8 bg-gray-300 dark:bg-gray-700 rounded"
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct VideoMeta {
@@ -87,19 +147,6 @@ pub fn get_video_title(event: &Event) -> Option<String> {
     None
 }
 
-/// Format duration in seconds to MM:SS or HH:MM:SS
-fn format_duration(seconds: f64) -> String {
-    let total_secs = seconds as u64;
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    let secs = total_secs % 60;
-
-    if hours > 0 {
-        format!("{:02}:{:02}:{:02}", hours, minutes, secs)
-    } else {
-        format!("{:02}:{:02}", minutes, secs)
-    }
-}
 
 #[component]
 pub fn VideoCard(event: Event) -> Element {
@@ -336,15 +383,15 @@ pub fn VideoCard(event: Event) -> Element {
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
         metadata.display_name.clone()
             .or_else(|| metadata.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..]))
+            .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
-        format!("{}...{}", &author_pubkey_display[..8], &author_pubkey_display[author_pubkey_display.len()-4..])
+        truncate_pubkey(&author_pubkey_display)
     };
 
     let author_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
 
-    let formatted_duration = first_video.duration.map(format_duration);
+    let formatted_duration = first_video.duration.map(|d| format_duration_timecode_padded(d as u64));
 
     rsx! {
         div {

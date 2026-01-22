@@ -15,14 +15,14 @@ enum StatusFilter {
 #[component]
 pub fn VideosLive() -> Element {
     // Following streams state
-    let mut following_streams = use_signal(|| Vec::<Event>::new());
+    let mut following_streams = use_signal(Vec::<Event>::new);
     let mut loading_following = use_signal(|| false);
     let mut has_more_following = use_signal(|| true);
     let mut oldest_timestamp_following = use_signal(|| None::<u64>);
     let mut error_following = use_signal(|| None::<String>);
 
     // Global streams state
-    let mut global_streams = use_signal(|| Vec::<Event>::new());
+    let mut global_streams = use_signal(Vec::<Event>::new);
     let mut loading_global = use_signal(|| false);
     let mut has_more_global = use_signal(|| true);
     let mut oldest_timestamp_global = use_signal(|| None::<u64>);
@@ -31,27 +31,71 @@ pub fn VideosLive() -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Live);
     let mut refresh_trigger = use_signal(|| 0);
 
+    // Request IDs for preventing stale results
+    let mut request_id_following = use_signal(|| 0u32);
+    let mut request_id_global = use_signal(|| 0u32);
+
+    // Track last intentional load triggers
+    let mut last_loaded_following = use_signal(|| (0u32, StatusFilter::Live));
+    let mut last_loaded_global = use_signal(|| (0u32, StatusFilter::Live));
+
     // Load following streams
-    use_effect(use_reactive((&*refresh_trigger.read(), &*status_filter.read()), move |(_, current_status)| {
+    use_effect(move || {
+        let refresh = *refresh_trigger.read();
+        let current_status = *status_filter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized {
             return;
         }
 
-        loading_following.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_status) = *last_loaded_following.peek();
+        let has_data = !following_streams.peek().is_empty();
+
+        let status_changed = current_status != last_status;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !status_changed && !refresh_changed {
+            log::debug!("Skipping following streams re-load: data already present");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_following.set((refresh, current_status));
+
+        // Generate request ID for stale request prevention
+        let current_id = *request_id_following.peek() + 1;
+        request_id_following.set(current_id);
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading_following.set(true);
+        }
         error_following.set(None);
         oldest_timestamp_following.set(None);
         has_more_following.set(true);
 
         spawn(async move {
-            match load_following_streams(None, current_status).await {
-                Ok((events, next_until, hit_limit)) => {
-                    // Set cursor from raw data, not filtered results
-                    oldest_timestamp_following.set(next_until);
+            // Check if this request is still current
+            if *request_id_following.peek() != current_id {
+                log::debug!("Discarding stale following streams request {}", current_id);
+                return;
+            }
 
-                    has_more_following.set(hit_limit);
-                    following_streams.set(events);
+            match load_following_streams(None, current_status).await {
+                Ok((events, next_until, hit_limit, did_fallback)) => {
+                    // If fallback occurred, clear the following streams to avoid duplicate with global
+                    // This happens when user has no contacts
+                    if did_fallback {
+                        log::info!("No contacts, hiding Following streams section");
+                        following_streams.set(Vec::new());
+                    } else {
+                        // Set cursor from raw data, not filtered results
+                        oldest_timestamp_following.set(next_until);
+                        has_more_following.set(hit_limit);
+                        following_streams.set(events);
+                    }
                     loading_following.set(false);
                 }
                 Err(e) => {
@@ -60,22 +104,52 @@ pub fn VideosLive() -> Element {
                 }
             }
         });
-    }));
+    });
 
     // Load global streams
-    use_effect(use_reactive((&*refresh_trigger.read(), &*status_filter.read()), move |(_, current_status)| {
+    use_effect(move || {
+        let refresh = *refresh_trigger.read();
+        let current_status = *status_filter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
         if !client_initialized {
             return;
         }
 
-        loading_global.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_status) = *last_loaded_global.peek();
+        let has_data = !global_streams.peek().is_empty();
+
+        let status_changed = current_status != last_status;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !status_changed && !refresh_changed {
+            log::debug!("Skipping global streams re-load: data already present");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_global.set((refresh, current_status));
+
+        // Generate request ID for stale request prevention
+        let current_id = *request_id_global.peek() + 1;
+        request_id_global.set(current_id);
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading_global.set(true);
+        }
         error_global.set(None);
         oldest_timestamp_global.set(None);
         has_more_global.set(true);
 
         spawn(async move {
+            // Check if this request is still current
+            if *request_id_global.peek() != current_id {
+                log::debug!("Discarding stale global streams request {}", current_id);
+                return;
+            }
+
             match load_global_streams(None, current_status).await {
                 Ok((events, next_until, hit_limit)) => {
                     // Set cursor from raw data, not filtered results
@@ -91,7 +165,7 @@ pub fn VideosLive() -> Element {
                 }
             }
         });
-    }));
+    });
 
     // Load more following streams
     let mut load_more_following = move || {
@@ -105,8 +179,9 @@ pub fn VideosLive() -> Element {
         loading_following.set(true);
 
         spawn(async move {
+            // Note: During pagination, we ignore the fallback flag since we already showed following section
             match load_following_streams(until, current_status).await {
-                Ok((new_events, next_until, hit_limit)) => {
+                Ok((new_events, next_until, hit_limit, _did_fallback)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -403,7 +478,8 @@ pub fn VideosLive() -> Element {
 
 // Helper functions to load streams
 
-async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool), String> {
+/// Returns (events, next_until, hit_limit, did_fallback)
+async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool, bool), String> {
     let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone()
         .ok_or("Not authenticated")?;
 
@@ -412,13 +488,15 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            return load_global_streams(until, status).await;
+            let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
+            return Ok((events, next_until, hit_limit, true));
         }
     };
 
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global streams");
-        return load_global_streams(until, status).await;
+        let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
+        return Ok((events, next_until, hit_limit, true));
     }
 
     // Parse contact pubkeys into a HashSet for efficient lookup
@@ -429,7 +507,8 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
 
     if followed_pubkeys.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        return load_global_streams(until, status).await;
+        let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
+        return Ok((events, next_until, hit_limit, true));
     }
 
     // Fetch all recent livestream events (we'll filter client-side)
@@ -479,7 +558,7 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
 
     let filtered_events = filter_by_status(following_events, status);
 
-    Ok((filtered_events, next_until, hit_limit))
+    Ok((filtered_events, next_until, hit_limit, false))
 }
 
 async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool), String> {

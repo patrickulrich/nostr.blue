@@ -8,9 +8,10 @@ use instant::{Duration, Instant};
 use crate::stores::pending_comments::{CommentStatus, PendingComment};
 
 /// Source of a thread node - distinguishes confirmed vs pending comments
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ThreadNodeSource {
     /// Confirmed event from relays
+    #[default]
     Confirmed,
     /// Pending local comment awaiting confirmation
     Pending {
@@ -19,12 +20,6 @@ pub enum ThreadNodeSource {
         /// Author's public key (stored explicitly since display event may have dummy pubkey)
         author_pubkey: PublicKey,
     },
-}
-
-impl Default for ThreadNodeSource {
-    fn default() -> Self {
-        Self::Confirmed
-    }
 }
 
 /// Represents a node in a threaded conversation tree
@@ -234,7 +229,10 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
     // Phase 3.5: Check L2 cache first
     {
-        let mut cache = get_thread_tree_cache().lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Thread tree cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         if let Some(cached_tree) = cache.get(&root_id_hex) {
             log::debug!("Thread tree cache HIT for {}", root_id_hex);
             return cached_tree;
@@ -360,7 +358,10 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
     // Phase 3.5: Cache the result for future calls
     {
-        let mut cache = get_thread_tree_cache().lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Thread tree cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.insert(root_id_hex, root_replies.clone());
     }
 
@@ -392,7 +393,10 @@ pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
 pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
     let root_id_hex = root_event_id.to_hex();
     {
-        let mut cache = get_thread_tree_cache().lock().unwrap();
+        let mut cache = get_thread_tree_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Thread tree cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
@@ -461,7 +465,7 @@ pub fn merge_pending_into_tree(
         if let Some(parent_id) = pending_comment.parent_comment_id {
             // Replying to another comment - find and insert as child
             // Returns Some(node) if not found (ownership returned), None if consumed
-            fn insert_as_child(nodes: &mut Vec<ThreadNode>, parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
+            fn insert_as_child(nodes: &mut [ThreadNode], parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
                 for existing in nodes.iter_mut() {
                     if existing.event.id == *parent_id {
                         existing.children.push(node);

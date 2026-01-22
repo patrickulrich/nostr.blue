@@ -52,7 +52,7 @@ impl NotificationFilter {
 
 #[component]
 pub fn Notifications() -> Element {
-    let mut notifications = use_signal(|| Vec::<NotificationType>::new());
+    let mut notifications = use_signal(Vec::<NotificationType>::new);
     let mut loading = use_signal(|| false);
     let mut refreshing = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -81,7 +81,7 @@ pub fn Notifications() -> Element {
             match load_notifications(None).await {
                 Ok(notifs) => {
                     if !notifs.is_empty() {
-                        let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
+                        let oldest = notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
                         notifications.set(notifs.clone());
@@ -116,7 +116,7 @@ pub fn Notifications() -> Element {
             match load_notifications(None).await {
                 Ok(notifs) => {
                     if !notifs.is_empty() {
-                        let oldest = notifs.iter().map(|n| get_timestamp(n)).min();
+                        let oldest = notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
                         let len = notifs.len();
                         notifications.set(notifs.clone());
@@ -149,7 +149,7 @@ pub fn Notifications() -> Element {
             match load_notifications(until).await {
                 Ok(new_notifs) => {
                     if !new_notifs.is_empty() {
-                        let oldest = new_notifs.iter().map(|n| get_timestamp(n)).min();
+                        let oldest = new_notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
 
                         let mut current = notifications.read().clone();
@@ -417,7 +417,7 @@ fn ReactionNotification(event: NostrEvent) -> Element {
         event.tags.iter()
             .find_map(|tag| {
                 let slice = tag.as_slice();
-                if slice.get(0).map(|k| k == "emoji").unwrap_or(false) &&
+                if slice.first().map(|k| k == "emoji").unwrap_or(false) &&
                    slice.get(1).map(|s| s == shortcode).unwrap_or(false) {
                     slice.get(2).cloned()
                 } else {
@@ -432,10 +432,8 @@ fn ReactionNotification(event: NostrEvent) -> Element {
         "❤️".to_string() // Default to heart if empty or just "+"
     } else if event.content == "-" {
         "👎".to_string() // Thumbs down for downvote
-    } else if custom_emoji_url.is_some() {
-        event.content.clone() // Will show as custom image below
     } else {
-        event.content.clone() // Regular emoji
+        event.content.clone() // Regular emoji or custom emoji (shown as image below if custom_emoji_url.is_some())
     };
 
     // Get the event ID that was reacted to
@@ -508,7 +506,7 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 
@@ -638,7 +636,7 @@ fn RepostNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 
@@ -764,7 +762,7 @@ fn ZapNotification(event: NostrEvent) -> Element {
                     img {
                         src: "{avatar_url}",
                         alt: "{display_name}",
-                        class: "w-10 h-10 rounded-full object-cover flex-shrink-0",
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
                     }
                 }
 
@@ -868,12 +866,10 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
     let lower = bolt11.to_lowercase();
 
     // Find where the amount starts (after "lnbc" or "lntb" etc)
-    let prefix_end = if lower.starts_with("lnbc") {
-        4
-    } else if lower.starts_with("lntb") {
-        4
-    } else if lower.starts_with("lnbcrt") {
+    let prefix_end = if lower.starts_with("lnbcrt") {
         6
+    } else if lower.starts_with("lnbc") || lower.starts_with("lntb") {
+        4
     } else {
         return None;
     };

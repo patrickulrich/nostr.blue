@@ -21,15 +21,15 @@ pub fn WebBookmarkModal(
     on_close: EventHandler<()>,
 ) -> Element {
     // Form state
-    let mut url_input = use_signal(|| String::new());
-    let mut title_input = use_signal(|| String::new());
-    let mut description_input = use_signal(|| String::new());
-    let mut image_input = use_signal(|| String::new());
-    let mut tags_input = use_signal(|| String::new());
-    let mut published_at_input = use_signal(|| String::new());
+    let mut url_input = use_signal(String::new);
+    let mut title_input = use_signal(String::new);
+    let mut description_input = use_signal(String::new);
+    let mut image_input = use_signal(String::new);
+    let mut tags_input = use_signal(String::new);
+    let mut published_at_input = use_signal(String::new);
 
     // Track reserved tags (favorite, archived) to preserve them on save
-    let mut reserved_tags = use_signal(|| Vec::<String>::new());
+    let mut reserved_tags = use_signal(Vec::<String>::new);
 
     // UI state
     let mut is_fetching_metadata = use_signal(|| false);
@@ -317,7 +317,7 @@ pub fn WebBookmarkModal(
                         div {
                             class: "flex gap-2",
                             input {
-                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "url",
                                 placeholder: "https://example.com/article",
                                 value: "{url_input}",
@@ -356,7 +356,7 @@ pub fn WebBookmarkModal(
                             "Title"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Article title",
                             value: "{title_input}",
@@ -372,7 +372,7 @@ pub fn WebBookmarkModal(
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             rows: "3",
                             placeholder: "Brief description or notes",
                             value: "{description_input}",
@@ -388,7 +388,7 @@ pub fn WebBookmarkModal(
                             "Image URL"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "https://example.com/image.jpg",
                             value: "{image_input}",
@@ -416,7 +416,7 @@ pub fn WebBookmarkModal(
                             "Tags"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "javascript, tutorial, web development",
                             value: "{tags_input}",
@@ -436,7 +436,7 @@ pub fn WebBookmarkModal(
                             "Published Date"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "date",
                             value: "{published_at_input}",
                             oninput: move |evt| published_at_input.set(evt.value().clone()),

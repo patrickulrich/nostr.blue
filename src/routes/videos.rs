@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, feed_cache, nostr_client};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::utils::FeedItem;
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -23,15 +26,15 @@ impl FeedType {
 #[component]
 pub fn Videos() -> Element {
     // State for featured landscape videos
-    let mut featured_landscape = use_signal(|| Vec::<Event>::new());
+    let mut featured_landscape = use_signal(Vec::<Event>::new);
     let mut loading_featured = use_signal(|| false);
 
     // State for recent verts section
-    let mut recent_verts = use_signal(|| Vec::<Event>::new());
+    let mut recent_verts = use_signal(Vec::<Event>::new);
     let mut loading_recent_verts = use_signal(|| false);
 
     // State for combined feed
-    let mut feed_events = use_signal(|| Vec::<Event>::new());
+    let mut feed_events = use_signal(Vec::<Event>::new);
     let mut loading_feed = use_signal(|| false);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
@@ -42,6 +45,12 @@ pub fn Videos() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
     let mut error = use_signal(|| None::<String>);
+
+    // Request ID for preventing stale results when feed type changes rapidly
+    let mut request_id = use_signal(|| 0u32);
+
+    // Track last intentional load trigger to guard against spurious re-triggers
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
 
     // Load featured landscape videos on mount
     use_effect(move || {
@@ -93,7 +102,7 @@ pub fn Videos() -> Element {
 
     // Load combined feed when feed type changes or refresh is triggered
     use_effect(move || {
-        let _ = refresh_trigger.read();
+        let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -101,22 +110,85 @@ pub fn Videos() -> Element {
             return;
         }
 
-        loading_feed.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_feed) = *last_loaded_trigger.peek();
+        let has_data = !feed_events.peek().is_empty();
+
+        let feed_type_changed = current_feed_type != last_feed;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !feed_type_changed && !refresh_changed {
+            log::debug!("Skipping videos feed re-load: data already present, no intentional change");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_trigger.set((refresh, current_feed_type));
+
+        // Generate request ID for stale request prevention
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading_feed.set(true);
+        }
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
 
         spawn(async move {
+            // Check if this request is still current
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale videos feed request {}", current_id);
+                return;
+            }
+
+            // Determine cache key
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = match current_feed_type {
+                FeedType::Following => FeedCacheKey::Videos { pubkey: pubkey_str },
+                FeedType::Global => FeedCacheKey::VideosGlobal,
+            };
+
+            // STEP 1: Load from cache instantly
+            let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                .await
+                .unwrap_or_default();
+
+            if !cached_items.is_empty() {
+                log::info!("Loaded {} videos from cache", cached_items.len());
+                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+                feed_events.set(cached_events);
+            }
+
+            // STEP 2: Load from network
             let result = match current_feed_type {
                 FeedType::Following => load_following_videos(None).await,
-                FeedType::Global => load_global_videos(None).await,
+                FeedType::Global => load_global_videos(None).await.map(|(e, h)| (e, h, false)),
             };
 
             match result {
-                Ok((video_events, page_has_more)) => {
+                Ok((video_events, page_has_more, did_fallback)) => {
+                    // Update feed_type if fallback occurred (no contacts or error)
+                    if did_fallback {
+                        log::info!("No contacts, switched to Global videos feed");
+                        feed_type.set(FeedType::Global);
+                    }
+
                     if let Some(last_event) = video_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
+
+                    // STEP 3: Store to cache
+                    let feed_items: Vec<FeedItem> = video_events.iter()
+                        .map(|e| FeedItem::OriginalPost(e.clone()))
+                        .collect();
+                    let cache_key_for_store = cache_key.clone();
+                    spawn(async move {
+                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ = feed_cache::run_eviction_if_needed().await;
+                    });
 
                     // Use the has_more flag from the loader which checks if either query hit its limit
                     has_more.set(page_has_more);
@@ -124,7 +196,12 @@ pub fn Videos() -> Element {
                     loading_feed.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    // On error, keep cached data visible if we have it
+                    if cached_items.is_empty() {
+                        error.set(Some(e));
+                    } else {
+                        log::warn!("Network error but showing cached videos: {}", e);
+                    }
                     loading_feed.set(false);
                 }
             }
@@ -148,8 +225,9 @@ pub fn Videos() -> Element {
         loading_feed.set(true);
 
         spawn(async move {
+            // Note: During pagination, we ignore the fallback flag since feed_type is already set
             let result = match current_feed_type {
-                FeedType::Following => load_following_videos(until).await,
+                FeedType::Following => load_following_videos(until).await.map(|(e, h, _)| (e, h)),
                 FeedType::Global => load_global_videos(until).await,
             };
 
@@ -459,7 +537,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
     let author_pubkey = event.pubkey.to_string();
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Fetch author metadata
@@ -507,11 +585,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
-            if pk.len() > 16 {
-                format!("{}...{}", &pk[..8], &pk[pk.len()-8..])
-            } else {
-                pk
-            }
+            truncate_pubkey(&pk)
         });
 
     let video_id = event.id.to_hex();
@@ -581,7 +655,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 
                     p {
                         class: "text-xs text-muted-foreground",
-                        "{format_time_ago(event.created_at.as_secs())}"
+                        {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
             }
@@ -593,7 +667,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
 fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
-    let video_element_id = format!("preview-vert-{}", event.id.to_hex()[..12].to_string());
+    let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
 
     // Play/pause video on hover (only if no thumbnail)
@@ -729,26 +803,13 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-// Format timestamp as "X ago"
-fn format_time_ago(timestamp: u64) -> String {
-    let now = (js_sys::Date::now() / 1000.0) as u64;
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", diff / 60),
-        3600..=86399 => format!("{}h ago", diff / 3600),
-        86400..=604799 => format!("{}d ago", diff / 86400),
-        _ => format!("{}w ago", diff / 604800),
-    }
-}
 
 // Load featured landscape videos (3 landscape videos from Following, fallback to Global)
 async fn load_featured_content() -> Result<Vec<Event>, String> {
     log::info!("Loading featured landscape videos...");
 
     // Try Following feed first
-    let _result = if let Some(pubkey_str) = auth_store::get_pubkey() {
+    if let Some(pubkey_str) = auth_store::get_pubkey() {
         match nostr_client::fetch_contacts(pubkey_str).await {
             Ok(contacts) if !contacts.is_empty() => {
                 let mut authors = Vec::new();
@@ -765,7 +826,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         .authors(authors)
                         .limit(20);
 
-                    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
                         .await
                         .unwrap_or_default();
 
@@ -792,7 +853,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         .kinds([Kind::Custom(21)])
         .limit(20);
 
-    let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
         .unwrap_or_default();
 
@@ -829,7 +890,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     .authors(authors)
                     .limit(20);
 
-                let all_events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
                     .await
                     .unwrap_or_default();
 
@@ -855,9 +916,11 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
     Ok(Vec::new())
 }
 
-// Helper function to load following videos (Kind 21 & 22 from followed users)
-// Returns (events, has_more) where has_more is true if either query hit its limit
-async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
+/// Load following videos (Kind 21 & 22 from followed users)
+/// Returns (events, has_more, did_fallback) where:
+/// - has_more is true if either query hit its limit
+/// - did_fallback is true if we fell back to global feed
+async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, bool), String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
@@ -868,13 +931,15 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            return load_global_videos(until).await;
+            let (events, has_more) = load_global_videos(until).await?;
+            return Ok((events, has_more, true));
         }
     };
 
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global videos");
-        return load_global_videos(until).await;
+        let (events, has_more) = load_global_videos(until).await?;
+        return Ok((events, has_more, true));
     }
 
     log::info!("User follows {} accounts", contacts.len());
@@ -889,7 +954,8 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
 
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        return load_global_videos(until).await;
+        let (events, has_more) = load_global_videos(until).await?;
+        return Ok((events, has_more, true));
     }
 
     // Fetch videos (Kind 21, 22) and livestreams (Kind 30311) separately for better distribution
@@ -917,10 +983,10 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
 
     log::info!("Fetching videos and livestreams separately from followed accounts");
 
-    // Fetch both concurrently
+    // Fetch both concurrently using fast fetch (bypasses gossip)
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events_from_connected_relays(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_video_events_from_connected_relays(stream_filter, Duration::from_secs(10))
     );
 
     let mut all_events = Vec::new();
@@ -949,9 +1015,11 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
         }
     }
 
+    // If no events found, return empty (valid result - user's contacts just haven't posted videos)
+    // Don't fall back to global here - empty following is different from no contacts
     if all_events.is_empty() {
-        log::info!("No videos from followed users, showing global feed");
-        return load_global_videos(until).await;
+        log::info!("No videos from followed users");
+        return Ok((Vec::new(), false, false));
     }
 
     // Sort all content chronologically
@@ -962,7 +1030,7 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool),
     // has_more is true if either query hit its limit
     let has_more = video_hit_limit || stream_hit_limit;
 
-    Ok((all_events, has_more))
+    Ok((all_events, has_more, false))
 }
 
 // Helper function to load global videos (Kind 21, 22) and livestreams (Kind 30311) from everyone
@@ -994,8 +1062,8 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
 
     // Fetch both concurrently
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events(video_filter, Duration::from_secs(10)),
+        nostr_client::fetch_video_events(stream_filter, Duration::from_secs(10))
     );
 
     let mut all_events = Vec::new();

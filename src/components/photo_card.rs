@@ -1,14 +1,78 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_note, publish_repost, get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{publish_note_tracked, publish_repost, get_client, HAS_SIGNER};
 use crate::hooks::use_reaction;
 use crate::stores::bookmarks;
 use crate::stores::signer::SIGNER_INFO;
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
 use crate::components::{ZapModal, ReactionButton};
-use crate::utils::format_sats_compact;
+use crate::utils::{format_sats_compact, format_relative_time_or, truncate_pubkey};
 use std::time::Duration;
+
+/// Skeleton loader for PhotoCard - prevents layout shift during loading
+#[component]
+pub fn PhotoCardSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "border-b border-border bg-background mb-4 animate-pulse",
+
+            // Author header skeleton
+            div {
+                class: "p-3 flex items-center gap-3",
+                // Avatar
+                div {
+                    class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700"
+                }
+                // Name
+                div {
+                    class: "flex-1",
+                    div {
+                        class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"
+                    }
+                }
+                // Timestamp
+                div {
+                    class: "h-3 bg-gray-300 dark:bg-gray-700 rounded w-16"
+                }
+            }
+
+            // Image area skeleton (square aspect ratio like Instagram)
+            div {
+                class: "relative bg-gray-300 dark:bg-gray-700 aspect-square max-h-[600px]"
+            }
+
+            // Action buttons skeleton
+            div {
+                class: "flex items-center gap-4 px-3 py-2",
+                for _ in 0..4 {
+                    div {
+                        class: "w-6 h-6 bg-gray-300 dark:bg-gray-700 rounded"
+                    }
+                }
+            }
+
+            // Like count skeleton
+            div {
+                class: "px-3 pb-2",
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-20"
+                }
+            }
+
+            // Caption skeleton
+            div {
+                class: "px-3 pb-3 space-y-2",
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-3/4"
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ImageMeta {
@@ -129,7 +193,7 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
 
     // State for comment composer
-    let mut comment_text = use_signal(|| String::new());
+    let mut comment_text = use_signal(String::new);
     let mut is_posting_comment = use_signal(|| false);
 
     // State for zap modal
@@ -329,19 +393,13 @@ pub fn PhotoCard(event: Event) -> Element {
         });
     }));
 
-    // Format timestamp
-    let timestamp = format_timestamp(created_at.as_secs());
+    // Format timestamp using shared utility
+    let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata
     let display_name = author_metadata.read().as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            if author_pubkey.len() > 16 {
-                format!("{}...{}", &author_pubkey[..8], &author_pubkey[author_pubkey.len()-8..])
-            } else {
-                author_pubkey.clone()
-            }
-        });
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let picture_url = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone());
@@ -362,7 +420,7 @@ pub fn PhotoCard(event: Event) -> Element {
                 class: "p-3 flex items-center gap-3",
                 Link {
                     to: Route::Profile { pubkey: author_pubkey.clone() },
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     if let Some(pic) = picture_url {
                         img {
@@ -677,7 +735,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     {
                         let count = *reply_count.read();
                         if count == 1 {
-                            format!("View 1 comment")
+                            "View 1 comment".to_string()
                         } else {
                             format!("View all {} comments", count)
                         }
@@ -691,7 +749,7 @@ pub fn PhotoCard(event: Event) -> Element {
                     class: "px-3 pb-3 flex items-center gap-2",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     input {
-                        class: "flex-1 bg-transparent border-none outline-none text-sm placeholder:text-muted-foreground",
+                        class: "flex-1 bg-transparent border-none outline-hidden text-sm placeholder:text-muted-foreground",
                         r#type: "text",
                         placeholder: "Add a comment...",
                         value: "{comment_text}",
@@ -712,8 +770,19 @@ pub fn PhotoCard(event: Event) -> Element {
                                         vec!["p".to_string(), author_clone],
                                     ];
 
-                                    match publish_note(text, tags).await {
-                                        Ok(_) => {
+                                    match publish_note_tracked(text, tags).await {
+                                        Ok(result) => {
+                                            log::info!(
+                                                "Photo comment published: {} ({}/{} relays)",
+                                                result.event_id,
+                                                result.success_count(),
+                                                result.total_attempted()
+                                            );
+                                            if result.has_failures() {
+                                                for (relay, error) in &result.failed_relays {
+                                                    log::warn!("Relay {} failed: {}", relay, error);
+                                                }
+                                            }
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);
@@ -750,8 +819,19 @@ pub fn PhotoCard(event: Event) -> Element {
                                         vec!["p".to_string(), author_clone],
                                     ];
 
-                                    match publish_note(text, tags).await {
-                                        Ok(_) => {
+                                    match publish_note_tracked(text, tags).await {
+                                        Ok(result) => {
+                                            log::info!(
+                                                "Photo comment published: {} ({}/{} relays)",
+                                                result.event_id,
+                                                result.success_count(),
+                                                result.total_attempted()
+                                            );
+                                            if result.has_failures() {
+                                                for (relay, error) in &result.failed_relays {
+                                                    log::warn!("Relay {} failed: {}", relay, error);
+                                                }
+                                            }
                                             let current_count = *reply_count.read();
                                             reply_count.set(current_count + 1);
                                             is_posting_comment.set(false);
@@ -783,21 +863,5 @@ pub fn PhotoCard(event: Event) -> Element {
                 }
             }
         }
-    }
-}
-
-// Helper to format timestamp
-fn format_timestamp(timestamp: u64) -> String {
-    use nostr_sdk::Timestamp;
-
-    let now = Timestamp::now().as_secs();
-    let diff = now.saturating_sub(timestamp);
-
-    match diff {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m", diff / 60),
-        3600..=86399 => format!("{}h", diff / 3600),
-        86400..=604799 => format!("{}d", diff / 86400),
-        _ => format!("{}w", diff / 604800),
     }
 }

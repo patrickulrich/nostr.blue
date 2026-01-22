@@ -2,7 +2,14 @@ use nostr_sdk::prelude::*;
 use dioxus::prelude::ReadableExt;
 use std::time::Duration;
 
-use crate::stores::nostr_client::NOSTR_CLIENT;
+use crate::stores::nostr_client::{NOSTR_CLIENT, ensure_relays_ready};
+use crate::stores::relay;
+
+/// Get search relay URLs, returns empty vec if none configured (fallback to all relays)
+fn get_search_relay_urls() -> Vec<String> {
+    // Use peek() for non-component context - safe in async/service code
+    relay::SEARCH_RELAYS.peek().clone()
+}
 
 /// Result type for content search
 #[derive(Clone, Debug)]
@@ -41,13 +48,25 @@ pub async fn search_text_notes(
 
     log::debug!("Searching for text notes matching: {}", query);
 
+    // Ensure relays are connected before searching (NIP-50 requires relay support)
+    ensure_relays_ready(&client).await;
+
     // NIP-50 search for text notes
     let filter = Filter::new()
         .kind(Kind::TextNote)
         .search(query)
         .limit(limit);
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    let search_urls = get_search_relay_urls();
+    let fetch_result = if search_urls.is_empty() {
+        // Fallback to all connected relays
+        client.fetch_events(filter, Duration::from_secs(5)).await
+    } else {
+        // Route to specific search relays
+        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+    };
+
+    match fetch_result {
         Ok(events) => {
             log::debug!("Found {} text notes from relays", events.len());
 
@@ -96,13 +115,25 @@ pub async fn search_articles(
 
     log::debug!("Searching for articles matching: {}", query);
 
+    // Ensure relays are connected before searching (NIP-50 requires relay support)
+    ensure_relays_ready(&client).await;
+
     // NIP-50 search for long-form content (kind 30023)
     let filter = Filter::new()
         .kind(Kind::from(30023))
         .search(query)
         .limit(limit);
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    let search_urls = get_search_relay_urls();
+    let fetch_result = if search_urls.is_empty() {
+        // Fallback to all connected relays
+        client.fetch_events(filter, Duration::from_secs(5)).await
+    } else {
+        // Route to specific search relays
+        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+    };
+
+    match fetch_result {
         Ok(events) => {
             log::debug!("Found {} articles from relays", events.len());
 
@@ -151,13 +182,25 @@ pub async fn search_photos(
 
     log::debug!("Searching for photos matching: {}", query);
 
+    // Ensure relays are connected before searching (NIP-50 requires relay support)
+    ensure_relays_ready(&client).await;
+
     // NIP-50 search for kind 20 photo events (NIP-68)
     let filter = Filter::new()
         .kind(Kind::Custom(20))
         .search(query)
         .limit(limit);
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    let search_urls = get_search_relay_urls();
+    let fetch_result = if search_urls.is_empty() {
+        // Fallback to all connected relays
+        client.fetch_events(filter, Duration::from_secs(5)).await
+    } else {
+        // Route to specific search relays
+        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+    };
+
+    match fetch_result {
         Ok(events) => {
             log::debug!("Found {} photo events from relays", events.len());
 
@@ -206,13 +249,25 @@ pub async fn search_videos(
 
     log::debug!("Searching for videos matching: {}", query);
 
+    // Ensure relays are connected before searching (NIP-50 requires relay support)
+    ensure_relays_ready(&client).await;
+
     // NIP-50 search for kind 21 (landscape) and 22 (portrait) video events (NIP-71)
     let filter = Filter::new()
         .kinds([Kind::Custom(21), Kind::Custom(22)])
         .search(query)
         .limit(limit);
 
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    let search_urls = get_search_relay_urls();
+    let fetch_result = if search_urls.is_empty() {
+        // Fallback to all connected relays
+        client.fetch_events(filter, Duration::from_secs(5)).await
+    } else {
+        // Route to specific search relays
+        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+    };
+
+    match fetch_result {
         Ok(events) => {
             log::debug!("Found {} video events from relays", events.len());
 
