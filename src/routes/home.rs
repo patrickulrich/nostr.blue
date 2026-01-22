@@ -277,6 +277,8 @@ pub fn Home(list: String) -> Element {
                             // Batch fetch interaction counts for all events
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
+                                let req_id = request_id;
+                                let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -284,6 +286,8 @@ pub fn Home(list: String) -> Element {
                                     } else {
                                         sync_interaction_counts(event_ids, Duration::from_secs(5)).await
                                     };
+                                    // Re-check staleness after await
+                                    if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -367,6 +371,8 @@ pub fn Home(list: String) -> Element {
                             // Batch fetch interaction counts for all events
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
+                                let req_id = request_id;
+                                let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -374,6 +380,8 @@ pub fn Home(list: String) -> Element {
                                     } else {
                                         sync_interaction_counts(event_ids, Duration::from_secs(5)).await
                                     };
+                                    // Re-check staleness after await
+                                    if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -446,6 +454,8 @@ pub fn Home(list: String) -> Element {
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let is_first_load = !*interactions_loaded.peek();
+                                let req_id = request_id;
+                                let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -453,6 +463,8 @@ pub fn Home(list: String) -> Element {
                                     } else {
                                         sync_interaction_counts(event_ids, Duration::from_secs(5)).await
                                     };
+                                    // Re-check staleness after await
+                                    if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -530,6 +542,8 @@ pub fn Home(list: String) -> Element {
                             // Batch fetch interaction counts for all events
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
+                                let req_id = request_id;
+                                let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
@@ -537,6 +551,8 @@ pub fn Home(list: String) -> Element {
                                     } else {
                                         sync_interaction_counts(event_ids, Duration::from_secs(5)).await
                                     };
+                                    // Re-check staleness after await
+                                    if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -848,10 +864,33 @@ pub fn Home(list: String) -> Element {
             log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
 
             // Fetch items based on feed type
-            // Note: During pagination, we ignore the fallback flag since feed_type is already set
+            // Check did_fallback during pagination - if fallback occurs, treat as error
+            // to avoid silently injecting Global items into Following feed
             let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
-                FeedType::Following => load_following_feed(until).await.map(|(items, _)| items),
-                FeedType::FollowingWithReplies => load_following_with_replies(until).await.map(|(items, _)| items),
+                FeedType::Following => {
+                    match load_following_feed(until).await {
+                        Ok((items, did_fallback)) => {
+                            if did_fallback {
+                                Err("Contact fetch failed during pagination".to_string())
+                            } else {
+                                Ok(items)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                FeedType::FollowingWithReplies => {
+                    match load_following_with_replies(until).await {
+                        Ok((items, did_fallback)) => {
+                            if did_fallback {
+                                Err("Contact fetch failed during pagination".to_string())
+                            } else {
+                                Ok(items)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 FeedType::Global => load_global_feed(until).await,
                 FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
             };

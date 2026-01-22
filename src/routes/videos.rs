@@ -156,6 +156,12 @@ pub fn Videos() -> Element {
                 .await
                 .unwrap_or_default();
 
+            // Check staleness after cache load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale videos feed request {} after cache load", current_id);
+                return;
+            }
+
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
                 let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
@@ -167,6 +173,12 @@ pub fn Videos() -> Element {
                 FeedType::Following => load_following_videos(None).await,
                 FeedType::Global => load_global_videos(None).await.map(|(e, h)| (e, h, false)),
             };
+
+            // Check staleness after network load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale videos feed request {} after network load", current_id);
+                return;
+            }
 
             match result {
                 Ok((video_events, page_has_more, did_fallback)) => {

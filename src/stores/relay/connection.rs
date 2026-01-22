@@ -238,14 +238,18 @@ pub async fn fetch_event_by_coordinate_with_relays(
         let added = super::specialty::add_relays_from_strings(client, &relay_hints).await;
 
         // Try fetching with shorter timeout
-        if let Ok(events) = client.fetch_events(filter.clone(), Duration::from_secs(5)).await {
+        let fetch_result = client.fetch_events(filter.clone(), Duration::from_secs(5)).await;
+
+        // Clean up temporary hint relays to avoid polluting the relay pool
+        if !added.is_empty() {
+            super::specialty::remove_relays(client, &added).await;
+        }
+
+        if let Ok(events) = fetch_result {
             if let Some(event) = events.into_iter().next() {
                 return Ok(Some(event));
             }
         }
-
-        // Note: We don't remove hint relays - they may be useful for future requests
-        let _ = added; // Suppress unused warning
     }
 
     // Fallback: standard relay fetch

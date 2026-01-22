@@ -13,19 +13,24 @@
 //! rather than calling `nostr_client::get_client()` internally. This avoids
 //! circular dependencies and follows the relay module design principle.
 
+#[cfg(target_arch = "wasm32")]
 use gloo_storage::{LocalStorage, Storage};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
 use std::collections::HashMap;
 
 /// Storage key for relay scores
+#[cfg(target_arch = "wasm32")]
 const RELAY_SCORES_KEY: &str = "nostr_relay_scores_v2";
 
 /// Maximum number of relay scores to store (prevent localStorage bloat)
+#[cfg(target_arch = "wasm32")]
 const MAX_STORED_RELAYS: usize = 100;
 
 /// Persisted relay score snapshot (localStorage)
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct RelayScoreSnapshot {
     pub url: String,
     /// Lifetime success rate from SDK stats
@@ -71,12 +76,19 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
     get_persisted_score(url).unwrap_or(0.5)
 }
 
-/// Get persisted score from localStorage
+/// Get persisted score from localStorage (WASM only)
+#[cfg(target_arch = "wasm32")]
 fn get_persisted_score(url: &str) -> Option<f64> {
     let snapshots: HashMap<String, RelayScoreSnapshot> =
         LocalStorage::get(RELAY_SCORES_KEY).ok()?;
 
     snapshots.get(url).map(|s| s.lifetime_success_rate)
+}
+
+/// Get persisted score - returns None on non-WASM platforms
+#[cfg(not(target_arch = "wasm32"))]
+fn get_persisted_score(_url: &str) -> Option<f64> {
+    None
 }
 
 /// Sort relays by score (best first)
@@ -98,7 +110,7 @@ pub async fn sort_relays_by_score(client: &Client, relays: Vec<String>) -> Vec<S
     scored.into_iter().map(|(url, _)| url).collect()
 }
 
-/// Snapshot current SDK stats to localStorage
+/// Snapshot current SDK stats to localStorage (WASM only)
 ///
 /// Call this periodically to persist relay performance data:
 /// - On app backgrounding
@@ -107,19 +119,14 @@ pub async fn sort_relays_by_score(client: &Client, relays: Vec<String>) -> Vec<S
 ///
 /// # Arguments
 /// * `client` - The Nostr client instance
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub async fn persist_relay_stats(client: &Client) {
     let relays = client.relays().await;
     let mut snapshots: HashMap<String, RelayScoreSnapshot> =
         LocalStorage::get(RELAY_SCORES_KEY).unwrap_or_default();
 
-    #[cfg(target_arch = "wasm32")]
     let now_ms = js_sys::Date::now() as u64;
-    #[cfg(not(target_arch = "wasm32"))]
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
 
     for (url, relay) in relays {
         let url_str = url.to_string();
@@ -171,7 +178,15 @@ pub async fn persist_relay_stats(client: &Client) {
     }
 }
 
-/// Get statistics about stored relay scores
+/// Snapshot current SDK stats - no-op on non-WASM platforms
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub async fn persist_relay_stats(_client: &Client) {
+    // No-op: localStorage not available on native platforms
+}
+
+/// Get statistics about stored relay scores (WASM only)
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub fn get_score_stats() -> Option<(usize, f64)> {
     let snapshots: HashMap<String, RelayScoreSnapshot> =
@@ -187,9 +202,24 @@ pub fn get_score_stats() -> Option<(usize, f64)> {
     Some((snapshots.len(), avg_score))
 }
 
-/// Clear all stored relay scores
+/// Get statistics about stored relay scores - returns None on non-WASM platforms
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn get_score_stats() -> Option<(usize, f64)> {
+    None
+}
+
+/// Clear all stored relay scores (WASM only)
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub fn clear_relay_scores() {
     LocalStorage::delete(RELAY_SCORES_KEY);
     log::info!("Cleared stored relay scores");
+}
+
+/// Clear all stored relay scores - no-op on non-WASM platforms
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn clear_relay_scores() {
+    // No-op: localStorage not available on native platforms
 }

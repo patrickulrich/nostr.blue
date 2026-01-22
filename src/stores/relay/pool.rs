@@ -6,7 +6,6 @@
 use dioxus::prelude::WritableExt;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
-use nostr::Url;
 use std::sync::Arc;
 
 use super::signals::{RelayInfo, RelaySource, RelayStatus, RELAY_POOL, USER_RELAYS_APPLIED};
@@ -65,7 +64,7 @@ pub async fn add_relay(client: &Client, relay_url: &str) -> std::result::Result<
         return Ok(());
     }
 
-    let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
 
     client.add_relay(url).await.map_err(|e| e.to_string())?;
 
@@ -108,7 +107,7 @@ pub async fn add_relay_with_opts(
         return Ok(());
     }
 
-    let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
 
     client.pool().add_relay(url, opts).await.map_err(|e| e.to_string())?;
 
@@ -143,7 +142,7 @@ pub async fn add_relay_with_opts(
 /// IMPORTANT: Takes client as parameter to avoid circular dependency
 #[allow(dead_code)]
 pub async fn remove_relay(client: &Client, relay_url: &str) -> std::result::Result<(), String> {
-    let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
 
     client.remove_relay(url).await.map_err(|e| e.to_string())?;
 
