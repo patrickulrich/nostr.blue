@@ -217,11 +217,18 @@ pub fn ContentShareModal(
     let handle_copy_link = {
         // For Bible verses, copy the formatted verse text with reference
         // For other content types, copy the URL
-        let copy_text = if let Some(ref text) = content {
-            format!("{}\n\n— {}", text, title)
+        #[cfg(target_arch = "wasm32")]
+        let copy_text = if matches!(content_type, ContentType::BibleVerse) {
+            if let Some(ref text) = content {
+                format!("{}\n\n— {}", text, title)
+            } else {
+                url.clone()
+            }
         } else {
             url.clone()
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let copy_text = url.clone();
         move |_| {
             let text_to_copy = copy_text.clone();
             spawn(async move {
@@ -564,26 +571,37 @@ pub fn ContentShareModal(
                             div {
                                 class: "flex flex-wrap gap-2",
                                 // Add Verse button (only for Bible verses with content)
-                                if let Some(ref verse_content) = content {
-                                    {
-                                        let verse_text = verse_content.clone();
-                                        let verse_title = title.clone();
-                                        rsx! {
-                                            button {
-                                                class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
-                                                onclick: move |_| {
-                                                    let mut current = nostr_text.read().clone();
-                                                    if !current.is_empty() {
-                                                        current.push_str("\n\n");
-                                                    }
-                                                    current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
-                                                    nostr_text.set(current.clone());
-                                                    cursor_position.set(current.len());
-                                                },
-                                                BookOpenIcon { class: "w-3 h-3" }
-                                                "Add Verse"
+                                {
+                                    #[cfg(target_arch = "wasm32")]
+                                    let show_verse_button = matches!(content_type, ContentType::BibleVerse);
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    let show_verse_button = false;
+
+                                    if show_verse_button {
+                                        if let Some(ref verse_content) = content {
+                                            let verse_text = verse_content.clone();
+                                            let verse_title = title.clone();
+                                            rsx! {
+                                                button {
+                                                    class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
+                                                    onclick: move |_| {
+                                                        let mut current = nostr_text.read().clone();
+                                                        if !current.is_empty() {
+                                                            current.push_str("\n\n");
+                                                        }
+                                                        current.push_str(&format!("{}\n\n— {}", verse_text, verse_title));
+                                                        nostr_text.set(current.clone());
+                                                        cursor_position.set(current.len());
+                                                    },
+                                                    BookOpenIcon { class: "w-3 h-3" }
+                                                    "Add Verse"
+                                                }
                                             }
+                                        } else {
+                                            rsx! {}
                                         }
+                                    } else {
+                                        rsx! {}
                                     }
                                 }
                                 // Add Link button

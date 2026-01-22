@@ -5,6 +5,7 @@
 window.hlsManager = window.hlsManager || {
     instances: new Map(),
     pendingTimeouts: new Map(),
+    pendingRejects: new Map(),
     hlsLoaded: false,
     hlsLoading: null,
     nowPlaying: null, // Current HLS metadata {title, artist}
@@ -110,7 +111,11 @@ window.hlsManager = window.hlsManager || {
         this.instances.set(audioId, hls);
 
         return new Promise((resolve, reject) => {
+            // Store reject handler so detach() can reject the promise
+            this.pendingRejects.set(audioId, reject);
+
             const timeout = setTimeout(() => {
+                this.pendingRejects.delete(audioId);
                 this.pendingTimeouts.delete(audioId);
                 this.instances.delete(audioId);
                 hls.destroy();
@@ -128,6 +133,7 @@ window.hlsManager = window.hlsManager || {
             hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
                 clearTimeout(timeout);
                 this.pendingTimeouts.delete(audioId);
+                this.pendingRejects.delete(audioId);
                 console.log('[HLS Manager] Manifest parsed, levels:', data.levels.length);
                 // Instance already tracked above; no need to set again
                 resolve({ type: 'hls.js', levels: data.levels.length, url: streamUrl });
@@ -137,6 +143,7 @@ window.hlsManager = window.hlsManager || {
                 if (data.fatal) {
                     clearTimeout(timeout);
                     this.pendingTimeouts.delete(audioId);
+                    this.pendingRejects.delete(audioId);
                     console.error('[HLS Manager] Fatal error:', data.type, data.details);
                     hls.destroy();
                     this.instances.delete(audioId);
@@ -199,6 +206,13 @@ window.hlsManager = window.hlsManager || {
         if (pendingTimeout) {
             clearTimeout(pendingTimeout);
             this.pendingTimeouts.delete(audioId);
+        }
+
+        // Reject any pending attach Promise
+        const pendingReject = this.pendingRejects.get(audioId);
+        if (pendingReject) {
+            pendingReject(new Error('HLS stream detached before initialization completed'));
+            this.pendingRejects.delete(audioId);
         }
 
         const hls = this.instances.get(audioId);

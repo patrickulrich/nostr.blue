@@ -745,10 +745,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                 }
                             }
 
-                            // Insert button (disabled when validation errors - Security Fix #1)
+                            // Insert button (disabled when validation errors or no valid book reference)
                             button {
                                 class: "w-full mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed",
-                                disabled: *has_validation_error.read(),
+                                disabled: *has_validation_error.read() || book_reference.read().is_none(),
                                 onclick: handle_insert,
                                 "Insert Book Reference"
                             }
