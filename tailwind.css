@@ -1,7 +1,61 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 - CSS-based configuration */
+@import "tailwindcss";
 
+/* Source paths - Dioxus scans these for class names */
+@source "./src/**/*.rs";
+@source "./index.html";
+
+/* Typography plugin */
+@plugin "@tailwindcss/typography";
+
+/* Dark mode variant for class-based dark mode (CORRECT v4 syntax) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Custom theme colors (migrated from theme.extend.colors) */
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  /* Border radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/* Custom utility: scrollbar-hide */
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Base layer - CSS variable definitions for light/dark modes */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -47,12 +101,11 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -60,15 +113,6 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-}
-
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
 }
 
 /* Styled thin scrollbar matching app theme */
@@ -96,7 +140,7 @@
   background: hsl(var(--muted-foreground));
 }
 
-/* Wallet loading animation - pulsing dots */
+/* Wallet loading animation */
 @keyframes wallet-pulse {
   0%, 100% {
     opacity: 0.3;
@@ -108,15 +152,10 @@
   }
 }
 
-/* Reduced motion: remove scale transforms, keep opacity animation */
 @media (prefers-reduced-motion: reduce) {
   @keyframes wallet-pulse {
-    0%, 100% {
-      opacity: 0.3;
-    }
-    50% {
-      opacity: 1;
-    }
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
   }
 }
 
@@ -124,12 +163,10 @@
    NKBIP-03 Citation Styles
    ============================================================================ */
 
-/* Inline citations - clickable links */
 .citation-inline {
-  @apply text-primary cursor-pointer hover:underline focus:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
+  @apply text-primary cursor-pointer hover:underline focus:underline focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2;
 }
 
-/* Footnote/endnote superscripts */
 .citation-footnote,
 .citation-endnote {
   @apply text-xs px-0.5;
@@ -137,15 +174,13 @@
 
 .citation-footnote a,
 .citation-endnote a {
-  @apply text-primary hover:underline focus:underline focus:outline-none focus:ring-1 focus:ring-ring no-underline;
+  @apply text-primary hover:underline focus:underline focus:outline-hidden focus:ring-1 focus:ring-ring no-underline;
 }
 
-/* Foot-end reference arrow */
 .citation-end-ref {
   @apply text-xs text-muted-foreground hover:text-primary focus:text-primary ml-0.5;
 }
 
-/* Block quotes with citations */
 .citation-quote {
   @apply my-4;
 }
@@ -162,7 +197,6 @@
   @apply font-medium;
 }
 
-/* Unresolved citation styling */
 .citation-unresolved {
   @apply opacity-60;
 }
@@ -171,7 +205,6 @@
   @apply decoration-dotted;
 }
 
-/* Footnotes section */
 .citation-footnotes,
 .citation-footnotes-container {
   @apply mt-6 pt-4;
@@ -185,7 +218,6 @@
   @apply list-decimal pl-4 sm:pl-6 space-y-2 text-sm;
 }
 
-/* Endnotes/References section */
 .citation-endnotes,
 .citation-endnotes-container {
   @apply mt-8 pt-4;
@@ -199,7 +231,6 @@
   @apply list-decimal pl-4 sm:pl-6 space-y-2 sm:space-y-3 text-sm;
 }
 
-/* Individual citation entries in footnotes/endnotes */
 .citation-entry {
   @apply leading-relaxed;
 }
@@ -212,7 +243,6 @@
   @apply ml-2 text-muted-foreground hover:text-primary text-xs no-underline;
 }
 
-/* Citation type badges */
 .citation-type-badge {
   @apply mr-1.5 text-sm;
 }
@@ -233,7 +263,6 @@
   @apply text-purple-700 dark:text-purple-400;
 }
 
-/* Loading state for citations being fetched */
 .citation-loading {
   @apply opacity-60 animate-pulse;
 }

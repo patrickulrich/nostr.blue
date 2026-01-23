@@ -36,8 +36,14 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
     // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
+    // Filter out empty/whitespace-only names before use
     let display_name = author_metadata.read().as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(|m| {
+            m.display_name.as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .or(m.name.as_ref().filter(|s| !s.trim().is_empty()))
+                .cloned()
+        })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
@@ -49,7 +55,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 
     rsx! {
         div {
-            class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 flex-shrink-0 cursor-pointer",
+            class: "group relative rounded-xl overflow-hidden hover:scale-[1.02] transition-transform duration-200 w-56 h-72 shrink-0 cursor-pointer",
 
             Link {
                 to: Route::RecipeDetail { naddr: naddr.clone() },
@@ -126,7 +132,7 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
 pub fn DiscoverRecipeCardSkeleton() -> Element {
     rsx! {
         div {
-            class: "flex-shrink-0 w-56 h-72 bg-muted rounded-xl animate-pulse"
+            class: "shrink-0 w-56 h-72 bg-muted rounded-xl animate-pulse"
         }
     }
 }

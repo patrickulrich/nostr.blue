@@ -86,7 +86,7 @@ pub fn ShopCollectionNew() -> Element {
                             label { class: "block text-sm font-medium mb-2", "Collection Title *" }
                             input {
                                 r#type: "text",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "e.g., Summer Sale, Best Sellers",
                                 value: "{title}",
                                 oninput: move |e| title.set(e.value())
@@ -97,7 +97,7 @@ pub fn ShopCollectionNew() -> Element {
                         div {
                             label { class: "block text-sm font-medium mb-2", "Description" }
                             textarea {
-                                class: "w-full h-24 px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                                class: "w-full h-24 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                                 placeholder: "Describe this collection...",
                                 value: "{description}",
                                 oninput: move |e| description.set(e.value())
@@ -109,7 +109,7 @@ pub fn ShopCollectionNew() -> Element {
                             label { class: "block text-sm font-medium mb-2", "Cover Image URL" }
                             input {
                                 r#type: "url",
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "https://example.com/collection-image.jpg",
                                 value: "{image_url}",
                                 oninput: move |e| image_url.set(e.value())
@@ -183,7 +183,7 @@ pub fn ShopCollectionNew() -> Element {
                                                     }
 
                                                     // Product image
-                                                    div { class: "w-10 h-10 bg-muted rounded overflow-hidden flex-shrink-0",
+                                                    div { class: "w-10 h-10 bg-muted rounded overflow-hidden shrink-0",
                                                         if let Some(ref img) = product_img {
                                                             img {
                                                                 src: "{img}",

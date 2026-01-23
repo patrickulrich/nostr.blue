@@ -265,7 +265,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
 
                         // Large episode artwork
                         div {
-                            class: "w-full md:w-64 flex-shrink-0",
+                            class: "w-full md:w-64 shrink-0",
                             img {
                                 src: "{image_url}",
                                 alt: "{episode.title}",

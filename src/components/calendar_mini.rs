@@ -119,6 +119,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                 // Previous month
                 button {
                     class: "p-1 hover:bg-accent rounded transition",
+                    aria_label: "Previous month",
                     onclick: go_prev_month,
                     svg {
                         class: "w-4 h-4",
@@ -145,6 +146,7 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                 // Next month
                 button {
                     class: "p-1 hover:bg-accent rounded transition",
+                    aria_label: "Next month",
                     onclick: go_next_month,
                     svg {
                         class: "w-4 h-4",

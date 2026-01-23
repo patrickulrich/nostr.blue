@@ -205,14 +205,19 @@ pub fn CashuReceiveModal(
                                     span { "{p.proof_count}" }
                                 }
 
-                                // Memo (if present)
+                                // Memo (if present) - sanitize for defense-in-depth
                                 if let Some(memo) = &p.memo {
-                                    div {
-                                        class: "flex items-start justify-between",
-                                        span { class: "text-muted-foreground", "Memo" }
-                                        span {
-                                            class: "text-right max-w-[200px] italic",
-                                            "\"{memo}\""
+                                    {
+                                        let sanitized_memo = ammonia::clean_text(memo);
+                                        rsx! {
+                                            div {
+                                                class: "flex items-start justify-between",
+                                                span { class: "text-muted-foreground", "Memo" }
+                                                span {
+                                                    class: "text-right max-w-[200px] italic",
+                                                    "\"{sanitized_memo}\""
+                                                }
+                                            }
                                         }
                                     }
                                 }

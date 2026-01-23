@@ -12,12 +12,18 @@ use std::time::Duration;
 use nostr_indexeddb::WebDatabase;
 
 use crate::stores::signer::SignerType;
-use crate::stores::relay_metadata;
 use crate::stores::pinned_notes;
+use crate::stores::relay;
 use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_tags};
 
 #[cfg(target_arch = "wasm32")]
 use crate::services::admission_policy::NostrBlueAdmissionPolicy;
+
+// Re-export relay types for backward compatibility
+// New code should use crate::stores::relay directly
+pub use crate::stores::relay::{
+    RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED, RELAY_POOL, USER_RELAYS_APPLIED,
+};
 
 /// Global Nostr client instance
 pub static NOSTR_CLIENT: GlobalSignal<Option<Arc<Client>>> = Signal::global(|| None);
@@ -53,161 +59,28 @@ pub fn invalidate_contacts_cache() {
 }
 
 /// Wait for at least one relay to be ready before fetching
-/// This is needed because connect() is non-blocking and spawns background tasks
-/// Ensure at least one relay is connected before fetching
-/// Call this before any direct client.fetch_events() calls
+/// Delegates to relay::connection::ensure_relays_ready for the actual implementation.
 ///
-/// IMPORTANT: Uses a timeout to prevent blocking the WASM event loop indefinitely.
-/// In WASM, blocking connect() calls can freeze the entire UI.
+/// This is needed because connect() is non-blocking and spawns background tasks.
+/// Call this before any direct client.fetch_events() calls.
 pub async fn ensure_relays_ready(client: &Client) {
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
-
-    // First, check if any relay is already connected
-    let relays = client.relays().await;
-    let any_connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
-
-    if any_connected {
-        log::debug!("At least one relay is already connected, proceeding with fetch");
-        return;
-    }
-
-    // No relays connected yet - initiate connection and poll for status
-    log::info!("No relays connected, attempting connection with timeout...");
-
-    // Initiate connection (non-blocking, spawns background tasks)
-    client.connect().await;
-
-    // Poll for at least one connected relay with timeout
-    const TIMEOUT_MS: u64 = 3000;
-    const POLL_INTERVAL_MS: u64 = 100;
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        use gloo_timers::future::TimeoutFuture;
-        let start = instant::Instant::now();
-
-        loop {
-            let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
-
-            if connected {
-                log::info!("Relay connected after {}ms", start.elapsed().as_millis());
-                return;
-            }
-
-            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
-                break;
-            }
-
-            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
-
-        loop {
-            let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
-
-            if connected {
-                log::info!("Relay connected after {:?}", start.elapsed());
-                return;
-            }
-
-            if start.elapsed() > timeout {
-                break;
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-        }
-    }
-
-    // Final status check
-    let relays_after = client.relays().await;
-    let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
-    if connected_count == 0 {
-        log::warn!("After timeout: no relays connected - fetches may fail or use cached data");
-    } else {
-        log::info!("After connection attempt: {} relay(s) connected", connected_count);
-    }
-}
-
-/// Get URLs of write-enabled relays for use as relay hints in NIP-19 naddrs
-/// Returns up to 2 relay URLs that have the WRITE flag enabled.
-/// Per NIP-19, relay hints help other clients locate addressable events.
-pub async fn get_write_relay_hints() -> Vec<String> {
-    let client = match get_client() {
-        Some(c) => c,
-        None => return vec![],
-    };
-
-    let relays = client.relays().await;
-    let mut write_relays: Vec<String> = relays
-        .iter()
-        .filter(|(_, relay)| relay.flags().has_write())
-        .map(|(url, _)| url.to_string())
-        .collect();
-
-    // Sort first for deterministic selection, then truncate to 2 per NIP-19 best practice
-    write_relays.sort();
-    write_relays.truncate(2);
-    write_relays
+    relay::connection::ensure_relays_ready(client).await;
 }
 
 /// Create an naddr (NIP-19) with relay hints for an addressable event
 /// This includes relay hints from the user's write relays for better discoverability.
+/// Delegates to relay::hints::make_naddr_with_hints
 pub async fn make_naddr_with_hints(
     kind: u16,
     pubkey: &nostr::PublicKey,
     identifier: &str,
 ) -> std::result::Result<String, String> {
-    use nostr::nips::nip19::{Nip19Coordinate, ToBech32};
-    use nostr::types::url::RelayUrl;
-
-    let coordinate = Coordinate::new(Kind::from(kind), *pubkey)
-        .identifier(identifier);
-
-    // Get write relay hints
-    let relay_hints = get_write_relay_hints().await;
-    let relay_urls: Vec<RelayUrl> = relay_hints
-        .iter()
-        .filter_map(|r| RelayUrl::parse(r).ok())
-        .collect();
-
-    let nip19 = Nip19Coordinate::new(coordinate, relay_urls);
-    nip19.to_bech32()
-        .map_err(|e| format!("Failed to encode naddr: {}", e))
+    let client = get_client().ok_or("Client not initialized")?;
+    relay::make_naddr_with_hints(&client, kind, pubkey, identifier).await
 }
 
-/// Relay connection status
-#[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)]
-pub enum RelayStatus {
-    Disconnected,
-    Connecting,
-    Connected,
-    Error(String),
-}
-
-/// Relay information
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct RelayInfo {
-    pub url: String,
-    pub status: RelayStatus,
-}
-
-/// Global relay pool state
-/// Store for relay pool with fine-grained reactivity
-#[derive(Clone, Debug, Default, Store)]
-pub struct RelayPoolStore {
-    pub data: Vec<RelayInfo>,
-}
-
-pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> = Signal::global(|| Store::new(RelayPoolStore::default()));
+// RelayStatus, RelayInfo, RelayPoolStore, RELAY_POOL are now re-exported from relay module
+// See the `pub use crate::stores::relay::...` at the top of this file
 
 /// Result of publishing an event, including relay success/failure tracking
 /// Enables debugging which relays accepted/rejected events
@@ -271,14 +144,9 @@ impl PublishResult {
     }
 }
 
-/// Default relays to connect to
-const DEFAULT_RELAYS: &[&str] = &[
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.snort.social",
-    "wss://nostr.wine",
-    "wss://relay.nostr.band",
-];
+// DEFAULT_RELAYS is now defined in relay::pool
+// Re-export for backward compatibility
+pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 
 /// Initialize the Nostr client and connect to relays
 pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
@@ -315,10 +183,19 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         // Enable gossip with in-memory storage
         // NostrGossipMemory is WASM-compatible and provides automatic relay routing
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::unbounded();
+
+        // Configure client options for gossip-discovered relays
+        // This is CRITICAL: Without this, gossip relays won't verify events match filters
+        let client_opts = ClientOptions::new()
+            .verify_subscriptions(true)
+            .ban_relay_on_mismatch(true)
+            .max_avg_latency(Duration::from_secs(2));
+
         Client::builder()
             .database(database)
             .gossip(gossip)
             .admit_policy(NostrBlueAdmissionPolicy)
+            .opts(client_opts)
             .build()
     };
 
@@ -340,17 +217,11 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                     match pool.add_relay(url, opts).await {
                         Ok(_) => {
                             log::debug!("Added relay with opts: {}", url_str);
-                            RelayInfo {
-                                url: url_str,
-                                status: RelayStatus::Connected,
-                            }
+                            RelayInfo::new(url_str, RelayStatus::Connected)
                         }
                         Err(e) => {
                             log::error!("Failed to add relay {}: {}", url_str, e);
-                            RelayInfo {
-                                url: url_str,
-                                status: RelayStatus::Disconnected,
-                            }
+                            RelayInfo::new(url_str, RelayStatus::Disconnected)
                         }
                     }
                 }
@@ -362,20 +233,27 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
-    // Store client and mark initialized BEFORE connecting
-    // This allows the UI to start loading while relays connect in background
+    // Store client first (so it's available for queries)
     *NOSTR_CLIENT.write() = Some(client.clone());
-    *CLIENT_INITIALIZED.write() = true;
 
-    // Connect to relays in background - spawn the future so it gets polled to completion
-    // In WASM, simply dropping the Future won't reliably execute it
-    log::debug!("Spawning background relay connections...");
+    // Add discovery relays for gossip bootstrapping
+    // These are used by the SDK to find users' relay lists (NIP-65/NIP-17)
+    // when gossip data is outdated or missing
+    log::info!("Adding discovery relays for gossip...");
+    for discovery_url in &["wss://relay.damus.io", "wss://purplepag.es", "wss://nos.lol"] {
+        if let Err(e) = client.add_discovery_relay(*discovery_url).await {
+            log::warn!("Failed to add discovery relay {}: {}", discovery_url, e);
+        }
+    }
+
+    // Spawn relay connections in background (required for WASM - can't block main thread)
+    log::info!("Spawning relay connections...");
     #[cfg(target_arch = "wasm32")]
     {
         let client_for_connect = client.clone();
         wasm_bindgen_futures::spawn_local(async move {
             client_for_connect.connect().await;
-            log::info!("Background relay connections completed");
+            log::info!("Background relay connections initiated");
         });
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -383,11 +261,79 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         let client_for_connect = client.clone();
         tokio::spawn(async move {
             client_for_connect.connect().await;
-            log::info!("Background relay connections completed (non-WASM)");
+            log::info!("Background relay connections initiated");
         });
     }
 
-    log::info!("Nostr client initialized (relays connecting in background)");
+    // Wait for at least one relay to connect before marking initialized
+    // This ensures CLIENT_INITIALIZED means "ready to fetch events"
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+    const TIMEOUT_MS: u64 = 3000;
+    const POLL_INTERVAL_MS: u64 = 100;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_timers::future::TimeoutFuture;
+        let start = instant::Instant::now();
+
+        loop {
+            // Yield to allow background connection task to progress
+            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("First relay connected after {}ms", start.elapsed().as_millis());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
+                break;
+            }
+
+            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
+                log::warn!("Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS);
+                // Signal false so downstream watchers know init completed without relay
+                // They can retry via ensure_relays_ready when a relay connects later
+                *RELAY_CONNECTED.write() = false;
+                break;
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+
+            let relays_now = client.relays().await;
+            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+
+            if connected {
+                log::info!("First relay connected after {:?}", start.elapsed());
+                if !*RELAY_CONNECTED.peek() {
+                    *RELAY_CONNECTED.write() = true;
+                }
+                break;
+            }
+
+            if start.elapsed() > timeout {
+                log::warn!("Relay connection timeout after {:?}, proceeding anyway", timeout);
+                // Signal false so downstream watchers know init completed without relay
+                // They can retry via ensure_relays_ready when a relay connects later
+                *RELAY_CONNECTED.write() = false;
+                break;
+            }
+        }
+    }
+
+    // Now mark as initialized - relays are ready (or timed out)
+    *CLIENT_INITIALIZED.write() = true;
+
+    log::info!("Nostr client initialized with relays ready");
     Ok(client)
 }
 
@@ -421,17 +367,35 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     *HAS_SIGNER.write() = true;
     *CURRENT_SIGNER.write() = Some(signer.clone());
 
-    // Load user's relay lists (kind 10002/10050) in background
+    // Load user's relay configuration in background
+    // SDK gossip handles dynamic relay routing automatically, so we only need to:
+    // 1. Load user's relay metadata for Settings UI display
+    // 2. Apply local relays (browser-only storage)
+    // 3. Load NIP-51 lists (search/blocked - not handled by gossip)
     let client_clone = client.clone();
     spawn(async move {
-        if let Err(e) = relay_metadata::init_user_relay_lists(client_clone.clone()).await {
+        // Apply local relays FIRST (browser-only storage) - this is instant
+        relay::apply_local_relays_to_client(client_clone.clone()).await;
+
+        // Signal immediately after local relays are applied
+        // SDK gossip discovers relays dynamically per-pubkey, so we don't need
+        // to wait for Settings metadata before feed fetching can begin
+        *relay::USER_RELAYS_APPLIED.write() = true;
+        log::info!("User relays applied, feed fetching unblocked");
+
+        // Load user's relay metadata for Settings UI (slow network fetch)
+        // This is non-blocking for feeds - only needed for Settings display
+        if let Err(e) = relay::init_user_relay_lists(client_clone.clone()).await {
             log::warn!("Failed to load user relay lists: {}", e);
-        } else {
-            // Apply relay lists to client
-            if let Err(e) = apply_relay_lists_to_client(client_clone).await {
-                log::error!("Failed to apply relay lists: {}", e);
-            }
         }
+
+        // Load NIP-51 relay lists (search/blocked) - non-blocking for feed
+        if let Err(e) = relay::init_nip51_relay_lists(client_clone.clone()).await {
+            log::warn!("Failed to load NIP-51 relay lists: {}", e);
+        }
+
+        // After NIP-51 lists load, remove any blocked relays that were added before
+        relay::pool::remove_blocked_relays_from_pool(&client_clone).await;
     });
 
     // Load user's pinned notes (kind 10001) in background
@@ -442,60 +406,6 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     });
 
     log::info!("Signer updated successfully");
-    Ok(())
-}
-
-/// Apply user's relay lists to the client connections
-async fn apply_relay_lists_to_client(client: Arc<Client>) -> std::result::Result<(), String> {
-    let metadata = relay_metadata::USER_RELAY_METADATA
-        .read()
-        .clone()
-        .ok_or("No relay metadata available")?;
-
-    log::info!("Applying {} relays from kind 10002 to client", metadata.relays.len());
-
-    // Add user's configured relays with read/write flags
-    for relay in &metadata.relays {
-        if let Ok(url) = RelayUrl::parse(&relay.url) {
-            let result = match (relay.read, relay.write) {
-                (true, true) => {
-                    client.add_relay(url.clone()).await.map_err(|e| e.to_string())
-                }
-                (true, false) => {
-                    client.add_read_relay(url.clone()).await.map_err(|e| e.to_string())
-                }
-                (false, true) => {
-                    client.add_write_relay(url.clone()).await.map_err(|e| e.to_string())
-                }
-                _ => continue, // Skip invalid configurations
-            };
-
-            match result {
-                Ok(_) => log::info!("Added relay from kind 10002: {} (read: {}, write: {})",
-                    relay.url, relay.read, relay.write),
-                Err(e) => log::warn!("Failed to add relay {}: {}", relay.url, e),
-            }
-        }
-    }
-
-    // Wait for newly added relays to connect
-    log::info!("Waiting for user's relays to connect...");
-    client.connect().await;
-
-    // Update RELAY_POOL to reflect ALL connected relays (defaults + user's relays)
-    let pool_relays = client.pool().relays().await;
-    let mut relay_infos = Vec::new();
-    for (url, _relay) in pool_relays {
-        relay_infos.push(RelayInfo {
-            url: url.to_string(),
-            status: RelayStatus::Connected,
-        });
-    }
-
-    log::info!("Updating RELAY_POOL with {} total connected relays", relay_infos.len());
-    RELAY_POOL.read().data().write().clone_from(&relay_infos);
-
-    log::info!("Relay lists applied successfully");
     Ok(())
 }
 
@@ -517,61 +427,36 @@ pub async fn set_read_only() -> std::result::Result<(), String> {
 }
 
 /// Add a custom relay
+/// Delegates to relay::pool::add_relay for the actual implementation.
 #[allow(dead_code)]
 pub async fn add_relay(relay_url: &str) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
-
-    let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-    client.add_relay(url).await.map_err(|e| e.to_string())?;
-
-    // Update relay pool state
-    let store = RELAY_POOL.read();
-    let mut data = store.data();
-    let mut relays = data.write();
-    relays.push(RelayInfo {
-        url: relay_url.to_string(),
-        status: RelayStatus::Connecting,
-    });
-
-    log::info!("Added relay: {}", relay_url);
-    Ok(())
+    relay::pool::add_relay(&client, relay_url).await
 }
 
 /// Remove a relay
+/// Delegates to relay::pool::remove_relay for the actual implementation.
 #[allow(dead_code)]
 pub async fn remove_relay(relay_url: &str) -> std::result::Result<(), String> {
     let client = get_client().ok_or("Client not initialized")?;
-
-    let url = Url::parse(relay_url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-    client.remove_relay(url).await.map_err(|e| e.to_string())?;
-
-    // Update relay pool state
-    let store = RELAY_POOL.read();
-    let mut data = store.data();
-    let mut relays = data.write();
-    relays.retain(|r| r.url != relay_url);
-
-    log::info!("Removed relay: {}", relay_url);
-    Ok(())
+    relay::pool::remove_relay(&client, relay_url).await
 }
 
 /// Disconnect from all relays
+/// Delegates to relay::connection::disconnect for the actual implementation.
 #[allow(dead_code)]
 pub async fn disconnect() {
     if let Some(client) = get_client() {
-        client.disconnect().await;
-        log::info!("Disconnected from all relays");
+        relay::connection::disconnect(&client).await;
     }
 }
 
 /// Reconnect to all relays
+/// Delegates to relay::connection::reconnect for the actual implementation.
 #[allow(dead_code)]
 pub async fn reconnect() {
     if let Some(client) = get_client() {
-        client.connect().await;
-        log::info!("Reconnected to relays");
+        relay::connection::reconnect(&client).await;
     }
 }
 
@@ -624,6 +509,30 @@ pub async fn fetch_events_aggregated(
         .map_err(|e| e.to_string())
 }
 
+/// Ensure the video relay is connected
+/// Delegates to relay::connection::ensure_video_relay_connected
+async fn ensure_video_relay_connected(client: &Client) {
+    relay::connection::ensure_video_relay_connected(client).await;
+}
+
+/// Fetch video events, ensuring relay.divine.video is included
+///
+/// This function adds the video-specific relay to the pool before fetching,
+/// ensuring video content is discovered from the Divine relay in addition
+/// to relays selected via the outbox model.
+pub async fn fetch_video_events(
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Ensure video relay is in the pool
+    ensure_video_relay_connected(&client).await;
+
+    // Use standard aggregated fetch (DB first, then relays including video relay)
+    fetch_events_aggregated(filter, timeout).await
+}
+
 /// Fetch events directly from relays, bypassing cache
 ///
 /// Use this for discovery features where fresh data from the network is needed.
@@ -662,19 +571,64 @@ pub async fn fetch_events_from_relays(
 }
 
 /// Fetch events using gossip (automatic relay routing)
+///
+/// This function waits for user relay lists (kind 10002) to be applied before
+/// fetching, ensuring gossip routing uses the correct relays for signed-in users.
 pub async fn fetch_events_aggregated_outbox(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
+    // Wait for user relays if signed in (up to 2 seconds)
+    // This ensures gossip routing uses the user's configured relays
+    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
+        log::debug!("Waiting for user relay lists to be applied...");
+        let start = instant::Instant::now();
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+                gloo_timers::future::TimeoutFuture::new(50).await;
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        if *USER_RELAYS_APPLIED.peek() {
+            log::debug!("User relay lists applied after {}ms", start.elapsed().as_millis());
+        } else {
+            log::warn!("User relay lists not applied after timeout, proceeding with defaults");
+        }
+    }
+
     // Wait for at least one relay to be ready (non-blocking connect() may not have finished)
     ensure_relays_ready(&client).await;
 
+    // Capture authors for client-side filtering (defense-in-depth)
+    let filter_authors = filter.authors.clone();
+
     // Use gossip for automatic relay routing
-    client.fetch_events(filter, timeout).await
-        .map(|events| events.into_iter().collect())
-        .map_err(|e| format!("Failed to fetch events: {}", e))
+    let events = client.fetch_events(filter, timeout).await
+        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+    // Client-side author filtering (defense-in-depth against misbehaving relays)
+    // Even with verify_subscriptions enabled, some relays may still send unmatched events
+    let filtered_events: Vec<nostr::Event> = if let Some(ref authors) = filter_authors {
+        let author_set: std::collections::HashSet<_> = authors.iter().collect();
+        events.into_iter()
+            .filter(|e| author_set.contains(&e.pubkey))
+            .collect()
+    } else {
+        events.into_iter().collect()
+    };
+
+    Ok(filtered_events)
 }
 
 /// Fetch events from database only (instant, for initial display)
@@ -1071,8 +1025,9 @@ async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Ve
         .kind(Kind::ContactList)
         .limit(1);
 
-    // Fetch from database/relays using aggregated pattern
-    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Fetch from database/relays using outbox routing for better discovery
+    // This routes the query to the author's preferred write relays
+    match fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Use SDK's public_keys() method to extract p-tags
@@ -1301,6 +1256,90 @@ pub async fn is_user_blocked(pubkey: String) -> std::result::Result<bool, String
     Ok(blocked_users.contains(&normalized_pubkey))
 }
 
+// ============================================================================
+// Mute List Tag Helpers (NIP-51)
+// ============================================================================
+
+/// Extracted tag categories from a mute list event (kind 10000)
+/// Used to reduce code duplication in mute/unmute/block/unblock operations
+struct MuteListTags {
+    event_ids: Vec<nostr::EventId>,   // Muted posts (e tags)
+    pubkeys: Vec<nostr::PublicKey>,   // Blocked users (p tags)
+    hashtags: Vec<String>,            // Muted hashtags (t tags)
+    words: Vec<String>,               // Muted words (word tags)
+    other_tags: Vec<nostr::Tag>,      // Preserve unknown tags
+}
+
+/// Extract categorized tags from a kind 10000 mute list event
+fn extract_mute_list_tags(event: &nostr::Event) -> MuteListTags {
+    let mut tags = MuteListTags {
+        event_ids: Vec::new(),
+        pubkeys: Vec::new(),
+        hashtags: Vec::new(),
+        words: Vec::new(),
+        other_tags: Vec::new(),
+    };
+
+    for tag in event.tags.iter() {
+        if tag.kind() == nostr::TagKind::e() {
+            if let Some(id) = tag.content() {
+                if let Ok(eid) = nostr::EventId::from_hex(id) {
+                    tags.event_ids.push(eid);
+                }
+            }
+        } else if tag.kind() == nostr::TagKind::p() {
+            if let Some(pk) = tag.content() {
+                if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
+                    tags.pubkeys.push(pubkey);
+                }
+            }
+        } else if tag.kind() == nostr::TagKind::t() {
+            if let Some(hashtag) = tag.content() {
+                tags.hashtags.push(hashtag.to_string());
+            }
+        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
+            if let Some(word) = tag.content() {
+                tags.words.push(word.to_string());
+            }
+        } else {
+            // Preserve all other tags (e.g., 'a' address tags, future extensions)
+            tags.other_tags.push(tag.clone());
+        }
+    }
+
+    tags
+}
+
+/// Rebuild tags vec from categorized structure
+fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::Tag> {
+    let mut all_tags = Vec::new();
+
+    // Add e tags for muted posts
+    for event_id in &tags.event_ids {
+        all_tags.push(nostr::Tag::event(*event_id));
+    }
+
+    // Add p tags for blocked users
+    for pubkey in &tags.pubkeys {
+        all_tags.push(nostr::Tag::public_key(*pubkey));
+    }
+
+    // Add t tags for hashtags
+    for hashtag in &tags.hashtags {
+        all_tags.push(nostr::Tag::hashtag(hashtag.clone()));
+    }
+
+    // Add word tags
+    for word in &tags.words {
+        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word.clone()]));
+    }
+
+    // Re-attach preserved tags
+    all_tags.extend(tags.other_tags.clone());
+
+    all_tags
+}
+
 /// Mute a post (add to mute list kind 10000)
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
 pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
@@ -1312,88 +1351,31 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
 
     log::info!("Muting post: {}", event_id);
 
-    // Parse event ID
-    use nostr::EventId;
-    let target_event_id = EventId::from_hex(&event_id)
+    let target_event_id = nostr::EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    // Fetch current mute list
+    // Fetch current mute list and extract tags
     let mute_event = fetch_mute_list().await?;
-
-    // Build new mute list
-    let mut muted_posts = Vec::new();
-    let mut blocked_users = Vec::new();
-    let mut hashtags = Vec::new();
-    let mut words = Vec::new();
-    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
-    let mut existing_content = String::new(); // Preserve existing content
-
-    if let Some(event) = mute_event {
-        // Preserve the existing content before consuming the event
-        existing_content = event.content.clone();
-
-        // Extract existing muted posts, blocked users, hashtags, and words
-        for tag in event.tags.iter() {
-            if tag.kind() == nostr::TagKind::e() {
-                if let Some(id) = tag.content() {
-                    if let Ok(eid) = EventId::from_hex(id) {
-                        muted_posts.push(eid);
-                    }
-                }
-            } else if tag.kind() == nostr::TagKind::p() {
-                if let Some(pk) = tag.content() {
-                    if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
-                        blocked_users.push(pubkey);
-                    }
-                }
-            } else if tag.kind() == nostr::TagKind::t() {
-                // Hashtag tag
-                if let Some(hashtag) = tag.content() {
-                    hashtags.push(hashtag.to_string());
-                }
-            } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
-                // Word tag
-                if let Some(word) = tag.content() {
-                    words.push(word.to_string());
-                }
-            } else {
-                // Preserve all other tags (e.g., 'a' address tags, future extensions)
-                other_tags.push(tag.clone());
-            }
+    let (mut tags, existing_content) = match mute_event {
+        Some(event) => {
+            let content = event.content.clone();
+            (extract_mute_list_tags(&event), content)
         }
-    }
+        None => (MuteListTags {
+            event_ids: Vec::new(),
+            pubkeys: Vec::new(),
+            hashtags: Vec::new(),
+            words: Vec::new(),
+            other_tags: Vec::new(),
+        }, String::new())
+    };
 
     // Add new muted post if not already present
-    if !muted_posts.contains(&target_event_id) {
-        muted_posts.push(target_event_id);
+    if !tags.event_ids.contains(&target_event_id) {
+        tags.event_ids.push(target_event_id);
     }
 
-    // Build tags manually to preserve all custom tags
-    let mut all_tags = Vec::new();
-
-    // Add e tags for muted posts
-    for event_id in muted_posts {
-        all_tags.push(nostr::Tag::event(event_id));
-    }
-
-    // Add p tags for blocked users
-    for pubkey in blocked_users {
-        all_tags.push(nostr::Tag::public_key(pubkey));
-    }
-
-    // Add t tags for hashtags
-    for hashtag in hashtags {
-        all_tags.push(nostr::Tag::hashtag(hashtag));
-    }
-
-    // Add word tags
-    for word in words {
-        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
-    }
-
-    // Re-attach preserved tags
-    all_tags.extend(other_tags);
-
+    let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
@@ -1413,82 +1395,19 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
 
     log::info!("Unmuting post: {}", event_id);
 
-    // Parse event ID
-    use nostr::EventId;
-    let target_event_id = EventId::from_hex(&event_id)
+    let target_event_id = nostr::EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    // Fetch current mute list
+    // Fetch current mute list and extract tags
     let mute_event = fetch_mute_list().await?
         .ok_or("No mute list found")?;
-
-    // Preserve the existing content before consuming the event
     let existing_content = mute_event.content.clone();
+    let mut tags = extract_mute_list_tags(&mute_event);
 
-    // Build new mute list without the target post
-    let mut muted_posts = Vec::new();
-    let mut blocked_users = Vec::new();
-    let mut hashtags = Vec::new();
-    let mut words = Vec::new();
-    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
+    // Remove the target post
+    tags.event_ids.retain(|eid| *eid != target_event_id);
 
-    for tag in mute_event.tags.iter() {
-        if tag.kind() == nostr::TagKind::e() {
-            if let Some(id) = tag.content() {
-                if let Ok(eid) = EventId::from_hex(id) {
-                    if eid != target_event_id {
-                        muted_posts.push(eid);
-                    }
-                }
-            }
-        } else if tag.kind() == nostr::TagKind::p() {
-            if let Some(pk) = tag.content() {
-                if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
-                    blocked_users.push(pubkey);
-                }
-            }
-        } else if tag.kind() == nostr::TagKind::t() {
-            // Hashtag tag
-            if let Some(hashtag) = tag.content() {
-                hashtags.push(hashtag.to_string());
-            }
-        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
-            // Word tag
-            if let Some(word) = tag.content() {
-                words.push(word.to_string());
-            }
-        } else {
-            // Preserve all other tags (e.g., 'a' address tags, future extensions)
-            other_tags.push(tag.clone());
-        }
-    }
-
-    // Build tags manually to preserve all custom tags
-    let mut all_tags = Vec::new();
-
-    // Add e tags for muted posts
-    for event_id in muted_posts {
-        all_tags.push(nostr::Tag::event(event_id));
-    }
-
-    // Add p tags for blocked users
-    for pubkey in blocked_users {
-        all_tags.push(nostr::Tag::public_key(pubkey));
-    }
-
-    // Add t tags for hashtags
-    for hashtag in hashtags {
-        all_tags.push(nostr::Tag::hashtag(hashtag));
-    }
-
-    // Add word tags
-    for word in words {
-        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
-    }
-
-    // Re-attach preserved tags
-    all_tags.extend(other_tags);
-
+    let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
@@ -1507,91 +1426,34 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    // Normalize pubkey
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     log::info!("Blocking user: {}", normalized_pubkey);
 
-    // Parse pubkey
     let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Fetch current mute list
+    // Fetch current mute list and extract tags
     let mute_event = fetch_mute_list().await?;
-
-    // Build new mute list
-    let mut muted_posts = Vec::new();
-    let mut blocked_users = Vec::new();
-    let mut hashtags = Vec::new();
-    let mut words = Vec::new();
-    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
-    let mut existing_content = String::new(); // Preserve existing content
-
-    if let Some(event) = mute_event {
-        // Preserve the existing content before consuming the event
-        existing_content = event.content.clone();
-
-        // Extract existing muted posts, blocked users, hashtags, and words
-        for tag in event.tags.iter() {
-            if tag.kind() == nostr::TagKind::e() {
-                if let Some(id) = tag.content() {
-                    if let Ok(eid) = nostr::EventId::from_hex(id) {
-                        muted_posts.push(eid);
-                    }
-                }
-            } else if tag.kind() == nostr::TagKind::p() {
-                if let Some(pk) = tag.content() {
-                    if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
-                        blocked_users.push(pubkey);
-                    }
-                }
-            } else if tag.kind() == nostr::TagKind::t() {
-                // Hashtag tag
-                if let Some(hashtag) = tag.content() {
-                    hashtags.push(hashtag.to_string());
-                }
-            } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
-                // Word tag
-                if let Some(word) = tag.content() {
-                    words.push(word.to_string());
-                }
-            } else {
-                // Preserve all other tags (e.g., 'a' address tags, future extensions)
-                other_tags.push(tag.clone());
-            }
+    let (mut tags, existing_content) = match mute_event {
+        Some(event) => {
+            let content = event.content.clone();
+            (extract_mute_list_tags(&event), content)
         }
-    }
+        None => (MuteListTags {
+            event_ids: Vec::new(),
+            pubkeys: Vec::new(),
+            hashtags: Vec::new(),
+            words: Vec::new(),
+            other_tags: Vec::new(),
+        }, String::new())
+    };
 
     // Add new blocked user if not already present
-    if !blocked_users.contains(&target_pubkey) {
-        blocked_users.push(target_pubkey);
+    if !tags.pubkeys.contains(&target_pubkey) {
+        tags.pubkeys.push(target_pubkey);
     }
 
-    // Build tags manually to preserve all custom tags
-    let mut all_tags = Vec::new();
-
-    // Add e tags for muted posts
-    for event_id in muted_posts {
-        all_tags.push(nostr::Tag::event(event_id));
-    }
-
-    // Add p tags for blocked users
-    for pubkey in blocked_users {
-        all_tags.push(nostr::Tag::public_key(pubkey));
-    }
-
-    // Add t tags for hashtags
-    for hashtag in hashtags {
-        all_tags.push(nostr::Tag::hashtag(hashtag));
-    }
-
-    // Add word tags
-    for word in words {
-        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
-    }
-
-    // Re-attach preserved tags
-    all_tags.extend(other_tags);
-
+    let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
@@ -1609,85 +1471,22 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    // Normalize pubkey
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     log::info!("Unblocking user: {}", normalized_pubkey);
 
-    // Parse pubkey
     let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Fetch current mute list
+    // Fetch current mute list and extract tags
     let mute_event = fetch_mute_list().await?
         .ok_or("No mute list found")?;
-
-    // Preserve the existing content before consuming the event
     let existing_content = mute_event.content.clone();
+    let mut tags = extract_mute_list_tags(&mute_event);
 
-    // Build new mute list without the target user
-    let mut muted_posts = Vec::new();
-    let mut blocked_users = Vec::new();
-    let mut hashtags = Vec::new();
-    let mut words = Vec::new();
-    let mut other_tags = Vec::new(); // Preserve unknown/custom tags
+    // Remove the target user
+    tags.pubkeys.retain(|pk| *pk != target_pubkey);
 
-    for tag in mute_event.tags.iter() {
-        if tag.kind() == nostr::TagKind::e() {
-            if let Some(id) = tag.content() {
-                if let Ok(eid) = nostr::EventId::from_hex(id) {
-                    muted_posts.push(eid);
-                }
-            }
-        } else if tag.kind() == nostr::TagKind::p() {
-            if let Some(pk) = tag.content() {
-                if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
-                    if pubkey != target_pubkey {
-                        blocked_users.push(pubkey);
-                    }
-                }
-            }
-        } else if tag.kind() == nostr::TagKind::t() {
-            // Hashtag tag
-            if let Some(hashtag) = tag.content() {
-                hashtags.push(hashtag.to_string());
-            }
-        } else if tag.kind() == nostr::TagKind::Custom("word".into()) {
-            // Word tag
-            if let Some(word) = tag.content() {
-                words.push(word.to_string());
-            }
-        } else {
-            // Preserve all other tags (e.g., 'a' address tags, future extensions)
-            other_tags.push(tag.clone());
-        }
-    }
-
-    // Build tags manually to preserve all custom tags
-    let mut all_tags = Vec::new();
-
-    // Add e tags for muted posts
-    for event_id in muted_posts {
-        all_tags.push(nostr::Tag::event(event_id));
-    }
-
-    // Add p tags for blocked users
-    for pubkey in blocked_users {
-        all_tags.push(nostr::Tag::public_key(pubkey));
-    }
-
-    // Add t tags for hashtags
-    for hashtag in hashtags {
-        all_tags.push(nostr::Tag::hashtag(hashtag));
-    }
-
-    // Add word tags
-    for word in words {
-        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word]));
-    }
-
-    // Re-attach preserved tags
-    all_tags.extend(other_tags);
-
+    let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
     client.send_event_builder(builder).await
@@ -1904,6 +1703,7 @@ pub async fn fetch_event_by_coordinate(
 
 /// Fetch addressable event by coordinate with relay hints
 /// Two-phase loading: DB first (instant), then relay (if not found or for freshness)
+/// Delegates to relay::connection::fetch_event_by_coordinate_with_relays
 pub async fn fetch_event_by_coordinate_with_relays(
     kind: u16,
     pubkey: String,
@@ -1911,63 +1711,7 @@ pub async fn fetch_event_by_coordinate_with_relays(
     relay_hints: Vec<String>,
 ) -> std::result::Result<Option<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
-
-    use nostr::{Filter, Kind, PublicKey};
-
-    let author = PublicKey::from_hex(&pubkey)
-        .or_else(|_| PublicKey::parse(&pubkey))
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
-
-    let filter = Filter::new()
-        .kind(Kind::from(kind))
-        .author(author)
-        .identifier(identifier.clone())
-        .limit(1);
-
-    // PHASE 1: Check database first (instant)
-    if let Ok(db_events) = client.database().query(filter.clone()).await {
-        if let Some(event) = db_events.into_iter().next() {
-            log::debug!("Found event kind {} in DB: {}:{}", kind, pubkey, identifier);
-            return Ok(Some(event));
-        }
-    }
-
-    log::info!("Fetching event kind {} from relay: {}:{}", kind, pubkey, identifier);
-
-    // PHASE 2: Fetch from relays
-    // Try relay hints first if provided
-    if !relay_hints.is_empty() {
-        let relay_urls: Vec<nostr_sdk::RelayUrl> = relay_hints.iter()
-            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
-            .collect();
-
-        // Add relay hints temporarily and fetch
-        for relay_url in &relay_urls {
-            if let Err(e) = client.add_relay(relay_url.as_str()).await {
-                log::debug!("Could not add relay hint {}: {}", relay_url, e);
-            }
-        }
-
-        // Try fetching with shorter timeout for relay hints
-        if let Ok(events) = client.fetch_events(filter.clone(), std::time::Duration::from_secs(5)).await {
-            if let Some(event) = events.into_iter().next() {
-                return Ok(Some(event));
-            }
-        }
-    }
-
-    // Fallback: standard relay fetch with longer timeout
-    ensure_relays_ready(&client).await;
-
-    match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
-        Ok(events) => {
-            Ok(events.into_iter().next())
-        }
-        Err(e) => {
-            log::error!("Failed to fetch event: {}", e);
-            Err(format!("Failed to fetch event: {}", e))
-        }
-    }
+    relay::fetch_event_by_coordinate_with_relays(&client, kind, &pubkey, &identifier, relay_hints).await
 }
 
 /// Publish profile metadata (Kind 0) with relay feedback
@@ -2779,29 +2523,14 @@ pub async fn publish_poll_vote_tracked(
 
     // NIP-88: Votes should be published to the relays specified in the poll
     let output = if !poll_relays.is_empty() {
-        // Track which relays we actually add (to clean up later)
-        let mut added_relays = Vec::new();
-        for relay_url in &poll_relays {
-            // add_relay returns Ok if added, Err if already present or failed
-            if client.add_relay(relay_url.as_str()).await.is_ok() {
-                added_relays.push(relay_url.clone());
-            }
-        }
+        // Add poll relays temporarily using specialty helpers
+        let added_relays = relay::add_relays(&client, &poll_relays).await;
 
         // Use non-blocking relay ready check instead of blocking connect()
         ensure_relays_ready(&client).await;
 
         // Check if any poll relays are actually connected
-        let relays_status = client.relays().await;
-        let connected_poll_relays: Vec<_> = poll_relays.iter()
-            .filter(|r| {
-                if let Ok(url) = nostr::RelayUrl::parse(r.as_str()) {
-                    relays_status.get(&url).map(|relay| relay.is_connected()).unwrap_or(false)
-                } else {
-                    false
-                }
-            })
-            .collect();
+        let connected_poll_relays = relay::get_connected(&client, &poll_relays).await;
 
         if connected_poll_relays.is_empty() {
             log::warn!("None of the {} poll relays are connected, falling back to default relays", poll_relays.len());
@@ -2825,11 +2554,7 @@ pub async fn publish_poll_vote_tracked(
         };
 
         // Cleanup: remove only the relays we added
-        for relay_url in added_relays {
-            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
-                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
-            }
-        }
+        relay::remove_relays(&client, &added_relays).await;
 
         result?
     } else {
@@ -3277,6 +3002,249 @@ where
     Ok(count)
 }
 
+/// Stream events with gossip routing, calling a callback for each batch
+///
+/// This function is optimized for progressive UI updates. It:
+/// 1. Waits for user relay lists to be applied (like fetch_events_aggregated_outbox)
+/// 2. Streams events as they arrive
+/// 3. Calls the callback with batches of events for efficient UI updates
+///
+/// # Arguments
+/// * `filter` - The filter to use for the subscription
+/// * `timeout` - Maximum duration to wait for events
+/// * `batch_size` - Number of events to collect before calling on_batch
+/// * `on_batch` - Callback invoked with each batch of events
+///
+/// # Returns
+/// Total count of events received
+pub async fn stream_events_batched<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    batch_size: usize,
+    mut on_batch: F,
+) -> std::result::Result<usize, String>
+where
+    F: FnMut(Vec<nostr::Event>),
+{
+    use futures::StreamExt;
+
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Wait for user relays if signed in (up to 2 seconds)
+    // This ensures gossip routing uses the user's configured relays
+    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
+        log::debug!("Streaming: Waiting for user relay lists to be applied...");
+        let start = instant::Instant::now();
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+                gloo_timers::future::TimeoutFuture::new(50).await;
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        if *USER_RELAYS_APPLIED.peek() {
+            log::debug!("Streaming: User relay lists applied after {}ms", start.elapsed().as_millis());
+        } else {
+            log::warn!("Streaming: User relay lists not applied after timeout, proceeding with defaults");
+        }
+    }
+
+    // Wait for at least one relay to be ready
+    ensure_relays_ready(&client).await;
+
+    let mut stream = client.stream_events(filter, timeout)
+        .await
+        .map_err(|e| format!("Failed to create event stream: {}", e))?;
+
+    let mut total_count = 0;
+    let mut batch = Vec::with_capacity(batch_size);
+
+    while let Some(event) = stream.next().await {
+        batch.push(event);
+        total_count += 1;
+
+        // Deliver batch when we reach batch_size
+        if batch.len() >= batch_size {
+            let items = std::mem::take(&mut batch);
+            batch.reserve(batch_size);
+            on_batch(items);
+        }
+    }
+
+    // Deliver any remaining events
+    if !batch.is_empty() {
+        on_batch(batch);
+    }
+
+    log::info!("Stream completed: received {} events in batches", total_count);
+    Ok(total_count)
+}
+
+/// Stream events from connected relays only (bypasses gossip discovery)
+///
+/// FAST alternative to stream_events_batched that:
+/// 1. Only queries already-connected relays (no relay discovery)
+/// 2. Bypasses the gossip model - no NIP-65 lookups per author
+/// 3. Returns results much faster but may miss events from unconnected relays
+///
+/// Use for initial feed load where speed is critical.
+pub async fn stream_events_from_connected_relays_batched<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    batch_size: usize,
+    mut on_batch: F,
+) -> std::result::Result<usize, String>
+where
+    F: FnMut(Vec<nostr::Event>),
+{
+    use futures::StreamExt;
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    // Get connected relay URLs
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    if connected_urls.is_empty() {
+        log::warn!("No connected relays, falling back to gossip stream");
+        return stream_events_batched(filter, timeout, batch_size, on_batch).await;
+    }
+
+    log::info!("Fast streaming from {} connected relays (bypassing gossip)", connected_urls.len());
+
+    // Capture authors for client-side filtering (defense-in-depth)
+    // Relays may return events from any author, ignoring the filter
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+        .map(|authors| authors.iter().collect());
+
+    // Use stream_events_from which bypasses gossip entirely
+    let mut stream = client
+        .stream_events_from(connected_urls, filter, timeout)
+        .await
+        .map_err(|e| format!("Failed to create stream: {}", e))?;
+
+    let mut total_count = 0;
+    let mut filtered_count = 0;
+    let mut batch = Vec::with_capacity(batch_size);
+
+    while let Some(event) = stream.next().await {
+        // Client-side author filtering (defense-in-depth against misbehaving relays)
+        if let Some(ref authors) = author_set {
+            if !authors.contains(&event.pubkey) {
+                filtered_count += 1;
+                continue;  // Skip events from non-followed authors
+            }
+        }
+
+        batch.push(event);
+        total_count += 1;
+
+        if batch.len() >= batch_size {
+            let items = std::mem::take(&mut batch);
+            batch.reserve(batch_size);
+            on_batch(items);
+        }
+    }
+
+    if !batch.is_empty() {
+        on_batch(batch);
+    }
+
+    if filtered_count > 0 {
+        log::info!("Fast stream completed: {} events ({} filtered out from non-followed authors)", total_count, filtered_count);
+    } else {
+        log::info!("Fast stream completed: {} events from connected relays", total_count);
+    }
+    Ok(total_count)
+}
+
+/// Fetch events from connected relays only (bypasses gossip discovery)
+///
+/// FAST alternative to fetch_events_aggregated_outbox for pagination:
+/// 1. Only queries already-connected relays (no relay discovery)
+/// 2. Bypasses the gossip model - no NIP-65 lookups per author
+/// 3. Returns results much faster but may miss events from unconnected relays
+///
+/// Includes client-side author filtering for defense-in-depth against
+/// misbehaving relays that ignore filter authors.
+pub async fn fetch_events_from_connected_relays(
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    if connected_urls.is_empty() {
+        log::warn!("No connected relays, falling back to gossip fetch");
+        return fetch_events_aggregated_outbox(filter.clone(), timeout).await;
+    }
+
+    log::info!("Fast fetching from {} connected relays (bypassing gossip)", connected_urls.len());
+
+    // Capture authors for client-side filtering (defense-in-depth)
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+        .map(|authors| authors.iter().collect());
+
+    let events = client.fetch_events_from(connected_urls, filter, timeout).await
+        .map_err(|e| format!("Failed to fetch events: {}", e))?;
+
+    // Client-side author filtering (defense-in-depth against misbehaving relays)
+    let result: Vec<nostr::Event> = events.into_iter()
+        .filter(|event| {
+            if let Some(ref authors) = author_set {
+                authors.contains(&event.pubkey)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    log::info!("Fast fetch completed: {} events (after filtering)", result.len());
+    Ok(result)
+}
+
+/// Fetch video events from connected relays (bypasses gossip)
+///
+/// Ensures video relay (relay.divine.video) is connected first,
+/// then uses fast fetch (bypasses gossip) for the query.
+pub async fn fetch_video_events_from_connected_relays(
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Ensure video relay is in the pool
+    ensure_video_relay_connected(&client).await;
+
+    // Use fast fetch (bypasses gossip)
+    fetch_events_from_connected_relays(filter, timeout).await
+}
+
 /// Stream events and collect them into a Vec
 ///
 /// This is a convenience wrapper that collects all streamed events
@@ -3347,71 +3315,16 @@ pub async fn search_custom_nips(
     fetch_events_aggregated(filter, Duration::from_secs(10)).await
 }
 
-/// Relay connection info for display in settings
-#[derive(Clone, Debug)]
-pub struct RelayDisplayInfo {
-    pub url: String,
-    pub status: String,
-    pub bytes_sent: usize,
-    pub bytes_received: usize,
-    pub has_read: bool,
-    pub has_write: bool,
-    // Enhanced stats from SDK
-    pub success_rate: f64,
-    pub connection_attempts: usize,
-}
+// Re-export RelayDisplayInfo from relay module for backward compatibility
+pub use relay::RelayDisplayInfo;
 
 /// Get display info for all connected relays (for Connections tab in settings)
+///
+/// This is a convenience wrapper that calls get_client() internally.
+/// See [`relay::get_relay_display_info`] for the implementation.
 pub async fn get_relay_display_info() -> Vec<RelayDisplayInfo> {
     let Some(client) = get_client() else {
         return vec![];
     };
-
-    let relays = client.relays().await;
-    let mut info_list = Vec::new();
-
-    for (url, relay) in relays {
-        let status = match relay.status() {
-            nostr_relay_pool::RelayStatus::Connected => "Connected",
-            nostr_relay_pool::RelayStatus::Connecting => "Connecting",
-            nostr_relay_pool::RelayStatus::Disconnected => "Disconnected",
-            nostr_relay_pool::RelayStatus::Initialized => "Initialized",
-            nostr_relay_pool::RelayStatus::Terminated => "Terminated",
-            nostr_relay_pool::RelayStatus::Pending => "Pending",
-            nostr_relay_pool::RelayStatus::Banned => "Banned",
-            nostr_relay_pool::RelayStatus::Sleeping => "Sleeping",
-        };
-
-        let stats = relay.stats();
-        let flags = relay.flags();
-
-        info_list.push(RelayDisplayInfo {
-            url: url.to_string(),
-            status: status.to_string(),
-            bytes_sent: stats.bytes_sent(),
-            bytes_received: stats.bytes_received(),
-            has_read: flags.has_read(),
-            has_write: flags.has_write(),
-            // Enhanced stats from SDK (latency not available in WASM)
-            success_rate: stats.success_rate(),
-            connection_attempts: stats.attempts(),
-        });
-    }
-
-    // Sort by status (Connected first) then by URL
-    info_list.sort_by(|a, b| {
-        let status_order = |s: &str| match s {
-            "Connected" => 0,
-            "Connecting" => 1,
-            "Pending" => 2,
-            "Initialized" => 3,
-            "Disconnected" => 4,
-            "Terminated" => 5,
-            _ => 6,
-        };
-        status_order(&a.status).cmp(&status_order(&b.status))
-            .then_with(|| a.url.cmp(&b.url))
-    });
-
-    info_list
+    relay::get_relay_display_info(&client).await
 }

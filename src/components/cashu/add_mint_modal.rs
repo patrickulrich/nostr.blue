@@ -110,7 +110,7 @@ pub fn CashuAddMintModal(
                             div {
                                 class: "flex items-start gap-3",
                                 svg {
-                                    class: "w-6 h-6 text-green-600 flex-shrink-0",
+                                    class: "w-6 h-6 text-green-600 shrink-0",
                                     xmlns: "http://www.w3.org/2000/svg",
                                     fill: "none",
                                     view_box: "0 0 24 24",
@@ -143,7 +143,7 @@ pub fn CashuAddMintModal(
                             div {
                                 class: "flex items-start gap-3",
                                 svg {
-                                    class: "w-6 h-6 text-red-600 flex-shrink-0",
+                                    class: "w-6 h-6 text-red-600 shrink-0",
                                     xmlns: "http://www.w3.org/2000/svg",
                                     fill: "none",
                                     view_box: "0 0 24 24",

@@ -3,6 +3,7 @@
 //! Uses two-stage loading: board metadata first, then pins
 
 use dioxus::prelude::*;
+use dioxus_core::Task;
 
 use crate::hooks::use_author_metadata;
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -58,6 +59,7 @@ pub fn BoardSlideover(
     let mut show_delete_confirm = use_signal(|| false);
     // Counter for delete task to prevent concurrent deletes (0 = not deleting, >0 = in progress)
     let mut delete_task_id = use_signal(|| 0u32);
+    let mut delete_task: Signal<Option<Task>> = use_signal(|| None);
     let mut delete_error = use_signal(|| None::<String>);
     // Pin to board modal (lifted from PinCard to avoid overflow clipping)
     let mut pin_to_board_request: Signal<Option<PinToBoardRequest>> = use_signal(|| None);
@@ -70,6 +72,10 @@ pub fn BoardSlideover(
             show_zap_modal.set(false);
             show_share_modal.set(false);
             show_delete_confirm.set(false);
+            // Cancel any in-flight delete task before resetting state
+            if let Some(task) = delete_task.take() {
+                task.cancel();
+            }
             delete_task_id.set(0);
             delete_error.set(None);
             pin_to_board_request.set(None);
@@ -77,8 +83,10 @@ pub fn BoardSlideover(
             pins.set(Vec::new());
             pins_loading.set(true);  // Set to true so loading shows on reopen
             pins_error.set(None);
-            // Invalidate any in-flight requests by resetting request_id to 0
-            request_id.set(0);
+            // Invalidate any in-flight requests by incrementing request_id
+            // This prevents a quickly reopened slideover from reusing the same ID
+            let next = request_id.read().wrapping_add(1);
+            request_id.set(if next == 0 { 1 } else { next });
         }
     });
 
@@ -178,27 +186,40 @@ pub fn BoardSlideover(
             // Delete already in progress
             return;
         }
-        delete_task_id.set(current.wrapping_add(1));
+        let task_id_at_start = current.wrapping_add(1);
+        delete_task_id.set(task_id_at_start);
         delete_error.set(None);
         let board_clone = board_for_delete.clone();
         let on_close = on_close_for_delete;
 
-        spawn(async move {
+        let task = spawn(async move {
             match delete_pinboard(&board_clone).await {
                 Ok(_) => {
-                    // Bug Fix #12: Reset delete_task_id on success
+                    // Check if this task is still current (not cancelled)
+                    if *delete_task_id.peek() != task_id_at_start {
+                        log::info!("Delete task cancelled, ignoring stale result");
+                        return;
+                    }
+                    // Clear task handle and reset counter on success
+                    delete_task.set(None);
                     delete_task_id.set(0);
                     on_close.call(());
                     nav.push(Route::PinBoardsHome {});
                 }
                 Err(e) => {
+                    // Check if this task is still current (not cancelled)
+                    if *delete_task_id.peek() != task_id_at_start {
+                        return;
+                    }
                     log::error!("Failed to delete board: {}", e);
                     delete_error.set(Some(format!("Failed to delete: {}", e)));
+                    delete_task.set(None);
                     delete_task_id.set(0); // Reset to allow retry
                     // Keep modal open so user sees the error
                 }
             }
         });
+        delete_task.set(Some(task));
     };
 
     // Handle pin deletion (called after successful delete from PinMenu)
@@ -404,7 +425,7 @@ pub fn BoardSlideover(
 
                         // Avatar
                         div {
-                            class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0",
+                            class: "w-10 h-10 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0",
                             if let Some(ref pic_url) = profile_picture().as_ref().filter(|u| is_valid_http_url(u)) {
                                 img {
                                     src: "{pic_url}",

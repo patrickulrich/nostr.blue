@@ -132,7 +132,7 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
 
             // Podcast cover image
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{image_url}",
                     alt: "{show.title}",
@@ -192,7 +192,7 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
 
             // Right side badges
             div {
-                class: "flex items-center gap-2 flex-shrink-0",
+                class: "flex items-center gap-2 shrink-0",
 
                 // V4V indicator
                 if has_v4v {
@@ -226,7 +226,7 @@ pub fn PodcastShowCardSkeleton() -> Element {
 
             // Image skeleton
             div {
-                class: "w-16 h-16 bg-muted rounded-lg flex-shrink-0"
+                class: "w-16 h-16 bg-muted rounded-lg shrink-0"
             }
 
             // Info skeleton
@@ -243,7 +243,7 @@ pub fn PodcastShowCardSkeleton() -> Element {
 
             // Badge skeleton
             div {
-                class: "w-20 h-4 bg-muted rounded flex-shrink-0"
+                class: "w-20 h-4 bg-muted rounded shrink-0"
             }
         }
     }

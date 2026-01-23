@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, feed_cache, nostr_client};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::utils::FeedItem;
 use crate::components::{ArticleCard, ArticleCardSkeleton, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use crate::utils::article_meta::get_identifier;
@@ -36,9 +38,15 @@ pub fn Articles() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
+    // Request ID for preventing stale results when feed type changes rapidly
+    let mut request_id = use_signal(|| 0u32);
+
+    // Track last intentional load trigger to guard against spurious re-triggers
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
+
     // Load articles on mount and when refresh is triggered or feed type changes
     use_effect(move || {
-        let _ = refresh_trigger.read();
+        let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -47,23 +55,106 @@ pub fn Articles() -> Element {
             return;
         }
 
-        loading.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_feed) = *last_loaded_trigger.peek();
+        let has_data = !articles.peek().is_empty();
+
+        let feed_type_changed = current_feed_type != last_feed;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !feed_type_changed && !refresh_changed {
+            log::debug!("Skipping articles feed re-load: data already present, no intentional change");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_trigger.set((refresh, current_feed_type));
+
+        // Generate request ID for stale request prevention
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading.set(true);
+        }
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
 
         spawn(async move {
-            let result = match current_feed_type {
-                FeedType::Following => load_following_articles(None).await,
-                FeedType::Global => load_articles(None).await,
+            // Check if this request is still current
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale articles feed request {}", current_id);
+                return;
+            }
+
+            // Determine cache key
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = match current_feed_type {
+                FeedType::Following => FeedCacheKey::Articles { pubkey: pubkey_str },
+                FeedType::Global => FeedCacheKey::ArticlesGlobal,
             };
 
+            // STEP 1: Load from cache instantly
+            let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                .await
+                .unwrap_or_default();
+
+            // Check staleness after cache load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale articles request after cache load");
+                return;
+            }
+
+            if !cached_items.is_empty() {
+                log::info!("Loaded {} articles from cache", cached_items.len());
+                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+
+                // Seed pagination from cache to enable proper pagination on cached data
+                if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
+                    oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
+                }
+
+                articles.set(cached_events);
+            }
+
+            // STEP 2: Load from network
+            let result = match current_feed_type {
+                FeedType::Following => load_following_articles(None).await,
+                FeedType::Global => load_articles(None).await.map(|e| (e, false)),
+            };
+
+            // Check staleness after network load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale articles request after network load");
+                return;
+            }
+
             match result {
-                Ok(feed_events) => {
+                Ok((feed_events, did_fallback)) => {
+                    // Recompute cache key if fallback occurred
+                    let effective_cache_key = if did_fallback {
+                        log::info!("No contacts, switched to Global articles feed");
+                        feed_type.set(FeedType::Global);
+                        FeedCacheKey::ArticlesGlobal  // Use Global key, not Following
+                    } else {
+                        cache_key.clone()
+                    };
+
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
+
+                    // STEP 3: Store to cache with effective key
+                    let feed_items: Vec<FeedItem> = feed_events.iter()
+                        .map(|e| FeedItem::OriginalPost(e.clone()))
+                        .collect();
+                    spawn(async move {
+                        let _ = feed_cache::store_feed_items(&effective_cache_key, &feed_items).await;
+                        let _ = feed_cache::run_eviction_if_needed().await;
+                    });
 
                     // Determine if there are more events to load
                     has_more.set(feed_events.len() >= 20);
@@ -72,7 +163,12 @@ pub fn Articles() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    // On error, keep cached data visible if we have it
+                    if cached_items.is_empty() {
+                        error.set(Some(e));
+                    } else {
+                        log::warn!("Network error but showing cached articles: {}", e);
+                    }
                     loading.set(false);
                 }
             }
@@ -91,8 +187,22 @@ pub fn Articles() -> Element {
         loading.set(true);
 
         spawn(async move {
+            // During pagination, handle fallback carefully to avoid mixing feeds
             let result = match current_feed_type {
-                FeedType::Following => load_following_articles(until).await,
+                FeedType::Following => {
+                    match load_following_articles(until).await {
+                        Ok((events, did_fallback)) => {
+                            // During pagination, discard fallback results to avoid mixing feeds
+                            if did_fallback {
+                                log::info!("Pagination fallback detected, returning empty to preserve feed type");
+                                Ok(Vec::new())
+                            } else {
+                                Ok(events)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 FeedType::Global => load_articles(until).await,
             };
 
@@ -349,7 +459,8 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
 }
 
 /// Load articles from followed users with deduplication by address
-async fn load_following_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
+/// Returns (articles, did_fallback) where did_fallback indicates if we fell back to global.
+async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -361,14 +472,16 @@ async fn load_following_articles(until: Option<u64>) -> Result<Vec<Event>, Strin
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            return load_articles(until).await;
+            let global = load_articles(until).await?;
+            return Ok((global, true));
         }
     };
 
     // If user doesn't follow anyone, show global feed
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global articles");
-        return load_articles(until).await;
+        let global = load_articles(until).await?;
+        return Ok((global, true));
     }
 
     log::info!("User follows {} accounts", contacts.len());
@@ -383,7 +496,8 @@ async fn load_following_articles(until: Option<u64>) -> Result<Vec<Event>, Strin
 
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        return load_articles(until).await;
+        let global = load_articles(until).await?;
+        return Ok((global, true));
     }
 
     // Create filter for long-form articles from followed users
@@ -447,17 +561,19 @@ async fn load_following_articles(until: Option<u64>) -> Result<Vec<Event>, Strin
 
             log::info!("After deduplication: {} unique articles", deduplicated.len());
 
-            // If no articles found, fall back to global feed
+            // If no articles found, return empty (valid result - user's contacts just haven't posted articles)
+            // Don't fall back to global here - empty following is different from no contacts
             if deduplicated.is_empty() {
-                log::info!("No articles from followed users, showing global articles");
-                return load_articles(until).await;
+                log::info!("No articles from followed users");
+                return Ok((Vec::new(), false));
             }
 
-            Ok(deduplicated)
+            Ok((deduplicated, false))
         }
         Err(e) => {
             log::error!("Failed to fetch following articles: {}, falling back to global", e);
-            load_articles(until).await
+            let global = load_articles(until).await?;
+            Ok((global, true))
         }
     }
 }

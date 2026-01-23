@@ -447,6 +447,14 @@ pub fn CommunityPostCard(
                         "aria-modal": "true",
                         tabindex: "-1",
                         onclick: move |e| e.stop_propagation(),
+                        onmounted: move |_evt| {
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                if let Some(el) = _evt.data().downcast::<web_sys::HtmlElement>() {
+                                    let _ = el.focus();
+                                }
+                            }
+                        },
                         onkeydown: move |evt: KeyboardEvent| {
                             if evt.key() == Key::Escape {
                                 show_remove_dialog.set(false);

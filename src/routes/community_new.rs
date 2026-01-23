@@ -173,7 +173,7 @@ pub fn CommunityNew() -> Element {
                                 "Identifier *"
                             }
                             input {
-                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 r#type: "text",
                                 placeholder: "my-community",
                                 value: "{identifier}",
@@ -193,7 +193,7 @@ pub fn CommunityNew() -> Element {
                                 "Name *"
                             }
                             input {
-                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 r#type: "text",
                                 placeholder: "My Awesome Community",
                                 value: "{name}",
@@ -213,7 +213,7 @@ pub fn CommunityNew() -> Element {
                                 "Description"
                             }
                             textarea {
-                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]",
+                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500 min-h-[100px]",
                                 placeholder: "What is your community about?",
                                 value: "{description}",
                                 disabled: *creating.read(),
@@ -228,7 +228,7 @@ pub fn CommunityNew() -> Element {
                                 "Image URL"
                             }
                             input {
-                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 r#type: "url",
                                 placeholder: "https://example.com/community-image.jpg",
                                 value: "{image_url}",
@@ -248,7 +248,7 @@ pub fn CommunityNew() -> Element {
                                 "Rules"
                             }
                             textarea {
-                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]",
+                                class: "w-full p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500 min-h-[100px]",
                                 placeholder: "1. Be respectful\n2. No spam\n3. Stay on topic",
                                 value: "{rules}",
                                 disabled: *creating.read(),
@@ -267,7 +267,7 @@ pub fn CommunityNew() -> Element {
                             div {
                                 class: "flex gap-2 mb-2",
                                 input {
-                                    class: "flex-1 p-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm",
+                                    class: "flex-1 p-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono text-sm",
                                     r#type: "text",
                                     placeholder: "64-character hex pubkey",
                                     value: "{moderator_input}",

@@ -283,7 +283,10 @@ async fn try_count_from_relays(
 
         // Check if we've cached this relay's NIP-45 support (with TTL for negative results)
         let should_try = {
-            let cache = get_nip45_cache().lock().unwrap();
+            let cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             match cache.get(&url_str) {
                 Some(status) if status.is_valid() => status.supported,
                 Some(_) => true, // Expired negative status - retry
@@ -302,7 +305,10 @@ async fn try_count_from_relays(
             Ok(count) => {
                 // Cache successful result (permanent)
                 {
-                    let mut cache = get_nip45_cache().lock().unwrap();
+                    let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
                     cache.insert(url_str, Nip45SupportStatus::new(true));
                 }
                 log::debug!("COUNT from {}: {} events", url, count);
@@ -311,7 +317,10 @@ async fn try_count_from_relays(
             Err(e) => {
                 // Cache failure for this relay (with TTL - will retry after 10 minutes)
                 {
-                    let mut cache = get_nip45_cache().lock().unwrap();
+                    let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
+                log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
                     cache.insert(url_str, Nip45SupportStatus::new(false));
                 }
                 log::debug!("COUNT failed on {}: {}", url, e);
@@ -414,7 +423,10 @@ pub async fn fetch_interaction_counts_batch(
 
     // Phase 3.5: Check L2 cache first
     let (cached_counts, cache_hits, uncached_ids) = {
-        let mut cache = get_counts_cache().lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         let cached_counts = cache.get_batch(&event_ids);
         let cache_hits = cached_counts.len();
 
@@ -608,7 +620,10 @@ pub async fn fetch_interaction_counts_batch(
 
     // Update L2 cache with freshly fetched counts
     {
-        let mut cache = get_counts_cache().lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.insert_batch(freshly_fetched.clone());
         // Cache lock is dropped here
     }
@@ -676,7 +691,10 @@ pub async fn sync_interaction_counts(
             if new_event_count == 0 {
                 log::info!("Negentropy sync: no new interaction events found");
                 // Return current cached counts
-                let mut cache = get_counts_cache().lock().unwrap();
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
                 return Ok(cache.get_batch(&event_ids));
             }
 
@@ -693,7 +711,10 @@ pub async fn sync_interaction_counts(
 
             // Get existing cached counts
             let mut result = {
-                let mut cache = get_counts_cache().lock().unwrap();
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
                 cache.get_batch(&event_ids)
             };
 
@@ -778,7 +799,10 @@ pub async fn sync_interaction_counts(
 
             // Update cache with new counts
             {
-                let mut cache = get_counts_cache().lock().unwrap();
+                let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
                 cache.insert_batch(result.clone());
             }
 
@@ -807,7 +831,10 @@ pub async fn sync_interaction_counts(
 #[allow(dead_code)]
 pub fn invalidate_interaction_counts(event_id: &str) {
     {
-        let mut cache = get_counts_cache().lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         cache.invalidate(event_id);
     }
     log::debug!("Invalidated interaction counts cache for {}", event_id);
@@ -817,7 +844,10 @@ pub fn invalidate_interaction_counts(event_id: &str) {
 #[allow(dead_code)]
 pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
     {
-        let mut cache = get_counts_cache().lock().unwrap();
+        let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+            log::warn!("Counts cache mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         for event_id in event_ids {
             cache.invalidate(event_id);
         }

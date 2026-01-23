@@ -178,7 +178,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "My Awesome Livestream",
                             value: "{title.read()}",
                             oninput: move |e| title.set(e.value().clone())
@@ -192,7 +192,7 @@ pub fn LiveStreamNew() -> Element {
                             "Description"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 min-h-[120px]",
                             placeholder: "Describe what you'll be streaming...",
                             value: "{summary.read()}",
                             oninput: move |e| summary.set(e.value().clone())
@@ -207,7 +207,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "url",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono text-sm",
                             placeholder: "https://example.com/stream.m3u8",
                             value: "{stream_url.read()}",
                             oninput: move |e| stream_url.set(e.value().clone())
@@ -226,7 +226,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "url",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "https://example.com/thumbnail.jpg",
                             value: "{image_url.read()}",
                             oninput: move |e| image_url.set(e.value().clone())
@@ -251,7 +251,7 @@ pub fn LiveStreamNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "gaming, music, tech (comma-separated)",
                             value: "{hashtags.read()}",
                             oninput: move |e| hashtags.set(e.value().clone())
@@ -269,7 +269,7 @@ pub fn LiveStreamNew() -> Element {
                             "Status"
                         }
                         select {
-                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             value: "{status.read()}",
                             onchange: move |e| status.set(e.value().clone()),
                             option {

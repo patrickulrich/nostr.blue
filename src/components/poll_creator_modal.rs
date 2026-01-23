@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::stores::{nostr_client, relay_metadata};
+use crate::stores::{nostr_client, relay};
 use crate::components::{PollOptionList, PollOptionData};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use nostr_sdk::{nips::nip19::Nip19Event, nips::nip88::{PollType, PollOption}, EventId, ToBech32};
@@ -114,7 +114,7 @@ pub fn PollCreatorModal(
             let hashtags: Vec<String> = extract_hashtags(&question, &hashtags_val);
 
             // Get user's write relays for poll discoverability (NIP-88 relay hints)
-            let relays: Vec<String> = relay_metadata::USER_RELAY_METADATA.read()
+            let relays: Vec<String> = relay::USER_RELAY_METADATA.read()
                 .as_ref()
                 .map(|m| m.relays.iter()
                     .filter(|r| r.write)
@@ -226,7 +226,7 @@ pub fn PollCreatorModal(
                             "Question"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             placeholder: "What's your question?",
                             rows: "2",
                             value: "{poll_question}",
@@ -295,7 +295,7 @@ pub fn PollCreatorModal(
                                 class: "mt-2",
                                 input {
                                     r#type: "datetime-local",
-                                    class: "px-3 py-1.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                    class: "px-3 py-1.5 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                     value: "{custom_end_time}",
                                     oninput: move |evt| custom_end_time.set(evt.value()),
                                 }
@@ -399,7 +399,7 @@ pub fn PollCreatorModal(
                                 }
                                 input {
                                     r#type: "text",
-                                    class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                    class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                     placeholder: "bitcoin, nostr (comma separated)",
                                     value: "{hashtags_input}",
                                     oninput: move |evt| hashtags_input.set(evt.value()),

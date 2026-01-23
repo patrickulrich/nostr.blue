@@ -422,7 +422,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 // Avatar
                 Link {
                     to: Route::Profile { pubkey: author_pubkey.clone() },
-                    class: "flex-shrink-0",
+                    class: "shrink-0",
                     if !author_avatar.is_empty() {
                         img {
                             src: "{author_avatar}",
@@ -449,7 +449,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                             if !author_username.is_empty() && author_username != author_name {
                                 span { class: "text-muted-foreground text-sm truncate", "@{author_username}" }
                             }
-                            span { class: "text-muted-foreground text-sm flex-shrink-0", "· {time_ago}" }
+                            span { class: "text-muted-foreground text-sm shrink-0", "· {time_ago}" }
                         }
                     }
                 }
@@ -476,7 +476,7 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
                     // Play/Pause button
                     button {
-                        class: "flex-shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
                         onclick: toggle_play,
                         if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
                             // Pause icon

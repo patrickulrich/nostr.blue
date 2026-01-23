@@ -211,7 +211,7 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
                                     "Add a note (optional)"
                                 }
                                 textarea {
-                                    class: "w-full px-3 py-2 border border-border rounded-lg bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 border border-border rounded-lg bg-background text-sm resize-none focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     rows: "2",
                                     placeholder: "Why are you pinning this?",
                                     value: "{pin_note}",

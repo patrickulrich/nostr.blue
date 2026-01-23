@@ -63,13 +63,13 @@ pub fn PollOptionList(
 
                             // Option number indicator
                             div {
-                                class: "flex-shrink-0 w-8 h-10 flex items-center justify-center text-muted-foreground font-medium",
+                                class: "shrink-0 w-8 h-10 flex items-center justify-center text-muted-foreground font-medium",
                                 "{index + 1}."
                             }
 
                             // Text input
                             textarea {
-                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                                class: "flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 placeholder: "Option {index + 1}",
                                 rows: "1",
                                 value: "{option_text}",
@@ -91,7 +91,7 @@ pub fn PollOptionList(
 
                             // Delete button
                             button {
-                                class: "flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-destructive transition disabled:opacity-30 disabled:cursor-not-allowed",
+                                class: "shrink-0 w-10 h-10 flex items-center justify-center rounded-lg hover:bg-destructive/10 text-destructive transition disabled:opacity-30 disabled:cursor-not-allowed",
                                 disabled: !can_remove,
                                 onclick: move |_| remove_option(option_index),
                                 title: if can_remove { "Remove option" } else { "At least 2 options required" },

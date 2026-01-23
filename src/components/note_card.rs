@@ -532,7 +532,7 @@ pub fn NoteCard(
 
                     // Avatar
                     div {
-                        class: "flex-shrink-0",
+                        class: "shrink-0",
                     Link {
                         to: Route::Profile { pubkey: author_pubkey.clone() },
                         onclick: move |e: MouseEvent| e.stop_propagation(),

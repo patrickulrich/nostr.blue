@@ -11,6 +11,9 @@ pub struct EmojiPickerProps {
     pub on_emoji_selected: EventHandler<String>,
     #[props(default = false)]
     pub icon_only: bool,
+    /// ARIA label for the emoji picker button (for accessibility)
+    #[props(default = "Add emoji".to_string())]
+    pub aria_label: String,
 }
 
 /// Comprehensive emoji categories with extensive emoji coverage
@@ -210,6 +213,8 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
     let mut picker_bottom = use_signal(|| 0.0);
     #[allow(unused_mut)] // Mutated only in WASM target
     let mut picker_left = use_signal(|| 0.0);
+    #[allow(unused_mut)] // Mutated only in WASM target
+    let mut is_mobile = use_signal(|| false);
     // Track failed image URLs for fallback display
     let mut failed_images: Signal<HashSet<String>> = use_signal(HashSet::new);
 
@@ -228,11 +233,11 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
         if query.is_empty() {
             return Vec::new();
         }
-        EMOJI_CATEGORIES.iter()
-            .flat_map(|(_, emojis)| emojis.iter())
-            .filter(|e| e.to_lowercase().contains(query.as_str()))
+        // Use emoji crate's fuzzy search by name
+        emoji::search::search_name(&query)
+            .into_iter()
             .take(50) // Limit results for performance
-            .map(|e| e.to_string())
+            .map(|e| e.glyph.to_string())
             .collect::<Vec<_>>()
     });
 
@@ -249,6 +254,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                     "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
                 },
                 title: if props.icon_only { "Add emoji" } else { "" },
+                aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
                 onclick: move |_| {
                     let current = *show_picker.read();
                     show_picker.set(!current);
@@ -262,26 +268,42 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 if let Some(document) = window.document() {
                                     if let Some(element) = document.get_element_by_id(&btn_id) {
                                         let rect = element.get_bounding_client_rect();
+                                        let viewport_width = window
+                                            .inner_width()
+                                            .ok()
+                                            .and_then(|w| w.as_f64())
+                                            .unwrap_or(1024.0);
                                         let viewport_height = window
                                             .inner_height()
                                             .ok()
                                             .and_then(|h| h.as_f64())
                                             .unwrap_or(800.0);
 
-                                        let button_center_y = rect.top() + (rect.height() / 2.0);
-                                        let is_in_top_half = button_center_y < (viewport_height / 2.0);
+                                        // Mobile breakpoint (sm = 640px)
+                                        let is_mobile_view = viewport_width < 640.0;
+                                        is_mobile.set(is_mobile_view);
 
-                                        // Calculate fixed position coordinates
-                                        picker_left.set(rect.left());
-
-                                        if is_in_top_half {
-                                            // Position below button
-                                            picker_top.set(rect.bottom() + 8.0); // 8px margin (mt-2)
+                                        if is_mobile_view {
+                                            // On mobile: position at top with margins
+                                            picker_top.set(16.0); // 1rem from top
                                             position_below.set(true);
                                         } else {
-                                            // Position above button
-                                            picker_bottom.set(viewport_height - rect.top() + 8.0); // 8px margin (mb-2)
-                                            position_below.set(false);
+                                            // Desktop positioning
+                                            let button_center_y = rect.top() + (rect.height() / 2.0);
+                                            let is_in_top_half = button_center_y < (viewport_height / 2.0);
+
+                                            // Calculate fixed position coordinates
+                                            picker_left.set(rect.left());
+
+                                            if is_in_top_half {
+                                                // Position below button
+                                                picker_top.set(rect.bottom() + 8.0); // 8px margin (mt-2)
+                                                position_below.set(true);
+                                            } else {
+                                                // Position above button
+                                                picker_bottom.set(viewport_height - rect.top() + 8.0); // 8px margin (mb-2)
+                                                position_below.set(false);
+                                            }
                                         }
                                     }
                                 }
@@ -299,8 +321,12 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             // Emoji picker popover
             if *show_picker.read() {
                 div {
-                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[60] w-80",
-                    style: if *position_below.read() {
+                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[60]",
+                    class: "w-[calc(100vw-2rem)] sm:w-80",
+                    style: if *is_mobile.read() {
+                        // Mobile: fixed position, CSS handles width via responsive classes
+                        "top: 1rem; left: 1rem; right: 1rem;".to_string()
+                    } else if *position_below.read() {
                         format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read())
                     } else {
                         format!("bottom: {}px; left: {}px;", *picker_bottom.read(), *picker_left.read())
@@ -326,7 +352,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         class: "p-2 border-b border-gray-200 dark:border-gray-700",
                         input {
                             r#type: "text",
-                            class: "w-full px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Search emojis...",
                             value: "{search_query}",
                             oninput: move |evt| search_query.set(evt.value()),
@@ -415,7 +441,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         // Show search results when searching
                         if is_searching {
                             div {
-                                class: "grid grid-cols-7 gap-2",
+                                class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
                                 // Render memoized standard emoji search results
                                 for (emoji_idx, emoji_str) in search_results.read().iter().enumerate() {
                                     {
@@ -483,7 +509,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             match selected_category.read().clone() {
                                 EmojiCategory::Recent => rsx! {
                                     div {
-                                        class: "grid grid-cols-7 gap-2",
+                                        class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
                                         for (emoji_idx, emoji) in recent_emojis.iter().enumerate() {
                                             {
                                                 let emoji_str = emoji.clone();
@@ -528,7 +554,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         }
                                         if recent_emojis.is_empty() {
                                             p {
-                                                class: "col-span-7 text-center text-gray-500 text-sm py-4",
+                                                class: "col-span-full text-center text-gray-500 text-sm py-4",
                                                 "No recent emojis yet. Select some emojis to see them here!"
                                             }
                                         }
@@ -536,7 +562,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 },
                                 EmojiCategory::Custom => rsx! {
                                     div {
-                                        class: "grid grid-cols-5 gap-2",
+                                        class: "grid grid-cols-4 sm:grid-cols-5 gap-2",
                                         for (emoji_idx, custom_emoji) in custom_emojis.data().read().iter().enumerate() {
                                             {
                                                 let shortcode = custom_emoji.shortcode.clone();
@@ -584,7 +610,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     let set_id = identifier.clone();
                                     rsx! {
                                         div {
-                                            class: "grid grid-cols-5 gap-2",
+                                            class: "grid grid-cols-4 sm:grid-cols-5 gap-2",
                                             if let Some(set) = set {
                                                 for (emoji_idx, custom_emoji) in set.emojis.iter().enumerate() {
                                                     {
@@ -626,7 +652,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 }
                                             } else {
                                                 p {
-                                                    class: "col-span-5 text-center text-gray-500 text-sm py-4",
+                                                    class: "col-span-full text-center text-gray-500 text-sm py-4",
                                                     "Emoji set not found"
                                                 }
                                             }
@@ -635,7 +661,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 },
                                 EmojiCategory::Standard(idx) => rsx! {
                                     div {
-                                        class: "grid grid-cols-7 gap-2",
+                                        class: "grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2",
                                         for (emoji_idx, emoji) in EMOJI_CATEGORIES[idx].1.iter().enumerate() {
                                             {
                                                 let emoji_str = emoji.to_string();

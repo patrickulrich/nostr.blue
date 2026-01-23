@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
+use crate::stores::{auth_store, feed_cache, nostr_client};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::utils::FeedItem;
 use crate::components::{PhotoCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
@@ -34,10 +36,16 @@ pub fn Photos() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
 
+    // Request ID for preventing stale results when feed type changes rapidly
+    let mut request_id = use_signal(|| 0u32);
+
+    // Track last intentional load trigger to guard against spurious re-triggers
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
+
     // Load feed on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         // Watch refresh trigger and feed type
-        let _ = refresh_trigger.read();
+        let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
@@ -46,19 +54,110 @@ pub fn Photos() -> Element {
             return;
         }
 
-        loading.set(true);
+        // Guard: Only reload if intentional change or no data
+        let (last_refresh, last_feed) = *last_loaded_trigger.peek();
+        let has_data = !events.peek().is_empty();
+
+        let feed_type_changed = current_feed_type != last_feed;
+        let refresh_changed = refresh != last_refresh;
+
+        if has_data && !feed_type_changed && !refresh_changed {
+            log::debug!("Skipping photos feed re-load: data already present, no intentional change");
+            return;
+        }
+
+        // Update last loaded trigger
+        last_loaded_trigger.set((refresh, current_feed_type));
+
+        // Generate request ID for stale request prevention
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
+
+        // Only show loading if no data exists
+        if !has_data {
+            loading.set(true);
+        }
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
 
         spawn(async move {
-            let result = match current_feed_type {
-                FeedType::Following => load_following_photos(None).await,
-                FeedType::Global => load_global_photos(None).await,
+            // Check if this request is still current
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos feed request {}", current_id);
+                return;
+            }
+
+            // Determine cache key
+            let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
+            let cache_key = match current_feed_type {
+                FeedType::Following => FeedCacheKey::Photos { pubkey: pubkey_str },
+                FeedType::Global => FeedCacheKey::PhotosGlobal,
             };
 
+            // STEP 1: Load from cache instantly
+            let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                .await
+                .unwrap_or_default();
+
+            // Staleness check after cache await (Dioxus pattern)
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request after cache load");
+                return;
+            }
+
+            if !cached_items.is_empty() {
+                log::info!("Loaded {} photos from cache", cached_items.len());
+                // Convert FeedItem to Event
+                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+
+                // Set pagination cursor from cache (enables scroll if network fails)
+                if let Some(oldest_event) = cached_events.last() {
+                    oldest_timestamp.set(Some(oldest_event.created_at.as_secs()));
+                }
+
+                events.set(cached_events);
+            }
+
+            // Staleness check before network await
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request before network");
+                return;
+            }
+
+            // STEP 2: Load from network
+            let result = match current_feed_type {
+                FeedType::Following => load_following_photos(None).await,
+                FeedType::Global => load_global_photos(None).await.map(|e| (e, false)),
+            };
+
+            // Staleness check after network await
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request after network");
+                return;
+            }
+
             match result {
-                Ok(photo_events) => {
+                Ok((photo_events, did_fallback)) => {
+                    // Recompute cache key if fallback occurred (nostr-sdk BrokenDownFilters pattern)
+                    let effective_cache_key = if did_fallback {
+                        log::info!("No contacts, switched to Global photos feed");
+                        feed_type.set(FeedType::Global);
+                        FeedCacheKey::PhotosGlobal  // Use Global key, not Following
+                    } else {
+                        cache_key.clone()
+                    };
+
+                    // STEP 3: Store to cache using effective key
+                    let feed_items: Vec<FeedItem> = photo_events.iter()
+                        .map(|e| FeedItem::OriginalPost(e.clone()))
+                        .collect();
+                    let cache_key_for_store = effective_cache_key;
+                    spawn(async move {
+                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ = feed_cache::run_eviction_if_needed().await;
+                    });
+
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = photo_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
@@ -72,7 +171,12 @@ pub fn Photos() -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    // On error, keep cached data visible if we have it
+                    if cached_items.is_empty() {
+                        error.set(Some(e));
+                    } else {
+                        log::warn!("Network error but showing cached photos: {}", e);
+                    }
                     loading.set(false);
                 }
             }
@@ -96,8 +200,22 @@ pub fn Photos() -> Element {
         loading.set(true);
 
         spawn(async move {
+            // Handle fallback during pagination (nostr-sdk Orphan pattern)
+            // During pagination, discard fallback results to preserve feed type integrity
             let result = match current_feed_type {
-                FeedType::Following => load_following_photos(Some(until)).await,
+                FeedType::Following => {
+                    match load_following_photos(Some(until)).await {
+                        Ok((events, did_fallback)) => {
+                            if did_fallback {
+                                log::info!("Pagination fallback detected, returning empty to preserve feed type");
+                                Ok(Vec::new())  // Triggers has_more.set(false)
+                            } else {
+                                Ok(events)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 FeedType::Global => load_global_photos(Some(until)).await,
             };
 
@@ -338,8 +456,9 @@ pub fn Photos() -> Element {
     }
 }
 
-// Helper function to load following photos feed (NIP-68 kind 20 events from followed users)
-async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
+/// Load following photos feed (NIP-68 kind 20 events from followed users)
+/// Returns (events, did_fallback) where did_fallback indicates if we fell back to global.
+async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     // Get current user's pubkey
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
@@ -351,14 +470,16 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
         Ok(contacts) => contacts,
         Err(e) => {
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
-            return load_global_photos(until).await;
+            let global = load_global_photos(until).await?;
+            return Ok((global, true));
         }
     };
 
     // If user doesn't follow anyone, show global feed
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global photos");
-        return load_global_photos(until).await;
+        let global = load_global_photos(until).await?;
+        return Ok((global, true));
     }
 
     log::info!("User follows {} accounts", contacts.len());
@@ -373,7 +494,8 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
-        return load_global_photos(until).await;
+        let global = load_global_photos(until).await?;
+        return Ok((global, true));
     }
 
     // Create filter for NIP-68 picture events from followed users
@@ -390,8 +512,8 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
 
     log::info!("Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
 
-    // Fetch events using aggregated pattern (database-first)
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    // Use fast fetch (bypasses gossip) for following feed - avoids 30+ second timeouts
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             log::info!("Loaded {} photo events from following", events.len());
 
@@ -399,17 +521,19 @@ async fn load_following_photos(until: Option<u64>) -> Result<Vec<Event>, String>
             let mut event_vec: Vec<Event> = events.into_iter().collect();
             event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-            // If no events found, fall back to global feed
+            // If no events found, return empty (valid result - user's contacts just haven't posted photos)
+            // Don't fall back to global here - empty following is different from no contacts
             if event_vec.is_empty() {
-                log::info!("No photos from followed users, showing global feed");
-                return load_global_photos(until).await;
+                log::info!("No photos from followed users");
+                return Ok((Vec::new(), false));
             }
 
-            Ok(event_vec)
+            Ok((event_vec, false))
         }
         Err(e) => {
             log::error!("Failed to fetch following photos: {}, falling back to global", e);
-            load_global_photos(until).await
+            let global = load_global_photos(until).await?;
+            Ok((global, true))
         }
     }
 }

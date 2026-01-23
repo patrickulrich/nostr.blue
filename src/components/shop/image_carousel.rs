@@ -99,9 +99,9 @@ pub fn ImageCarousel(props: ImageCarouselProps) -> Element {
                         button {
                             key: "{i}",
                             class: if i == current {
-                                "w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden ring-2 ring-blue-500"
+                                "w-16 h-16 shrink-0 rounded-lg overflow-hidden ring-2 ring-blue-500"
                             } else {
-                                "w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden opacity-70 hover:opacity-100 transition"
+                                "w-16 h-16 shrink-0 rounded-lg overflow-hidden opacity-70 hover:opacity-100 transition"
                             },
                             onclick: move |_| current_index.set(i),
                             img {

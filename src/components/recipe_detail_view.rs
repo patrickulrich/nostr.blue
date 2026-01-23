@@ -376,7 +376,7 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                     button {
                                         r#type: "button",
                                         class: format!(
-                                            "mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition {}",
+                                            "mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition {}",
                                             if checked_ingredients.read().contains(&idx) {
                                                 "bg-primary border-primary text-white"
                                             } else {
@@ -409,7 +409,7 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                     }
                                 } else {
                                     span {
-                                        class: "mt-1.5 w-2 h-2 rounded-full bg-primary flex-shrink-0",
+                                        class: "mt-1.5 w-2 h-2 rounded-full bg-primary shrink-0",
                                     }
                                 }
 
@@ -448,7 +448,7 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
                                 button {
                                     r#type: "button",
                                     class: format!(
-                                        "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-semibold transition {}",
+                                        "shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-semibold transition {}",
                                         if *cooking_mode.read() && completed_steps.read().contains(&idx) {
                                             "bg-green-500 text-white"
                                         } else if *cooking_mode.read() {
@@ -628,7 +628,7 @@ pub fn RecipeDetailViewSkeleton() -> Element {
                     for _ in 0..4 {
                         div {
                             class: "flex gap-4",
-                            div { class: "w-8 h-8 rounded-full bg-muted flex-shrink-0" }
+                            div { class: "w-8 h-8 rounded-full bg-muted shrink-0" }
                             div { class: "h-16 bg-muted rounded w-full" }
                         }
                     }

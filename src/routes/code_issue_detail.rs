@@ -340,7 +340,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                     div {
                         class: "border border-border rounded-lg overflow-hidden",
                         textarea {
-                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-none",
+                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-hidden",
                             placeholder: "Write a comment...",
                             rows: 3,
                             value: "{new_comment}",

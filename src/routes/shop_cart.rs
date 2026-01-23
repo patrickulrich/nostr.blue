@@ -193,7 +193,7 @@ fn MerchantCartGroup(
                 div { class: "bg-muted/50 p-4 border-b border-border",
                     div { class: "flex items-center gap-3",
                         // Avatar
-                        div { class: "w-10 h-10 rounded-full bg-muted overflow-hidden flex-shrink-0",
+                        div { class: "w-10 h-10 rounded-full bg-muted overflow-hidden shrink-0",
                             if let Some(ref p) = profile {
                                 if let Some(ref picture) = p.picture {
                                     img {

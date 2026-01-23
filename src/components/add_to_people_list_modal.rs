@@ -413,7 +413,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                     "List Name"
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "e.g., Friends, Work Colleagues",
                                     maxlength: "100",

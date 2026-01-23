@@ -123,7 +123,7 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
     };
 
     // Textarea class string
-    let textarea_class = "w-full h-full p-4 bg-background border-0 resize-none focus:outline-none focus:ring-0 font-mono text-sm";
+    let textarea_class = "w-full h-full p-4 bg-background border-0 resize-none focus:outline-hidden focus:ring-0 font-mono text-sm";
 
     rsx! {
         div {

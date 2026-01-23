@@ -151,7 +151,7 @@ pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
 
             // Icon
             div {
-                class: "flex-shrink-0 w-8 h-8 rounded bg-primary/10 flex items-center justify-center",
+                class: "shrink-0 w-8 h-8 rounded bg-primary/10 flex items-center justify-center",
                 FileVideoIcon { class: "w-4 h-4 text-primary" }
             }
 
@@ -171,7 +171,7 @@ pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
             // Link count
             if !page.forward_links.is_empty() {
                 span {
-                    class: "flex-shrink-0 text-xs text-muted-foreground",
+                    class: "shrink-0 text-xs text-muted-foreground",
                     "{page.forward_links.len()} links"
                 }
             }

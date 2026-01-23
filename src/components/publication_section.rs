@@ -223,7 +223,7 @@ fn ChildSectionCard(
 
             // Chapter number
             div {
-                class: "w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium flex-shrink-0",
+                class: "w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium shrink-0",
                 "{index + 1}"
             }
 
@@ -249,7 +249,7 @@ fn ChildSectionCard(
 
             // Arrow indicator (rotated chevron for "right" direction)
             ChevronDownIcon {
-                class: "w-5 h-5 -rotate-90 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0"
+                class: "w-5 h-5 -rotate-90 text-muted-foreground group-hover:text-foreground transition-colors shrink-0"
             }
         }
     }

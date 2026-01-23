@@ -355,12 +355,13 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
         return Ok(results);
     }
 
-    // Single query for all profiles
+    // Single query for all profiles using outbox routing for better discovery
+    // This routes queries to each author's preferred write relays
     let filter = Filter::new()
         .kind(Kind::Metadata)
         .authors(authors);
 
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {

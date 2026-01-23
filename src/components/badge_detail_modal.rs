@@ -37,19 +37,36 @@ pub fn BadgeDetailModal(
     on_reject: EventHandler<()>,
 ) -> Element {
     let mut processing_state = use_signal(ProcessingState::default);
-    let mut processing_timeout: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
+    let mut timeout_task: Signal<Option<Task>> = use_signal(|| None);
 
     // Reset processing state when is_accepted changes (operation completed by parent)
-    // Also reset any pending timeout since the operation completed
     use_effect(use_reactive!(|is_accepted| {
         processing_state.set(ProcessingState::Idle);
-        // Cancel any pending timeout since operation completed
-        if let Some(task) = processing_timeout.write().take() {
-            task.cancel();
-        }
         // Suppress unused variable warning - we react to the value changing
         let _ = is_accepted;
     }));
+
+    // Fallback timeout to reset stuck processing state
+    use_effect(move || {
+        let current_state = *processing_state.read();
+
+        // Cancel any existing timeout - write().take() swaps with None via std::mem::take
+        if let Some(task) = timeout_task.write().take() {
+            task.cancel();  // Immediately removes future from scheduler
+        }
+
+        if current_state != ProcessingState::Idle {
+            let task = spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(10_000).await;
+                if *processing_state.peek() != ProcessingState::Idle {
+                    log::warn!("Processing state timed out, resetting to Idle");
+                    processing_state.set(ProcessingState::Idle);
+                }
+                timeout_task.set(None);  // Clear handle when timer completes naturally
+            });
+            timeout_task.set(Some(task));
+        }
+    });
 
     // Get issuer profile
     let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
@@ -70,6 +87,10 @@ pub fn BadgeDetailModal(
 
         // Update target pubkey for race condition detection
         target_pubkey.set(badge_pubkey.clone());
+
+        // Reset profile immediately so UI shows loading state while fetching
+        // This prevents stale data from being shown when pubkey changes
+        issuer_profile.set(None);
 
         if let Some(profile) = profiles::get_profile(&badge_pubkey) {
             issuer_profile.set(Some(profile));
@@ -131,15 +152,12 @@ pub fn BadgeDetailModal(
         }
     }));
 
-    // Get issuer display name with UTF-8 safe truncation (memoized)
-    let badge_pubkey_for_memo = badge.pubkey.clone();
-    let issuer_name = use_memo(move || {
-        issuer_profile
-            .read()
-            .as_ref()
-            .and_then(|p| p.display_name.clone().or(p.name.clone()))
-            .unwrap_or_else(|| truncate_pubkey(&badge_pubkey_for_memo))
-    });
+    // Compute issuer display name inline - avoids stale captures when badge.pubkey changes
+    let issuer_name = issuer_profile
+        .read()
+        .as_ref()
+        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .unwrap_or_else(|| truncate_pubkey(&badge.pubkey));
 
     rsx! {
         // Modal overlay
@@ -162,6 +180,7 @@ pub fn BadgeDetailModal(
                     // Close button
                     button {
                         class: "absolute top-2 right-2 p-2 rounded-full hover:bg-black/20 transition",
+                        aria_label: "Close",
                         onclick: move |_| on_close.call(()),
                         svg {
                             class: "w-5 h-5",
@@ -281,20 +300,10 @@ pub fn BadgeDetailModal(
                         div {
                             class: "flex gap-3 mt-6",
 
-                            // Helper to start processing with timeout reset
+                            // Helper to start processing - relies on is_accepted prop change to reset state
                             {
                                 let mut start_processing = move |state: ProcessingState, handler: EventHandler<()>| {
                                     processing_state.set(state);
-                                    // Cancel any existing timeout to prevent race conditions
-                                    if let Some(existing_task) = processing_timeout.write().take() {
-                                        existing_task.cancel();
-                                    }
-                                    // Set a timeout to reset processing if parent doesn't respond
-                                    let timeout_task = spawn(async move {
-                                        gloo_timers::future::TimeoutFuture::new(10000).await;
-                                        processing_state.set(ProcessingState::Idle);
-                                    });
-                                    processing_timeout.set(Some(timeout_task));
                                     handler.call(());
                                 };
 

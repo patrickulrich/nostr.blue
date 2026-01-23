@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
-use crate::stores::{auth_store, nostr_client, relay_metadata};
+use nostr_sdk::nips::nip17;
+use crate::stores::{auth_store, nostr_client, relay};
 use crate::stores::nostr_client::PublishResult;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -87,6 +88,11 @@ pub async fn init_dms() -> Result<(), String> {
 
     log::info!("Loading DMs for {}", pubkey_str);
 
+    // Get user's DM relays (kind 10050) for privacy-preserving queries
+    // This prevents leaking DM activity to all relays
+    let dm_relays = relay::nip65::get_dm_relays();
+    log::info!("Using {} DM relays for privacy: {:?}", dm_relays.len(), dm_relays);
+
     // Create filters for all DM types
     let received_nip04 = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
@@ -105,11 +111,12 @@ pub async fn init_dms() -> Result<(), String> {
         .pubkey(pubkey)
         .limit(300);
 
-    // PARALLEL FETCHES - All three at once!
+    // PARALLEL FETCHES using DM-specific relays only!
+    // This is critical for privacy - DM queries should not be broadcast to all relays
     let (received_nip04_result, sent_nip04_result, nip17_all_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(received_nip04, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(sent_nip04, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(nip17_all, Duration::from_secs(10))
+        relay::connection::fetch_events_from_relays(&client, received_nip04, dm_relays.clone(), Duration::from_secs(10)),
+        relay::connection::fetch_events_from_relays(&client, sent_nip04, dm_relays.clone(), Duration::from_secs(10)),
+        relay::connection::fetch_events_from_relays(&client, nip17_all, dm_relays.clone(), Duration::from_secs(10))
     );
 
     // Combine all messages
@@ -236,8 +243,11 @@ pub async fn init_dms() -> Result<(), String> {
 /// Returns PublishResult with combined relay statistics from both gift wraps
 ///
 /// Per NIP-17, this sends to inbox relays (Kind 10050) for privacy:
-/// - Receiver's gift wrap -> recipient's inbox relays
-/// - Sender's copy -> sender's inbox relays
+/// - Receiver's gift wrap -> recipient's NIP-17 relays (via SDK gossip routing)
+/// - Sender's copy -> sender's NIP-17 relays (via SDK gossip routing)
+///
+/// The SDK's gossip feature automatically routes gift wraps to the correct
+/// NIP-17 relays based on the p-tag, eliminating the need for manual relay fetching.
 pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<PublishResult, String> {
     use nostr_sdk::EventBuilder;
 
@@ -259,33 +269,48 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
 
     log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
 
-    // Fetch inbox relays (Kind 10050) for both parties
-    // client is already Arc<Client> from NOSTR_CLIENT
-    let client_arc = client.clone();
+    // Ensure relays are ready before any network operations
+    nostr_client::ensure_relays_ready(&client).await;
 
-    // Fetch recipient's inbox relays
-    let recipient_inbox_relays = match relay_metadata::fetch_relay_list(recipient_pk, client_arc.clone()).await {
-        Ok(metadata) if !metadata.dm_relays.is_empty() => {
-            log::info!("Using {} inbox relays for recipient", metadata.dm_relays.len());
-            metadata.dm_relays
+    // Pre-send validation: Check if recipient has NIP-17 inbox relays (kind 10050)
+    // This gives a clear error before attempting to send, rather than failing silently
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
+
+    // First check database cache for recipient's inbox relay list
+    let cached_events = client.database()
+        .query(filter.clone())
+        .await
+        .unwrap_or_default();
+
+    let has_inbox_relays = if !cached_events.is_empty() {
+        // Found in cache - extract relay URLs using NIP-17 helper
+        if let Some(event) = cached_events.into_iter().next() {
+            nip17::extract_relay_list(&event).next().is_some()
+        } else {
+            false
         }
-        _ => {
-            log::warn!("No inbox relays (10050) found for recipient, using defaults");
-            relay_metadata::default_dm_relays()
+    } else {
+        // Try network fetch with SDK's native timeout support
+        match client.fetch_events(filter, Duration::from_secs(3)).await {
+            Ok(events) if !events.is_empty() => {
+                if let Some(event) = events.into_iter().next() {
+                    nip17::extract_relay_list(&event).next().is_some()
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     };
 
-    // Fetch sender's inbox relays
-    let sender_inbox_relays = match relay_metadata::fetch_relay_list(sender_pk, client_arc.clone()).await {
-        Ok(metadata) if !metadata.dm_relays.is_empty() => {
-            log::info!("Using {} inbox relays for sender copy", metadata.dm_relays.len());
-            metadata.dm_relays
-        }
-        _ => {
-            log::warn!("No inbox relays (10050) found for sender, using defaults");
-            relay_metadata::default_dm_relays()
-        }
-    };
+    if !has_inbox_relays {
+        return Err("Recipient has no inbox relays configured (NIP-17 kind 10050). \
+                   They may not be able to receive private messages. \
+                   Ask them to set up inbox relays in their Nostr client.".to_string());
+    }
 
     // Build the rumor (kind 14 unsigned message)
     let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
@@ -297,61 +322,42 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         .map_err(|e| format!("Failed to create receiver gift wrap: {}", e))?;
 
     // Create gift wrap for SENDER (with sender's p-tag) - NIP-17 requirement!
+    // SDK's send_private_msg() only sends to receiver, so we must manually send sender copy
     let sender_gift_wrap = EventBuilder::gift_wrap(&signer, &sender_pk, rumor, [])
         .await
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
 
-    // Send pre-signed gift wrap to recipient's inbox relays (preserves original signature)
-    log::info!("Sending receiver gift wrap to {} inbox relays", recipient_inbox_relays.len());
-    let receiver_result = nostr_client::send_presigned_event_to_relays(
-        receiver_gift_wrap.clone(),
-        recipient_inbox_relays.clone(),
-    ).await;
+    // Send receiver gift wrap - SDK gossip automatically routes to recipient's NIP-17 relays
+    // based on the p-tag in the gift wrap
+    log::info!("Sending receiver gift wrap via SDK gossip routing");
+    let receiver_output = client.send_event(&receiver_gift_wrap).await
+        .map_err(|e| format!("Failed to send to receiver: {}", e))?;
 
-    let receiver_result = match receiver_result {
-        Ok(result) => {
-            log::info!("Sent gift wrap to receiver: {} ({} success, {} failed)",
-                result.event_id,
-                result.success_count(),
-                result.failed_relays.len()
-            );
-            result
-        }
-        Err(e) => {
-            log::error!("Failed to send to recipient inbox relays: {}", e);
-            // Fallback to broadcast
-            log::warn!("Falling back to broadcast for receiver gift wrap");
-            let output = client.send_event(&receiver_gift_wrap).await
-                .map_err(|e| format!("Failed to send to receiver: {}", e))?;
-            PublishResult::from_output(output)
-        }
-    };
+    // Validate recipient actually has inbox relays configured (NIP-17 kind 10050)
+    if receiver_output.success.is_empty() {
+        log::warn!("No relays accepted gift wrap for recipient - they may not have NIP-17 inbox relays configured");
+        return Err("Recipient has no inbox relays configured (NIP-17 kind 10050). \
+                    They may not be able to receive private messages.".to_string());
+    }
 
-    // Send pre-signed gift wrap to sender's inbox relays (preserves original signature)
-    log::info!("Sending sender gift wrap to {} inbox relays", sender_inbox_relays.len());
-    let sender_result = nostr_client::send_presigned_event_to_relays(
-        sender_gift_wrap.clone(),
-        sender_inbox_relays.clone(),
-    ).await;
+    let receiver_result = PublishResult::from_output(receiver_output);
+    log::info!("Sent gift wrap to receiver: {} ({} success, {} failed)",
+        receiver_result.event_id,
+        receiver_result.success_count(),
+        receiver_result.failed_relays.len()
+    );
 
-    let sender_result = match sender_result {
-        Ok(result) => {
-            log::info!("Sent gift wrap to sender: {} ({} success, {} failed)",
-                result.event_id,
-                result.success_count(),
-                result.failed_relays.len()
-            );
-            result
-        }
-        Err(e) => {
-            log::error!("Failed to send to sender inbox relays: {}", e);
-            // Fallback to broadcast
-            log::warn!("Falling back to broadcast for sender gift wrap");
-            let output = client.send_event(&sender_gift_wrap).await
-                .map_err(|e| format!("Failed to send sender copy: {}", e))?;
-            PublishResult::from_output(output)
-        }
-    };
+    // Send sender gift wrap - SDK gossip automatically routes to sender's NIP-17 relays
+    // based on the p-tag in the gift wrap
+    log::info!("Sending sender gift wrap via SDK gossip routing");
+    let sender_output = client.send_event(&sender_gift_wrap).await
+        .map_err(|e| format!("Failed to send sender copy: {}", e))?;
+    let sender_result = PublishResult::from_output(sender_output);
+    log::info!("Sent gift wrap to sender: {} ({} success, {} failed)",
+        sender_result.event_id,
+        sender_result.success_count(),
+        sender_result.failed_relays.len()
+    );
 
     // Combine relay results from both gift wraps
     let mut successful_relays: Vec<String> = receiver_result.successful_relays.iter()
@@ -373,6 +379,24 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         successful_relays,
         failed_relays,
     };
+
+    // Validate success (nostr-sdk Output pattern: check success.is_empty())
+    if combined_result.success_count() == 0 {
+        // Log failed relays for debugging (nostr-sdk pattern: inspect failed map)
+        for (relay, error) in &combined_result.failed_relays {
+            log::error!("Failed to send to {}: {}", relay, error);
+        }
+        return Err(format!(
+            "Failed to deliver DM to any relay. {} relays failed.",
+            combined_result.failed_relays.len()
+        ));
+    }
+
+    // Warn on partial delivery (nostr-sdk pattern: redundancy check)
+    if combined_result.success_count() < 2 {
+        log::warn!("DM only delivered to {} relay(s) - low redundancy",
+            combined_result.success_count());
+    }
 
     log::info!("DM sent: {} relays succeeded, {} failed",
         combined_result.success_count(),

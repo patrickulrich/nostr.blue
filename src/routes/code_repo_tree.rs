@@ -67,8 +67,13 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 }
 
+                // Decode URL-encoded path (e.g., %20 → space)
+                let decoded_path = urlencoding::decode(&path)
+                    .map(|s| s.into_owned())
+                    .unwrap_or_else(|_| path.clone());
+
                 // List files
-                match git_service().list_files(&repo, &path, Some(&git_ref)).await {
+                match git_service().list_files(&repo, &decoded_path, Some(&git_ref)).await {
                     Ok(entries) => {
                         files.set(entries);
                     }

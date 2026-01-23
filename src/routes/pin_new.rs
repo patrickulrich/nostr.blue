@@ -518,7 +518,7 @@ pub fn PinNew() -> Element {
                                 class: "flex gap-2",
 
                                 input {
-                                    class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "https://... or nevent1... or naddr1...",
                                     value: "{reference_input}",
@@ -758,7 +758,7 @@ pub fn PinNew() -> Element {
                                 }
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "Give your pin a title",
                                 value: "{title}",
@@ -773,7 +773,7 @@ pub fn PinNew() -> Element {
                                 "Comment (optional)"
                             }
                             textarea {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 rows: "3",
                                 placeholder: "Why are you pinning this?",
                                 value: "{comment}",
@@ -788,7 +788,7 @@ pub fn PinNew() -> Element {
                                 "Tags (optional)"
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "travel, favorites, inspiration (comma separated)",
                                 value: "{tags_input}",
@@ -902,7 +902,7 @@ pub fn PinNew() -> Element {
                                     div {
                                         class: "flex gap-2 pt-2",
                                         input {
-                                            class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm",
+                                            class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary font-mono text-sm",
                                             r#type: "text",
                                             placeholder: "naddr1... or 30067:pubkey:d-tag",
                                             value: "{other_board_input}",

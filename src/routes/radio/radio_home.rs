@@ -142,7 +142,7 @@ pub fn RadioHome() -> Element {
                             input {
                                 r#type: "text",
                                 placeholder: "Search stations (NIP-50)...",
-                                class: "w-full px-4 py-2 pl-10 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full px-4 py-2 pl-10 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 value: "{search_input}",
                                 oninput: move |e| search_input.set(e.value())
                             }

@@ -37,3 +37,7 @@ yarn-error.log*
 
 # CSS (generated)
 /public/tailwind.css
+/assets/tailwind.css
+
+# Agent config
+AGENTS.md

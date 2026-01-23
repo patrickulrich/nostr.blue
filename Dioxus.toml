@@ -1,5 +1,5 @@
 [application]
-name = "nostrbluerust"
+name = "nostrblue"
 default_platform = "web"
 
 # Copy files from public/ to build output root
@@ -15,7 +15,7 @@ reload_html = true
 index_on_404 = true
 
 [web.resource]
-style = ["public/tailwind.css"]
+style = []
 script = []
 
 [web.resource.dev]

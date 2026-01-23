@@ -163,7 +163,7 @@ pub fn MusicTrackNew() -> Element {
                     input {
                         r#type: "text",
                         placeholder: "My Awesome Track",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{title}",
                         oninput: move |e| title.set(e.value())
                     }
@@ -178,7 +178,7 @@ pub fn MusicTrackNew() -> Element {
                     input {
                         r#type: "url",
                         placeholder: "https://example.com/track.mp3",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{audio_url}",
                         oninput: move |e| audio_url.set(e.value())
                     }
@@ -197,7 +197,7 @@ pub fn MusicTrackNew() -> Element {
                     input {
                         r#type: "url",
                         placeholder: "https://example.com/cover.jpg",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: "{image_url}",
                         oninput: move |e| image_url.set(e.value())
                     }
@@ -213,7 +213,7 @@ pub fn MusicTrackNew() -> Element {
                         r#type: "number",
                         placeholder: "180",
                         min: "1",
-                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-3 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                         value: if let Some(d) = *duration.read() { format!("{}", d) } else { String::new() },
                         oninput: move |e| {
                             let val = e.value().parse::<u32>().ok();
@@ -233,7 +233,7 @@ pub fn MusicTrackNew() -> Element {
                         input {
                             r#type: "text",
                             placeholder: "Add a genre",
-                            class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                             value: "{genre_input}",
                             oninput: move |e| genre_input.set(e.value()),
                             onkeydown: move |e| {

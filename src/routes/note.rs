@@ -12,7 +12,8 @@ use std::time::Duration;
 
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    // Use outbox routing - SDK will use hint relays if available
+    let events = nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
     events.into_iter().next().ok_or("Event not found".to_string())
 }
 
@@ -62,7 +63,8 @@ async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<V
         .ids(parent_ids)
         .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment]);
 
-    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    // Use outbox routing for better thread loading from users' write relays
+    nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
 }
 
 async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
@@ -82,12 +84,12 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
 
-    // Fetch both in parallel and combine
+    // Fetch both in parallel using outbox routing for better reply discovery
     let mut all_replies = Vec::new();
 
     let (lower_result, upper_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10))
+        nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(10))
     );
 
     if let Ok(lower_replies) = lower_result {

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, nostr_client, theme_store, music_player, nwc_store, reactions_store, shop_store, sidebar_store};
+use stores::{auth_store, feed_cache, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay, shop_store, sidebar_store};
 
 // Modules
 mod components;
@@ -44,7 +44,13 @@ fn App() -> Element {
         auth_store::init_auth();
         music_player::init_player();
 
-        // Initialize Nostr client
+        // Load cached preferences immediately (synchronous)
+        // This provides instant UI before async client init
+        sidebar_store::init_sidebar_from_cache();
+        reactions_store::init_reactions_from_cache();
+        relay::init_local_relays_from_cache();
+
+        // Initialize Nostr client (async)
         spawn(async move {
             match nostr_client::initialize_client().await {
                 Ok(_) => {
@@ -66,6 +72,12 @@ fn App() -> Element {
                                 log::warn!("Failed to initialize shop store: {}", e);
                             }
                         },
+                        // Initialize feed cache for instant feed loading
+                        async {
+                            if let Err(e) = feed_cache::init_feed_cache().await {
+                                log::warn!("Failed to initialize feed cache: {}", e);
+                            }
+                        },
                     );
                 }
                 Err(e) => {
@@ -78,7 +90,39 @@ fn App() -> Element {
         });
     });
 
+    // Reactive NIP-78 retry when relay connects
+    use_effect(move || {
+        // Track RELAY_CONNECTED - effect re-runs when this changes
+        let connected = *nostr_client::RELAY_CONNECTED.read();
+
+        if connected {
+            // Use peek() to check state WITHOUT subscribing (avoid re-run loops)
+            let sidebar_state = sidebar_store::SIDEBAR_STATE.peek();
+            let reactions_state = reactions_store::REACTIONS_STATE.peek();
+
+            let sidebar_failed = sidebar_state.is_failed();
+            let reactions_failed = reactions_state.is_failed();
+
+            if sidebar_failed || reactions_failed {
+                log::info!("Relay connected, retrying failed NIP-78 loads");
+                spawn(async move {
+                    // The load functions have their own Loading guard
+                    // to prevent duplicate concurrent fetches
+                    if sidebar_failed {
+                        sidebar_store::load_sidebar_preferences().await;
+                    }
+                    if reactions_failed {
+                        reactions_store::load_preferred_reactions().await;
+                    }
+                });
+            }
+        }
+    });
+
     rsx! {
+        // Tailwind CSS (processed by Dioxus built-in Tailwind support)
+        document::Stylesheet { href: asset!("/assets/tailwind.css") }
+
         ToastProvider {
             Router::<routes::Route> {}
         }

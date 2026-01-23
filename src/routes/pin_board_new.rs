@@ -147,7 +147,7 @@ pub fn PinBoardNew() -> Element {
                                 span { class: "text-red-500", "*" }
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "My Awesome Collection",
                                 value: "{title}",
@@ -163,7 +163,7 @@ pub fn PinBoardNew() -> Element {
                                 "Description"
                             }
                             textarea {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 rows: "3",
                                 placeholder: "What is this board about?",
                                 value: "{description}",
@@ -206,7 +206,7 @@ pub fn PinBoardNew() -> Element {
                                 "Tags"
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "cooking, favorites, inspiration (comma separated)",
                                 value: "{tags_input}",
@@ -479,7 +479,7 @@ pub fn PinBoardEdit(naddr: String) -> Element {
                                 span { class: "text-red-500", "*" }
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "My Awesome Collection",
                                 value: "{title}",
@@ -495,7 +495,7 @@ pub fn PinBoardEdit(naddr: String) -> Element {
                                 "Description"
                             }
                             textarea {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 rows: "3",
                                 placeholder: "What is this board about?",
                                 value: "{description}",
@@ -538,7 +538,7 @@ pub fn PinBoardEdit(naddr: String) -> Element {
                                 "Tags"
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "cooking, favorites, inspiration (comma separated)",
                                 value: "{tags_input}",

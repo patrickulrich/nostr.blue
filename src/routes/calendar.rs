@@ -163,7 +163,7 @@ pub fn Calendar() -> Element {
 
             // Sidebar (desktop only)
             div {
-                class: "hidden lg:block w-80 flex-shrink-0 border-r border-border bg-background overflow-y-auto",
+                class: "hidden lg:block w-80 shrink-0 border-r border-border bg-background overflow-y-auto",
 
                 div {
                     class: "p-4 space-y-6",
@@ -423,7 +423,7 @@ pub fn Calendar() -> Element {
                                     class: "flex items-center gap-1 lg:hidden bg-muted rounded-lg p-1",
                                     button {
                                         class: if *view_mode.read() == CalendarViewMode::Day {
-                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-sm"
+                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-xs"
                                         } else {
                                             "px-3 py-1 text-sm text-muted-foreground"
                                         },
@@ -432,7 +432,7 @@ pub fn Calendar() -> Element {
                                     }
                                     button {
                                         class: if *view_mode.read() == CalendarViewMode::Week {
-                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-sm"
+                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-xs"
                                         } else {
                                             "px-3 py-1 text-sm text-muted-foreground"
                                         },
@@ -441,7 +441,7 @@ pub fn Calendar() -> Element {
                                     }
                                     button {
                                         class: if *view_mode.read() == CalendarViewMode::Month {
-                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-sm"
+                                            "px-3 py-1 text-sm font-medium bg-background rounded shadow-xs"
                                         } else {
                                             "px-3 py-1 text-sm text-muted-foreground"
                                         },
@@ -684,7 +684,7 @@ fn EventTypeFilterRow(props: EventTypeFilterRowProps) -> Element {
 
             // Color dot
             div {
-                class: "w-3 h-3 rounded-full flex-shrink-0",
+                class: "w-3 h-3 rounded-full shrink-0",
                 style: "background-color: {props.color};",
             }
 

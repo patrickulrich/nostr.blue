@@ -1,17 +1,19 @@
 //! Bible Store
 //! Handles Bible reading state, chapter caching, and NIP-84 highlights (Kind 9802)
 //!
-//! Uses HelloAO Bible API for content and Nostr for social highlighting features
+//! Uses HelloAO Bible API for content and Nostr for social highlighting features.
+//! Highlight logic is delegated to the centralized nip84 module.
 
 #![allow(dead_code)]
 
 use dioxus::prelude::*;
 use lru::LruCache;
 use nostr_sdk::prelude::*;
-use nostr::Event as NostrEvent;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::time::Duration;
+
+// Import centralized NIP-84 module
+use crate::utils::nip84::{self, Highlight, HighlightSource};
 
 // Re-export types from bible_api for use by routes
 pub use crate::services::bible_api::{
@@ -20,6 +22,9 @@ pub use crate::services::bible_api::{
     verse_to_plain_text, filter_english_translations, sort_translations_by_priority,
 };
 
+// Re-export Highlight type for convenience (components use this)
+pub use crate::utils::nip84::Highlight as BibleHighlight;
+
 // Use std::result::Result to avoid ambiguity with dioxus/nostr_sdk Result types
 type StdResult<T, E> = std::result::Result<T, E>;
 
@@ -27,38 +32,14 @@ type StdResult<T, E> = std::result::Result<T, E>;
 // Constants
 // ============================================================================
 
-/// NIP-84 Highlights use Kind 9802
-pub const KIND_HIGHLIGHT: u16 = 9802;
+/// Re-export KIND_HIGHLIGHT from nip84 for backwards compatibility
+pub const KIND_HIGHLIGHT: u16 = nip84::KIND_HIGHLIGHT;
 
 /// Cache sizes
 const CHAPTER_CACHE_SIZE: usize = 100;
-const HIGHLIGHT_CACHE_SIZE: usize = 500;
 
 /// Default translation
 pub const DEFAULT_TRANSLATION: &str = "BSB";
-
-// ============================================================================
-// Data Structures
-// ============================================================================
-
-/// A parsed highlight from a Kind 9802 event
-#[derive(Clone, Debug, PartialEq)]
-pub struct BibleHighlight {
-    /// Original Nostr event
-    pub event: NostrEvent,
-    /// The highlighted verse text (from event content)
-    pub verse_text: String,
-    /// Human-readable reference (e.g., "John 3:16 (BSB)") from context tag
-    pub reference: String,
-    /// Optional user comment from comment tag
-    pub comment: Option<String>,
-    /// Source URL for the chapter (from r tag) - nostr.blue Bible URL for filtering
-    pub source_url: String,
-    /// Author's pubkey
-    pub pubkey: String,
-    /// Created timestamp
-    pub created_at: u64,
-}
 
 /// Cached chapter with highlight data
 #[derive(Clone, Debug)]
@@ -291,7 +272,7 @@ pub async fn load_chapter(translation: &str, book: &str, chapter: u32) -> StdRes
 // ============================================================================
 
 /// Create a highlight event for verse(s)
-/// NIP-84: The r-tag contains the nostr.blue URL (not API URL) so users can navigate to the source.
+/// Delegates to centralized nip84::create_highlight with Bible-specific defaults.
 pub async fn create_highlight(
     verse_text: &str,
     reference: &str,
@@ -300,61 +281,41 @@ pub async fn create_highlight(
     chapter: u32,
     comment: Option<&str>,
 ) -> StdResult<EventId, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    // Build nostr.blue URL for source
+    let source_url = get_nostr_blue_bible_url(translation, book, chapter);
 
-    if !*crate::stores::nostr_client::HAS_SIGNER.read() {
-        return Err("No signer attached - please sign in".to_string());
-    }
+    // Delegate to centralized NIP-84 function
+    let event_id = nip84::create_highlight(
+        verse_text,
+        HighlightSource::Url(source_url),
+        Some(reference),  // context tag
+        comment,          // comment tag
+        vec!["bible"],    // hashtags
+    ).await?;
 
-    // NIP-84: r-tag with "source" attribute points to user-navigable URL
-    let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
-
-    // Build event using validated SDK patterns
-    let mut builder = EventBuilder::new(Kind::Custom(KIND_HIGHLIGHT), verse_text)
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
-            vec![bible_url.as_str(), "source"]
-        ))
-        .tag(Tag::custom(TagKind::Custom("context".into()), vec![reference]))
-        .tag(Tag::hashtag("bible"));
-
-    if let Some(c) = comment {
-        builder = builder.tag(Tag::custom(TagKind::Custom("comment".into()), vec![c]));
-    }
-
-    let output = client.send_event_builder(builder).await
-        .map_err(|e| format!("Failed to publish highlight: {}", e))?;
-
-    let event_id = output.id();
     log::info!("Bible highlight published: {}", event_id.to_hex());
 
-    // Refresh user highlights
-    let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let _ = fetch_user_highlights(&pubkey).await;
+    // Refresh user highlights (best-effort, don't fail on error)
+    if let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() {
+        if let Err(e) = fetch_user_highlights(&pubkey).await {
+            log::warn!("Failed to refresh highlights after publish: {}", e);
+        }
+    } else {
+        log::warn!("Could not get pubkey to refresh highlights");
+    }
 
-    Ok(*event_id)
+    Ok(event_id)
 }
 
 /// Fetch user's Bible highlights
+/// Uses centralized nip84 module and filters for Bible-specific highlights.
 pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHighlight>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-
     *LOADING_HIGHLIGHTS.write() = true;
 
-    let filter = Filter::new()
-        .author(*pubkey)
-        .kind(Kind::Custom(KIND_HIGHLIGHT))
-        .hashtag("bible")
-        .limit(200);
-
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let highlights: Vec<BibleHighlight> = events
-                .iter()
-                .filter_map(parse_highlight)
-                .collect();
+    match nip84::fetch_user_highlights(pubkey).await {
+        Ok(all_highlights) => {
+            // Filter to only Bible highlights
+            let highlights = nip84::filter_bible_highlights(all_highlights);
 
             *USER_HIGHLIGHTS.write() = highlights.clone();
             *LOADING_HIGHLIGHTS.write() = false;
@@ -364,12 +325,13 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHig
         }
         Err(e) => {
             *LOADING_HIGHLIGHTS.write() = false;
-            Err(format!("Failed to fetch highlights: {}", e))
+            Err(e)
         }
     }
 }
 
 /// Fetch all highlights for a specific chapter (from all users)
+/// Uses centralized nip84 module for URL-based highlight fetching.
 pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u32) -> StdResult<Vec<BibleHighlight>, String> {
     let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
 
@@ -379,21 +341,8 @@ pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u3
     // Clear stale highlights immediately to prevent showing old data during fetch
     CURRENT_CHAPTER_HIGHLIGHTS.write().clear();
 
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-
-    let filter = Filter::new()
-        .kind(Kind::Custom(KIND_HIGHLIGHT))
-        .reference(&bible_url)
-        .limit(500);
-
-    match client.fetch_events(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            let highlights: Vec<BibleHighlight> = events
-                .iter()
-                .filter_map(parse_highlight)
-                .collect();
-
+    match nip84::fetch_highlights_by_url(&bible_url).await {
+        Ok(highlights) => {
             // Only update global state if still the latest request
             if *LATEST_REQUESTED_HIGHLIGHT_URL.read() == bible_url {
                 *CURRENT_CHAPTER_HIGHLIGHTS.write() = highlights.clone();
@@ -408,83 +357,8 @@ pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u3
     }
 }
 
-/// Parse a Kind 9802 event into a BibleHighlight
-fn parse_highlight(event: &NostrEvent) -> Option<BibleHighlight> {
-    // Must be Kind 9802
-    if event.kind.as_u16() != KIND_HIGHLIGHT {
-        return None;
-    }
-
-    // Verify event signature and ID before processing
-    // (nostr-sdk's client.fetch_events() does NOT automatically verify events)
-    if event.verify().is_err() {
-        log::warn!("Invalid event signature for highlight {}", event.id);
-        return None;
-    }
-
-    let tags = &event.tags;
-
-    // Extract context tag - REQUIRED, non-empty (nostr-sdk pattern: early validation)
-    let reference = tags.iter()
-        .find_map(|tag| {
-            let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some("context") {
-                slice.get(1).and_then(|s| {
-                    let trimmed = s.trim();
-                    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-                })
-            } else {
-                None
-            }
-        })?; // Return None if missing or empty
-
-    // Extract comment tag (optional)
-    let comment = tags.iter()
-        .find_map(|tag| {
-            let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some("comment") {
-                slice.get(1).map(|s| s.to_string())
-            } else {
-                None
-            }
-        });
-
-    // Extract r tag (source URL) - REQUIRED, non-empty (nostr-sdk pattern: early validation)
-    // NIP-84: This is the nostr.blue URL users can navigate to
-    let source_url = tags.iter()
-        .find_map(|tag| {
-            let slice = tag.as_slice();
-            if slice.first().map(|s| s.as_str()) == Some("r") {
-                slice.get(1).and_then(|s| {
-                    let trimmed = s.trim();
-                    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-                })
-            } else {
-                None
-            }
-        })?; // Return None if missing or empty
-
-    // Must have bible hashtag
-    let has_bible_tag = tags.iter().any(|tag| {
-        let slice = tag.as_slice();
-        slice.first().map(|s| s.as_str()) == Some("t") &&
-        slice.get(1).map(|s| s.as_str()) == Some("bible")
-    });
-
-    if !has_bible_tag {
-        return None;
-    }
-
-    Some(BibleHighlight {
-        verse_text: event.content.clone(),
-        reference,
-        comment,
-        source_url,
-        pubkey: event.pubkey.to_hex(),
-        created_at: event.created_at.as_secs(),
-        event: event.clone(),
-    })
-}
+// Note: parse_highlight is now handled by nip84::parse_highlight
+// Bible-specific filtering is done via nip84::filter_bible_highlights
 
 // ============================================================================
 // Highlight Query Functions
@@ -518,13 +392,24 @@ fn verse_matches_reference(reference: &str, target_verse: u32) -> bool {
     }
 }
 
+/// Helper to check if a highlight matches a Bible URL
+fn highlight_matches_url(highlight: &Highlight, url: &str) -> bool {
+    highlight.source.as_url().map(|u| u == url).unwrap_or(false)
+}
+
+/// Helper to get the reference string from a highlight (stored in context field)
+fn get_highlight_reference(highlight: &Highlight) -> Option<&str> {
+    highlight.context.as_deref()
+}
+
 /// Check if a verse is highlighted by the current user
 pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: u32) -> bool {
     let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().any(|h| {
-        h.source_url == bible_url && verse_matches_reference(&h.reference, verse)
+        highlight_matches_url(h, &bible_url) &&
+        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
     })
 }
 
@@ -532,7 +417,7 @@ pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: 
 pub fn get_verse_highlight_count(verse: u32) -> usize {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
     highlights.iter().filter(|h| {
-        verse_matches_reference(&h.reference, verse)
+        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
     }).count()
 }
 
@@ -546,9 +431,11 @@ pub fn get_chapter_highlight_stats() -> ChapterHighlightStats {
         stats.total += 1;
 
         // Extract verse numbers and count each verse in the range
-        if let Some((start, end)) = extract_verses_from_reference(&h.reference) {
-            for verse in start..=end {
-                *stats.verse_counts.entry(verse).or_insert(0) += 1;
+        if let Some(reference) = get_highlight_reference(h) {
+            if let Some((start, end)) = extract_verses_from_reference(reference) {
+                for verse in start..=end {
+                    *stats.verse_counts.entry(verse).or_insert(0) += 1;
+                }
             }
         }
     }
@@ -562,7 +449,8 @@ pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32,
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().find(|h| {
-        h.source_url == bible_url && verse_matches_reference(&h.reference, verse)
+        highlight_matches_url(h, &bible_url) &&
+        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
     }).cloned()
 }
 
@@ -570,7 +458,7 @@ pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32,
 pub fn get_highlights_for_verse(verse: u32) -> Vec<BibleHighlight> {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
     highlights.iter().filter(|h| {
-        verse_matches_reference(&h.reference, verse)
+        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
     }).cloned().collect()
 }
 

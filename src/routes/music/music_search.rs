@@ -486,7 +486,7 @@ pub fn MusicSearch(q: String) -> Element {
                                             input {
                                                 r#type: "text",
                                                 placeholder: "Enter playlist ID...",
-                                                class: "flex-1 px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-background",
+                                                class: "flex-1 px-4 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary bg-background",
                                                 value: "{playlist_id_input}",
                                                 oninput: move |evt| playlist_id_input.set(evt.value()),
                                                 onkeydown: move |evt| {
@@ -584,7 +584,7 @@ fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
 
             // Artist image with nostr badge
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{artist_image}",
                     alt: "{artist_name}",

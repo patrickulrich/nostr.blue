@@ -27,7 +27,7 @@ pub fn CodeRepoCard(
 
                 // Repository icon
                 div {
-                    class: "w-10 h-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0",
+                    class: "w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -158,7 +158,7 @@ pub fn CodeRepoCardCompact(repo: Repository) -> Element {
 
             // Repository icon
             div {
-                class: "w-8 h-8 rounded bg-muted flex items-center justify-center flex-shrink-0",
+                class: "w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0",
                 svg {
                     class: "w-4 h-4 text-muted-foreground",
                     xmlns: "http://www.w3.org/2000/svg",
