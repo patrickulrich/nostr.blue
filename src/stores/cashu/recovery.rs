@@ -347,20 +347,36 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
 }
 
 /// Sync state with all mints
+///
+/// Uses parallel execution across mints for improved performance.
+/// Each mint has its own lock via `try_acquire_mint_lock()`, so parallel ops are safe.
 pub async fn sync_state_with_all_mints() -> CashuResult<SyncResult> {
     let mints = get_mints();
-    let mut total_result = SyncResult::default();
 
-    for mint_url in mints {
-        match sync_state_with_mint(&mint_url).await {
-            Ok(result) => {
-                total_result.spent_found += result.spent_found;
-                total_result.proofs_cleaned += result.proofs_cleaned;
-                total_result.sats_cleaned += result.sats_cleaned;
+    if mints.is_empty() {
+        return Ok(SyncResult::default());
+    }
+
+    // Parallel execution across mints - WASM compatible via futures::future::join_all
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint_url| sync_state_with_mint(mint_url))
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    // Aggregate results
+    let mut total_result = SyncResult::default();
+    for (mint_url, result) in mints.iter().zip(results.into_iter()) {
+        match result {
+            Ok(r) => {
+                total_result.spent_found += r.spent_found;
+                total_result.proofs_cleaned += r.proofs_cleaned;
+                total_result.sats_cleaned += r.sats_cleaned;
+                total_result.pending_found += r.pending_found;
             }
             Err(e) => {
                 log::warn!("Failed to sync with mint {}: {}", mint_url, e);
-                // Continue with other mints
             }
         }
     }
@@ -668,6 +684,218 @@ async fn recover_unrecorded_proofs(mint_url: &str) -> CashuResult<RecoveryResult
             recovered_amount
         )),
     })
+}
+
+// =============================================================================
+// Batch Melt Quote Recovery (CDK 0.14.2+)
+// =============================================================================
+
+/// Check pending melt quotes using CDK's batch API
+///
+/// Uses `check_pending_melt_quotes()` for efficient batch checking across all mints.
+/// Parallel execution across mints for improved performance.
+pub async fn check_pending_melt_quotes_batch() -> CashuResult<MeltRecoveryResult> {
+    use crate::stores::cashu_cdk_bridge;
+
+    let mints = get_mints();
+    let mut result = MeltRecoveryResult::default();
+
+    if mints.is_empty() {
+        return Ok(result);
+    }
+
+    // Parallel check across mints - WASM compatible
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint_url| check_melt_quotes_for_mint(mint_url))
+        .collect();
+
+    let mint_results = futures::future::join_all(futures).await;
+
+    for (mint_url, mint_result) in mints.iter().zip(mint_results.into_iter()) {
+        match mint_result {
+            Ok(mr) => {
+                result.quotes_checked += mr.quotes_checked;
+                result.quotes_paid += mr.quotes_paid;
+                result.change_recovered += mr.change_recovered;
+            }
+            Err(e) => {
+                log::warn!("Failed to check melt quotes for {}: {}", mint_url, e);
+                result.errors.push(format!("{}: {}", mint_url, e));
+            }
+        }
+    }
+
+    // Sync wallet state after recovery if change was recovered
+    if result.change_recovered > 0 {
+        let _ = cashu_cdk_bridge::sync_wallet_state().await;
+    }
+
+    log::info!(
+        "Batch melt quote check: {} checked, {} paid, {} sats recovered",
+        result.quotes_checked,
+        result.quotes_paid,
+        result.change_recovered
+    );
+
+    Ok(result)
+}
+
+/// Internal result for per-mint melt quote checking
+#[derive(Clone, Debug, Default)]
+struct MeltMintResult {
+    quotes_checked: usize,
+    quotes_paid: usize,
+    change_recovered: u64,
+}
+
+/// Check melt quotes for a specific mint using CDK's batch API
+async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, String> {
+    use crate::stores::cashu_cdk_bridge;
+
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
+        .await
+        .map_err(|e| format!("Failed to get wallet: {}", e))?;
+
+    // CDK 0.14.2+ batch API - checks all pending melt quotes for this wallet
+    wallet
+        .check_pending_melt_quotes()
+        .await
+        .map_err(|e| format!("check_pending_melt_quotes failed: {}", e))?;
+
+    // After CDK processes quotes, check for recovered change
+    let recovered = recover_unrecorded_proofs_internal(mint_url).await.unwrap_or(0);
+
+    Ok(MeltMintResult {
+        quotes_checked: 1, // CDK handles batching internally
+        quotes_paid: if recovered > 0 { 1 } else { 0 },
+        change_recovered: recovered,
+    })
+}
+
+/// Internal version that returns amount only (for use in batch recovery)
+async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, String> {
+    use crate::stores::cashu_cdk_bridge;
+
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
+        .await
+        .map_err(|e| format!("Failed to get wallet: {}", e))?;
+
+    let cdk_proofs = wallet
+        .get_unspent_proofs()
+        .await
+        .map_err(|e| format!("Failed to get proofs: {}", e))?;
+
+    let known_proofs = get_all_proofs_for_mint(mint_url);
+    let known_secrets: std::collections::HashSet<String> =
+        known_proofs.iter().map(|p| p.secret.clone()).collect();
+
+    let missing: Vec<_> = cdk_proofs
+        .iter()
+        .filter(|p| !known_secrets.contains(&p.secret.to_string()))
+        .collect();
+
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    let recovered_amount: u64 = missing
+        .iter()
+        .map(|p| u64::from(p.amount))
+        .fold(0u64, |acc, amt| acc.saturating_add(amt));
+
+    Ok(recovered_amount)
+}
+
+/// Recover operations for a specific mint using CDK's active quote discovery
+///
+/// Uses `get_active_melt_quotes()` to find pending and non-expired unpaid quotes,
+/// then attempts recovery for any that are paid.
+async fn recover_operations_for_mint(mint_url: &str) -> Result<u64, String> {
+    use crate::stores::cashu_cdk_bridge;
+    use cdk::nuts::MeltQuoteState;
+
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
+        .await
+        .map_err(|e| format!("Failed to get wallet: {}", e))?;
+
+    // CDK 0.14.2+ - finds pending + non-expired unpaid quotes
+    let active_quotes = wallet
+        .get_active_melt_quotes()
+        .await
+        .map_err(|e| format!("get_active_melt_quotes failed: {}", e))?;
+
+    let mut total_recovered: u64 = 0;
+
+    for quote in active_quotes {
+        if matches!(quote.state, MeltQuoteState::Paid) {
+            if let Ok(result) = recover_melt_quote_change(mint_url, &quote.id).await {
+                if result.recovered_amount > 0 {
+                    log::info!(
+                        "Recovered {} sats from melt quote {}",
+                        result.recovered_amount,
+                        quote.id
+                    );
+                    total_recovered += result.recovered_amount;
+                }
+            }
+        }
+    }
+
+    Ok(total_recovered)
+}
+
+/// Run enhanced recovery across all mints using CDK's active quote discovery
+///
+/// Combines `get_active_melt_quotes()` with parallel execution for comprehensive
+/// melt quote recovery.
+pub async fn recover_active_melt_quotes() -> CashuResult<MeltRecoveryResult> {
+    use crate::stores::cashu_cdk_bridge;
+
+    let mints = get_mints();
+    let mut result = MeltRecoveryResult::default();
+
+    if mints.is_empty() {
+        return Ok(result);
+    }
+
+    // Parallel recovery across mints
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint_url| recover_operations_for_mint(mint_url))
+        .collect();
+
+    let mint_results = futures::future::join_all(futures).await;
+
+    for (mint_url, mint_result) in mints.iter().zip(mint_results.into_iter()) {
+        result.quotes_checked += 1;
+        match mint_result {
+            Ok(recovered) => {
+                if recovered > 0 {
+                    result.quotes_paid += 1;
+                    result.change_recovered += recovered;
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to recover melt quotes for {}: {}", mint_url, e);
+                result.errors.push(format!("{}: {}", mint_url, e));
+            }
+        }
+    }
+
+    // Sync wallet state after recovery
+    if result.change_recovered > 0 {
+        let _ = cashu_cdk_bridge::sync_wallet_state().await;
+    }
+
+    log::info!(
+        "Active melt quote recovery: {} mints checked, {} paid, {} sats recovered",
+        result.quotes_checked,
+        result.quotes_paid,
+        result.change_recovered
+    );
+
+    Ok(result)
 }
 
 // =============================================================================
@@ -1306,6 +1534,7 @@ pub async fn check_all_melt_quotes() -> Result<(usize, usize, usize), String> {
 /// Run a full wallet health check
 ///
 /// Checks all pending proofs and quotes, recovering any stuck funds.
+/// Uses CDK 0.14.2+ batch APIs for melt quote recovery.
 /// Returns a summary of what was found and fixed.
 pub async fn run_wallet_health_check() -> Result<WalletHealthReport, String> {
     use crate::stores::cashu_cdk_bridge;
@@ -1318,8 +1547,13 @@ pub async fn run_wallet_health_check() -> Result<WalletHealthReport, String> {
     // Check mint quotes
     let (mint_quotes_checked, mint_quotes_paid, amount_minted) = check_all_mint_quotes().await?;
 
-    // Check melt quotes
+    // Check melt quotes (legacy tracking)
     let (melt_quotes_checked, melt_completed, melt_expired) = check_all_melt_quotes().await?;
+
+    // CDK 0.14.2+ batch melt quote recovery
+    let melt_recovery = check_pending_melt_quotes_batch()
+        .await
+        .unwrap_or_default();
 
     // Sync wallet state
     let _ = cashu_cdk_bridge::sync_wallet_state().await;
@@ -1334,6 +1568,7 @@ pub async fn run_wallet_health_check() -> Result<WalletHealthReport, String> {
         melt_quotes_checked,
         melt_quotes_completed: melt_completed,
         melt_quotes_expired: melt_expired,
+        change_recovered_sats: melt_recovery.change_recovered,
     };
 
     log::info!("Health check complete: {:?}", report);
@@ -1362,6 +1597,8 @@ pub struct WalletHealthReport {
     pub melt_quotes_completed: usize,
     /// Number of melt quotes expired
     pub melt_quotes_expired: usize,
+    /// Amount of change recovered from melt quotes (sats) - CDK 0.14.2+
+    pub change_recovered_sats: u64,
 }
 
 impl WalletHealthReport {
@@ -1370,6 +1607,7 @@ impl WalletHealthReport {
         self.spent_proofs_found > 0
             || self.mint_quotes_paid > 0
             || self.melt_quotes_expired > 0
+            || self.change_recovered_sats > 0
     }
 
     /// Get a human-readable summary
@@ -1387,6 +1625,9 @@ impl WalletHealthReport {
         }
         if self.melt_quotes_expired > 0 {
             parts.push(format!("{} expired quotes removed", self.melt_quotes_expired));
+        }
+        if self.change_recovered_sats > 0 {
+            parts.push(format!("{} sats change recovered", self.change_recovered_sats));
         }
 
         if parts.is_empty() {
