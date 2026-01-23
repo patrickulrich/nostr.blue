@@ -243,7 +243,7 @@ pub fn RecipeForm(
                 }
                 input {
                     r#type: "text",
-                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-lg",
+                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-lg",
                     placeholder: "What are you cooking?",
                     value: "{title}",
                     oninput: move |evt| title.set(evt.value().clone()),
@@ -258,7 +258,7 @@ pub fn RecipeForm(
                     "Summary"
                 }
                 textarea {
-                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                     placeholder: "A brief description of your recipe...",
                     rows: "2",
                     value: "{summary}",
@@ -430,7 +430,7 @@ pub fn RecipeForm(
                     span { class: "text-xs text-muted-foreground font-normal", "(optional)" }
                 }
                 textarea {
-                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                     placeholder: "Share tips, story behind the recipe, or any special notes...",
                     rows: "3",
                     value: "{chef_notes}",
@@ -449,7 +449,7 @@ pub fn RecipeForm(
                     }
                     input {
                         r#type: "text",
-                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         placeholder: "e.g., 15 mins",
                         value: "{prep_time}",
                         oninput: move |evt| prep_time.set(evt.value().clone()),
@@ -463,7 +463,7 @@ pub fn RecipeForm(
                     }
                     input {
                         r#type: "text",
-                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         placeholder: "e.g., 30 mins",
                         value: "{cook_time}",
                         oninput: move |evt| cook_time.set(evt.value().clone()),
@@ -477,7 +477,7 @@ pub fn RecipeForm(
                     }
                     input {
                         r#type: "text",
-                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                        class: "w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         placeholder: "e.g., 4",
                         value: "{servings}",
                         oninput: move |evt| servings.set(evt.value().clone()),
@@ -505,7 +505,7 @@ pub fn RecipeForm(
                     span { class: "text-xs text-muted-foreground font-normal", "(optional)" }
                 }
                 textarea {
-                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                    class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                     placeholder: "Links, references, or related recipes...",
                     rows: "2",
                     value: "{additional_resources}",

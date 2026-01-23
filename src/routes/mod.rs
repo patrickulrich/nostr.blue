@@ -6,6 +6,7 @@ pub mod note;
 pub mod settings;
 pub mod settings_blocklist;
 pub mod settings_muted;
+pub mod settings_relays;
 pub mod notifications;
 pub mod bookmarks;
 pub mod dms;
@@ -135,6 +136,9 @@ pub mod blossom;
 #[cfg(target_arch = "wasm32")]
 pub mod bible;
 
+// Highlights (NIP-84 Kind 9802)
+pub mod highlights;
+
 // Stub bible module for non-WASM builds (clippy/check on native targets)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bible {
@@ -180,6 +184,7 @@ use note::Note;
 use settings::Settings;
 use settings_blocklist::SettingsBlocklist;
 use settings_muted::SettingsMuted;
+use settings_relays::SettingsRelays;
 use notifications::Notifications;
 use bookmarks::Bookmarks;
 use dms::DMs;
@@ -293,6 +298,7 @@ use shop_collection_new::ShopCollectionNew;
 use shop_search::ShopSearch;
 use blossom::BlossomPage;
 use bible::{BibleHome, BibleChapter, BibleSearch};
+use highlights::Highlights;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -701,6 +707,10 @@ pub enum Route {
         #[route("/bible/search")]
         BibleSearch {},
 
+        // Highlights (NIP-84 Kind 9802)
+        #[route("/highlights")]
+        Highlights {},
+
         #[route("/settings")]
         Settings {},
 
@@ -709,6 +719,9 @@ pub enum Route {
 
         #[route("/settings/muted")]
         SettingsMuted {},
+
+        #[route("/settings/relays")]
+        SettingsRelays {},
 
         #[route("/terms")]
         Terms {},
@@ -786,7 +799,7 @@ fn Layout() -> Element {
     let is_bible_page = matches!(current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
-    let is_settings_page = matches!(current_route, Route::Settings {});
+    let is_settings_page = matches!(current_route, Route::Settings {} | Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {});
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
@@ -832,7 +845,7 @@ fn Layout() -> Element {
 
                 // Left Sidebar (Navigation)
                 aside {
-                    class: "w-[275px] flex-shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
+                    class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
                     div {
                         class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
 
@@ -1267,8 +1280,8 @@ fn Layout() -> Element {
                     class: match (is_wide_page, music_player_visible) {
                         (true, true) => "w-full flex-1 border-r border-border pb-24",
                         (true, false) => "w-full flex-1 border-r border-border",
-                        (false, true) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border pb-24",
-                        (false, false) => "w-full max-w-[600px] flex-shrink flex-grow border-r border-border",
+                        (false, true) => "w-full max-w-[600px] shrink grow border-r border-border pb-24",
+                        (false, false) => "w-full max-w-[600px] shrink grow border-r border-border",
                     },
 
                     // Mobile header
@@ -1298,13 +1311,13 @@ fn Layout() -> Element {
                 // Right Sidebar (Trending & Search) - Hidden on wide pages and settings
                 if !is_wide_page && !is_settings_page {
                     aside {
-                        class: "w-[350px] flex-shrink-0 hidden xl:block",
+                        class: "w-[350px] shrink-0 hidden xl:block",
                     div {
                         class: "flex flex-col gap-4 sticky top-0 pt-4 pb-4 h-screen overflow-hidden px-4 z-0",
 
                         // Search Input
                         div {
-                            class: "flex-shrink-0",
+                            class: "shrink-0",
                             crate::components::SearchInput {}
                         }
 
@@ -1316,7 +1329,7 @@ fn Layout() -> Element {
 
                         // Footer Links
                         div {
-                            class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto flex-shrink-0",
+                            class: "text-xs text-muted-foreground flex flex-wrap gap-2 mt-auto shrink-0",
                             Link {
                                 to: Route::Terms {},
                                 class: "hover:underline",
@@ -1414,6 +1427,7 @@ fn NavLink(
         (Route::BibleHome {}, Route::BibleHome {}) |
         (Route::BibleHome {}, Route::BibleChapter { .. }) |
         (Route::BibleHome {}, Route::BibleSearch {}) => true,
+        (Route::Highlights {}, Route::Highlights {}) => true,
         _ => false,
     };
 
@@ -1870,6 +1884,23 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
                 path { d: "M12 7v6" }
                 path { d: "M9 10h6" }
+            }
+        },
+        SidebarItem::Highlights => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Highlighter pen icon
+                path { d: "m9 11-6 6v3h9l3-3" }
+                path { d: "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" }
             }
         },
     }

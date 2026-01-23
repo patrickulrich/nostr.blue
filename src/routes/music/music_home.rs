@@ -277,7 +277,7 @@ pub fn MusicHome() -> Element {
                 input {
                     r#type: "text",
                     placeholder: "Search for tracks, artists, or albums...",
-                    class: "w-full px-4 py-3 pr-12 border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-primary bg-background",
+                    class: "w-full px-4 py-3 pr-12 border border-border rounded-full focus:outline-hidden focus:ring-2 focus:ring-primary bg-background",
                     value: "{search_query}",
                     oninput: move |evt| search_query.set(evt.value()),
                     onkeydown: move |evt| {

@@ -238,7 +238,7 @@ pub fn VideoNewPortrait() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Give your short a title",
                             value: "{title}",
                             oninput: move |e| title.set(e.value()),
@@ -252,7 +252,7 @@ pub fn VideoNewPortrait() -> Element {
                             "Description (optional)"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                             rows: 4,
                             placeholder: "Describe your short...",
                             value: "{description}",
@@ -268,7 +268,7 @@ pub fn VideoNewPortrait() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "shorts, viral, funny (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),

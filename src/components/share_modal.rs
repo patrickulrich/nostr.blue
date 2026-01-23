@@ -6,9 +6,12 @@ use crate::stores::{nostr_client, dms};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
     ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon
+    FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon, CameraIcon, BarChartIcon
 };
+use crate::components::{MediaUploader, EmojiPicker, GifPicker, PollCreatorModal};
 use crate::utils::clipboard::copy_to_clipboard;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 /// Global counter for generating unique modal IDs
 static SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -41,7 +44,111 @@ pub fn ShareModal(
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);
 
+    // Media buttons state
+    let mut show_image_uploader = use_signal(|| false);
+    let mut show_poll_modal = use_signal(|| false);
+    let mut cursor_position = use_signal(|| 0usize);
+    let textarea_id = use_signal(|| format!("share-textarea-{}", modal_id()));
+
     let has_signer = *HAS_SIGNER.read();
+
+    // Helper to get cursor position from DOM (returns UTF-16 index)
+    #[allow(unused_variables)]
+    fn get_cursor_position(textarea_id: &str) -> usize {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(textarea_id) {
+                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    // Convert UTF-16 (JS) to UTF-8 (Rust) index
+    fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
+        let mut utf8_index = 0;
+        let mut utf16_count = 0;
+        for c in text.chars() {
+            if utf16_count >= utf16_index { break; }
+            utf16_count += c.len_utf16();
+            utf8_index += c.len_utf8();
+        }
+        utf8_index.min(text.len())
+    }
+
+    // Helper to insert text at cursor position
+    let mut insert_at_cursor = {
+        let mut nostr_text = nostr_text;
+        let mut cursor_position = cursor_position;
+        move |text: String| {
+            let mut current = nostr_text.read().clone();
+            let pos = (*cursor_position.read()).min(current.len());
+            // Ensure we're at a char boundary
+            let safe_pos = if current.is_char_boundary(pos) {
+                pos
+            } else {
+                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+            };
+            current.insert_str(safe_pos, &text);
+            nostr_text.set(current);
+            cursor_position.set(safe_pos + text.len());
+        }
+    };
+
+    // Helper to insert text with smart spacing
+    let mut insert_with_spacing = {
+        let nostr_text = nostr_text;
+        let cursor_position = cursor_position;
+        move |text: String| {
+            let mut text_with_space = text.clone();
+            {
+                let current = nostr_text.read();
+                let pos = (*cursor_position.read()).min(current.len());
+                if pos > 0 {
+                    // Ensure we're at a char boundary for checking previous char
+                    let safe_pos = if current.is_char_boundary(pos) {
+                        pos
+                    } else {
+                        (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                    };
+                    if let Some(prev_char) = current[..safe_pos].chars().last() {
+                        if !prev_char.is_whitespace() {
+                            text_with_space.insert(0, ' ');
+                        }
+                    }
+                }
+            }
+            text_with_space.push(' ');
+            insert_at_cursor(text_with_space);
+        }
+    };
+
+    // Handler when image upload completes
+    let handle_image_uploaded = move |url: String| {
+        insert_with_spacing(url);
+    };
+
+    // Handler when emoji is selected
+    let handle_emoji_selected = move |emoji: String| {
+        insert_at_cursor(emoji);
+    };
+
+    // Handler when GIF is selected
+    let handle_gif_selected = move |gif_url: String| {
+        insert_with_spacing(gif_url);
+    };
+
+    // Handler when poll is created
+    let handle_poll_created = move |nevent_ref: String| {
+        insert_with_spacing(nevent_ref);
+        show_poll_modal.set(false);
+    };
 
     // Extract video/content information
     let content_title = event.tags.iter()
@@ -132,7 +239,14 @@ pub fn ShareModal(
                     copied.set(true);
                     log::info!("Link copied to clipboard");
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                        }
                         copied.set(false);
                     });
                 }
@@ -318,7 +432,7 @@ pub fn ShareModal(
                             class: "bg-accent rounded-lg p-4 flex items-center gap-3",
                             id: "{desc_id}",
                             div {
-                                class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center flex-shrink-0",
+                                class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center shrink-0",
                                 if is_recipe {
                                     span { class: "text-2xl", "🍳" }
                                 } else if is_article {
@@ -355,9 +469,9 @@ pub fn ShareModal(
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: handle_copy_link,
                                 if *copied.read() {
-                                    CheckIcon { class: "w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" }
+                                    CheckIcon { class: "w-5 h-5 text-green-500 shrink-0 mt-0.5" }
                                 } else {
-                                    CopyIcon { class: "w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" }
+                                    CopyIcon { class: "w-5 h-5 text-blue-500 shrink-0 mt-0.5" }
                                 }
                                 div {
                                     class: "text-left",
@@ -377,7 +491,7 @@ pub fn ShareModal(
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
                                 disabled: !has_signer,
-                                MessageCircleIcon { class: "w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" }
+                                MessageCircleIcon { class: "w-5 h-5 text-purple-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
                                     p {
@@ -402,7 +516,7 @@ pub fn ShareModal(
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
                                 disabled: !has_signer,
-                                SendIcon { class: "w-5 h-5 text-pink-500 flex-shrink-0 mt-0.5" }
+                                SendIcon { class: "w-5 h-5 text-pink-500 shrink-0 mt-0.5" }
                                 div {
                                     class: "text-left",
                                     p {
@@ -422,17 +536,46 @@ pub fn ShareModal(
                     if *share_mode.read() == ShareMode::Nostr {
                         div {
                             class: "space-y-3",
+
+                            // Media uploader (conditionally shown)
+                            if *show_image_uploader.read() {
+                                div {
+                                    class: "mb-3",
+                                    MediaUploader {
+                                        on_upload: handle_image_uploaded,
+                                        button_label: "Upload Media"
+                                    }
+                                }
+                            }
+
                             label {
                                 class: "text-sm font-medium",
                                 "Compose your note"
                             }
                             textarea {
-                                class: "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary",
+                                id: "{textarea_id}",
+                                class: "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 placeholder: "Share your thoughts about this video...",
                                 value: "{nostr_text}",
                                 oninput: move |e| {
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
+                                    // Sync cursor position
+                                    let pos = get_cursor_position(&textarea_id.read());
+                                    let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
+                                    cursor_position.set(utf8_pos);
+                                },
+                                onclick: move |_| {
+                                    let pos = get_cursor_position(&textarea_id.read());
+                                    let text = nostr_text.read();
+                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                    cursor_position.set(utf8_pos);
+                                },
+                                onkeyup: move |_| {
+                                    let pos = get_cursor_position(&textarea_id.read());
+                                    let text = nostr_text.read();
+                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                    cursor_position.set(utf8_pos);
                                 },
                             }
                             // Error message display
@@ -495,6 +638,48 @@ pub fn ShareModal(
                                 }
                             }
 
+                            // Media buttons row
+                            div {
+                                class: "flex items-center gap-2",
+
+                                // Camera button (toggle MediaUploader)
+                                button {
+                                    class: if *show_image_uploader.read() {
+                                        "p-2 rounded-full bg-primary text-primary-foreground transition"
+                                    } else {
+                                        "p-2 rounded-full hover:bg-accent transition"
+                                    },
+                                    title: "Add media",
+                                    onclick: move |_| {
+                                        let current = *show_image_uploader.read();
+                                        show_image_uploader.set(!current);
+                                    },
+                                    disabled: *is_publishing.read(),
+                                    CameraIcon { class: "w-5 h-5" }
+                                }
+
+                                // Emoji picker
+                                EmojiPicker {
+                                    on_emoji_selected: handle_emoji_selected,
+                                    icon_only: true
+                                }
+
+                                // GIF picker
+                                GifPicker {
+                                    on_gif_selected: handle_gif_selected,
+                                    icon_only: true
+                                }
+
+                                // Poll button
+                                button {
+                                    class: "p-2 rounded-full hover:bg-accent transition",
+                                    title: "Create poll",
+                                    onclick: move |_| show_poll_modal.set(true),
+                                    disabled: *is_publishing.read(),
+                                    BarChartIcon { class: "w-5 h-5" }
+                                }
+                            }
+
                             // Post button
                             button {
                                 class: if nostr_text.read().trim().is_empty() || *is_publishing.read() {
@@ -524,7 +709,7 @@ pub fn ShareModal(
                                     "Send to npub or hex pubkey"
                                 }
                                 input {
-                                    class: "w-full mt-2 p-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "w-full mt-2 p-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
                                     placeholder: "npub1... or hex pubkey",
                                     value: "{dm_recipient}",
@@ -560,6 +745,12 @@ pub fn ShareModal(
                     }
                 }
             }
+        }
+
+        // Poll creator modal
+        PollCreatorModal {
+            show: show_poll_modal,
+            on_poll_created: handle_poll_created
         }
     }
 }

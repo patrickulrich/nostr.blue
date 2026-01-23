@@ -223,7 +223,7 @@ pub fn PhotoNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Give your photo a title",
                             value: "{title}",
                             oninput: move |e| title.set(e.value()),
@@ -237,7 +237,7 @@ pub fn PhotoNew() -> Element {
                             "Caption (optional)"
                         }
                         textarea {
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                             rows: 4,
                             placeholder: "Describe your photo...",
                             value: "{caption}",
@@ -253,7 +253,7 @@ pub fn PhotoNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Where was this taken?",
                             value: "{location}",
                             oninput: move |e| location.set(e.value()),
@@ -268,7 +268,7 @@ pub fn PhotoNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "photography, nature, sunset (comma separated)",
                             value: "{hashtags}",
                             oninput: move |e| hashtags.set(e.value()),

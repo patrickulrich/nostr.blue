@@ -305,7 +305,7 @@ pub fn NipsHome() -> Element {
                                 NipsTab::Custom => "Search custom NIPs (searches relays)...",
                                 NipsTab::EventKinds => "Search event kinds...",
                             },
-                            class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                            class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                             value: "{search_query}",
                             oninput: move |e| {
                                 let val = e.value();
@@ -746,7 +746,7 @@ pub fn NipNew() -> Element {
                     input {
                         r#type: "text",
                         placeholder: "e.g., Gaming Events Protocol",
-                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition",
+                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                         value: "{title}",
                         oninput: move |e| title.set(e.value()),
                         onblur: auto_generate_id,
@@ -763,7 +763,7 @@ pub fn NipNew() -> Element {
                     input {
                         r#type: "text",
                         placeholder: "e.g., gaming-events",
-                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition font-mono",
+                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition font-mono",
                         value: "{identifier}",
                         oninput: move |e| identifier.set(e.value()),
                     }
@@ -783,7 +783,7 @@ pub fn NipNew() -> Element {
                     input {
                         r#type: "text",
                         placeholder: "e.g., 30100, 30101, 30102",
-                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none transition font-mono",
+                        class: "w-full px-4 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition font-mono",
                         value: "{related_kinds_input}",
                         oninput: move |e| related_kinds_input.set(e.value()),
                     }

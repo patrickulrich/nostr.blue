@@ -133,7 +133,7 @@ pub fn PasswordModal() -> Element {
                         div {
                             class: "relative",
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background pr-12 focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background pr-12 focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: if *show_password.read() { "text" } else { "password" },
                                 placeholder: "Enter password",
                                 value: "{password}",
@@ -162,7 +162,7 @@ pub fn PasswordModal() -> Element {
                                 "Confirm Password"
                             }
                             input {
-                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: if *show_password.read() { "text" } else { "password" },
                                 placeholder: "Confirm password",
                                 value: "{confirm_password}",

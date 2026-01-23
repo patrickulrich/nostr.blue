@@ -78,7 +78,7 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     rsx! {
         Link {
             to: Route::Note { note_id: event_id.clone(), from_voice: None },
-            class: "block min-w-72 max-w-72 bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition snap-start flex-shrink-0",
+            class: "block min-w-72 max-w-72 bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition snap-start shrink-0",
             onclick: |e: MouseEvent| e.stop_propagation(),
 
             // Header: Avatar + Name + Pin icon
@@ -107,7 +107,7 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
 
                 // Pin icon indicator
                 PinIcon {
-                    class: "w-4 h-4 text-primary flex-shrink-0".to_string(),
+                    class: "w-4 h-4 text-primary shrink-0".to_string(),
                     filled: true
                 }
             }
@@ -137,7 +137,7 @@ pub fn PinnedNotesCarouselSkeleton() -> Element {
             // Show 2-3 skeleton cards
             for _ in 0..3 {
                 div {
-                    class: "min-w-72 max-w-72 bg-card border border-border rounded-lg p-3 animate-pulse flex-shrink-0",
+                    class: "min-w-72 max-w-72 bg-card border border-border rounded-lg p-3 animate-pulse shrink-0",
 
                     // Header skeleton
                     div {

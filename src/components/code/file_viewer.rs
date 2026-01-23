@@ -27,7 +27,9 @@ fn detect_language(filename: &str) -> &'static str {
         _ => {}
     }
 
-    match extract_extension(filename) {
+    // Normalize extension to lowercase to handle .RS, .JPG, etc.
+    let ext = extract_extension(filename).to_lowercase();
+    match ext.as_str() {
         "rs" => "rust",
         "js" | "mjs" => "javascript",
         "jsx" => "jsx",
@@ -61,8 +63,10 @@ fn detect_language(filename: &str) -> &'static str {
 
 /// Check if file is likely binary based on extension
 fn is_binary_extension(filename: &str) -> bool {
+    // Normalize extension to lowercase to handle .PNG, .JPG, etc.
+    let ext = extract_extension(filename).to_lowercase();
     matches!(
-        extract_extension(filename),
+        ext.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |
         "pdf" | "doc" | "docx" | "xls" | "xlsx" |
         "zip" | "tar" | "gz" | "rar" | "7z" |
@@ -166,9 +170,17 @@ pub fn CodeFileViewer(
         };
     }
 
+    const MAX_RENDER_LINES: usize = 2000;
     let lines: Vec<&str> = content.lines().collect();
     let line_count = lines.len();
     let line_number_width = line_count.to_string().len().max(2);
+    // Cap displayed lines to prevent UI freeze on large files
+    let is_truncated = line_count > MAX_RENDER_LINES;
+    let displayed_lines = if is_truncated {
+        &lines[..MAX_RENDER_LINES]
+    } else {
+        &lines[..]
+    };
 
     rsx! {
         div {
@@ -277,7 +289,7 @@ pub fn CodeFileViewer(
                             class: "w-full border-collapse",
 
                             tbody {
-                                for (i, line) in lines.iter().enumerate() {
+                                for (i, line) in displayed_lines.iter().enumerate() {
                                     tr {
                                         key: "{i}",
                                         class: "hover:bg-accent/30 transition-colors",
@@ -298,6 +310,14 @@ pub fn CodeFileViewer(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Truncation message for large files
+                if is_truncated {
+                    div {
+                        class: "px-4 py-3 bg-amber-500/10 border-t border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm",
+                        "⚠️ File truncated: showing first {MAX_RENDER_LINES} of {line_count} lines. Copy the content to view the full file."
                     }
                 }
             }
@@ -392,26 +412,31 @@ pub fn RawFileButton(
                         Ok(el) => el,
                         Err(e) => {
                             log::error!("Download failed for '{}': create_element error: {:?}", filename, e);
+                            let _ = web_sys::Url::revoke_object_url(&url);
                             return;
                         }
                     };
 
                     if let Err(e) = a.set_attribute("href", &url) {
                         log::error!("Download failed for '{}': set href attribute error: {:?}", filename, e);
+                        let _ = web_sys::Url::revoke_object_url(&url);
                         return;
                     }
                     if let Err(e) = a.set_attribute("download", &filename) {
                         log::error!("Download failed for '{}': set download attribute error: {:?}", filename, e);
+                        let _ = web_sys::Url::revoke_object_url(&url);
                         return;
                     }
 
                     let Some(body) = document.body() else {
                         log::error!("Download failed for '{}': document body not available", filename);
+                        let _ = web_sys::Url::revoke_object_url(&url);
                         return;
                     };
 
                     if let Err(e) = body.append_child(&a) {
                         log::error!("Download failed for '{}': append_child error: {:?}", filename, e);
+                        let _ = web_sys::Url::revoke_object_url(&url);
                         return;
                     }
 

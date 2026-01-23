@@ -198,7 +198,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                     div {
                         class: "flex items-start gap-3",
                         div {
-                            class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0",
+                            class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-4 h-4 text-blue-500",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -233,7 +233,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "Brief summary of the issue",
                         value: "{title}",
@@ -249,7 +249,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                         span { class: "text-destructive", "*" }
                     }
                     textarea {
-                        class: "w-full h-48 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y",
+                        class: "w-full h-48 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary resize-y",
                         placeholder: "Describe the issue in detail. What happened? What did you expect to happen?",
                         value: "{content}",
                         oninput: move |e| content.set(e.value())
@@ -268,7 +268,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
                     input {
-                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "e.g., bug, enhancement, documentation",
                         value: "{labels}",

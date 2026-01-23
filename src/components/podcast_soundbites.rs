@@ -138,7 +138,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
 
                 // Play button
                 button {
-                    class: "h-6 w-6 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors flex-shrink-0",
+                    class: "h-6 w-6 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors shrink-0",
                     onclick: handle_play.clone(),
                     title: "Play clip",
                     if *is_playing.read() {
@@ -169,7 +169,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
 
                 // Play button
                 button {
-                    class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors flex-shrink-0",
+                    class: "h-10 w-10 p-0 inline-flex items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-colors shrink-0",
                     onclick: handle_play.clone(),
                     title: "Play clip",
                     span {
@@ -217,7 +217,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
 
                 // Share button
                 button {
-                    class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors flex-shrink-0",
+                    class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors shrink-0",
                     title: "Share clip",
                     onclick: {
                         let sb = soundbite.clone();
@@ -365,7 +365,7 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
                         "{item.podcast_title}"
                     }
                     span {
-                        class: "font-mono flex-shrink-0",
+                        class: "font-mono shrink-0",
                         "{duration_str}"
                     }
                 }
@@ -475,7 +475,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
 
                 // Cover image
                 div {
-                    class: "relative w-24 h-24 rounded-lg overflow-hidden bg-muted flex-shrink-0 shadow-lg",
+                    class: "relative w-24 h-24 rounded-lg overflow-hidden bg-muted shrink-0 shadow-lg",
                     if let Some(ref img_url) = props.image_url {
                         img {
                             src: "{img_url}",

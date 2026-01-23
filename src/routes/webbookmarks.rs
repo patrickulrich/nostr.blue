@@ -439,7 +439,7 @@ pub fn WebBookmarks() -> Element {
                     div {
                         class: "flex gap-2",
                         input {
-                            class: "flex-1 px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "url",
                             placeholder: "Paste URL to quickly save...",
                             value: "{quick_url}",
@@ -475,7 +475,7 @@ pub fn WebBookmarks() -> Element {
                                 button {
                                     key: "{tab:?}",
                                     class: if *filter_tab.read() == tab {
-                                        "px-3 py-1 text-sm rounded bg-background shadow-sm font-medium"
+                                        "px-3 py-1 text-sm rounded bg-background shadow-xs font-medium"
                                     } else {
                                         "px-3 py-1 text-sm rounded hover:bg-background/50 transition"
                                     },
@@ -487,7 +487,7 @@ pub fn WebBookmarks() -> Element {
 
                         // Search
                         input {
-                            class: "flex-1 min-w-[200px] px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "flex-1 min-w-[200px] px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search bookmarks...",
                             value: "{search_query}",
@@ -497,7 +497,7 @@ pub fn WebBookmarks() -> Element {
                         // Tag filter
                         if !all_tags.read().is_empty() {
                             select {
-                                class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 onchange: move |evt| {
                                     let value = evt.value().clone();
                                     if value.is_empty() {
@@ -524,7 +524,7 @@ pub fn WebBookmarks() -> Element {
 
                         // Sort
                         select {
-                            class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "px-3 py-1 text-sm bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             onchange: move |evt| {
                                 let value = evt.value();
                                 sort_order.set(match value.as_str() {

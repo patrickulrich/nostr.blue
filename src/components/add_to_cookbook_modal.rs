@@ -521,10 +521,17 @@ pub fn AddToCookbookModal(
                                 r#type: "button",
                                 class: if *create_new.read() {
                                     "px-3 py-1 text-sm font-medium border-b-2 border-primary"
+                                } else if *needs_signin.read() {
+                                    "px-3 py-1 text-sm font-medium text-muted-foreground opacity-50 cursor-not-allowed"
                                 } else {
                                     "px-3 py-1 text-sm font-medium text-muted-foreground hover:text-foreground"
                                 },
-                                onclick: move |_| create_new.set(true),
+                                disabled: *needs_signin.read(),
+                                onclick: move |_| {
+                                    if !*needs_signin.read() {
+                                        create_new.set(true);
+                                    }
+                                },
                                 "Create New"
                             }
                         }
@@ -545,7 +552,7 @@ pub fn AddToCookbookModal(
                                         class: "text-center py-6",
                                         span { class: "text-4xl mb-2 block", "🔑" }
                                         p { class: "text-sm text-muted-foreground mb-3", "Sign in to view and manage your cookbooks." }
-                                        p { class: "text-xs text-muted-foreground", "You can still create a new cookbook below." }
+                                        p { class: "text-xs text-muted-foreground", "Sign in to create new cookbooks." }
                                     }
                                 } else if let Some(ref err) = *fetch_error.read() {
                                     // Show error when fetching cookbooks failed
@@ -608,7 +615,7 @@ pub fn AddToCookbookModal(
 
                                                         // Thumbnail
                                                         div {
-                                                            class: "w-12 h-12 rounded-lg overflow-hidden bg-gradient-to-br from-orange-500/60 to-amber-600/60 flex-shrink-0",
+                                                            class: "w-12 h-12 rounded-lg overflow-hidden bg-gradient-to-br from-orange-500/60 to-amber-600/60 shrink-0",
                                                             if let Some(ref img) = cb_for_check.image.as_ref().filter(|u| is_valid_http_url(u)) {
                                                                 img {
                                                                     src: "{img}",
@@ -641,7 +648,7 @@ pub fn AddToCookbookModal(
                                                         // Checkmark
                                                         if is_selected {
                                                             svg {
-                                                                class: "w-5 h-5 text-primary flex-shrink-0",
+                                                                class: "w-5 h-5 text-primary shrink-0",
                                                                 fill: "none",
                                                                 stroke: "currentColor",
                                                                 view_box: "0 0 24 24",
@@ -694,7 +701,7 @@ pub fn AddToCookbookModal(
                                         span { class: "text-red-500", "*" }
                                     }
                                     input {
-                                        class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                        class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                         r#type: "text",
                                         placeholder: "My Recipe Collection",
                                         value: "{new_title}",
@@ -709,7 +716,7 @@ pub fn AddToCookbookModal(
                                         "Description"
                                     }
                                     textarea {
-                                        class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm",
+                                        class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none text-sm",
                                         rows: "2",
                                         placeholder: "What recipes will this cookbook contain?",
                                         value: "{new_description}",

@@ -123,7 +123,7 @@ pub fn CodeRepositories() -> Element {
                     div {
                         class: "flex items-start gap-3",
                         div {
-                            class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0",
+                            class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-4 h-4 text-blue-500",
                                 xmlns: "http://www.w3.org/2000/svg",

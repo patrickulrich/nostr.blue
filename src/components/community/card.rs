@@ -258,13 +258,13 @@ pub fn CommunityCardWithMembership(
                 // Avatar/Image (Security Fix #2 - URL validation)
                 if let Some(image_url) = community.image.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
-                        class: "w-12 h-12 rounded-full object-cover flex-shrink-0",
+                        class: "w-12 h-12 rounded-full object-cover shrink-0",
                         src: "{image_url}",
                         alt: "Community image"
                     }
                 } else {
                     div {
-                        class: "w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white flex-shrink-0",
+                        class: "w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center text-white shrink-0",
                         svg {
                             class: "w-6 h-6",
                             xmlns: "http://www.w3.org/2000/svg",

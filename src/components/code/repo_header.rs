@@ -33,7 +33,7 @@ pub fn RepoHeader(
 
             // Book/repo icon (like gittr's)
             svg {
-                class: "w-4 h-4 text-muted-foreground flex-shrink-0",
+                class: "w-4 h-4 text-muted-foreground shrink-0",
                 xmlns: "http://www.w3.org/2000/svg",
                 width: "24",
                 height: "24",
@@ -49,17 +49,28 @@ pub fn RepoHeader(
 
             // Owner avatar (circular with ring)
             div {
-                class: "w-5 h-5 rounded-full overflow-hidden ring-2 ring-primary flex-shrink-0",
-                if let Some(url) = &picture_url {
-                    img {
-                        class: "w-5 h-5 object-cover",
-                        src: "{url}",
-                        alt: "{owner_name}",
-                    }
-                } else {
-                    div {
-                        class: "w-5 h-5 bg-muted flex items-center justify-center text-xs font-bold",
-                        "{owner_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                class: "w-5 h-5 rounded-full overflow-hidden ring-2 ring-primary shrink-0",
+                {
+                    // Validate URL before rendering img to prevent loading invalid/malicious URLs
+                    let valid_picture = picture_url.as_ref().filter(|url| {
+                        url.starts_with("http://") || url.starts_with("https://")
+                    });
+                    if let Some(url) = valid_picture {
+                        rsx! {
+                            img {
+                                class: "w-5 h-5 object-cover",
+                                src: "{url}",
+                                alt: "{owner_name}",
+                                referrerpolicy: "no-referrer",
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div {
+                                class: "w-5 h-5 bg-muted flex items-center justify-center text-xs font-bold",
+                                "{owner_name.chars().next().unwrap_or('?').to_ascii_uppercase()}"
+                            }
+                        }
                     }
                 }
             }
@@ -127,11 +138,18 @@ pub fn RepoHeaderCompact(
                 "{display_name}"
             }
 
-            // Current path if provided
+            // Current path if provided (decode URL-encoded paths for display)
             if let Some(path) = current_path {
                 if !path.is_empty() {
                     span { class: "text-muted-foreground", "/" }
-                    span { class: "text-muted-foreground truncate max-w-[200px]", "{path}" }
+                    {
+                        // Decode percent-encoded characters (e.g., %20 -> space)
+                        let decoded_path = urlencoding::decode(&path)
+                            .unwrap_or_else(|_| std::borrow::Cow::Borrowed(&path));
+                        rsx! {
+                            span { class: "text-muted-foreground truncate max-w-[200px]", "{decoded_path}" }
+                        }
+                    }
                 }
             }
         }

@@ -1337,7 +1337,7 @@ pub fn Profile(pubkey: String) -> Element {
                     }
 
                     textarea {
-                        class: "w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        class: "w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                         rows: "4",
                         placeholder: "Type your message...",
                         value: "{dm_message.read()}",
@@ -1566,7 +1566,7 @@ pub fn Profile(pubkey: String) -> Element {
 fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
         button {
-            class: "flex-shrink-0 px-4 py-4 font-semibold hover:bg-accent transition relative",
+            class: "shrink-0 px-4 py-4 font-semibold hover:bg-accent transition relative",
             onclick: move |e| onclick.call(e),
 
             span {
@@ -1954,10 +1954,96 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
 }
 
 // Special handling for Likes tab - Relay phase
+// Uses gossip for reactions (single author), connected relays for liked posts (many authors)
 async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
-    load_likes_common(public_key, until, |filter| {
-        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
-    }).await
+    const REACTIONS_LIMIT: usize = 50;
+
+    // Step 1: Fetch user's reactions using gossip (single author - fast)
+    let mut filter = Filter::new()
+        .author(public_key)
+        .kind(Kind::Reaction)
+        .limit(REACTIONS_LIMIT);
+
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+
+    let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+
+    // nostr-sdk pattern: full page = possibly more data
+    // Report limit as relay_count when we got a full page to signal has_more
+    let relay_count = if reactions.len() >= REACTIONS_LIMIT {
+        REACTIONS_LIMIT
+    } else {
+        reactions.len()
+    };
+
+    if reactions.is_empty() {
+        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
+    }
+
+    // Extract event IDs from reactions
+    let mut liked_event_ids = Vec::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+    for reaction in reactions.iter() {
+        for event_id in reaction.tags.event_ids() {
+            liked_event_ids.push(*event_id);
+            reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
+        }
+    }
+
+    if liked_event_ids.is_empty() {
+        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count });
+    }
+
+    // Step 2: Fetch liked events using connected relays (many authors - bypass gossip)
+    let liked_filter = Filter::new().ids(liked_event_ids.clone()).limit(500);
+    let mut event_vec: Vec<NostrEvent> = nostr_client::fetch_events_from_connected_relays(
+        liked_filter, Duration::from_secs(10)
+    ).await?;
+
+    // Step 2b: Gossip fallback for missing events (nostr-sdk BrokenDownFilters::Orphan pattern)
+    let found_ids: std::collections::HashSet<_> = event_vec.iter().map(|e| e.id).collect();
+    let missing_ids: Vec<_> = liked_event_ids.iter()
+        .filter(|id| !found_ids.contains(id))
+        .cloned()
+        .collect();
+
+    if !missing_ids.is_empty() {
+        log::info!("Fetching {} missing liked events via gossip fallback", missing_ids.len());
+        let gossip_filter = Filter::new().ids(missing_ids).limit(100);
+        // Use gossip (fetch_profile_events_from_relays) as fallback - same as SDK's Orphan handling
+        match nostr_client::fetch_profile_events_from_relays(
+            gossip_filter, Duration::from_secs(10)
+        ).await {
+            Ok(gossip_events) => {
+                let mut found_via_gossip = 0;
+                for event in gossip_events {
+                    if !found_ids.contains(&event.id) {
+                        event_vec.push(event);
+                        found_via_gossip += 1;
+                    }
+                }
+                log::info!("Recovered {} events via gossip", found_via_gossip);
+            }
+            Err(e) => {
+                log::warn!("Gossip fallback failed for liked events: {}", e);
+            }
+        }
+    }
+
+    // Sort by reaction time (when user liked the post), not post creation time
+    event_vec.sort_by(|a, b| {
+        let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
+        let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
+        time_b.cmp(&time_a)  // Newest likes first
+    });
+
+    let oldest_cursor = event_vec.last()
+        .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
+
+    Ok(LoadOutcome { events: event_vec, oldest_cursor, relay_count })
 }
 
 // Helper function to load events based on tab type (legacy - for pagination/load_more)

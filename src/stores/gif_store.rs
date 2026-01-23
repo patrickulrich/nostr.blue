@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet, Url};
+use nostr_sdk::{Filter, Kind, Timestamp, SingleLetterTag, Alphabet};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -81,21 +81,8 @@ pub async fn fetch_gifs(limit: usize, until: Option<Timestamp>, search_query: Op
         filter = filter.until(until_ts);
     }
 
-    // Add gifbuddy relay to the client if not already connected
-    let gifbuddy_url = match Url::parse("wss://relay.gifbuddy.lol") {
-        Ok(url) => url,
-        Err(e) => {
-            log::error!("Invalid gifbuddy relay URL: {}", e);
-            return Err(format!("Invalid relay URL: {}", e));
-        }
-    };
-
-    if let Err(e) = client.add_relay(&gifbuddy_url).await {
-        log::debug!("Gifbuddy relay already added or error: {}", e);
-    }
-    if let Err(e) = client.connect_relay(&gifbuddy_url).await {
-        log::warn!("Could not connect to gifbuddy relay: {}", e);
-    }
+    // Ensure GIF relay is connected using specialty relay module
+    crate::stores::relay::ensure_gif_relay(&client).await;
 
     // Query ALL connected relays (user relays + gifbuddy) with NIP-50 search
     // Relays that support NIP-50 will return filtered results

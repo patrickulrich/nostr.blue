@@ -31,7 +31,6 @@ pub const DEFAULT_CONTENT_DVM: &str = "0d9ec486275b70f0c4faec277fc4c63b9f14cb1ca
 const DVM_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
     "wss://nos.lol",
-    "wss://relay.nostr.band",
     "wss://nostr.wine",
     "wss://relay.primal.net",
 ];

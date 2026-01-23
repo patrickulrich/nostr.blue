@@ -86,7 +86,7 @@ pub fn CodeHome() -> Element {
                     div {
                         class: "relative",
                         input {
-                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search repositories and snippets...",
                             value: "{search_query}",
@@ -208,7 +208,7 @@ fn RepositoriesTab() -> Element {
                 div {
                     class: "flex items-start gap-3",
                     div {
-                        class: "w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0",
+                        class: "w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0",
                         svg {
                             class: "w-5 h-5 text-blue-500",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -367,7 +367,7 @@ fn SnippetsTab() -> Element {
                 div {
                     class: "flex items-start gap-3",
                     div {
-                        class: "w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center flex-shrink-0",
+                        class: "w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0",
                         svg {
                             class: "w-5 h-5 text-green-500",
                             xmlns: "http://www.w3.org/2000/svg",

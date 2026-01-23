@@ -396,7 +396,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         div {
                             class: "flex items-center gap-3 text-muted-foreground mb-3",
                             svg {
-                                class: "w-5 h-5 flex-shrink-0",
+                                class: "w-5 h-5 shrink-0",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 fill: "none",
                                 view_box: "0 0 24 24",
@@ -431,7 +431,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         class: "flex items-center gap-3 text-muted-foreground mb-2",
                                         if is_online_location(location) {
                                             svg {
-                                                class: "w-5 h-5 flex-shrink-0 text-blue-500",
+                                                class: "w-5 h-5 shrink-0 text-blue-500",
                                                 xmlns: "http://www.w3.org/2000/svg",
                                                 fill: "none",
                                                 view_box: "0 0 24 24",
@@ -445,7 +445,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                             }
                                         } else {
                                             svg {
-                                                class: "w-5 h-5 flex-shrink-0 text-green-500",
+                                                class: "w-5 h-5 shrink-0 text-green-500",
                                                 xmlns: "http://www.w3.org/2000/svg",
                                                 fill: "none",
                                                 view_box: "0 0 24 24",
@@ -783,7 +783,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         div {
                                             class: "flex gap-2",
                                             textarea {
-                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-none text-sm resize-none",
+                                                class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden text-sm resize-none",
                                                 placeholder: "Add a comment...",
                                                 rows: 2,
                                                 value: "{comment_input}",
@@ -1107,11 +1107,18 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
 
     // Only show status badges for calendar events
     if event.is_calendar_event() {
-        // Use end timestamp or default to 24 hours after start
-        let end_ts = event.end_timestamp()
-            .unwrap_or(start_ts + 86400);
+        // Use end timestamp or compute default based on event type per NIP-52:
+        // - Kind 31922 (date-based/all-day): default to 24 hours
+        // - Kind 31923 (time-based): default to instantaneous (same as start)
+        let end_ts = event.end_timestamp().unwrap_or_else(|| {
+            if event.is_all_day() {
+                start_ts + 86400 // Date-based: default to end of day
+            } else {
+                start_ts // Time-based: default to instantaneous
+            }
+        });
 
-        if end_ts < now_secs {
+        if end_ts <= now_secs {
             DetailEventStatus::Ended
         } else if start_ts > now_secs {
             DetailEventStatus::Upcoming

@@ -284,7 +284,7 @@ pub fn CashuCreateRequestModal(
                             div {
                                 class: "relative",
                                 input {
-                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     r#type: "number",
                                     placeholder: "Any amount",
                                     value: "{amount_input}",
@@ -309,7 +309,7 @@ pub fn CashuCreateRequestModal(
                                 "Description (optional)"
                             }
                             input {
-                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 r#type: "text",
                                 placeholder: "What's this payment for?",
                                 value: "{description_input}",

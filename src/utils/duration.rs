@@ -6,6 +6,11 @@
 //! - `format_duration_timecode`: Media timecode format ("01:24:35" or "02:15")
 //! - `format_duration_verbose`: Human-readable format ("2 hours 30 minutes")
 
+// Time unit constants in seconds
+const SECONDS_PER_MINUTE: u64 = 60;
+const SECONDS_PER_HOUR: u64 = 3600;
+const SECONDS_PER_DAY: u64 = 86400;
+
 /// Format duration in seconds to compact abbreviated format
 ///
 /// Examples:
@@ -16,14 +21,14 @@
 ///
 /// Used for: countdown timers, expiration badges, compact displays
 pub fn format_duration_compact(seconds: u64) -> String {
-    if seconds < 60 {
+    if seconds < SECONDS_PER_MINUTE {
         format!("{}s", seconds)
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86400 {
-        format!("{}h", seconds / 3600)
+    } else if seconds < SECONDS_PER_HOUR {
+        format!("{}m", seconds / SECONDS_PER_MINUTE)
+    } else if seconds < SECONDS_PER_DAY {
+        format!("{}h", seconds / SECONDS_PER_HOUR)
     } else {
-        format!("{}d", seconds / 86400)
+        format!("{}d", seconds / SECONDS_PER_DAY)
     }
 }
 
@@ -36,9 +41,9 @@ pub fn format_duration_compact(seconds: u64) -> String {
 ///
 /// Used for: video duration, podcast duration, audio players
 pub fn format_duration_timecode(seconds: u64) -> String {
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
+    let hours = seconds / SECONDS_PER_HOUR;
+    let minutes = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+    let secs = seconds % SECONDS_PER_MINUTE;
 
     if hours > 0 {
         format!("{}:{:02}:{:02}", hours, minutes, secs)
@@ -56,9 +61,9 @@ pub fn format_duration_timecode(seconds: u64) -> String {
 ///
 /// Used for: video cards with consistent width display
 pub fn format_duration_timecode_padded(seconds: u64) -> String {
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
+    let hours = seconds / SECONDS_PER_HOUR;
+    let minutes = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+    let secs = seconds % SECONDS_PER_MINUTE;
 
     if hours > 0 {
         format!("{:02}:{:02}:{:02}", hours, minutes, secs)
@@ -78,21 +83,21 @@ pub fn format_duration_timecode_padded(seconds: u64) -> String {
 ///
 /// Used for: expiration countdowns, time remaining displays
 pub fn format_duration_verbose(seconds: u64) -> String {
-    if seconds < 60 {
+    if seconds < SECONDS_PER_MINUTE {
         format!("{} seconds", seconds)
-    } else if seconds < 3600 {
-        format!("{} minutes", seconds / 60)
-    } else if seconds < 86400 {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
+    } else if seconds < SECONDS_PER_HOUR {
+        format!("{} minutes", seconds / SECONDS_PER_MINUTE)
+    } else if seconds < SECONDS_PER_DAY {
+        let hours = seconds / SECONDS_PER_HOUR;
+        let mins = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
         if mins > 0 {
             format!("{}h {}m", hours, mins)
         } else {
             format!("{} hours", hours)
         }
     } else {
-        let days = seconds / 86400;
-        let hours = (seconds % 86400) / 3600;
+        let days = seconds / SECONDS_PER_DAY;
+        let hours = (seconds % SECONDS_PER_DAY) / SECONDS_PER_HOUR;
         if hours > 0 {
             format!("{}d {}h", days, hours)
         } else {

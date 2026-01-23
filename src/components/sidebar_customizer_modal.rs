@@ -955,5 +955,22 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 path { d: "M9 10h6" }
             }
         },
+        SidebarItem::Highlights => rsx! {
+            svg {
+                class: "{class}",
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                // Highlighter/pen icon for Highlights
+                path { d: "m9 11-6 6v3h9l3-3" }
+                path { d: "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" }
+            }
+        },
     }
 }

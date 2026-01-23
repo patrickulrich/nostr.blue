@@ -392,7 +392,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     class: "flex items-center gap-3 min-w-0 w-80",
 
                     div {
-                        class: "w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                        class: "w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0",
                         if let Some(art_url) = &track.album_art_url {
                             img {
                                 src: "{art_url}",
@@ -444,7 +444,7 @@ pub fn PersistentMusicPlayer() -> Element {
                             // LIVE badge for live streams
                             if track.is_live_stream {
                                 span {
-                                    class: "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/20 text-red-400 flex-shrink-0",
+                                    class: "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/20 text-red-400 shrink-0",
                                     span {
                                         class: "w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"
                                     }
@@ -456,13 +456,13 @@ pub fn PersistentMusicPlayer() -> Element {
                         if let Some(ref error) = state.playback_error {
                             div {
                                 class: "text-xs text-red-400 truncate flex items-center gap-1",
-                                icons::AlertTriangleIcon { class: "w-3 h-3 flex-shrink-0".to_string() }
+                                icons::AlertTriangleIcon { class: "w-3 h-3 shrink-0".to_string() }
                                 "{error}"
                             }
                         } else if state.is_buffering {
                             div {
                                 class: "text-xs text-muted-foreground truncate flex items-center gap-1",
-                                icons::RefreshIcon { class: "w-3 h-3 animate-spin flex-shrink-0".to_string() }
+                                icons::RefreshIcon { class: "w-3 h-3 animate-spin shrink-0".to_string() }
                                 "Buffering..."
                             }
                         } else if track.is_live_stream && state.now_playing.is_some() {
@@ -679,7 +679,7 @@ pub fn PersistentMusicPlayer() -> Element {
                             }
 
                             select {
-                                class: "bg-transparent text-xs text-muted-foreground cursor-pointer hover:text-foreground border-none focus:outline-none appearance-none pr-4",
+                                class: "bg-transparent text-xs text-muted-foreground cursor-pointer hover:text-foreground border-none focus:outline-hidden appearance-none pr-4",
                                 value: "{state.playback_speed}",
                                 onchange: move |evt| {
                                     if let Ok(speed) = evt.value().parse::<f64>() {

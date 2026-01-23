@@ -317,7 +317,7 @@ pub fn LiveChat(
                         }
                         input {
                             r#type: "text",
-                            class: "flex-1 px-3 py-2 bg-input border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            class: "flex-1 px-3 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                             placeholder: "Send a message...",
                             value: "{message_input.read()}",
                             disabled: *sending.read(),
@@ -398,7 +398,7 @@ fn ChatMessage(event: Event) -> Element {
             class: "flex gap-3",
             Link {
                 to: Route::Profile { pubkey: author_pk_for_display.clone() },
-                class: "flex-shrink-0",
+                class: "shrink-0",
                 if let Some(pic_url) = author_picture.read().as_ref() {
                     img {
                         src: "{pic_url}",

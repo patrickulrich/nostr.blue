@@ -160,7 +160,7 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                         on_input: move |new_value: String| content.set(new_value),
                         placeholder: "What's on your mind?".to_string(),
                         rows: 8,
-                        class: "w-full min-h-[200px] p-3 bg-background border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500".to_string(),
+                        class: "w-full min-h-[200px] p-3 bg-background border border-border rounded-lg resize-y focus:outline-hidden focus:ring-2 focus:ring-blue-500".to_string(),
                         disabled: false,
                     }
 

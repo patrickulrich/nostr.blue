@@ -309,7 +309,7 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
                         div {
                             class: "flex-1 flex items-center gap-2",
                             input {
-                                class: "flex-1 px-2 py-1 text-sm bg-muted rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary",
+                                class: "flex-1 px-2 py-1 text-sm bg-muted rounded-lg border border-border focus:outline-hidden focus:ring-1 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "Search transcript...",
                                 value: "{search_query}",
@@ -494,7 +494,7 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
 
             // Timestamp
             span {
-                class: "text-xs text-muted-foreground font-mono flex-shrink-0 w-12",
+                class: "text-xs text-muted-foreground font-mono shrink-0 w-12",
                 "{timestamp}"
             }
 
@@ -528,7 +528,7 @@ fn TranscriptCueItem(props: TranscriptCueItemProps) -> Element {
             // Current indicator
             if props.is_current {
                 div {
-                    class: "text-primary flex-shrink-0",
+                    class: "text-primary shrink-0",
                     dangerous_inner_html: icons::VOLUME_2
                 }
             }
@@ -669,7 +669,7 @@ pub fn TranscriptSkeleton() -> Element {
                 div {
                     key: "{i}",
                     class: "flex gap-2 p-2",
-                    div { class: "w-12 h-4 bg-muted rounded flex-shrink-0" }
+                    div { class: "w-12 h-4 bg-muted rounded shrink-0" }
                     div { class: "flex-1 h-4 bg-muted rounded" }
                 }
             }

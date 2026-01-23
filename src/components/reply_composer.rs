@@ -4,6 +4,7 @@ use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
 use crate::stores::pending_comments::{
     PendingComment, CommentStatus, add_pending_comment, update_pending_status,
 };
+use crate::stores::relay;
 use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
 use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -12,6 +13,27 @@ use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use nostr_sdk::prelude::*;
 use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+
+/// Extract relay hint for reply tagging (NIP-10)
+/// First tries to find a relay hint from parent's e-tags, then falls back to user's write relays
+fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
+    // Try parent's e-tags first for relay hints
+    for tag in parent_tags.iter() {
+        let tag_vec = tag.clone().to_vec();
+        if tag_vec.len() >= 3 && tag_vec[0] == "e" && !tag_vec[2].is_empty() {
+            log::debug!("Found relay hint from parent e-tag: {}", tag_vec[2]);
+            return tag_vec[2].clone();
+        }
+    }
+
+    // Fall back to user's first write relay
+    let write_relays = relay::nip65::get_write_relays();
+    let hint = write_relays.first().cloned().unwrap_or_default();
+    if !hint.is_empty() {
+        log::debug!("Using user's write relay as hint: {}", hint);
+    }
+    hint
+}
 
 const MAX_LENGTH: usize = 5000;
 
@@ -286,6 +308,10 @@ pub fn ReplyComposer(
         let content_for_publish = content_value.clone();
         let thread_root_id_clone = thread_root_id.clone();
 
+        // Get relay hint for better discoverability (NIP-10)
+        // Tries parent's e-tags first, falls back to user's write relays
+        let relay_hint = get_relay_hint_for_reply(&parent_tags);
+
         // Use spawn_forever so the task survives component unmount
         spawn_forever(async move {
             // Build tags for reply following NIP-10 properly
@@ -293,14 +319,14 @@ pub fn ReplyComposer(
 
             if let Some(root_id) = parent_root {
                 // This is a nested reply (replying to a reply)
-                // Add root marker for the thread root
-                tags.push(vec!["e".to_string(), root_id, "".to_string(), "root".to_string()]);
-                // Add reply marker for the immediate parent
-                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "reply".to_string()]);
+                // Add root marker for the thread root (with relay hint for discoverability)
+                tags.push(vec!["e".to_string(), root_id, relay_hint.clone(), "root".to_string()]);
+                // Add reply marker for the immediate parent (with relay hint)
+                tags.push(vec!["e".to_string(), event_id.clone(), relay_hint.clone(), "reply".to_string()]);
             } else {
                 // This is a direct reply to root
-                // Use only root marker (not reply)
-                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "root".to_string()]);
+                // Use only root marker (not reply) with relay hint
+                tags.push(vec!["e".to_string(), event_id.clone(), relay_hint.clone(), "root".to_string()]);
             }
 
             // Collect all p tags from parent event plus the parent's author

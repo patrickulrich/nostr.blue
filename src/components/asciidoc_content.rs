@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use crate::utils::asciidoc::{
-    render_asciidoc, render_content_auto, content_to_plain_text,
+    render_content_auto_with_options, content_to_plain_text,
     render_content_with_citations, content_has_citations, extract_citation_identifiers,
 };
 use crate::utils::markdown::sanitize_html;
@@ -89,6 +89,7 @@ pub fn AsciiDocContent(
         }
 
         citations_loading.set(true);
+        citations_error.set(false);  // Clear stale error before fetch
 
         spawn(async move {
             let result = fetch_citations_by_identifiers(&identifiers).await;
@@ -127,7 +128,7 @@ pub fn AsciiDocContent(
 
     // Render content with citations if enabled
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
-        let result = render_content_with_citations(&content, &resolved_citations.read());
+        let result = render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
         let mut html = result.html;
 
         // Process book:: links if enabled
@@ -145,11 +146,8 @@ pub fn AsciiDocContent(
         (html, result.footnotes_html, result.endnotes_html, Some(metadata))
     } else {
         // Process content through our renderers with automatic format detection
-        let mut html = if enable_wikilinks {
-            render_content_auto(&content)
-        } else {
-            render_asciidoc(&content)
-        };
+        // Always use auto-detection, controlling wikilinks separately
+        let mut html = render_content_auto_with_options(&content, enable_wikilinks);
 
         // Process book:: links if enabled
         if enable_book_links {
@@ -170,6 +168,9 @@ pub fn AsciiDocContent(
                 last_notified_metadata.set(Some(metadata.clone()));
                 handler.call(metadata.clone());
             }
+        } else if citation_metadata_for_effect.is_none() {
+            // Clear cached metadata when citations are disabled so re-enabling with same metadata triggers callback
+            last_notified_metadata.set(None);
         }
     }));
 
@@ -240,11 +241,8 @@ pub fn AsciiDocContentCollapsible(
     // Compute rendered content directly - props are not reactive so use_memo wouldn't recompute on changes
     // Sanitize to prevent XSS
     let rendered = {
-        let html = if enable_wikilinks {
-            render_content_auto(&content)
-        } else {
-            render_asciidoc(&content)
-        };
+        // Always use auto-detection, controlling wikilinks separately
+        let html = render_content_auto_with_options(&content, enable_wikilinks);
         sanitize_html(&html)
     };
 

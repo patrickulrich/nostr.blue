@@ -11,6 +11,64 @@ use crate::utils::truncate_pubkey;
 use crate::utils::duration::format_duration_timecode_padded;
 use std::time::Duration;
 
+/// Skeleton loader for VideoCard - prevents layout shift during loading
+#[component]
+pub fn VideoCardSkeleton() -> Element {
+    rsx! {
+        div {
+            class: "border-b border-border animate-pulse",
+
+            // Author header skeleton
+            div {
+                class: "p-4 flex items-center gap-3",
+                // Avatar
+                div {
+                    class: "w-12 h-12 rounded-full bg-gray-300 dark:bg-gray-700"
+                }
+                // Name and timestamp
+                div {
+                    class: "flex-1 space-y-2",
+                    div {
+                        class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-1/4"
+                    }
+                    div {
+                        class: "h-3 bg-gray-300 dark:bg-gray-700 rounded w-1/6"
+                    }
+                }
+            }
+
+            // Video player area skeleton
+            div {
+                class: "relative bg-gray-300 dark:bg-gray-700 aspect-video"
+            }
+
+            // Title and description skeleton
+            div {
+                class: "p-4 space-y-2",
+                div {
+                    class: "h-5 bg-gray-300 dark:bg-gray-700 rounded w-3/4"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"
+                }
+                div {
+                    class: "h-4 bg-gray-300 dark:bg-gray-700 rounded w-2/3"
+                }
+            }
+
+            // Action buttons skeleton
+            div {
+                class: "px-4 pb-4 flex items-center gap-6",
+                for _ in 0..4 {
+                    div {
+                        class: "w-8 h-8 bg-gray-300 dark:bg-gray-700 rounded"
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VideoMeta {
     pub url: String,

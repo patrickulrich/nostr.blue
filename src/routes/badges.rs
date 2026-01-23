@@ -231,7 +231,7 @@ pub fn BadgesHome() -> Element {
                 div {
                     class: "px-4 pb-3",
                     input {
-                        class: "w-full px-4 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                        class: "w-full px-4 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "Search badges...",
                         value: "{search_query}",
@@ -509,7 +509,7 @@ fn PendingAwardCard(award: BadgeAward, badge: Option<BadgeDefinition>) -> Elemen
 
             // Badge image
             div {
-                class: "w-16 h-16 rounded-lg overflow-hidden bg-muted flex-shrink-0",
+                class: "w-16 h-16 rounded-lg overflow-hidden bg-muted shrink-0",
 
                 if let Some(thumb) = badge.as_ref().and_then(|b| b.get_thumbnail()) {
                     img {
@@ -545,7 +545,7 @@ fn PendingAwardCard(award: BadgeAward, badge: Option<BadgeDefinition>) -> Elemen
 
             // Actions
             div {
-                class: "flex gap-2 flex-shrink-0",
+                class: "flex gap-2 shrink-0",
 
                 // View details
                 if let Some(addr) = naddr {

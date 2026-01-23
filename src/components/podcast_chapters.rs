@@ -181,7 +181,7 @@ fn ChapterItem(props: ChapterItemProps) -> Element {
                     img {
                         src: "{img_url}",
                         alt: chapter.title.as_deref().unwrap_or("Chapter"),
-                        class: "w-12 h-12 rounded object-cover flex-shrink-0"
+                        class: "w-12 h-12 rounded object-cover shrink-0"
                     }
                 }
             }
@@ -212,7 +212,7 @@ fn ChapterItem(props: ChapterItemProps) -> Element {
 
             // Timestamp
             div {
-                class: "text-xs text-muted-foreground flex-shrink-0 font-mono",
+                class: "text-xs text-muted-foreground shrink-0 font-mono",
                 "{timestamp}"
             }
 
@@ -238,13 +238,13 @@ pub fn ChapterListSkeleton() -> Element {
                 div {
                     key: "{i}",
                     class: "flex items-center gap-3 p-2 rounded-lg",
-                    div { class: "w-12 h-12 bg-muted rounded flex-shrink-0" }
+                    div { class: "w-12 h-12 bg-muted rounded shrink-0" }
                     div {
                         class: "flex-1 space-y-1",
                         div { class: "h-4 bg-muted rounded w-3/4" }
                         div { class: "h-3 bg-muted rounded w-1/2" }
                     }
-                    div { class: "w-12 h-4 bg-muted rounded flex-shrink-0" }
+                    div { class: "w-12 h-4 bg-muted rounded shrink-0" }
                 }
             }
         }

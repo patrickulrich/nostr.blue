@@ -2,6 +2,7 @@
 //! Select publications and book references to insert into wiki pages and publications
 
 use dioxus::prelude::*;
+use dioxus_core::Task;
 use gloo_timers::future::TimeoutFuture;
 use crate::stores::publication_store::{
     PublicationIndex, search_publications, get_all_cached_publications,
@@ -13,6 +14,13 @@ use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon}
 // ============================================================================
 // Input Validation Functions (Security Fix #1)
 // ============================================================================
+
+/// Validate book identifier (d-tag or chapter) against NKBIP-08 format.
+/// Only lowercase letters, digits, and hyphens are allowed.
+fn is_valid_book_id(input: &str) -> bool {
+    !input.is_empty()
+        && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
 
 /// Validate book version input against allowed format.
 /// Only lowercase letters, digits, and hyphens are allowed (per NKBIP-08).
@@ -130,6 +138,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut is_searching = use_signal(|| false);
     // Debounce counter to cancel stale search requests
     let mut debounce_counter = use_signal(|| 0u32);
+    // Track search task for cancellation on modal close/reopen
+    let mut search_task: Signal<Option<Task>> = use_signal(|| None);
 
     // Selected publication and reference building
     let mut selected_publication = use_signal(|| None::<PublicationIndex>);
@@ -145,6 +155,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut loading = use_signal(|| false);
     // Error state for fetch/search operations
     let mut fetch_error = use_signal(|| None::<String>);
+    // Version signal to trigger memo re-evaluation when cache updates
+    let mut publications_version = use_signal(|| 0usize);
 
     // Load publications when modal opens
     use_effect(use_reactive(
@@ -155,7 +167,11 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 fetch_error.set(None);
                 spawn(async move {
                     match fetch_publications(100, None).await {
-                        Ok(_) => fetch_error.set(None),
+                        Ok(_) => {
+                            fetch_error.set(None);
+                            // Bump version to trigger memo re-evaluation
+                            publications_version.set(publications_version() + 1);
+                        }
                         Err(e) => {
                             crate::utils::log_fetch_error("publications", e.clone());
                             fetch_error.set(Some(format!("Failed to load publications: {}", e)));
@@ -172,6 +188,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 sections_error.set(false);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
+                // Cancel any stale search task and reset debounce state
+                is_searching.set(false);
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                debounce_counter.set(0);
             }
         },
     ));
@@ -181,8 +203,17 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         search_query.set(query.clone());
 
         if query.is_empty() {
+            debounce_counter.set(debounce_counter() + 1); // Invalidate pending searches
             search_results.set(Vec::new());
             is_searching.set(false);
+            // Only clear search-related errors, preserve initial load errors
+            let should_clear = fetch_error.peek()
+                .as_ref()
+                .map(|err| err.starts_with("Search failed:"))
+                .unwrap_or(false);
+            if should_clear {
+                fetch_error.set(None);
+            }
             return;
         }
 
@@ -191,7 +222,11 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         let current_counter = debounce_counter();
 
         is_searching.set(true);
-        spawn(async move {
+        // Cancel any existing search task before spawning new one
+        if let Some(task) = search_task.take() {
+            task.cancel();
+        }
+        let new_task = spawn(async move {
             // Wait 300ms before searching
             TimeoutFuture::new(300).await;
 
@@ -221,10 +256,13 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 is_searching.set(false);
             }
         });
+        search_task.set(Some(new_task));
     };
 
     // Get publications to display based on tab
     let publications_to_display = use_memo(move || {
+        // Read version to create reactive dependency - Dioxus auto-tracks this read
+        let _ = *publications_version.read();
         if *active_tab.read() == BookPickerTab::Search && !search_query.read().is_empty() {
             search_results.read().clone()
         } else {
@@ -245,7 +283,13 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Build book reference from selections (pure computation - no side effects)
     let book_reference = use_memo(move || {
-        selected_publication.read().as_ref().map(|pub_| {
+        selected_publication.read().as_ref().and_then(|pub_| {
+            // Validate d_tag from relay data
+            if !is_valid_book_id(&pub_.d_tag) {
+                log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
+                return None;
+            }
+
             let mut reference = BookReference::new(&pub_.d_tag);
 
             // Add version only if valid
@@ -254,23 +298,27 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 reference = reference.with_version(&version_input);
             }
 
-            // Add chapter (validated by dropdown selection)
+            // Add chapter only if valid (validated against same NKBIP-08 format)
             if let Some(ref chapter) = *selected_chapter.read() {
-                reference = reference.with_chapter(chapter);
+                if is_valid_book_id(chapter) {
+                    reference = reference.with_chapter(chapter);
+                } else {
+                    log::warn!("Invalid chapter id: {}", chapter);
+                }
             }
 
             // Add sections only if valid
+            // Note: is_valid_book_sections() forbids spaces, so no trimming needed
             let sections_str = selected_sections.read();
             if !sections_str.is_empty() && is_valid_book_sections(&sections_str) {
                 for section in sections_str.split(',') {
-                    let section = section.trim();
                     if !section.is_empty() {
                         reference = reference.with_section(section);
                     }
                 }
             }
 
-            reference
+            Some(reference)
         })
     });
 
@@ -383,7 +431,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
                     button {
                         class: "p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition-colors",
+                        r#type: "button",
                         onclick: close_modal,
+                        aria_label: "Close",
+                        title: "Close",
                         XIcon { class: "w-5 h-5".to_string() }
                     }
                 }
@@ -409,6 +460,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                 search_query.set(String::new());
                                 search_results.set(Vec::new());
                                 is_searching.set(false);
+                                fetch_error.set(None); // Clear stale search errors
                             },
                             "Browse"
                         }
@@ -434,7 +486,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                             }
                             input {
                                 r#type: "text",
-                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                class: "w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                 placeholder: "Search by title, author...",
                                 value: "{search_query}",
                                 oninput: move |e| handle_search(e.value()),
@@ -507,7 +559,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                     class: "flex items-start gap-3",
                                                     // Cover image or placeholder (with URL validation)
                                                     div {
-                                                        class: "w-12 h-16 flex-shrink-0 rounded bg-muted flex items-center justify-center",
+                                                        class: "w-12 h-16 shrink-0 rounded bg-muted flex items-center justify-center",
                                                         if let Some(ref img) = publication.cover_image {
                                                             if is_safe_image_url(img) {
                                                                 img {
@@ -541,7 +593,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                         }
                                                     }
                                                     if is_selected {
-                                                        ChevronDownIcon { class: "w-5 h-5 text-primary flex-shrink-0 -rotate-90".to_string() }
+                                                        ChevronDownIcon { class: "w-5 h-5 text-primary shrink-0 -rotate-90".to_string() }
                                                     }
                                                 }
                                             }
@@ -569,7 +621,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                 "Chapter/Section (optional)"
                                             }
                                             select {
-                                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50",
+                                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50",
                                                 value: selected_chapter.read().clone().unwrap_or_default(),
                                                 onchange: move |e| {
                                                     let val = e.value();
@@ -618,9 +670,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     input {
                                         r#type: "text",
                                         class: if *sections_error.read() {
-                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
                                         } else {
-                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50"
                                         },
                                         placeholder: "e.g., 4-9 or 1,3,5",
                                         value: "{selected_sections}",
@@ -648,9 +700,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                     input {
                                         r#type: "text",
                                         class: if *version_error.read() {
-                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                                            "w-full px-3 py-2 bg-background border-2 border-red-500 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
                                         } else {
-                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary/50"
                                         },
                                         placeholder: "e.g., kjv, 1st-edition",
                                         value: "{selected_version}",
@@ -693,10 +745,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                 }
                             }
 
-                            // Insert button (disabled when validation errors - Security Fix #1)
+                            // Insert button (disabled when validation errors or no valid book reference)
                             button {
                                 class: "w-full mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed",
-                                disabled: *has_validation_error.read(),
+                                disabled: *has_validation_error.read() || book_reference.read().is_none(),
                                 onclick: handle_insert,
                                 "Insert Book Reference"
                             }

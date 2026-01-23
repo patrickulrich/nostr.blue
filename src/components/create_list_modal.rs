@@ -94,6 +94,11 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
     let on_created = props.on_created;
 
     let handle_create = move |_| {
+        // Guard against re-entry while already creating
+        if *loading.peek() {
+            return;
+        }
+
         let list_type_val = *list_type.read();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
@@ -124,7 +129,12 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
-            onclick: move |_| props.on_close.call(()),
+            onclick: move |_| {
+                // Use peek() to check loading without subscribing
+                if !*loading.peek() {
+                    props.on_close.call(())
+                }
+            },
 
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-lg mx-4 w-full max-h-[90vh] overflow-y-auto",
@@ -138,8 +148,14 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                         "Create New List"
                     }
                     button {
-                        class: "text-muted-foreground hover:text-foreground",
-                        onclick: move |_| props.on_close.call(()),
+                        class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                        disabled: *loading.read(),
+                        aria_busy: "{loading}",
+                        onclick: move |_| {
+                            if !*loading.peek() {
+                                props.on_close.call(())
+                            }
+                        },
                         "✕"
                     }
                 }
@@ -198,7 +214,7 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             "Name"
                         }
                         input {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "My Awesome List",
                             maxlength: "100",
@@ -214,7 +230,7 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             "Description (optional)"
                         }
                         textarea {
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             rows: "2",
                             placeholder: "What is this list for?",
                             maxlength: "500",
@@ -345,12 +361,13 @@ async fn create_list(
         ),
     ];
 
-    // Add description if provided
+    // Add description if provided (enforce 500-char limit matching UI)
     let desc = description.trim();
     if !desc.is_empty() {
+        let bounded_desc: String = desc.chars().take(500).collect();
         tags.push(Tag::custom(
             nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
-            vec![desc.to_string()],
+            vec![bounded_desc],
         ));
     }
 
@@ -369,7 +386,7 @@ async fn create_list(
         String::new()
     };
 
-    let builder = EventBuilder::new(Kind::from(list_type.kind()), content).tags(tags);
+    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content).tags(tags);
 
     client
         .send_event_builder(builder)

@@ -55,11 +55,11 @@ jobs:
       - name: Build CSS and JS assets
         run: npm run build:all
 
-      - name: Install Trunk
-        run: cargo install trunk --locked --force
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli --version 0.7.2 --locked
 
-      - name: Build with Trunk
-        run: trunk build --release
+      - name: Build with Dioxus
+        run: dx build --release
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -67,7 +67,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist'
+          path: './dist/public'
 
   deploy:
     name: Deploy

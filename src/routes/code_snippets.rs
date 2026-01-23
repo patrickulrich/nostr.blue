@@ -105,7 +105,7 @@ pub fn CodeSnippets() -> Element {
                     div {
                         class: "relative",
                         input {
-                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 pl-10 bg-muted rounded-full text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search snippets...",
                             value: "{search_query}",
@@ -150,7 +150,7 @@ pub fn CodeSnippets() -> Element {
                     div {
                         class: "flex items-start gap-3",
                         div {
-                            class: "w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center flex-shrink-0",
+                            class: "w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0",
                             svg {
                                 class: "w-4 h-4 text-green-500",
                                 xmlns: "http://www.w3.org/2000/svg",

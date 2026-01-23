@@ -27,14 +27,19 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     // Format timestamp using shared utility
     let timestamp = format_relative_time_or(published_at, "Unknown date");
 
-    // Get display name from metadata or fallback
+    // Get display name from metadata or fallback (filter empty strings)
     let display_name = author_metadata.read().as_ref()
-        .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        .and_then(|m| {
+            m.display_name.as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .or(m.name.as_ref().filter(|s| !s.trim().is_empty()))
+                .cloned()
+        })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_metadata.read().as_ref()
         .and_then(|m| m.picture.clone())
-        .filter(|url| is_valid_http_url(url));
+        .filter(|url| !url.trim().is_empty() && is_valid_http_url(url));
 
     // Generate avatar fallback (first letter of display name)
     let avatar_letter = display_name.chars().next()
@@ -146,7 +151,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                                     onclick: move |e: Event<MouseData>| {
                                         e.stop_propagation();
                                     },
-                                    class: "flex-shrink-0",
+                                    class: "shrink-0",
 
                                     div {
                                         class: "w-8 h-8 rounded-full overflow-hidden bg-muted flex items-center justify-center",
@@ -186,7 +191,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
 
                             // Read time
                             div {
-                                class: "flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0",
+                                class: "flex items-center gap-1 text-xs text-muted-foreground shrink-0",
                                 span { "📄" }
                                 span { "{read_time} min read" }
                             }

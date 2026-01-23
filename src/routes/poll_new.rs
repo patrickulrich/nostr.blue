@@ -207,7 +207,7 @@ pub fn PollNew() -> Element {
                             "Poll Question"
                         }
                         textarea {
-                            class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none",
+                            class: "w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             placeholder: "What's your question?",
                             rows: "3",
                             value: "{poll_question}",
@@ -330,7 +330,7 @@ pub fn PollNew() -> Element {
                                 class: "mt-3",
                                 input {
                                     r#type: "datetime-local",
-                                    class: "px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                                    class: "px-4 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     value: "{custom_end_time}",
                                     oninput: move |evt| custom_end_time.set(evt.value()),
                                 }
@@ -350,7 +350,7 @@ pub fn PollNew() -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "w-full px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-4 py-2 rounded-lg border border-border bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "bitcoin, nostr, poll (comma separated)",
                             value: "{hashtags_input}",
                             oninput: move |evt| hashtags_input.set(evt.value()),

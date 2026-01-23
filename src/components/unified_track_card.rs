@@ -180,7 +180,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
             // Album art with source badge
             div {
-                class: "relative flex-shrink-0",
+                class: "relative shrink-0",
                 img {
                     src: "{artwork_url}",
                     alt: "Album art",
@@ -269,7 +269,7 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             if props.show_sats {
                 if let Some(sats) = &sats_display {
                     div {
-                        class: "flex items-center gap-1 text-xs font-medium text-amber-500 flex-shrink-0",
+                        class: "flex items-center gap-1 text-xs font-medium text-amber-500 shrink-0",
                         dangerous_inner_html: icons::ZAP,
                         span { "{sats}" }
                     }
@@ -278,13 +278,13 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
             // Duration
             div {
-                class: "text-xs text-muted-foreground flex-shrink-0",
+                class: "text-xs text-muted-foreground shrink-0",
                 "{duration_str}"
             }
 
             // Actions (vote, zap)
             div {
-                class: "flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition",
+                class: "flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition",
 
                 // Vote button
                 button {
@@ -354,7 +354,7 @@ pub fn UnifiedTrackCardSkeleton() -> Element {
 
             // Album art skeleton
             div {
-                class: "w-14 h-14 bg-muted rounded flex-shrink-0"
+                class: "w-14 h-14 bg-muted rounded shrink-0"
             }
 
             // Track info skeleton
@@ -370,12 +370,12 @@ pub fn UnifiedTrackCardSkeleton() -> Element {
 
             // Sats skeleton
             div {
-                class: "w-16 h-4 bg-muted rounded flex-shrink-0"
+                class: "w-16 h-4 bg-muted rounded shrink-0"
             }
 
             // Duration skeleton
             div {
-                class: "w-12 h-3 bg-muted rounded flex-shrink-0"
+                class: "w-12 h-3 bg-muted rounded shrink-0"
             }
         }
     }

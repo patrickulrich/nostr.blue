@@ -1,6 +1,7 @@
 /// NIP-78: Sidebar Preferences Storage
 /// Stores user's sidebar layout preferences on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
+use gloo_storage::{LocalStorage, Storage};
 use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -8,6 +9,39 @@ use strum::{EnumIter, IntoEnumIterator};
 
 use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
+
+/// State for NIP-78 data loading operations
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Nip78LoadState {
+    /// Initial state, not yet attempted
+    #[default]
+    Pending,
+    /// Currently loading from relays
+    Loading,
+    /// Successfully loaded from relays
+    Loaded,
+    /// Using defaults (not authenticated, no data found, or parse error)
+    LoadedDefaults,
+    /// Network/fetch error - candidate for retry when relay connects
+    Failed(String),
+}
+
+impl Nip78LoadState {
+    /// Returns true if data is ready (loaded, defaults, or pending with defaults)
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Loaded | Self::LoadedDefaults | Self::Pending)
+    }
+
+    /// Returns true if load failed and should be retried
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// Returns true if currently loading (prevents duplicate loads)
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+}
 
 /// All customizable sidebar navigation items
 /// Auth-required items will be filtered at render time when user is logged out
@@ -55,6 +89,7 @@ pub enum SidebarItem {
     Shop,
     Blossom,
     Bible,
+    Highlights,
 }
 
 impl SidebarItem {
@@ -120,6 +155,7 @@ impl SidebarItem {
             SidebarItem::Shop => "Marketplace",
             SidebarItem::Blossom => "Blossom",
             SidebarItem::Bible => "Bible",
+            SidebarItem::Highlights => "Highlights",
         }
     }
 
@@ -163,6 +199,7 @@ impl SidebarItem {
             SidebarItem::Shop => Some(Route::ShopHome {}),
             SidebarItem::Blossom => Some(Route::BlossomPage {}),
             SidebarItem::Bible => Some(Route::BibleHome {}),
+            SidebarItem::Highlights => Some(Route::Highlights {}),
         }
     }
 }
@@ -199,6 +236,9 @@ const APP_DATA_KIND: u16 = 30078;
 
 /// D tag identifier for sidebar preferences
 const SIDEBAR_D_TAG: &str = "nostr.blue/sidebar";
+
+/// localStorage key for caching sidebar preferences
+const SIDEBAR_LOCAL_STORAGE_KEY: &str = "nostr_blue_sidebar_prefs";
 
 /// Default main sidebar slot count (items beyond this go to More menu)
 pub const DEFAULT_MAIN_SIDEBAR_SLOTS: usize = 12;
@@ -239,8 +279,8 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
 /// Global state for sidebar items
 pub static SIDEBAR_ITEMS: GlobalSignal<Vec<SidebarItem>> = Signal::global(default_sidebar_items);
 pub static SIDEBAR_SLOT_COUNT: GlobalSignal<usize> = Signal::global(|| DEFAULT_MAIN_SIDEBAR_SLOTS);
-pub static SIDEBAR_LOADED: GlobalSignal<bool> = Signal::global(|| false);
-pub static SIDEBAR_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+/// NIP-78 load state for sidebar preferences
+pub static SIDEBAR_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78LoadState::default);
 
 /// Get visible main sidebar items (up to slot count, filtered by auth)
 pub fn get_main_sidebar_items(is_authenticated: bool) -> Vec<SidebarItem> {
@@ -272,34 +312,76 @@ pub fn get_available_items(active_items: &[SidebarItem]) -> Vec<SidebarItem> {
         .collect()
 }
 
+/// Load cached sidebar preferences from localStorage
+fn load_cached_sidebar() -> Option<SidebarPreferencesData> {
+    LocalStorage::get::<String>(SIDEBAR_LOCAL_STORAGE_KEY)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+}
+
+/// Save sidebar preferences to localStorage
+fn cache_sidebar(data: &SidebarPreferencesData) {
+    if let Ok(json) = serde_json::to_string(data) {
+        let _ = LocalStorage::set(SIDEBAR_LOCAL_STORAGE_KEY, json);
+    }
+}
+
+/// Initialize sidebar from localStorage cache (synchronous, for instant UI)
+/// Call this during app init BEFORE async client initialization
+pub fn init_sidebar_from_cache() {
+    if let Some(cached) = load_cached_sidebar() {
+        if !cached.active_items.is_empty() {
+            log::info!("Initialized {} sidebar items from localStorage", cached.active_items.len());
+            *SIDEBAR_ITEMS.write() = cached.active_items;
+            *SIDEBAR_SLOT_COUNT.write() = cached.main_sidebar_count;
+        }
+    }
+}
+
 /// Load sidebar preferences from Nostr relays (NIP-78)
+/// Uses a 3-step loading strategy for reliability:
+/// 1. Load from localStorage first for instant UI
+/// 2. Query local database (nostr-sdk caches events)
+/// 3. Fetch from relays to sync any updates
 pub async fn load_sidebar_preferences() {
-    // Atomically check and set loading flag to avoid duplicate loads
+    // Guard against concurrent loads
     {
-        let mut loading = SIDEBAR_LOADING.write();
-        if *loading {
+        let state = SIDEBAR_STATE.read().clone();
+        if state.is_loading() {
             return;
         }
-        *loading = true;
+        *SIDEBAR_STATE.write() = Nip78LoadState::Loading;
     }
 
-    log::info!("Loading sidebar preferences from Nostr (NIP-78)...");
+    log::info!("Loading sidebar preferences...");
 
-    // Check if authenticated
+    // STEP 1: Try localStorage first for instant UI
+    let mut loaded_from_cache = false;
+    if let Some(cached) = load_cached_sidebar() {
+        log::info!("Loaded {} sidebar items from localStorage", cached.active_items.len());
+        *SIDEBAR_ITEMS.write() = cached.active_items;
+        *SIDEBAR_SLOT_COUNT.write() = cached.main_sidebar_count;
+        loaded_from_cache = true;
+    }
+
+    // Not authenticated - use cache or defaults
     if !auth_store::is_authenticated() {
-        log::info!("Not authenticated, using default sidebar");
-        *SIDEBAR_LOADING.write() = false;
-        *SIDEBAR_LOADED.write() = true;
+        log::info!("Not authenticated, using {} sidebar",
+            if loaded_from_cache { "cached" } else { "default" });
+        *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
 
-    // Get client and pubkey
+    // Get client - if not initialized, mark as Failed (will retry via main effect)
     let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
         Some(c) => c.clone(),
         None => {
             log::warn!("Client not initialized");
-            *SIDEBAR_LOADING.write() = false;
-            *SIDEBAR_LOADED.write() = true;
+            *SIDEBAR_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::Failed("Client not initialized".into())
+            };
             return;
         }
     };
@@ -314,16 +396,22 @@ pub async fn load_sidebar_preferences() {
                 Ok(pk) => pk,
                 Err(e) => {
                     log::error!("Invalid pubkey: {}", e);
-                    *SIDEBAR_LOADING.write() = false;
-                    *SIDEBAR_LOADED.write() = true;
+                    *SIDEBAR_STATE.write() = if loaded_from_cache {
+                        Nip78LoadState::Loaded
+                    } else {
+                        Nip78LoadState::LoadedDefaults
+                    };
                     return;
                 }
             }
         }
         None => {
             log::warn!("No pubkey available");
-            *SIDEBAR_LOADING.write() = false;
-            *SIDEBAR_LOADED.write() = true;
+            *SIDEBAR_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::LoadedDefaults
+            };
             return;
         }
     };
@@ -335,40 +423,68 @@ pub async fn load_sidebar_preferences() {
         .identifier(SIDEBAR_D_TAG)
         .limit(1);
 
-    // Ensure relays are ready before fetching
+    // STEP 2: Query local database first (nostr-sdk best practice)
+    if let Ok(db_events) = client.database().query(filter.clone()).await {
+        if let Some(event) = db_events.into_iter().next() {
+            log::info!("Found sidebar preference in local database: {}", event.id);
+            if let Ok(data) = serde_json::from_str::<SidebarPreferencesData>(&event.content) {
+                if !data.active_items.is_empty() {
+                    *SIDEBAR_ITEMS.write() = data.active_items.clone();
+                    *SIDEBAR_SLOT_COUNT.write() = data.main_sidebar_count;
+                    cache_sidebar(&data); // Update localStorage
+                    loaded_from_cache = true;
+                }
+            }
+        }
+    }
+
+    // STEP 3: Fetch from relays to sync any updates
     nostr_client::ensure_relays_ready(&client).await;
 
-    // Fetch sidebar preferences event
-    match client.fetch_events(filter, Duration::from_secs(5)).await {
+    match client.fetch_events(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
-                log::info!("Found sidebar preference event: {}", event.id);
+                log::info!("Found sidebar preference event from relays: {}", event.id);
 
-                // Parse preferences from content
                 match serde_json::from_str::<SidebarPreferencesData>(&event.content) {
                     Ok(data) => {
                         if !data.active_items.is_empty() {
-                            log::info!("Loaded {} sidebar items with {} main slots from Nostr",
-                                data.active_items.len(), data.main_sidebar_count);
-                            *SIDEBAR_ITEMS.write() = data.active_items;
+                            log::info!("Loaded {} sidebar items from Nostr relays",
+                                data.active_items.len());
+                            *SIDEBAR_ITEMS.write() = data.active_items.clone();
                             *SIDEBAR_SLOT_COUNT.write() = data.main_sidebar_count;
+                            cache_sidebar(&data); // Update localStorage
                         }
+                        *SIDEBAR_STATE.write() = Nip78LoadState::Loaded;
                     }
                     Err(e) => {
                         log::warn!("Failed to parse sidebar data: {}", e);
+                        *SIDEBAR_STATE.write() = if loaded_from_cache {
+                            Nip78LoadState::Loaded
+                        } else {
+                            Nip78LoadState::LoadedDefaults
+                        };
                     }
                 }
             } else {
-                log::info!("No sidebar preferences found on Nostr, using defaults");
+                log::info!("No sidebar preferences found on relays");
+                *SIDEBAR_STATE.write() = if loaded_from_cache {
+                    Nip78LoadState::Loaded
+                } else {
+                    Nip78LoadState::LoadedDefaults
+                };
             }
         }
         Err(e) => {
             log::warn!("Failed to fetch sidebar preferences: {}", e);
+            // If we have cached data, consider it a success
+            *SIDEBAR_STATE.write() = if loaded_from_cache {
+                Nip78LoadState::Loaded
+            } else {
+                Nip78LoadState::Failed(e.to_string())
+            };
         }
     }
-
-    *SIDEBAR_LOADING.write() = false;
-    *SIDEBAR_LOADED.write() = true;
 }
 
 /// Save sidebar preferences to Nostr relays (NIP-78)
@@ -409,6 +525,9 @@ pub async fn save_sidebar_preferences(items: Vec<SidebarItem>, slot_count: usize
         .map_err(|e| format!("Failed to publish sidebar preferences: {}", e))?;
 
     log::info!("Sidebar preferences saved to Nostr successfully");
+
+    // Cache to localStorage for instant loading next time
+    cache_sidebar(&data);
 
     // Update global state
     *SIDEBAR_ITEMS.write() = items;

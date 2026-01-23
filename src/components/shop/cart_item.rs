@@ -32,7 +32,7 @@ pub fn CartItemCard(props: CartItemCardProps) -> Element {
     rsx! {
         div { class: "flex gap-4 p-4 bg-card border border-border rounded-lg",
             // Product image
-            div { class: "w-20 h-20 flex-shrink-0 bg-muted rounded overflow-hidden",
+            div { class: "w-20 h-20 shrink-0 bg-muted rounded overflow-hidden",
                 if let Some(img_url) = &image_url {
                     img {
                         src: "{img_url}",
@@ -98,7 +98,7 @@ pub fn CartItemCard(props: CartItemCardProps) -> Element {
             }
 
             // Line total
-            div { class: "flex-shrink-0 text-right",
+            div { class: "shrink-0 text-right",
                 if line_total > 0 {
                     PriceDisplay { price_sats: line_total }
                 } else {

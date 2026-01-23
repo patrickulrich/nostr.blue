@@ -368,7 +368,7 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
             input {
                 r#type: "number",
                 placeholder: "Custom sats",
-                class: "flex-1 px-3 py-2 rounded-lg bg-muted text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                class: "flex-1 px-3 py-2 rounded-lg bg-muted text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                 value: "{amount}",
                 oninput: move |e| amount.set(e.value())
             }

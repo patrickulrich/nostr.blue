@@ -107,7 +107,7 @@ pub fn ReviewForm(props: ReviewFormProps) -> Element {
             // Review text
             div {
                 textarea {
-                    class: "w-full h-24 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-sm",
+                    class: "w-full h-24 px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none text-sm",
                     placeholder: "Share your experience with this product... (optional)",
                     value: "{content}",
                     oninput: move |e| content.set(e.value())

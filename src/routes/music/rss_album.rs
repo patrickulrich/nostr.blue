@@ -131,7 +131,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                 div { class: "bg-muted/30 rounded-lg border border-border p-6",
                                     div { class: "flex flex-col sm:flex-row items-start gap-6",
                                         // Album art
-                                        div { class: "w-48 h-48 bg-muted rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0",
+                                        div { class: "w-48 h-48 bg-muted rounded-lg flex items-center justify-center overflow-hidden shrink-0",
                                             if let Some(ref art_url) = album_art {
                                                 img {
                                                     src: "{art_url}",

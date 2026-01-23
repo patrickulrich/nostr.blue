@@ -193,7 +193,7 @@ pub fn RadioStationNew() -> Element {
                         input {
                             id: "name",
                             r#type: "text",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "e.g., Nostr FM",
                             value: "{name}",
                             oninput: move |e| name.set(e.value())
@@ -210,7 +210,7 @@ pub fn RadioStationNew() -> Element {
                         }
                         textarea {
                             id: "description",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] resize-y",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary min-h-[100px] resize-y",
                             placeholder: "Describe your radio station...",
                             value: "{description}",
                             oninput: move |e| description.set(e.value())
@@ -228,7 +228,7 @@ pub fn RadioStationNew() -> Element {
                         input {
                             id: "thumbnail",
                             r#type: "url",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "https://example.com/logo.png",
                             value: "{thumbnail_url}",
                             oninput: move |e| thumbnail_url.set(e.value())
@@ -246,7 +246,7 @@ pub fn RadioStationNew() -> Element {
                         input {
                             id: "website",
                             r#type: "url",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "https://yourstation.com",
                             value: "{website}",
                             oninput: move |e| website.set(e.value())
@@ -266,7 +266,7 @@ pub fn RadioStationNew() -> Element {
                             input {
                                 id: "location",
                                 r#type: "text",
-                                class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 placeholder: "e.g., New York",
                                 value: "{location}",
                                 oninput: move |e| location.set(e.value())
@@ -282,7 +282,7 @@ pub fn RadioStationNew() -> Element {
                             input {
                                 id: "country",
                                 r#type: "text",
-                                class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                                class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 placeholder: "e.g., US",
                                 maxlength: "2",
                                 value: "{country_code}",
@@ -302,7 +302,7 @@ pub fn RadioStationNew() -> Element {
                         input {
                             id: "genres",
                             r#type: "text",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "e.g., rock, indie, alternative",
                             value: "{genres}",
                             oninput: move |e| genres.set(e.value())
@@ -320,7 +320,7 @@ pub fn RadioStationNew() -> Element {
                         input {
                             id: "languages",
                             r#type: "text",
-                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary",
+                            class: "w-full px-3 py-2 bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "e.g., en, es",
                             value: "{languages}",
                             oninput: move |e| languages.set(e.value())
@@ -358,7 +358,7 @@ pub fn RadioStationNew() -> Element {
                                     class: "flex gap-2",
                                     input {
                                         r#type: "url",
-                                        class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm",
+                                        class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                         placeholder: "https://stream.example.com/live.mp3",
                                         value: "{stream.url}",
                                         oninput: move |e| {
@@ -387,7 +387,7 @@ pub fn RadioStationNew() -> Element {
                                 div {
                                     class: "flex gap-2 items-center",
                                     select {
-                                        class: "px-2 py-1.5 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                        class: "px-2 py-1.5 bg-background border border-border rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                         value: "{stream.format}",
                                         onchange: move |e| {
                                                 let mut current = streams.read().clone();
@@ -404,7 +404,7 @@ pub fn RadioStationNew() -> Element {
                                     }
                                     input {
                                         r#type: "number",
-                                        class: "w-20 px-2 py-1.5 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary",
+                                        class: "w-20 px-2 py-1.5 bg-background border border-border rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                                         placeholder: "kbps",
                                         value: "{stream.bitrate}",
                                         oninput: move |e| {

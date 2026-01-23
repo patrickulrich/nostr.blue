@@ -76,7 +76,7 @@ pub fn TrendingNotes() -> Element {
 
             // Header
             div {
-                class: "px-4 py-3 border-b border-border flex-shrink-0",
+                class: "px-4 py-3 border-b border-border shrink-0",
                 h3 {
                     class: "text-xl font-bold flex items-center gap-2",
                     span { "📈" }
@@ -122,7 +122,7 @@ pub fn TrendingNotes() -> Element {
             // Show more button - always visible at bottom
             if !*loading.read() && !*error.read() && !trending_notes.read().is_empty() {
                 div {
-                    class: "border-t border-border flex-shrink-0",
+                    class: "border-t border-border shrink-0",
                     Link {
                         to: Route::Trending {},
                         class: "block w-full px-4 py-3 text-blue-500 hover:bg-accent/50 transition-colors text-left text-sm",
@@ -188,7 +188,7 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
                 img {
                     src: "{picture}",
                     alt: "{author_name}",
-                    class: "w-10 h-10 rounded-full flex-shrink-0 object-cover",
+                    class: "w-10 h-10 rounded-full shrink-0 object-cover",
                     loading: "lazy"
                 }
 
