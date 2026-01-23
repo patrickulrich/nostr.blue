@@ -886,3 +886,17 @@ pub struct MeltRecoveryResult {
     /// Errors encountered during recovery
     pub errors: Vec<String>,
 }
+
+/// Result of orphan proof sync operation (CDK → NIP-60)
+///
+/// Tracks proofs found in CDK's IndexedDB that were not in WALLET_TOKENS,
+/// verified with mint via NUT-07, and published to Nostr.
+#[derive(Clone, Debug, Default)]
+pub struct OrphanSyncResult {
+    /// Number of orphaned proofs recovered and published to NIP-60
+    pub proofs_recovered: usize,
+    /// Total sats recovered from orphaned proofs
+    pub sats_recovered: u64,
+    /// Errors encountered during sync
+    pub errors: Vec<String>,
+}

@@ -27,6 +27,7 @@ use super::init::is_wallet_initialized;
 use super::internal::inject_nip60_proofs_to_cdk;
 use super::mint_mgmt::get_mints;
 use super::signals::try_acquire_mint_lock;
+use super::utils::now_secs;
 
 /// Refresh wallet data by re-fetching tokens and history from Nostr
 pub async fn refresh_wallet() -> Result<(), String> {
@@ -491,6 +492,194 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
 
     log::info!("Pending operation recovery complete");
     Ok(())
+}
+
+// =============================================================================
+// CDK → NIP-60 Orphan Sync (Fund Safety)
+// =============================================================================
+
+/// Maximum proofs per batch for NUT-07 state check
+const ORPHAN_SYNC_BATCH_SIZE: usize = 100;
+
+/// Sync orphaned proofs from CDK to NIP-60
+///
+/// Detects proofs that exist in CDK's IndexedDB but are not in WALLET_TOKENS.
+/// Uses Y values (not secrets) for proof identification per CDK pattern.
+/// Verifies with mint before assuming proofs are orphaned (NUT-07).
+///
+/// This function recovers proofs from crashed send/melt operations:
+/// - CDK's confirm() commits proofs to IndexedDB
+/// - If app crashes before Nostr publish, proofs exist only in CDK
+/// - This function detects and publishes those orphaned proofs
+///
+/// CRITICAL SAFETY: Never publishes proofs without mint verification.
+pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult> {
+    use crate::stores::cashu_cdk_bridge;
+    use cdk::dhke::hash_to_curve;
+    use super::proofs::cdk_proof_to_proof_data;
+    use super::signals::WALLET_TOKENS;
+    use std::collections::HashSet;
+
+    log::info!("Checking for orphaned CDK proofs not in NIP-60...");
+
+    let mut result = OrphanSyncResult::default();
+
+    // Get all proof Y values currently in WALLET_TOKENS (NIP-60 source of truth)
+    // CDK best practice: Use Y values for proof identification, not secrets
+    let known_ys: HashSet<String> = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        tokens
+            .iter()
+            .flat_map(|t| {
+                t.proofs.iter().filter_map(|p| {
+                    // Compute Y = hash_to_curve(secret)
+                    hash_to_curve(p.secret.as_bytes())
+                        .ok()
+                        .map(|y| y.to_string())
+                })
+            })
+            .collect()
+    };
+
+    // Get MultiMintWallet - use clone to avoid holding read lock across await
+    let multi_wallet = match cashu_cdk_bridge::MULTI_WALLET.read().clone() {
+        Some(w) => w,
+        None => {
+            log::debug!("MultiMintWallet not initialized, skipping orphan sync");
+            return Ok(result);
+        }
+    };
+
+    // Check each wallet's proofs
+    let wallets = multi_wallet.get_wallets().await;
+    for wallet in wallets.iter() {
+        let mint_url = wallet.mint_url.to_string();
+
+        let cdk_proofs = match wallet.get_unspent_proofs().await {
+            Ok(proofs) => proofs,
+            Err(e) => {
+                log::warn!("Failed to get CDK proofs for {}: {}", mint_url, e);
+                continue;
+            }
+        };
+
+        // Find potentially orphaned proofs (in CDK but not in WALLET_TOKENS)
+        // Use Y values for comparison per CDK pattern
+        let potentially_orphaned: Vec<_> = cdk_proofs
+            .iter()
+            .filter(|p| {
+                p.y()
+                    .ok()
+                    .map(|y| !known_ys.contains(&y.to_string()))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        if potentially_orphaned.is_empty() {
+            continue;
+        }
+
+        log::info!(
+            "Found {} potentially orphaned proofs in CDK for {}, verifying with mint...",
+            potentially_orphaned.len(),
+            mint_url
+        );
+
+        // CDK best practice: Verify with mint before assuming orphaned (NUT-07)
+        // Process in batches of ORPHAN_SYNC_BATCH_SIZE
+        let mut confirmed_orphaned = Vec::new();
+
+        for chunk in potentially_orphaned.chunks(ORPHAN_SYNC_BATCH_SIZE) {
+            let chunk_proofs: Vec<_> = chunk.to_vec();
+
+            match wallet.check_proofs_spent(chunk_proofs.clone()).await {
+                Ok(states) => {
+                    // CRITICAL: Only consider proofs that mint confirms as UNSPENT
+                    for (proof, state) in chunk.iter().zip(states.iter()) {
+                        if state.state == cdk::nuts::State::Unspent {
+                            confirmed_orphaned.push(proof.clone());
+                        } else {
+                            log::debug!(
+                                "Proof Y={} is {:?} at mint, skipping (not truly orphaned)",
+                                proof.y().map(|y| y.to_string()).unwrap_or_default(),
+                                state.state
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to verify proofs with mint {}: {}", mint_url, e);
+                    // SAFETY: Don't assume orphaned on verification failure - skip this batch
+                    // This prevents publishing spent proofs on network errors
+                    result
+                        .errors
+                        .push(format!("Mint verification failed for {}: {}", mint_url, e));
+                }
+            }
+        }
+
+        if confirmed_orphaned.is_empty() {
+            continue;
+        }
+
+        let orphaned_amount: u64 = confirmed_orphaned
+            .iter()
+            .map(|p| u64::from(p.amount))
+            .fold(0, |acc, a| acc.saturating_add(a));
+
+        log::info!(
+            "Confirmed {} orphaned proofs ({} sats) in CDK for {}, publishing to Nostr...",
+            confirmed_orphaned.len(),
+            orphaned_amount,
+            mint_url
+        );
+
+        // Convert to ProofData
+        let proof_data: Vec<ProofData> = confirmed_orphaned
+            .iter()
+            .map(cdk_proof_to_proof_data)
+            .collect();
+
+        // Create and publish token event for orphaned proofs
+        // nostr-sdk will save locally before attempting relay publish
+        match super::events::publish_orphaned_proofs_event(&mint_url, &proof_data).await {
+            Ok(event_id) => {
+                log::info!("Published orphaned proofs to Nostr: {}", event_id);
+
+                // Add to WALLET_TOKENS
+                let store = WALLET_TOKENS.read();
+                let mut data = store.data();
+                let mut tokens = data.write();
+                tokens.push(TokenData {
+                    event_id,
+                    mint: mint_url.clone(),
+                    unit: "sat".to_string(),
+                    proofs: proof_data,
+                    created_at: now_secs(),
+                });
+
+                result.proofs_recovered += confirmed_orphaned.len();
+                result.sats_recovered += orphaned_amount;
+            }
+            Err(e) => {
+                log::warn!("Failed to publish orphaned proofs: {}", e);
+                result.errors.push(e);
+            }
+        }
+    }
+
+    if result.proofs_recovered > 0 {
+        log::info!(
+            "Recovered {} orphaned proofs ({} sats) from CDK to NIP-60",
+            result.proofs_recovered,
+            result.sats_recovered
+        );
+    }
+
+    Ok(result)
 }
 
 // =============================================================================

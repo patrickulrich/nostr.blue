@@ -425,9 +425,14 @@ pub async fn melt_tokens(
 
     *MELT_PROGRESS.write() = Some(MeltProgress::PayingInvoice);
 
-    // Execute melt with auto-retry
-    let (melted, keep_proofs) =
-        execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed).await?;
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (melted, keep_proofs) = super::internal::try_operation_or_recover(
+        &mint_url,
+        all_proofs.clone(),
+        execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed),
+    )
+    .await?;
 
     let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
     let preimage = melted.preimage;
@@ -455,12 +460,33 @@ pub async fn melt_tokens(
         *MELT_PROGRESS.write() = Some(MeltProgress::WaitingForConfirmation);
     }
 
-    // Publish events and update state
-    let new_event_id =
-        publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    update_local_state_after_melt(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_melt(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_melt_events
+            log::warn!("Nostr melt publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();

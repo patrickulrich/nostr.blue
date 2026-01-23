@@ -120,21 +120,47 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         ));
     }
 
-    // Prepare and confirm send with auto-retry on spent proofs
-    let (token_string, keep_proofs) = execute_send_with_retry(
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
         &mint_url,
-        amount,
-        all_proofs,
-        None, // No P2PK conditions
+        all_proofs.clone(),
+        execute_send_with_retry(
+            &mint_url,
+            amount,
+            all_proofs,
+            None, // No P2PK conditions
+        ),
     )
     .await?;
 
-    // Publish events and update state
-    let new_event_id =
-        publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    update_local_state_after_send(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_send(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_send_events
+            log::warn!("Nostr publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
@@ -218,21 +244,47 @@ pub async fn send_tokens_p2pk(
         ));
     }
 
-    // Execute P2PK send using swap directly (bypasses CDK's buggy proof selection)
-    let (token_string, keep_proofs) = execute_p2pk_send_via_swap(
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
         &mint_url,
-        amount,
-        all_proofs,
-        spending_conditions,
+        all_proofs.clone(),
+        execute_p2pk_send_via_swap(
+            &mint_url,
+            amount,
+            all_proofs,
+            spending_conditions,
+        ),
     )
     .await?;
 
-    // Publish events and update state
-    let new_event_id =
-        publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    update_local_state_after_send(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_send(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_send_events
+            log::warn!("Nostr P2PK publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
