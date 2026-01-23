@@ -11,6 +11,9 @@ pub struct EmojiPickerProps {
     pub on_emoji_selected: EventHandler<String>,
     #[props(default = false)]
     pub icon_only: bool,
+    /// ARIA label for the emoji picker button (for accessibility)
+    #[props(default = "Add emoji".to_string())]
+    pub aria_label: String,
 }
 
 /// Comprehensive emoji categories with extensive emoji coverage
@@ -251,6 +254,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                     "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
                 },
                 title: if props.icon_only { "Add emoji" } else { "" },
+                aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
                 onclick: move |_| {
                     let current = *show_picker.read();
                     show_picker.set(!current);

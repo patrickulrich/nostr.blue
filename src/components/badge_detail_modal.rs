@@ -35,8 +35,16 @@ pub fn BadgeDetailModal(
     on_close: EventHandler<()>,
     on_accept: EventHandler<()>,
     on_reject: EventHandler<()>,
+    /// Optional callback for parent to signal operation completion (true=success, false=error).
+    /// Call this on both success AND failure to immediately reset processing state.
+    #[props(optional)]
+    on_complete: Option<EventHandler<bool>>,
 ) -> Element {
     let mut processing_state = use_signal(ProcessingState::default);
+    let mut timeout_task: Signal<Option<Task>> = use_signal(|| None);
+
+    // Track completion signal from parent for immediate reset
+    let mut completion_signal = use_signal(|| None::<bool>);
 
     // Reset processing state when is_accepted changes (operation completed by parent)
     use_effect(use_reactive!(|is_accepted| {
@@ -45,17 +53,33 @@ pub fn BadgeDetailModal(
         let _ = is_accepted;
     }));
 
+    // Effect to reset processing state on completion signal from parent
+    use_effect(move || {
+        if completion_signal.read().is_some() {
+            processing_state.set(ProcessingState::Idle);
+            completion_signal.set(None);
+        }
+    });
+
     // Fallback timeout to reset stuck processing state
     use_effect(move || {
         let current_state = *processing_state.read();
+
+        // Cancel any existing timeout - take() swaps with None via std::mem::take
+        if let Some(task) = timeout_task.take() {
+            task.cancel();  // Immediately removes future from scheduler
+        }
+
         if current_state != ProcessingState::Idle {
-            spawn(async move {
+            let task = spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(10_000).await;
                 if *processing_state.peek() != ProcessingState::Idle {
                     log::warn!("Processing state timed out, resetting to Idle");
                     processing_state.set(ProcessingState::Idle);
                 }
+                timeout_task.set(None);  // Clear handle when timer completes naturally
             });
+            timeout_task.set(Some(task));
         }
     });
 

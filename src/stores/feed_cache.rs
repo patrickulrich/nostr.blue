@@ -217,12 +217,21 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
         return Ok(Vec::new());
     }
 
-    // Fetch cached items
-    let cached_items = db.get_feed_items_by_ids(&event_ids).await?;
+    // Fetch cached items (with failure tracking for cleanup)
+    let cached_result = db.get_feed_items_by_ids(&event_ids).await?;
+
+    // Log any deserialization failures for debugging
+    if cached_result.failed_count > 0 {
+        log::warn!(
+            "Feed cache: {} items failed deserialization (keys: {:?})",
+            cached_result.failed_count,
+            cached_result.failed_keys
+        );
+    }
 
     // Convert to FeedItems
     let mut feed_items = Vec::new();
-    for cached in cached_items {
+    for cached in cached_result.items {
         if let Ok(event) = serde_json::from_str::<Event>(&cached.event_json) {
             let feed_item = match cached.item_type {
                 CachedFeedItemType::OriginalPost => FeedItem::OriginalPost(event),

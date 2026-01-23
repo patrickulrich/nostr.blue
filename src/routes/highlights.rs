@@ -92,9 +92,10 @@ pub fn Highlights() -> Element {
                         fallback_in_progress.set(true);  // Signal to skip next effect run
                         feed_type.set(FeedType::Global);
                     }
-                    // Track oldest timestamp for pagination
+                    // Track oldest timestamp for pagination (use saturating_sub(1) for exclusive boundary,
+                    // matching the pagination logic to avoid re-fetching boundary events)
                     if let Some(last) = new_highlights.last() {
-                        oldest_timestamp.set(Some(last.created_at));
+                        oldest_timestamp.set(Some(last.created_at.saturating_sub(1)));
                     }
 
                     // Determine if there are more events to load
@@ -178,9 +179,7 @@ pub fn Highlights() -> Element {
                     has_more.set(new_highlights.len() >= 30 && !unique.is_empty());
 
                     // Extend with unique items
-                    let mut current = highlights.read().clone();
-                    current.extend(unique);
-                    highlights.set(current);
+                    highlights.write().extend(unique);
                     loading.set(false);
                 }
                 Err(e) => {

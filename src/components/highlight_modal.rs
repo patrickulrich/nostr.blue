@@ -17,6 +17,11 @@ pub struct HighlightModalProps {
     pub on_confirm: EventHandler<Option<String>>,
     /// Called when user cancels
     pub on_cancel: EventHandler<()>,
+    /// Optional external submitting state controlled by parent.
+    /// When Some(false), resets local is_submitting to false.
+    /// Use this when the parent closes and reopens the modal to ensure fresh state.
+    #[props(default)]
+    pub submitting: Option<bool>,
 }
 
 /// Modal for creating highlights with optional commentary
@@ -25,10 +30,30 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
     let mut comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
 
+    // Sync local is_submitting with parent's submitting prop when it changes to false
+    // This handles the case where parent closes the modal and reopens it
+    {
+        let parent_submitting = props.submitting;
+        use_effect(move || {
+            if parent_submitting == Some(false) {
+                is_submitting.set(false);
+            }
+        });
+    }
+
+    // Use parent's submitting if provided, otherwise use local state
+    let effective_submitting = props.submitting.unwrap_or(*is_submitting.read());
+
     // Cancel helper - resets submitting state before calling on_cancel
     let do_cancel = {
         let on_cancel = props.on_cancel;
+        let parent_submitting = props.submitting;
         move || {
+            // Don't allow cancel while submitting
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
+            if currently_submitting {
+                return;
+            }
             is_submitting.set(false);
             on_cancel.call(());
         }
@@ -37,8 +62,11 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
     // Extract submit logic into a helper closure that doesn't require event
     let do_submit = {
         let on_confirm = props.on_confirm;
+        let parent_submitting = props.submitting;
         move || {
-            if *is_submitting.read() {
+            // Check effective submitting state (parent override or local)
+            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
+            if currently_submitting {
                 return;
             }
             is_submitting.set(true);
@@ -185,7 +213,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                     class: "flex justify-end gap-3 p-4 border-t border-border",
                     button {
                         class: "px-4 py-2 rounded-lg hover:bg-accent transition-colors",
-                        disabled: *is_submitting.read(),
+                        disabled: effective_submitting,
                         onclick: {
                             let mut do_cancel = do_cancel;
                             move |_| do_cancel()
@@ -194,9 +222,9 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                     }
                     button {
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50",
-                        disabled: *is_submitting.read(),
+                        disabled: effective_submitting,
                         onclick: on_submit_click,
-                        if *is_submitting.read() {
+                        if effective_submitting {
                             "Saving..."
                         } else {
                             "Save Highlight"

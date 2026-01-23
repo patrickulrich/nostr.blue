@@ -126,25 +126,33 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
                     on_accept: move |_| {
                         // Already accepted, no action needed
                     },
-                    on_reject: move |_| {
-                        // Remove from profile badges
+                    on_reject: {
+                        // Clone badge_coord outside the closure for use in the async block
                         let badge_coord = badge.coordinate.clone();
-                        spawn(async move {
-                            match nip58::reject_badge(&badge_coord).await {
-                                Ok(_) => {
-                                    log::info!("Badge rejected successfully");
-                                    // Remove from local list
-                                    let mut current = badges.read().clone();
-                                    current.retain(|b| b.coordinate != badge_coord);
-                                    badges.set(current);
-                                    show_modal.set(false);
-                                    selected_badge.set(None);
+                        move |_| {
+                            // Remove from profile badges
+                            let badge_coord = badge_coord.clone();
+                            spawn(async move {
+                                match nip58::reject_badge(&badge_coord).await {
+                                    Ok(_) => {
+                                        log::info!("Badge rejected successfully");
+                                        // Remove from local list
+                                        let mut current = badges.read().clone();
+                                        current.retain(|b| b.coordinate != badge_coord);
+                                        badges.set(current);
+                                        show_modal.set(false);
+                                        selected_badge.set(None);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to reject badge: {}", e);
+                                        // Close modal on failure to reset processing state
+                                        // User can reopen to retry
+                                        show_modal.set(false);
+                                        selected_badge.set(None);
+                                    }
                                 }
-                                Err(e) => {
-                                    log::error!("Failed to reject badge: {}", e);
-                                }
-                            }
-                        });
+                            });
+                        }
                     }
                 }
             }

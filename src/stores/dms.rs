@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
+use nostr_sdk::nips::nip17;
 use crate::stores::{auth_store, nostr_client, relay};
 use crate::stores::nostr_client::PublishResult;
 use std::time::Duration;
@@ -267,6 +268,46 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
 
     log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
+
+    // Pre-send validation: Check if recipient has NIP-17 inbox relays (kind 10050)
+    // This gives a clear error before attempting to send, rather than failing silently
+    let filter = Filter::new()
+        .author(recipient_pk)
+        .kind(Kind::InboxRelays)
+        .limit(1);
+
+    // First check database cache for recipient's inbox relay list
+    let cached_events = client.database()
+        .query(filter.clone())
+        .await
+        .unwrap_or_default();
+
+    let has_inbox_relays = if !cached_events.is_empty() {
+        // Found in cache - extract relay URLs using NIP-17 helper
+        if let Some(event) = cached_events.into_iter().next() {
+            nip17::extract_relay_list(&event).next().is_some()
+        } else {
+            false
+        }
+    } else {
+        // Try network fetch with SDK's native timeout support
+        match client.fetch_events(filter, Duration::from_secs(3)).await {
+            Ok(events) if !events.is_empty() => {
+                if let Some(event) = events.into_iter().next() {
+                    nip17::extract_relay_list(&event).next().is_some()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    };
+
+    if !has_inbox_relays {
+        return Err("Recipient has no inbox relays configured (NIP-17 kind 10050). \
+                   They may not be able to receive private messages. \
+                   Ask them to set up inbox relays in their Nostr client.".to_string());
+    }
 
     // Ensure relays are ready before sending (nostr-sdk pattern: pool checks before send)
     nostr_client::ensure_relays_ready(&client).await;

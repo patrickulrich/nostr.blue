@@ -409,8 +409,11 @@ pub fn SettingsRelays() -> Element {
             #[cfg(not(target_arch = "wasm32"))]
             let now_secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+                .map(|d| d.as_secs())
+                .unwrap_or_else(|e| {
+                    log::warn!("System time before UNIX_EPOCH: {}", e);
+                    0
+                });
 
             *metadata = Some(relay::RelayListMetadata {
                 relays: general,

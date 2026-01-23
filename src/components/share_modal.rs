@@ -578,6 +578,12 @@ pub fn ShareModal(
                                     let utf8_pos = utf16_to_utf8_index(&text, pos);
                                     cursor_position.set(utf8_pos);
                                 },
+                                onmouseup: move |_| {
+                                    let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
+                                    let utf8_pos = utf16_to_utf8_index(&text, pos);
+                                    cursor_position.set(utf8_pos);
+                                },
                             }
                             // Error message display
                             if let Some(error) = nostr_error.read().as_ref() {

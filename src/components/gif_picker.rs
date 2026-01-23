@@ -7,6 +7,9 @@ pub struct GifPickerProps {
     pub on_gif_selected: EventHandler<String>,
     #[props(default = false)]
     pub icon_only: bool,
+    /// ARIA label for the GIF picker button (for accessibility)
+    #[props(default = "Add GIF".to_string())]
+    pub aria_label: String,
 }
 
 #[component]
@@ -65,6 +68,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                     "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition"
                 },
                 title: if props.icon_only { "Add GIF" } else { "" },
+                aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
                 onclick: move |_| {
                     let current = *show_picker.read();
                     show_picker.set(!current);

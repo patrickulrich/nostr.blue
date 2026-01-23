@@ -83,8 +83,12 @@ self.addEventListener('fetch', (event) => {
           if (response.ok) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            return response;
           }
-          return response;
+          // Non-OK response: try cache first
+          return caches.match(event.request).then((cached) =>
+            cached || response  // Return cached if available, otherwise the error response
+          );
         })
         .catch(() =>
           caches.match(event.request).then((cached) =>

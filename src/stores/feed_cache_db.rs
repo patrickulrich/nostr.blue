@@ -78,6 +78,17 @@ pub struct LruEntry {
     pub last_access: u64,
 }
 
+/// Result of a bulk cache read operation, including failed entries for cleanup
+#[derive(Clone, Debug)]
+pub struct BulkReadResult<T> {
+    /// Successfully deserialized items
+    pub items: Vec<T>,
+    /// Number of entries that failed to deserialize
+    pub failed_count: usize,
+    /// Keys of entries that failed to deserialize (for cleanup)
+    pub failed_keys: Vec<String>,
+}
+
 // ============================================================================
 // Native stub (non-wasm32)
 // ============================================================================
@@ -143,7 +154,19 @@ mod native_stub {
             Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
         }
 
-        pub async fn get_feed_items_by_ids(&self, _event_ids: &[String]) -> Result<Vec<CachedFeedItem>, String> {
+        pub async fn get_feed_items_by_ids(&self, _event_ids: &[String]) -> Result<BulkReadResult<CachedFeedItem>, String> {
+            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_all_feed_metadata_bulk(&self) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
+            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn get_all_lru_entries_bulk(&self) -> Result<BulkReadResult<(String, LruEntry)>, String> {
+            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn delete_bad_entries(&self, _keys: &[String], _store_name: &str) -> Result<usize, String> {
             Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
         }
     }
@@ -332,8 +355,8 @@ mod wasm_impl {
             self.delete_value(STORE_FEED_ITEMS, event_id).await
         }
 
-        /// Get multiple feed items by their IDs
-        pub async fn get_feed_items_by_ids(&self, event_ids: &[String]) -> Result<Vec<CachedFeedItem>, String> {
+        /// Get multiple feed items by their IDs, tracking deserialization failures
+        pub async fn get_feed_items_by_ids(&self, event_ids: &[String]) -> Result<BulkReadResult<CachedFeedItem>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_FEED_ITEMS, IdbTransactionMode::Readonly)
@@ -344,6 +367,7 @@ mod wasm_impl {
                 .map_err(|e| format!("Store error: {:?}", e))?;
 
             let mut items = Vec::new();
+            let mut failed_keys = Vec::new();
 
             for event_id in event_ids {
                 let js_key = JsValue::from_str(event_id);
@@ -358,15 +382,24 @@ mod wasm_impl {
                         match serde_json::from_str::<CachedFeedItem>(&json_str) {
                             Ok(item) => items.push(item),
                             Err(e) => {
-                                log::warn!("Failed to deserialize cached feed item: {} - JSON: {}...",
-                                    e, &json_str[..json_str.len().min(100)]);
+                                log::error!(
+                                    "Cache corruption: Failed to deserialize feed item '{}': {} - JSON preview: {}",
+                                    event_id,
+                                    e,
+                                    &json_str[..json_str.len().min(200)]
+                                );
+                                failed_keys.push(event_id.clone());
                             }
                         }
                     }
                 }
             }
 
-            Ok(items)
+            Ok(BulkReadResult {
+                items,
+                failed_count: failed_keys.len(),
+                failed_keys,
+            })
         }
 
         /// Count total feed items in cache
@@ -525,6 +558,161 @@ mod wasm_impl {
             }
 
             Ok(entries)
+        }
+
+        /// Get all feed metadata entries with failure tracking (for eviction cleanup)
+        pub async fn get_all_feed_metadata_bulk(&self) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(STORE_FEED_METADATA, IdbTransactionMode::Readonly)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+
+            let store = tx
+                .object_store(STORE_FEED_METADATA)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+
+            let cursor = store
+                .open_cursor()
+                .map_err(|e| format!("Cursor error: {:?}", e))?
+                .await
+                .map_err(|e| format!("Cursor await error: {:?}", e))?;
+
+            let mut items = Vec::new();
+            let mut failed_keys = Vec::new();
+
+            if let Some(cursor) = cursor {
+                loop {
+                    if let Some(key_js) = cursor.key() {
+                        let value_js = cursor.value();
+                        if let (Some(key_str), Some(value_str)) = (
+                            key_js.as_string(),
+                            value_js.as_string(),
+                        ) {
+                            match serde_json::from_str::<FeedCacheMetadata>(&value_str) {
+                                Ok(metadata) => items.push((key_str, metadata)),
+                                Err(e) => {
+                                    log::error!(
+                                        "Cache corruption: Failed to deserialize feed metadata '{}': {} - JSON preview: {}",
+                                        key_str,
+                                        e,
+                                        &value_str[..value_str.len().min(200)]
+                                    );
+                                    failed_keys.push(key_str);
+                                }
+                            }
+                        }
+                    }
+
+                    let has_next = cursor
+                        .continue_cursor()
+                        .map_err(|e| format!("Cursor continue error: {:?}", e))?
+                        .await
+                        .map_err(|e| format!("Cursor continue await error: {:?}", e))?;
+
+                    if !has_next {
+                        break;
+                    }
+                }
+            }
+
+            Ok(BulkReadResult {
+                items,
+                failed_count: failed_keys.len(),
+                failed_keys,
+            })
+        }
+
+        /// Get all LRU entries with failure tracking (for eviction processing)
+        pub async fn get_all_lru_entries_bulk(&self) -> Result<BulkReadResult<(String, LruEntry)>, String> {
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(STORE_LRU_ORDER, IdbTransactionMode::Readonly)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+
+            let store = tx
+                .object_store(STORE_LRU_ORDER)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+
+            let cursor = store
+                .open_cursor()
+                .map_err(|e| format!("Cursor error: {:?}", e))?
+                .await
+                .map_err(|e| format!("Cursor await error: {:?}", e))?;
+
+            let mut items = Vec::new();
+            let mut failed_keys = Vec::new();
+
+            if let Some(cursor) = cursor {
+                loop {
+                    if let Some(key_js) = cursor.key() {
+                        let value_js = cursor.value();
+                        if let (Some(key_str), Some(value_str)) = (
+                            key_js.as_string(),
+                            value_js.as_string(),
+                        ) {
+                            match serde_json::from_str::<LruEntry>(&value_str) {
+                                Ok(entry) => items.push((key_str, entry)),
+                                Err(e) => {
+                                    log::error!(
+                                        "Cache corruption: Failed to deserialize LRU entry '{}': {} - JSON preview: {}",
+                                        key_str,
+                                        e,
+                                        &value_str[..value_str.len().min(200)]
+                                    );
+                                    failed_keys.push(key_str);
+                                }
+                            }
+                        }
+                    }
+
+                    let has_next = cursor
+                        .continue_cursor()
+                        .map_err(|e| format!("Cursor continue error: {:?}", e))?
+                        .await
+                        .map_err(|e| format!("Cursor continue await error: {:?}", e))?;
+
+                    if !has_next {
+                        break;
+                    }
+                }
+            }
+
+            Ok(BulkReadResult {
+                items,
+                failed_count: failed_keys.len(),
+                failed_keys,
+            })
+        }
+
+        /// Delete corrupted cache entries by their keys
+        pub async fn delete_bad_entries(&self, keys: &[String], store_name: &str) -> Result<usize, String> {
+            if keys.is_empty() {
+                return Ok(0);
+            }
+
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(store_name, IdbTransactionMode::Readwrite)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+
+            let store = tx
+                .object_store(store_name)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+
+            let mut deleted = 0;
+            for key in keys {
+                let js_key = JsValue::from_str(key);
+                if store.delete(&js_key).is_ok() {
+                    deleted += 1;
+                }
+            }
+
+            tx.await
+                .into_result()
+                .map_err(|e| format!("Transaction commit error: {:?}", e))?;
+
+            log::info!("Cleaned up {} corrupted cache entries from {}", deleted, store_name);
+            Ok(deleted)
         }
     }
 }
