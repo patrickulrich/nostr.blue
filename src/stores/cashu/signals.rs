@@ -251,20 +251,7 @@ pub async fn load_pending_secrets() {
 pub async fn cleanup_expired_pending_secrets() {
     const ONE_HOUR_SECS: u64 = 60 * 60;
 
-    let now = {
-        #[cfg(target_arch = "wasm32")]
-        {
-            (js_sys::Date::now() / 1000.0) as u64
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-        }
-    };
+    let now = super::utils::now_secs();
 
     let (before_count, removed_count) = {
         let mut secrets = PENDING_BY_MINT_SECRETS.write();

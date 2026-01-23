@@ -433,6 +433,7 @@ pub async fn receive_tokens_with_options(
     // Attempt publish with immediate retries before falling back to queue
     let mut event_id: Option<String> = None;
     let mut last_error = String::new();
+    let mut retryable = true; // Track if error is retryable
     let delays_ms = [500u32, 1000, 2000]; // Exponential backoff delays
 
     for (attempt, delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
@@ -473,28 +474,34 @@ pub async fn receive_tokens_with_options(
                 let err_str = last_error.to_lowercase();
                 if err_str.contains("banned") || err_str.contains("invalid") {
                     log::error!("Permanent error, stopping retries: {}", last_error);
+                    retryable = false; // Mark as non-retryable
                     break;
                 }
             }
         }
     }
 
-    // If all immediate retries failed, queue for background retry
+    // If all immediate retries failed, queue for background retry (only if retryable)
     let event_id = match event_id {
         Some(id) => id,
         None => {
-            log::error!("All publish attempts failed, queueing for retry: {}", last_error);
-            let pending_id = format!("pending_{}", super::utils::now_secs());
+            if retryable {
+                log::error!("All publish attempts failed, queueing for retry: {}", last_error);
+                let pending_id = format!("pending_{}", super::utils::now_secs());
 
-            // Queue for background retry - proofs are safe in CDK, just need Nostr backup
-            super::events::queue_token_event_for_retry(
-                builder,
-                pending_id.clone(),
-                mint_url.clone(),
-            )
-            .await;
+                // Queue for background retry - proofs are safe in CDK, just need Nostr backup
+                super::events::queue_token_event_for_retry(
+                    builder,
+                    pending_id.clone(),
+                    mint_url.clone(),
+                )
+                .await;
 
-            pending_id
+                pending_id
+            } else {
+                log::warn!("Permanent error - not queueing for retry: {}", last_error);
+                format!("local_{}", super::utils::now_secs())
+            }
         }
     };
     log::info!("Token event ID: {}", event_id);

@@ -160,13 +160,13 @@ pub struct ProofRecoveryResult {
 /// Urgency level for stuck proof display
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UrgencyLevel {
-    /// < 5 min (TRANSACTION_TIMEOUT_SECS)
+    /// < 5 min (TRANSACTION_TIMEOUT_SECS = 300s)
     Normal,
-    /// 5 min - 1 hr
+    /// 5-10 min (TRANSACTION_TIMEOUT_SECS to RESERVED_TIMEOUT_SECS)
     Warning,
-    /// 1 hr - 24 hr (PENDING_SPENT_TIMEOUT_SECS - RESERVED_TIMEOUT_SECS)
+    /// 10-30 min (RESERVED_TIMEOUT_SECS to PENDING_SPENT_TIMEOUT_DEFAULT)
     High,
-    /// > 24 hr (RESERVED_TIMEOUT_SECS)
+    /// > 30 min (PENDING_SPENT_TIMEOUT_DEFAULT = 1800s)
     Critical,
 }
 
@@ -531,10 +531,16 @@ fn recalculate_balance() {
 }
 
 /// Calculate urgency level based on how long proof has been stuck
+///
+/// Thresholds (checked in descending order):
+/// - > 1800s (30 min, PENDING_SPENT_TIMEOUT_DEFAULT) = Critical
+/// - > 600s (10 min, RESERVED_TIMEOUT_SECS) = High
+/// - > 300s (5 min, TRANSACTION_TIMEOUT_SECS) = Warning
+/// - <= 300s = Normal
 fn calculate_urgency(duration_secs: u64) -> UrgencyLevel {
-    if duration_secs > RESERVED_TIMEOUT_SECS {
+    if duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT {
         UrgencyLevel::Critical
-    } else if duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT {
+    } else if duration_secs > RESERVED_TIMEOUT_SECS {
         UrgencyLevel::High
     } else if duration_secs > TRANSACTION_TIMEOUT_SECS {
         UrgencyLevel::Warning
