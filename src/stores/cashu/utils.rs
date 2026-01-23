@@ -225,6 +225,12 @@ where
     loop {
         match operation().await {
             Ok(result) => {
+                if heal_attempt > 0 {
+                    log::info!(
+                        "Counter healing succeeded after {} attempt(s)",
+                        heal_attempt
+                    );
+                }
                 return Ok(CounterHealResult {
                     result,
                     heal_attempts: heal_attempt,

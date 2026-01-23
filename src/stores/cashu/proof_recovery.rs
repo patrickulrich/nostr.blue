@@ -12,7 +12,7 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
-use super::signals::{is_transaction_active, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{IN_FLIGHT_MELT_REQUESTS, WALLET_BALANCE, WALLET_TOKENS};
 use super::types::{
     ProofData, ProofState, WalletTokensStoreStoreExt,
     RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
@@ -224,12 +224,17 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         .collect();
     drop(pending_secrets);
 
-    // SAFETY (Risk 4): Filter out proofs that are part of active transactions
+    // SAFETY (Risk 4): Filter out proofs that are part of active in-flight melt operations
     // This prevents timeout recovery from interfering with still-running operations
-    safe_to_recover.retain(|p| {
-        let tx_id_str = p.transaction_id.map(|id| format!("tx_{}", id));
-        !is_transaction_active(&tx_id_str)
-    });
+    {
+        let in_flight = IN_FLIGHT_MELT_REQUESTS.read();
+        let in_flight_secrets: std::collections::HashSet<&str> = in_flight
+            .iter()
+            .flat_map(|req| req.proofs_used.iter().map(|p| p.secret.as_str()))
+            .collect();
+
+        safe_to_recover.retain(|p| !in_flight_secrets.contains(p.secret.as_str()));
+    }
 
     if safe_to_recover.is_empty() {
         log::debug!("All reserved proofs are still pending at mint");

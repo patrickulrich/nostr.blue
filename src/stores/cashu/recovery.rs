@@ -972,15 +972,15 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                         result.change_recovered += change_amount;
                         result.quotes_paid += 1;
                         log::info!("Recovered {} sats change from quote {}", change_amount, request.quote_id);
+                        // Only remove from in-flight on success
+                        remove_in_flight_melt_request(&request.transaction_id);
                     }
                     Err(e) => {
-                        log::warn!("Failed to recover change for quote {}: {}", request.quote_id, e);
+                        // Keep in-flight for retry on next restart
+                        log::warn!("Failed to recover change for quote {}, keeping for retry: {}", request.quote_id, e);
                         result.errors.push(format!("Change recovery failed for {}: {}", request.quote_id, e));
                     }
                 }
-
-                // Remove from in-flight tracking
-                remove_in_flight_melt_request(&request.transaction_id);
             }
             MeltQuoteState::Pending => {
                 // Lightning still in-flight, keep tracking (don't revert proofs!)
@@ -998,19 +998,21 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     request.quote_id, quote_status.state
                 );
 
-                // Step 1: Convert proofs for NUT-07 check
-                let cdk_proofs: Vec<cdk::nuts::Proof> = request.proofs_used.iter()
-                    .filter_map(|p| proof_data_to_cdk_proof(p).ok())
+                // Step 1: Convert proofs for NUT-07 check, keeping pairs aligned
+                let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request.proofs_used.iter()
+                    .filter_map(|p| proof_data_to_cdk_proof(p).ok().map(|cdk_p| (p, cdk_p)))
                     .collect();
 
-                if cdk_proofs.is_empty() {
+                if valid_pairs.is_empty() {
                     log::warn!("No valid proofs to check for quote {}", request.quote_id);
                     remove_in_flight_melt_request(&request.transaction_id);
                     continue;
                 }
 
+                let cdk_proofs: Vec<_> = valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
+
                 // Step 2: Check actual proof states at mint (NUT-07)
-                let proof_states = match wallet.check_proofs_spent(cdk_proofs.clone()).await {
+                let proof_states = match wallet.check_proofs_spent(cdk_proofs).await {
                     Ok(states) => states,
                     Err(e) => {
                         // Network error - DO NOT revert, keep tracking for next startup
@@ -1020,15 +1022,15 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     }
                 };
 
-                // Step 3: Categorize proofs by mint state
+                // Step 3: Categorize proofs by mint state (now properly aligned)
                 let mut unspent_secrets = Vec::new();
                 let mut spent_secrets = Vec::new();
                 let mut pending_count = 0;
 
-                for (proof, state_info) in request.proofs_used.iter().zip(proof_states.iter()) {
+                for ((original_proof, _), state_info) in valid_pairs.iter().zip(proof_states.iter()) {
                     match state_info.state {
-                        State::Unspent => unspent_secrets.push(proof.secret.clone()),
-                        State::Spent => spent_secrets.push(proof.secret.clone()),
+                        State::Unspent => unspent_secrets.push(original_proof.secret.clone()),
+                        State::Spent => spent_secrets.push(original_proof.secret.clone()),
                         State::Pending | State::PendingSpent => pending_count += 1,
                         State::Reserved => {} // Don't touch - may be part of active operation
                     }
@@ -1182,14 +1184,16 @@ async fn recover_melt_change_deduplicated(
 
             // Register proofs in event map for fast lookup
             super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
+
+            Ok(recovered_amount)
         }
         Err(e) => {
-            log::warn!("Failed to publish recovered change proofs: {}", e);
-            // Proofs are still in CDK database, will be recovered on next sync
+            log::warn!("Failed to publish recovered change proofs to Nostr: {}. Proofs safe in CDK, will retry on next sync.", e);
+            // Return 0 to indicate no proofs were fully recovered (synced to Nostr)
+            // This prevents incorrect metrics and keeps request in-flight for retry
+            Ok(0)
         }
     }
-
-    Ok(recovered_amount)
 }
 
 // =============================================================================
