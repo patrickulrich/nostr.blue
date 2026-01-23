@@ -9,7 +9,9 @@ use dioxus::prelude::*;
 use crate::components::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 use crate::stores::cashu::proof_recovery::{
     self, StuckProofInfo, UrgencyLevel, WalletHealthStats,
+    RESERVED_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_DEFAULT,
 };
+use crate::stores::cashu::types::ProofState;
 use crate::utils::format_sats_with_separator;
 
 // =============================================================================
@@ -105,6 +107,21 @@ fn urgency_color_class(urgency: UrgencyLevel) -> &'static str {
     }
 }
 
+/// Calculate the remaining seconds until a group becomes eligible for recovery
+fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
+    proofs
+        .iter()
+        .filter_map(|p| {
+            let timeout = match p.state {
+                ProofState::Reserved => RESERVED_TIMEOUT_SECS,
+                ProofState::PendingSpent => PENDING_SPENT_TIMEOUT_DEFAULT,
+                _ => return None,
+            };
+            timeout.checked_sub(p.stuck_duration_secs)
+        })
+        .max()
+}
+
 // =============================================================================
 // Components
 // =============================================================================
@@ -155,7 +172,11 @@ fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) ->
                     span { class: "text-green-500", "Eligible for recovery" }
                 } else {
                     span { class: "text-muted-foreground",
-                        "Recovery available after 24h"
+                        if let Some(remaining) = remaining_until_recovery(&proofs) {
+                            "Recovery available in {format_duration(remaining)}"
+                        } else {
+                            "Recovery pending"
+                        }
                     }
                 }
             }
