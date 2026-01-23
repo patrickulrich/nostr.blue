@@ -234,21 +234,38 @@ pub async fn consolidate_dust(
     })
 }
 
-/// Consolidate dust across all mints
+/// Consolidate dust across all mints (parallel execution)
 pub async fn consolidate_all_dust(
     threshold: u64,
 ) -> HashMap<String, Result<DustConsolidationResult, String>> {
     let stats = get_all_dust_stats(threshold);
-    let mut results = HashMap::new();
 
-    for (mint_url, mint_stats) in stats {
-        if mint_stats.should_consolidate {
-            let result = consolidate_dust(&mint_url, threshold).await;
-            results.insert(mint_url, result);
-        }
+    // Filter to mints that should consolidate
+    let mints_to_consolidate: Vec<_> = stats
+        .into_iter()
+        .filter(|(_, s)| s.should_consolidate)
+        .map(|(url, _)| url)
+        .collect();
+
+    if mints_to_consolidate.is_empty() {
+        return HashMap::new();
     }
 
-    results
+    // Parallel dust consolidation - each mint has its own lock
+    let futures: Vec<_> = mints_to_consolidate
+        .iter()
+        .map(|mint_url| {
+            let mint_url = mint_url.clone();
+            async move {
+                let result = consolidate_dust(&mint_url, threshold).await;
+                (mint_url, result)
+            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    results.into_iter().collect()
 }
 
 // =============================================================================

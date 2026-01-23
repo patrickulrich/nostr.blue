@@ -56,14 +56,30 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     // Get existing keyset IDs from all current mints
     let mut existing_keyset_to_mint: HashMap<String, String> = HashMap::new();
 
-    // Collect keysets from all existing mints in the MultiMintWallet
+    // Collect keysets from all existing mints in parallel (read-only, safe)
     if let Some(ref multi_wallet) = *cashu_cdk_bridge::MULTI_WALLET.read() {
-        for wallet in multi_wallet.get_wallets().await {
-            let mint_url = wallet.mint_url.to_string();
-            if let Ok(keysets) = wallet.get_mint_keysets().await {
-                for keyset in keysets {
-                    existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
+        let wallets = multi_wallet.get_wallets().await;
+
+        let futures: Vec<_> = wallets
+            .iter()
+            .map(|wallet| {
+                let mint_url = wallet.mint_url.to_string();
+                let wallet = wallet.clone();
+                async move {
+                    match wallet.get_mint_keysets().await {
+                        Ok(keysets) => Some((mint_url, keysets)),
+                        Err(_) => None,
+                    }
                 }
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        for result in results.into_iter().flatten() {
+            let (mint_url, keysets) = result;
+            for keyset in keysets {
+                existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
             }
         }
     }
@@ -1046,24 +1062,38 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     })
 }
 
-/// Consolidate proofs across all mints
+/// Consolidate proofs across all mints (parallel execution)
 pub async fn consolidate_all_mints() -> Result<Vec<(String, ConsolidationResult)>, String> {
     let mints = get_mints();
-    let mut results = Vec::new();
 
-    for mint in mints {
-        match consolidate_proofs(mint.clone()).await {
-            Ok(result) => {
-                results.push((mint, result));
+    if mints.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Parallel consolidation - each mint has its own lock
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint| {
+            let mint = mint.clone();
+            async move {
+                let result = consolidate_proofs(mint.clone()).await;
+                (mint, result)
             }
-            Err(e) => {
-                log::warn!("Failed to consolidate {}: {}", mint, e);
-                // Continue with other mints even if one fails
-            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    // Collect successful results, log failures
+    let mut output = Vec::new();
+    for (mint, result) in results {
+        match result {
+            Ok(r) => output.push((mint, r)),
+            Err(e) => log::warn!("Failed to consolidate {}: {}", mint, e),
         }
     }
 
-    Ok(results)
+    Ok(output)
 }
 
 // =============================================================================
