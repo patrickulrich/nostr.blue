@@ -142,6 +142,7 @@ pub fn SettingsRelays() -> Element {
         let is_local = lower.contains("127.0.0.1") ||
             lower.contains("localhost") ||
             lower.contains("192.168.") ||
+            lower.ends_with(".local") ||
             lower.contains(".local:") ||
             lower.contains(".local/") ||
             lower.contains("umbrel:");
@@ -310,7 +311,10 @@ pub fn SettingsRelays() -> Element {
                 relays.push(normalized);
                 // Save to LocalStorage immediately
                 relay::save_local_relays(&relays);
+                // Sync to global signal so other components observe the change
+                let relays_clone = relays.clone();
                 drop(relays);
+                *relay::LOCAL_RELAYS.write() = relays_clone;
                 new_local_relay.set(String::new());
                 local_error.set(None);
             }
@@ -324,6 +328,8 @@ pub fn SettingsRelays() -> Element {
             relays.remove(index);
             // Save to LocalStorage immediately
             relay::save_local_relays(&relays);
+            // Sync to global signal so other components observe the change
+            *relay::LOCAL_RELAYS.write() = relays.clone();
         }
     };
 

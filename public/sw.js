@@ -11,12 +11,37 @@ const STATIC_ASSETS = [
   // a build-time generated precache manifest (e.g., workbox-precaching).
 ];
 
-// Install - cache static assets
+// Install - cache static assets + discover hashed assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(CACHE_NAME).then(async (cache) => {
       console.log('[SW] Caching static assets');
-      return cache.addAll(STATIC_ASSETS);
+      await cache.addAll(STATIC_ASSETS);
+
+      // Discover and cache hashed assets from index.html
+      // Dioxus uses asset!() macro which hashes CSS/JS at build time
+      try {
+        const response = await fetch('/index.html');
+        const html = await response.text();
+
+        // Find all /assets/ CSS and JS references
+        const assetRegex = /\/assets\/[^"'\s]+\.(css|js)/g;
+        const matches = html.match(assetRegex) || [];
+
+        // Also check root document (Dioxus may inject assets differently)
+        const docResponse = await fetch('/');
+        const docHtml = await docResponse.text();
+        const docMatches = docHtml.match(assetRegex) || [];
+
+        const allAssets = [...new Set([...matches, ...docMatches])];
+
+        if (allAssets.length > 0) {
+          console.log('[SW] Discovered hashed assets:', allAssets);
+          await cache.addAll(allAssets);
+        }
+      } catch (err) {
+        console.warn('[SW] Failed to discover hashed assets:', err);
+      }
     }).then(() => {
       // skipWaiting must be inside waitUntil to ensure caching completes first
       self.skipWaiting();
