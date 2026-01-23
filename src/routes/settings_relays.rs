@@ -50,6 +50,9 @@ pub fn SettingsRelays() -> Element {
     // Save status
     let mut save_status = use_signal(|| None::<String>);
 
+    // Re-entry guard for publish (Dioxus pattern: prevent concurrent spawns)
+    let mut publishing = use_signal(|| false);
+
     // === REACTIVE EFFECTS ===
     // Watch global signals and sync to local state
     // Use .read() to subscribe to changes (Dioxus pattern: .read() subscribes, .peek() does not)
@@ -312,6 +315,12 @@ pub fn SettingsRelays() -> Element {
 
     // === PUBLISH HANDLER ===
     let publish_relay_lists = move |_| {
+        // Re-entry guard: prevent concurrent publishes (Dioxus pattern)
+        if *publishing.read() {
+            return;
+        }
+        publishing.set(true);
+
         let general = general_relays.read().clone();
         let dm = dm_relays.read().clone();
         let search = search_relays.read().clone();
@@ -324,6 +333,7 @@ pub fn SettingsRelays() -> Element {
                 Some(c) => c,
                 None => {
                     save_status.set(Some("Client not initialized".to_string()));
+                    publishing.set(false);  // Clear guard on early return
                     return;
                 }
             };
@@ -331,24 +341,28 @@ pub fn SettingsRelays() -> Element {
             // Publish kind 10002 (general relays)
             if let Err(e) = relay::publish_relay_list(general.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish general relays: {}", e)));
+                publishing.set(false);  // Clear guard on error
                 return;
             }
 
             // Publish kind 10050 (DM relays)
             if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish DM relays: {}", e)));
+                publishing.set(false);  // Clear guard on error
                 return;
             }
 
             // Publish kind 10007 (search relays)
             if let Err(e) = relay::publish_search_relays(search.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish search relays: {}", e)));
+                publishing.set(false);  // Clear guard on error
                 return;
             }
 
             // Publish kind 10006 (blocked relays)
             if let Err(e) = relay::publish_blocked_relays(blocked.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish blocked relays: {}", e)));
+                publishing.set(false);  // Clear guard on error
                 return;
             }
 
@@ -377,6 +391,7 @@ pub fn SettingsRelays() -> Element {
             // Clear message after 3 seconds
             gloo_timers::future::TimeoutFuture::new(3000).await;
             save_status.set(None);
+            publishing.set(false);  // Clear guard on completion
         });
     };
 

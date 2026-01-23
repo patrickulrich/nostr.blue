@@ -110,6 +110,12 @@ pub fn Photos() -> Element {
                 log::info!("Loaded {} photos from cache", cached_items.len());
                 // Convert FeedItem to Event
                 let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+
+                // Set pagination cursor from cache (enables scroll if network fails)
+                if let Some(oldest_event) = cached_events.last() {
+                    oldest_timestamp.set(Some(oldest_event.created_at.as_secs()));
+                }
+
                 events.set(cached_events);
             }
 

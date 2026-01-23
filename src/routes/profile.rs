@@ -1956,18 +1956,27 @@ async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result
 // Special handling for Likes tab - Relay phase
 // Uses gossip for reactions (single author), connected relays for liked posts (many authors)
 async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+    const REACTIONS_LIMIT: usize = 50;
+
     // Step 1: Fetch user's reactions using gossip (single author - fast)
     let mut filter = Filter::new()
         .author(public_key)
         .kind(Kind::Reaction)
-        .limit(50);
+        .limit(REACTIONS_LIMIT);
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
 
     let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
-    let relay_count = reactions.len();
+
+    // nostr-sdk pattern: full page = possibly more data
+    // Report limit as relay_count when we got a full page to signal has_more
+    let relay_count = if reactions.len() >= REACTIONS_LIMIT {
+        REACTIONS_LIMIT
+    } else {
+        reactions.len()
+    };
 
     if reactions.is_empty() {
         return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
@@ -2005,17 +2014,22 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
         log::info!("Fetching {} missing liked events via gossip fallback", missing_ids.len());
         let gossip_filter = Filter::new().ids(missing_ids).limit(100);
         // Use gossip (fetch_profile_events_from_relays) as fallback - same as SDK's Orphan handling
-        if let Ok(gossip_events) = nostr_client::fetch_profile_events_from_relays(
+        match nostr_client::fetch_profile_events_from_relays(
             gossip_filter, Duration::from_secs(10)
         ).await {
-            let mut found_via_gossip = 0;
-            for event in gossip_events {
-                if !found_ids.contains(&event.id) {
-                    event_vec.push(event);
-                    found_via_gossip += 1;
+            Ok(gossip_events) => {
+                let mut found_via_gossip = 0;
+                for event in gossip_events {
+                    if !found_ids.contains(&event.id) {
+                        event_vec.push(event);
+                        found_via_gossip += 1;
+                    }
                 }
+                log::info!("Recovered {} events via gossip", found_via_gossip);
             }
-            log::info!("Recovered {} events via gossip", found_via_gossip);
+            Err(e) => {
+                log::warn!("Gossip fallback failed for liked events: {}", e);
+            }
         }
     }
 
