@@ -71,6 +71,109 @@ pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
     Signal::global(HashMap::new);
 
 // =============================================================================
+// Pending Secrets Persistence Functions
+// =============================================================================
+
+/// Persist pending secrets to IndexedDB (call after modifications)
+///
+/// This ensures pending-at-mint state survives app restarts.
+/// Uses spawn to avoid blocking the caller.
+pub fn schedule_persist_pending_secrets() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use dioxus::prelude::spawn;
+        spawn(async move {
+            persist_pending_secrets_impl().await;
+        });
+    }
+}
+
+/// Internal implementation for persisting pending secrets
+async fn persist_pending_secrets_impl() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping pending secrets persistence: localstore not initialized");
+            return;
+        }
+    };
+
+    // Snapshot the current state
+    let secrets = PENDING_BY_MINT_SECRETS.read().clone();
+
+    if let Err(e) = localstore.save_pending_mint_secrets(&secrets).await {
+        log::warn!("Failed to persist pending secrets: {}", e);
+    } else {
+        log::debug!("Persisted {} pending secrets to IndexedDB", secrets.len());
+    }
+}
+
+/// Load pending secrets from IndexedDB (call on startup)
+///
+/// Restores the pending-at-mint state from the previous session.
+pub async fn load_pending_secrets() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping pending secrets load: localstore not initialized");
+            return;
+        }
+    };
+
+    match localstore.load_pending_mint_secrets().await {
+        Ok(Some(secrets)) => {
+            if !secrets.is_empty() {
+                log::info!("Loaded {} pending mint secrets from storage", secrets.len());
+                *PENDING_BY_MINT_SECRETS.write() = secrets;
+            }
+        }
+        Ok(None) => {
+            log::debug!("No pending secrets found in storage");
+        }
+        Err(e) => {
+            log::warn!("Failed to load pending secrets: {}", e);
+        }
+    }
+}
+
+/// Clean up expired pending secrets (older than 1 hour)
+///
+/// Pending proofs should resolve within a reasonable time.
+/// This prevents stale entries from accumulating indefinitely.
+pub async fn cleanup_expired_pending_secrets() {
+    const ONE_HOUR_SECS: u64 = 60 * 60;
+
+    let now = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            (js_sys::Date::now() / 1000.0) as u64
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        }
+    };
+
+    let (before_count, removed_count) = {
+        let mut secrets = PENDING_BY_MINT_SECRETS.write();
+        let before = secrets.len();
+        secrets.retain(|_, timestamp| now.saturating_sub(*timestamp) < ONE_HOUR_SECS);
+        let after = secrets.len();
+        (before, before - after)
+    };
+
+    if removed_count > 0 {
+        log::info!("Cleaned up {} expired pending secrets ({} remaining)", removed_count, before_count - removed_count);
+        // Persist after cleanup
+        persist_pending_secrets_impl().await;
+    }
+}
+
+// =============================================================================
 // Sync State Signals
 // =============================================================================
 

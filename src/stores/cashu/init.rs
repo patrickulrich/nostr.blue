@@ -204,6 +204,9 @@ pub async fn init_wallet() -> Result<(), String> {
                             log::warn!("Failed to load pending events: {}", e);
                         }
 
+                        // Load persisted pending secrets (proofs pending at mint)
+                        super::signals::load_pending_secrets().await;
+
                         // Start background processor for pending events
                         start_pending_events_processor();
 
@@ -216,6 +219,9 @@ pub async fn init_wallet() -> Result<(), String> {
                             #[cfg(target_arch = "wasm32")]
                             gloo_timers::future::TimeoutFuture::new(500).await;
 
+                            // Phase 0: Clean up any expired pending secrets from previous sessions
+                            super::signals::cleanup_expired_pending_secrets().await;
+
                             // Phase 1: Sync proof states with all mints (NUT-07)
                             // Detects proofs spent elsewhere, proofs pending at mint
                             log::info!("Starting wallet recovery - syncing with mints...");
@@ -227,6 +233,26 @@ pub async fn init_wallet() -> Result<(), String> {
                             // Completes paid-but-not-minted quotes, recovers change, etc.
                             if let Err(e) = recover_pending_operations().await {
                                 log::warn!("Pending operation recovery failed: {}", e);
+                            }
+
+                            // Phase 2.5: Recover stuck proofs (SAFE: checks mint + timeouts)
+                            // Recovers proofs stuck in Reserved/PendingSpent states
+                            match super::proof_recovery::run_full_recovery().await {
+                                result if result.recovered_count > 0 || result.spent_count > 0 => {
+                                    log::info!(
+                                        "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
+                                        result.recovered_count,
+                                        result.recovered_value,
+                                        result.spent_count,
+                                        result.spent_value
+                                    );
+                                }
+                                result if !result.errors.is_empty() => {
+                                    for err in result.errors {
+                                        log::warn!("Proof recovery error: {}", err);
+                                    }
+                                }
+                                _ => {}
                             }
 
                             // Phase 3: Check for paid mint quotes using CDK

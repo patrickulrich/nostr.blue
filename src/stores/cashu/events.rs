@@ -870,6 +870,7 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Calling this function multiple times is safe - subsequent calls are no-ops.
 ///
 /// Uses adaptive interval: 30s when there are pending events, 5 minutes when idle.
+/// Also runs periodic proof recovery and pending secrets cleanup.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
     use dioxus::prelude::spawn;
@@ -887,6 +888,9 @@ pub fn start_pending_events_processor() {
     }
 
     spawn(async {
+        // Counter for periodic recovery (every 6th iteration when idle = ~30 min)
+        let mut recovery_counter = 0u32;
+
         loop {
             // Adaptive interval: 30s when pending events exist, 5min otherwise
             let pending_count = PENDING_NOSTR_EVENTS.read().len();
@@ -898,13 +902,40 @@ pub fn start_pending_events_processor() {
 
             TimeoutFuture::new(interval_ms).await;
 
+            // Process pending Nostr events
             if let Err(e) = process_pending_events().await {
                 log::error!("Error processing pending events: {}", e);
+            }
+
+            // Every 6th iteration when idle (roughly every 30 min), run maintenance tasks
+            recovery_counter += 1;
+            if recovery_counter >= 6 && pending_count == 0 {
+                recovery_counter = 0;
+
+                // Clean expired pending secrets (proofs pending at mint for >1 hour)
+                super::signals::cleanup_expired_pending_secrets().await;
+
+                // Run proof recovery to catch any stuck proofs
+                match super::proof_recovery::run_full_recovery().await {
+                    result if result.recovered_count > 0 || result.spent_count > 0 => {
+                        log::info!(
+                            "Periodic recovery: {} recovered, {} spent",
+                            result.recovered_count,
+                            result.spent_count
+                        );
+                    }
+                    result if !result.errors.is_empty() => {
+                        for err in result.errors {
+                            log::debug!("Periodic recovery error: {}", err);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     });
 
-    log::info!("Started pending events background processor (adaptive interval)");
+    log::info!("Started pending events background processor (adaptive interval + periodic recovery)");
 }
 
 /// No-op on non-WASM targets (gloo_timers is WASM-only)
