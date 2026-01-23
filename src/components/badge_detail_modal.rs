@@ -35,16 +35,9 @@ pub fn BadgeDetailModal(
     on_close: EventHandler<()>,
     on_accept: EventHandler<()>,
     on_reject: EventHandler<()>,
-    /// Optional callback for parent to signal operation completion (true=success, false=error).
-    /// Call this on both success AND failure to immediately reset processing state.
-    #[props(optional)]
-    on_complete: Option<EventHandler<bool>>,
 ) -> Element {
     let mut processing_state = use_signal(ProcessingState::default);
     let mut timeout_task: Signal<Option<Task>> = use_signal(|| None);
-
-    // Track completion signal from parent for immediate reset
-    let mut completion_signal = use_signal(|| None::<bool>);
 
     // Reset processing state when is_accepted changes (operation completed by parent)
     use_effect(use_reactive!(|is_accepted| {
@@ -53,20 +46,12 @@ pub fn BadgeDetailModal(
         let _ = is_accepted;
     }));
 
-    // Effect to reset processing state on completion signal from parent
-    use_effect(move || {
-        if completion_signal.read().is_some() {
-            processing_state.set(ProcessingState::Idle);
-            completion_signal.set(None);
-        }
-    });
-
     // Fallback timeout to reset stuck processing state
     use_effect(move || {
         let current_state = *processing_state.read();
 
-        // Cancel any existing timeout - take() swaps with None via std::mem::take
-        if let Some(task) = timeout_task.take() {
+        // Cancel any existing timeout - write().take() swaps with None via std::mem::take
+        if let Some(task) = timeout_task.write().take() {
             task.cancel();  // Immediately removes future from scheduler
         }
 

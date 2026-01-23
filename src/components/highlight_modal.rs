@@ -32,14 +32,13 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
 
     // Sync local is_submitting with parent's submitting prop when it changes to false
     // This handles the case where parent closes the modal and reopens it
-    {
-        let parent_submitting = props.submitting;
-        use_effect(move || {
-            if parent_submitting == Some(false) {
-                is_submitting.set(false);
-            }
-        });
-    }
+    // Note: use_reactive! requires capturing the prop value first, not props.field syntax
+    let parent_submitting = props.submitting;
+    use_effect(use_reactive!(|parent_submitting| {
+        if parent_submitting == Some(false) {
+            is_submitting.set(false);
+        }
+    }));
 
     // Use parent's submitting if provided, otherwise use local state
     let effective_submitting = props.submitting.unwrap_or(*is_submitting.read());

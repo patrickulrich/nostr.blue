@@ -179,7 +179,8 @@ pub async fn init_feed_cache() -> Result<(), String> {
     }
 
     let db = FeedCacheDb::new().await?;
-    FEED_CACHE_DB.set(db).map_err(|_| "Feed cache already initialized".to_string())?;
+    // OnceLock::set returns Err if already set - treat as success (race won by another task)
+    let _ = FEED_CACHE_DB.set(db);
 
     log::info!("Feed cache initialized");
     Ok(())
@@ -220,34 +221,51 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
     // Fetch cached items (with failure tracking for cleanup)
     let cached_result = db.get_feed_items_by_ids(&event_ids).await?;
 
-    // Log any deserialization failures for debugging
+    // Log any deserialization failures for debugging and prune failed keys
     if cached_result.failed_count > 0 {
         log::warn!(
             "Feed cache: {} items failed deserialization (keys: {:?})",
             cached_result.failed_count,
             cached_result.failed_keys
         );
+
+        // Prune failed keys from metadata to prevent perpetual retries
+        if let Ok(Some(mut updated_metadata)) = db.get_feed_metadata(&feed_key).await {
+            let failed_set: HashSet<&String> = cached_result.failed_keys.iter().collect();
+            updated_metadata.event_ids.retain(|id| !failed_set.contains(id));
+            if let Err(e) = db.put_feed_metadata(&feed_key, &updated_metadata).await {
+                log::error!("Failed to persist pruned feed metadata: {}", e);
+            }
+        }
     }
 
     // Convert to FeedItems
     let mut feed_items = Vec::new();
     for cached in cached_result.items {
-        if let Ok(event) = serde_json::from_str::<Event>(&cached.event_json) {
-            let feed_item = match cached.item_type {
-                CachedFeedItemType::OriginalPost => FeedItem::OriginalPost(event),
-                CachedFeedItemType::Repost { reposted_by, repost_timestamp } => {
-                    // For reposts, reconstruct the FeedItem::Repost variant
-                    use nostr_sdk::{PublicKey, Timestamp};
-                    let pubkey = PublicKey::parse(&reposted_by).unwrap_or(event.pubkey);
-                    FeedItem::Repost {
+        let event = match serde_json::from_str::<Event>(&cached.event_json) {
+            Ok(e) => e,
+            Err(_) => continue, // Skip invalid JSON
+        };
+
+        let feed_item = match cached.item_type {
+            CachedFeedItemType::OriginalPost => FeedItem::OriginalPost(event),
+            CachedFeedItemType::Repost { reposted_by, repost_timestamp } => {
+                // For reposts, reconstruct the FeedItem::Repost variant
+                use nostr_sdk::{PublicKey, Timestamp};
+                match PublicKey::parse(&reposted_by) {
+                    Ok(pubkey) => FeedItem::Repost {
                         original: event,
                         reposted_by: pubkey,
                         repost_timestamp: Timestamp::from(repost_timestamp),
+                    },
+                    Err(e) => {
+                        log::warn!("Invalid reposted_by pubkey '{}': {}, skipping", reposted_by, e);
+                        continue; // Skip item with invalid pubkey
                     }
                 }
-            };
-            feed_items.push(feed_item);
-        }
+            }
+        };
+        feed_items.push(feed_item);
     }
 
     // Sort by timestamp descending
@@ -399,10 +417,23 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
     let min_age = now.saturating_sub(MIN_AGE_BEFORE_EVICTION_SECS);
 
     let eviction_candidates: Vec<_> = lru_entries
-        .into_iter()
+        .iter()
         .filter(|(_, entry)| entry.last_access < min_age)
         .take(EVICTION_BATCH_SIZE)
+        .cloned()
         .collect();
+
+    // Fallback: if no candidates but still over limit, evict oldest items anyway
+    let eviction_candidates = if eviction_candidates.is_empty() && total_items > MAX_TOTAL_ITEMS as u32 {
+        log::warn!("All items are recent but over hard cap, evicting oldest {} items", EVICTION_BATCH_SIZE);
+        lru_entries
+            .iter()
+            .take(EVICTION_BATCH_SIZE)
+            .cloned()
+            .collect()
+    } else {
+        eviction_candidates
+    };
 
     let mut evicted = 0;
     let mut evicted_ids: Vec<String> = Vec::new();

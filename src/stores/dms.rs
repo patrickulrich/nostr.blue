@@ -269,6 +269,9 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
 
     log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
 
+    // Ensure relays are ready before any network operations
+    nostr_client::ensure_relays_ready(&client).await;
+
     // Pre-send validation: Check if recipient has NIP-17 inbox relays (kind 10050)
     // This gives a clear error before attempting to send, rather than failing silently
     let filter = Filter::new()
@@ -308,9 +311,6 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
                    They may not be able to receive private messages. \
                    Ask them to set up inbox relays in their Nostr client.".to_string());
     }
-
-    // Ensure relays are ready before sending (nostr-sdk pattern: pool checks before send)
-    nostr_client::ensure_relays_ready(&client).await;
 
     // Build the rumor (kind 14 unsigned message)
     let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
