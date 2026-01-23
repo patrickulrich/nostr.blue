@@ -847,7 +847,7 @@ pub async fn process_pending_events() -> Result<usize, String> {
 ///
 /// Called when a pending TokenEvent is successfully published to Nostr.
 /// Updates the token in WALLET_TOKENS from the pending_id to the real Nostr event_id.
-fn update_token_event_id(pending_id: &str, real_event_id: &str) {
+pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
     let store = WALLET_TOKENS.read();
     let mut data_signal = store.data();
     let mut data = data_signal.write();
@@ -858,6 +858,85 @@ fn update_token_event_id(pending_id: &str, real_event_id: &str) {
     } else {
         log::warn!("Could not find token with pending_id {} to update", pending_id);
     }
+}
+
+/// Publish a token event for orphaned proofs discovered in CDK
+///
+/// This follows the same pattern as publish_send_events but without deletion events.
+/// Used by `sync_orphaned_cdk_proofs_to_nostr()` to publish proofs that exist in CDK
+/// but are not in WALLET_TOKENS (e.g., from crashed send/melt operations).
+///
+/// nostr-sdk saves events to local database before relay transmission,
+/// so data is persisted even if relay publish fails.
+pub async fn publish_orphaned_proofs_event(
+    mint_url: &str,
+    proofs: &[ProofData],
+) -> Result<String, String> {
+    use nostr_sdk::signer::NostrSigner;
+    use super::types::ExtendedCashuProof;
+
+    if proofs.is_empty() {
+        return Err("No proofs to publish".to_string());
+    }
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // Convert to extended proofs format
+    let extended_proofs: Vec<ExtendedCashuProof> = proofs
+        .iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = super::types::ExtendedTokenEvent {
+        mint: mint_url.to_string(),
+        unit: "sat".to_string(),
+        proofs: extended_proofs,
+        del: vec![], // No deletions for orphan recovery
+    };
+
+    let json_content = serde_json::to_string(&token_event_data)
+        .map_err(|e| format!("Failed to serialize: {}", e))?;
+
+    let encrypted = signer
+        .nip44_encrypt(&pubkey, &json_content)
+        .await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+    // Pre-compute event ID from unsigned event
+    let mut unsigned = builder.clone().build(pubkey);
+    let event_id_hex = unsigned.id().to_hex();
+
+    // Sign the event
+    let signed_event = unsigned
+        .sign(&signer)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+
+    // Publish (nostr-sdk saves locally first)
+    match client.send_event(&signed_event).await {
+        Ok(_) => {
+            log::info!("Published orphaned proofs token event: {}", event_id_hex);
+        }
+        Err(e) => {
+            log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);
+            queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+        }
+    }
+
+    Ok(event_id_hex)
 }
 
 /// Guard to prevent multiple processor spawns

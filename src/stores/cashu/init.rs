@@ -222,6 +222,31 @@ pub async fn init_wallet() -> Result<(), String> {
                             // Phase 0: Clean up any expired pending secrets from previous sessions
                             super::signals::cleanup_expired_pending_secrets().await;
 
+                            // Phase 0.5: Sync orphaned CDK proofs to NIP-60
+                            // This recovers proofs from crashed send/melt operations:
+                            // - Proofs exist in CDK's IndexedDB but not in WALLET_TOKENS
+                            // - Verified with mint (NUT-07) before publishing to Nostr
+                            // Must run AFTER inject_nip60_proofs_to_cdk() but BEFORE sync_state_with_all_mints()
+                            match super::recovery::sync_orphaned_cdk_proofs_to_nostr().await {
+                                Ok(result) => {
+                                    if result.proofs_recovered > 0 {
+                                        log::info!(
+                                            "Orphan sync: recovered {} proofs ({} sats) from CDK to NIP-60",
+                                            result.proofs_recovered,
+                                            result.sats_recovered
+                                        );
+                                    }
+                                    if !result.errors.is_empty() {
+                                        for err in result.errors {
+                                            log::warn!("Orphan sync error: {}", err);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Orphan sync failed: {}", e);
+                                }
+                            }
+
                             // Phase 1: Sync proof states with all mints (NUT-07)
                             // Detects proofs spent elsewhere, proofs pending at mint
                             log::info!("Starting wallet recovery - syncing with mints...");
