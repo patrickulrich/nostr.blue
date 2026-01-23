@@ -44,6 +44,8 @@ pub async fn queue_nostr_event(
         created_at,
         retry_count: 0,
         last_retry_at: None,
+        pending_token_id: None,
+        mint_url: None,
     };
 
     // Save to in-memory queue
@@ -156,6 +158,83 @@ pub async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type:
                 Err(sign_err) => {
                     log::error!("Failed to sign event for queueing: {}", sign_err);
                 }
+            }
+        }
+    }
+}
+
+/// Queue a token event for retry with tracking info
+///
+/// The `pending_token_id` links this pending event to a token in WALLET_TOKENS,
+/// allowing us to update the token's event_id when background publish succeeds.
+pub async fn queue_token_event_for_retry(
+    builder: nostr_sdk::EventBuilder,
+    pending_token_id: String,
+    mint_url: String,
+) {
+    let signer = match crate::stores::signer::get_signer() {
+        Some(s) => s,
+        None => {
+            log::error!("Cannot queue token event: no signer available");
+            return;
+        }
+    };
+
+    let pending_token_id_clone = pending_token_id.clone();
+    let mint_url_clone = mint_url.clone();
+
+    let do_queue = |event: nostr_sdk::Event| async move {
+        let event_json = match serde_json::to_string(&event) {
+            Ok(j) => j,
+            Err(e) => {
+                log::error!("Failed to serialize event: {}", e);
+                return;
+            }
+        };
+
+        let pending_event = PendingNostrEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            builder_json: event_json,
+            event_type: PendingEventType::TokenEvent,
+            created_at: chrono::Utc::now().timestamp() as u64,
+            retry_count: 0,
+            last_retry_at: None,
+            pending_token_id: Some(pending_token_id_clone.clone()),
+            mint_url: Some(mint_url_clone.clone()),
+        };
+
+        // Add to in-memory queue
+        PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
+
+        // Persist to IndexedDB
+        if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+            if let Err(e) = localstore.add_pending_event(&pending_event).await {
+                log::warn!("Failed to persist pending event: {}", e);
+            }
+        }
+
+        log::info!("Queued token event for retry, pending_id={}", pending_token_id_clone);
+    };
+
+    // Sign based on signer type (same pattern as queue_event_for_retry)
+    match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            match builder.sign_with_keys(&keys) {
+                Ok(event) => do_queue(event).await,
+                Err(e) => log::error!("Failed to sign event: {}", e),
+            }
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            match builder.sign(&*browser_signer).await {
+                Ok(event) => do_queue(event).await,
+                Err(e) => log::error!("Failed to sign event: {}", e),
+            }
+        }
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
+            match builder.sign(&*remote_signer).await {
+                Ok(event) => do_queue(event).await,
+                Err(e) => log::error!("Failed to sign event: {}", e),
             }
         }
     }
@@ -651,8 +730,8 @@ pub async fn create_history_event_full(
 // Pending Events Processing
 // =============================================================================
 
-/// Publish a single pending event
-async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> {
+/// Publish a single pending event and return the Nostr event ID
+async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, String> {
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Nostr client not initialized")?
         .clone();
@@ -660,10 +739,21 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> 
     let evt: nostr_sdk::Event = serde_json::from_str(&event.builder_json)
         .map_err(|e| format!("Failed to deserialize event: {}", e))?;
 
-    client.send_event(&evt).await
+    // Get the event_id before publishing (deterministic from signature)
+    let event_id = evt.id.to_hex();
+
+    let output = client.send_event(&evt).await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
 
-    Ok(())
+    // Check for at least one successful relay
+    if output.success.is_empty() {
+        return Err(format!("All {} relays failed", output.failed.len()));
+    }
+
+    log::debug!("Published to {}/{} relays", output.success.len(),
+        output.success.len() + output.failed.len());
+
+    Ok(event_id)
 }
 
 /// Process pending events with adaptive backoff retry logic
@@ -710,8 +800,16 @@ pub async fn process_pending_events() -> Result<usize, String> {
         }
 
         match publish_pending_event(&event).await {
-            Ok(_) => {
-                log::info!("Published pending event: {}", event.id);
+            Ok(nostr_event_id) => {
+                log::info!("Published pending event: {} -> nostr:{}", event.id, nostr_event_id);
+
+                // Handle TokenEvent: update token's event_id in WALLET_TOKENS
+                if event.event_type == PendingEventType::TokenEvent {
+                    if let Some(ref pending_id) = event.pending_token_id {
+                        update_token_event_id(pending_id, &nostr_event_id);
+                    }
+                }
+
                 let _ = remove_pending_event(&event.id).await;
                 processed_count += 1;
             }
@@ -745,6 +843,23 @@ pub async fn process_pending_events() -> Result<usize, String> {
     Ok(processed_count)
 }
 
+/// Update a token's event_id after successful background publish
+///
+/// Called when a pending TokenEvent is successfully published to Nostr.
+/// Updates the token in WALLET_TOKENS from the pending_id to the real Nostr event_id.
+fn update_token_event_id(pending_id: &str, real_event_id: &str) {
+    let store = WALLET_TOKENS.read();
+    let mut data_signal = store.data();
+    let mut data = data_signal.write();
+
+    if let Some(token) = data.iter_mut().find(|t| t.event_id == pending_id) {
+        log::info!("Updating token event_id: {} -> {}", pending_id, real_event_id);
+        token.event_id = real_event_id.to_string();
+    } else {
+        log::warn!("Could not find token with pending_id {} to update", pending_id);
+    }
+}
+
 /// Guard to prevent multiple processor spawns
 #[cfg(target_arch = "wasm32")]
 static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -753,6 +868,8 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 ///
 /// Uses AtomicBool guard to ensure only one processor runs at a time.
 /// Calling this function multiple times is safe - subsequent calls are no-ops.
+///
+/// Uses adaptive interval: 30s when there are pending events, 5 minutes when idle.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
     use dioxus::prelude::spawn;
@@ -771,7 +888,15 @@ pub fn start_pending_events_processor() {
 
     spawn(async {
         loop {
-            TimeoutFuture::new(5 * 60 * 1000).await;
+            // Adaptive interval: 30s when pending events exist, 5min otherwise
+            let pending_count = PENDING_NOSTR_EVENTS.read().len();
+            let interval_ms = if pending_count > 0 {
+                30_000  // 30 seconds when there's work
+            } else {
+                5 * 60 * 1000  // 5 minutes when idle
+            };
+
+            TimeoutFuture::new(interval_ms).await;
 
             if let Err(e) = process_pending_events().await {
                 log::error!("Error processing pending events: {}", e);
@@ -779,7 +904,7 @@ pub fn start_pending_events_processor() {
         }
     });
 
-    log::info!("Started pending events background processor (5 minute interval)");
+    log::info!("Started pending events background processor (adaptive interval)");
 }
 
 /// No-op on non-WASM targets (gloo_timers is WASM-only)

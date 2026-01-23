@@ -807,7 +807,7 @@ pub struct PendingMeltQuotesStore {
 // =============================================================================
 
 /// Event type for pending Nostr event publication
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::enum_variant_names)]
 pub enum PendingEventType {
     TokenEvent,
@@ -827,6 +827,15 @@ pub struct PendingNostrEvent {
     /// Timestamp of last retry attempt (for proper backoff calculation)
     #[serde(default)]
     pub last_retry_at: Option<u64>,
+
+    /// For TokenEvents: links pending event to token in WALLET_TOKENS
+    /// Used to update event_id when background publish succeeds
+    #[serde(default)]
+    pub pending_token_id: Option<String>,
+
+    /// Mint URL for recovery context if token lookup fails
+    #[serde(default)]
+    pub mint_url: Option<String>,
 }
 
 // =============================================================================

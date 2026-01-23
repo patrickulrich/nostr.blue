@@ -991,16 +991,80 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Publish new token event
-    let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => {
-            let id = event_output.id().to_hex();
-            log::info!("Published consolidated token event: {}", id);
-            id
+    // Attempt publish with immediate retries
+    // Proofs are already safely persisted in CDK IndexedDB at line 950
+    let mut new_event_id: Option<String> = None;
+    let mut last_error = String::new();
+
+    // Retry delays: 500ms, 1s, 2s (with jitter)
+    let delays = [500u32, 1000, 2000];
+
+    for (attempt, delay_ms) in std::iter::once(0).chain(delays.iter().copied()).enumerate() {
+        if attempt > 0 {
+            // Add jitter: ±100ms
+            #[cfg(target_arch = "wasm32")]
+            {
+                let jitter = (js_sys::Math::random() * 200.0) as u32;
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
+                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+            }
+            log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
-        Err(e) => {
-            log::error!("Failed to publish token event: {}", e);
-            return Err(format!("Failed to publish: {}", e));
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(output) => {
+                // Check for partial success (at least 1 relay succeeded)
+                if !output.success.is_empty() {
+                    let id = output.id().to_hex();
+                    log::info!(
+                        "Published token event {} to {}/{} relays",
+                        id,
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
+                    );
+                    new_event_id = Some(id);
+                    break;
+                } else {
+                    // All relays failed - treat as error
+                    last_error = format!("All {} relays failed", output.failed.len());
+                    log::warn!("Publish attempt {} - all relays failed", attempt + 1);
+                }
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                // Check for non-retryable errors
+                let err_str = last_error.to_lowercase();
+                if err_str.contains("banned") || err_str.contains("invalid") ||
+                   err_str.contains("malformed") || err_str.contains("too large") {
+                    log::error!("Non-retryable error: {}", last_error);
+                    break;
+                }
+                log::warn!("Publish attempt {} failed: {}", attempt + 1, e);
+            }
+        }
+    }
+
+    // Handle final result
+    let new_event_id = match new_event_id {
+        Some(id) => id,
+        None => {
+            // All retries failed - queue for background retry
+            log::error!("All publish attempts failed, queueing for background retry: {}", last_error);
+
+            let pending_id = format!("pending_{}", js_sys::Date::now() as u64);
+
+            // Queue with token tracking info
+            super::events::queue_token_event_for_retry(
+                builder,
+                pending_id.clone(),
+                mint_url.clone(),
+            ).await;
+
+            pending_id
         }
     };
 
