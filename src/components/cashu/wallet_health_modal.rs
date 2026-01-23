@@ -13,6 +13,17 @@ use crate::stores::cashu::proof_recovery::{
 use crate::utils::format_sats_with_separator;
 
 // =============================================================================
+// Types
+// =============================================================================
+
+/// A group of stuck proofs from the same mint and transaction
+struct ProofGroup {
+    mint_url: String,
+    transaction_id: Option<u64>,
+    proofs: Vec<StuckProofInfo>,
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 
@@ -45,9 +56,7 @@ fn format_duration(secs: u64) -> String {
 ///
 /// Groups by (mint_url, transaction_id) to prevent proofs from different mints
 /// with the same transaction_id from being incorrectly merged.
-fn group_by_transaction(
-    proofs: &[StuckProofInfo],
-) -> Vec<((String, Option<u64>), Vec<StuckProofInfo>)> {
+fn group_by_transaction(proofs: &[StuckProofInfo]) -> Vec<ProofGroup> {
     let mut groups: HashMap<(String, Option<u64>), Vec<StuckProofInfo>> = HashMap::new();
 
     for proof in proofs {
@@ -57,11 +66,19 @@ fn group_by_transaction(
             .push(proof.clone());
     }
 
-    let mut result: Vec<_> = groups.into_iter().collect();
+    let mut result: Vec<_> = groups
+        .into_iter()
+        .map(|((mint_url, transaction_id), proofs)| ProofGroup {
+            mint_url,
+            transaction_id,
+            proofs,
+        })
+        .collect();
+
     // Sort by urgency of first proof in group (critical first)
     result.sort_by(|a, b| {
-        let a_urgency = a.1.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
-        let b_urgency = b.1.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
+        let a_urgency = a.proofs.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
+        let b_urgency = b.proofs.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
         b_urgency.cmp(&a_urgency)
     });
 
@@ -222,11 +239,11 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                         div { class: "space-y-4",
                             h3 { class: "font-semibold", "Stuck Proofs" }
 
-                            for ((mint_url, tx_id), proofs) in grouped.iter() {
+                            for group in grouped.iter() {
                                 TransactionGroup {
-                                    key: "{mint_url}_{tx_id:?}",
-                                    transaction_id: *tx_id,
-                                    proofs: proofs.clone(),
+                                    key: "{group.mint_url}_{group.transaction_id:?}",
+                                    transaction_id: group.transaction_id,
+                                    proofs: group.proofs.clone(),
                                 }
                             }
                         }
