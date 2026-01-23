@@ -24,8 +24,8 @@ self.addEventListener('install', (event) => {
         const response = await fetch('/index.html');
         const html = await response.text();
 
-        // Find all /assets/ CSS and JS references
-        const assetRegex = /\/assets\/[^"'\s]+\.(css|js)/g;
+        // Find all /assets/ CSS, JS, and WASM references
+        const assetRegex = /\/assets\/[^"'\s]+\.(css|js|wasm)/g;
         const matches = html.match(assetRegex) || [];
 
         // Also check root document (Dioxus may inject assets differently)

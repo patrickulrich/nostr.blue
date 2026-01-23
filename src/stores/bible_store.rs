@@ -295,9 +295,14 @@ pub async fn create_highlight(
 
     log::info!("Bible highlight published: {}", event_id.to_hex());
 
-    // Refresh user highlights
-    let pubkey = crate::stores::nostr_client::get_cached_pubkey()?;
-    let _ = fetch_user_highlights(&pubkey).await;
+    // Refresh user highlights (best-effort, don't fail on error)
+    if let Ok(pubkey) = crate::stores::nostr_client::get_cached_pubkey() {
+        if let Err(e) = fetch_user_highlights(&pubkey).await {
+            log::warn!("Failed to refresh highlights after publish: {}", e);
+        }
+    } else {
+        log::warn!("Could not get pubkey to refresh highlights");
+    }
 
     Ok(event_id)
 }

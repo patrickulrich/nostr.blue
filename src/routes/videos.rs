@@ -165,6 +165,12 @@ pub fn Videos() -> Element {
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
                 let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+
+                // Seed pagination from cache to enable proper pagination on cached data
+                if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
+                    oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
+                }
+
                 feed_events.set(cached_events);
             }
 

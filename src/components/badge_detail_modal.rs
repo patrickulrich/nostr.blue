@@ -45,6 +45,20 @@ pub fn BadgeDetailModal(
         let _ = is_accepted;
     }));
 
+    // Fallback timeout to reset stuck processing state
+    use_effect(move || {
+        let current_state = *processing_state.read();
+        if current_state != ProcessingState::Idle {
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(10_000).await;
+                if *processing_state.peek() != ProcessingState::Idle {
+                    log::warn!("Processing state timed out, resetting to Idle");
+                    processing_state.set(ProcessingState::Idle);
+                }
+            });
+        }
+    });
+
     // Get issuer profile
     let mut issuer_profile = use_signal(|| None::<nostr_sdk::Metadata>);
     let badge_pubkey = badge.pubkey.clone();

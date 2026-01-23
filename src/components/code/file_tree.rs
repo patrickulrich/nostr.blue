@@ -7,6 +7,15 @@ use dioxus::prelude::*;
 use crate::services::git_worker::FileEntry;
 use crate::routes::Route;
 
+/// Encode path segments individually to preserve slashes in the URL.
+/// This avoids encoding the path separator, which would break routing.
+fn encode_path_segments(path: &str) -> String {
+    path.split('/')
+        .map(|segment| urlencoding::encode(segment).into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Get static padding class for tree depth (Tailwind requires static classes)
 /// Clamps at depth 4 (pl-20) to prevent excessive indentation for deeply nested directories
 fn get_indent_class(depth: usize) -> &'static str {
@@ -88,8 +97,9 @@ pub fn FileTreeEntry(
     let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
 
-    // URL-encode the path to handle spaces and special characters
-    let encoded_path = urlencoding::encode(&entry.path).into_owned();
+    // URL-encode each path segment to handle spaces and special characters
+    // but preserve slashes for proper routing
+    let encoded_path = encode_path_segments(&entry.path);
 
     let route = if is_dir {
         Route::CodeRepoTree {
@@ -190,7 +200,7 @@ pub fn CodeFileTree(
                         .rsplit_once('/')
                         .map(|(p, _)| p.to_string())
                         .unwrap_or_default();
-                    let encoded_parent_path = urlencoding::encode(&parent_path).into_owned();
+                    let encoded_parent_path = encode_path_segments(&parent_path);
 
                     rsx! {
                         Link {
@@ -271,7 +281,7 @@ pub fn FilePathBreadcrumb(
             for (i, part) in parts.iter().enumerate() {
                 {
                     let accumulated_path = parts[..=i].join("/");
-                    let encoded_accumulated_path = urlencoding::encode(&accumulated_path).into_owned();
+                    let encoded_accumulated_path = encode_path_segments(&accumulated_path);
                     let is_last = i == parts.len() - 1;
 
                     rsx! {
@@ -322,8 +332,8 @@ pub fn BranchSelector(
     let decoded_path = urlencoding::decode(&path)
         .map(|s| s.into_owned())
         .unwrap_or_else(|_| path.clone());
-    // Encode once for use in routes
-    let encoded_path = urlencoding::encode(&decoded_path).into_owned();
+    // Encode path segments for use in routes (preserves slashes)
+    let encoded_path = encode_path_segments(&decoded_path);
 
     rsx! {
         div {

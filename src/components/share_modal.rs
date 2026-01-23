@@ -54,7 +54,7 @@ pub fn ShareModal(
 
     // Helper to get cursor position from DOM (returns UTF-16 index)
     #[allow(unused_variables)]
-    fn get_cursor_position(textarea_id: &str) -> usize {
+    fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(window) = web_sys::window() {
@@ -67,7 +67,8 @@ pub fn ShareModal(
                 }
             }
         }
-        0
+        // Fallback: return UTF-16 length (cursor at end of text)
+        current_text.chars().map(|c| c.len_utf16()).sum()
     }
 
     // Convert UTF-16 (JS) to UTF-8 (Rust) index
@@ -561,19 +562,19 @@ pub fn ShareModal(
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
                                     // Sync cursor position
-                                    let pos = get_cursor_position(&textarea_id.read());
+                                    let pos = get_cursor_position(&textarea_id.read(), &e.value());
                                     let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
                                     cursor_position.set(utf8_pos);
                                 },
                                 onclick: move |_| {
-                                    let pos = get_cursor_position(&textarea_id.read());
                                     let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
                                     let utf8_pos = utf16_to_utf8_index(&text, pos);
                                     cursor_position.set(utf8_pos);
                                 },
                                 onkeyup: move |_| {
-                                    let pos = get_cursor_position(&textarea_id.read());
                                     let text = nostr_text.read();
+                                    let pos = get_cursor_position(&textarea_id.read(), &text);
                                     let utf8_pos = utf16_to_utf8_index(&text, pos);
                                     cursor_position.set(utf8_pos);
                                 },
@@ -650,6 +651,7 @@ pub fn ShareModal(
                                         "p-2 rounded-full hover:bg-accent transition"
                                     },
                                     title: "Add media",
+                                    aria_label: "Add media",
                                     onclick: move |_| {
                                         let current = *show_image_uploader.read();
                                         show_image_uploader.set(!current);
@@ -674,6 +676,7 @@ pub fn ShareModal(
                                 button {
                                     class: "p-2 rounded-full hover:bg-accent transition",
                                     title: "Create poll",
+                                    aria_label: "Create poll",
                                     onclick: move |_| show_poll_modal.set(true),
                                     disabled: *is_publishing.read(),
                                     BarChartIcon { class: "w-5 h-5" }

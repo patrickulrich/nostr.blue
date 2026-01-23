@@ -79,6 +79,29 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
 
+                // Validate path to prevent path traversal attacks
+                fn is_safe_path(path: &str) -> bool {
+                    use std::path::{Component, Path};
+                    let path = Path::new(path);
+                    for component in path.components() {
+                        match component {
+                            Component::ParentDir => return false, // Reject ".."
+                            Component::RootDir => return false,   // Reject absolute paths
+                            Component::Prefix(_) => return false, // Reject Windows-style paths
+                            _ => {}
+                        }
+                    }
+                    // Also reject paths that start with /
+                    !path.to_string_lossy().starts_with('/')
+                }
+
+                if !is_safe_path(&decoded_path) {
+                    log::warn!("Path traversal attempt blocked: {}", decoded_path);
+                    error.set(Some("Invalid path".to_string()));
+                    loading.set(false);
+                    return;
+                }
+
                 // Read file content
                 match git_service().read_file(&repo, &decoded_path, Some(&git_ref)).await {
                     Ok(file_content) => {

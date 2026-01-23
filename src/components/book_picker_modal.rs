@@ -150,6 +150,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     // Validation error signals (Security Fix #1)
     let mut version_error = use_signal(|| false);
     let mut sections_error = use_signal(|| false);
+    let mut book_id_error = use_signal(|| false);
 
     // Loading state
     let mut loading = use_signal(|| false);
@@ -186,6 +187,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 selected_version.set(String::new());
                 version_error.set(false);
                 sections_error.set(false);
+                book_id_error.set(false);
                 search_query.set(String::new());
                 search_results.set(Vec::new());
                 // Cancel any stale search task and reset debounce state
@@ -287,8 +289,10 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             // Validate d_tag from relay data
             if !is_valid_book_id(&pub_.d_tag) {
                 log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
+                book_id_error.set(true);
                 return None;
             }
+            book_id_error.set(false);
 
             let mut reference = BookReference::new(&pub_.d_tag);
 
@@ -324,7 +328,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
 
     // Track overall validation state (for disabling Insert button)
     let has_validation_error = use_memo(move || {
-        *version_error.read() || *sections_error.read()
+        *version_error.read() || *sections_error.read() || *book_id_error.read()
     });
 
     // Generate markup preview
@@ -611,6 +615,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                         if selected_publication.read().is_some() {
                             div {
                                 class: "space-y-4 flex-1",
+
+                                // Book ID validation error display
+                                if *book_id_error.read() {
+                                    p {
+                                        class: "text-xs text-destructive",
+                                        "Selected publication has an invalid identifier"
+                                    }
+                                }
 
                                 // Chapter selection (if publication has sections)
                                 if let Some(ref pub_) = *selected_publication.read() {

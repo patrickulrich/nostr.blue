@@ -186,7 +186,8 @@ pub fn BoardSlideover(
             // Delete already in progress
             return;
         }
-        delete_task_id.set(current.wrapping_add(1));
+        let task_id_at_start = current.wrapping_add(1);
+        delete_task_id.set(task_id_at_start);
         delete_error.set(None);
         let board_clone = board_for_delete.clone();
         let on_close = on_close_for_delete;
@@ -194,6 +195,11 @@ pub fn BoardSlideover(
         let task = spawn(async move {
             match delete_pinboard(&board_clone).await {
                 Ok(_) => {
+                    // Check if this task is still current (not cancelled)
+                    if *delete_task_id.peek() != task_id_at_start {
+                        log::info!("Delete task cancelled, ignoring stale result");
+                        return;
+                    }
                     // Clear task handle and reset counter on success
                     delete_task.set(None);
                     delete_task_id.set(0);
@@ -201,6 +207,10 @@ pub fn BoardSlideover(
                     nav.push(Route::PinBoardsHome {});
                 }
                 Err(e) => {
+                    // Check if this task is still current (not cancelled)
+                    if *delete_task_id.peek() != task_id_at_start {
+                        return;
+                    }
                     log::error!("Failed to delete board: {}", e);
                     delete_error.set(Some(format!("Failed to delete: {}", e)));
                     delete_task.set(None);

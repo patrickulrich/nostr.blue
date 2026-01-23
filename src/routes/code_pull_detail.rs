@@ -410,7 +410,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     div {
                         class: "border border-border rounded-lg overflow-hidden",
                         textarea {
-                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-hidden",
+                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             placeholder: "Write a comment...",
                             rows: 3,
                             value: "{new_comment}",

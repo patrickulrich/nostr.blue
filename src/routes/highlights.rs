@@ -186,6 +186,7 @@ pub fn Highlights() -> Element {
                 Err(e) => {
                     log::error!("Failed to load more highlights: {}", e);
                     loading.set(false);
+                    has_more.set(false);  // Stop infinite retry loop on error
                 }
             }
         });

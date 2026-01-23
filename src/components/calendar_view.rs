@@ -710,7 +710,8 @@ fn render_all_day_events(events: &[UnifiedEvent], on_click: Option<EventHandler<
                                 onclick: {
                                     let event = (*event).clone();
                                     let handler = on_click;
-                                    move |_| {
+                                    move |e: Event<MouseData>| {
+                                        e.stop_propagation();
                                         if let Some(h) = &handler {
                                             h.call(event.clone());
                                         }

@@ -133,8 +133,9 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
 
                     // Image preview - check if the current URL is the one that failed
                     {
-                        let current_url = props.cover_url.read();
-                        let is_current_url_failed = failed_url.read().as_ref() == Some(&*current_url);
+                        let current_url = props.cover_url.read().clone();
+                        let failed = failed_url.read().clone();
+                        let is_current_url_failed = failed.as_ref() == Some(&current_url);
                         if !is_current_url_failed {
                             rsx! {
                                 img {

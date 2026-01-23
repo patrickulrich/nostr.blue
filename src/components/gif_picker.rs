@@ -105,8 +105,13 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                             // On mobile: position at top with margins, CSS handles width
                                             picker_top.set(16.0); // 1rem from top
                                         } else {
-                                            // Desktop: existing left/right positioning logic
-                                            let picker_width = 700.0;
+                                            // Desktop: compute picker_width based on viewport to match responsive CSS
+                                            // sm:w-[500px] at 640px, md:w-[700px] at 768px
+                                            let picker_width = if viewport_width < 768.0 {
+                                                500.0  // sm:w-[500px]
+                                            } else {
+                                                700.0  // md:w-[700px]
+                                            };
                                             let picker_height = 600.0; // Approximate height
                                             let margin = 8.0;
 

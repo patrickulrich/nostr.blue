@@ -291,6 +291,14 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
     log::info!("Sending receiver gift wrap via SDK gossip routing");
     let receiver_output = client.send_event(&receiver_gift_wrap).await
         .map_err(|e| format!("Failed to send to receiver: {}", e))?;
+
+    // Validate recipient actually has inbox relays configured (NIP-17 kind 10050)
+    if receiver_output.success.is_empty() {
+        log::warn!("No relays accepted gift wrap for recipient - they may not have NIP-17 inbox relays configured");
+        return Err("Recipient has no inbox relays configured (NIP-17 kind 10050). \
+                    They may not be able to receive private messages.".to_string());
+    }
+
     let receiver_result = PublishResult::from_output(receiver_output);
     log::info!("Sent gift wrap to receiver: {} ({} success, {} failed)",
         receiver_result.event_id,

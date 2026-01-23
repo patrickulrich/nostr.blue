@@ -138,10 +138,26 @@ pub fn SettingsRelays() -> Element {
         }
 
         // No scheme present - add appropriate WebSocket scheme
-        // Check if it's a local address
+        // Check if it's a local/private address
+        // Helper to detect 172.16-31.x.x private range
+        fn is_private_172(host: &str) -> bool {
+            if let Some(rest) = host.strip_prefix("172.") {
+                if let Some(second_octet) = rest.split('.').next() {
+                    if let Ok(n) = second_octet.parse::<u8>() {
+                        return (16..=31).contains(&n);
+                    }
+                }
+            }
+            false
+        }
+
         let is_local = lower.contains("127.0.0.1") ||
             lower.contains("localhost") ||
             lower.contains("192.168.") ||
+            lower.starts_with("10.") ||
+            is_private_172(&lower) ||
+            lower.contains("[::1]") ||
+            lower.contains("::1:") ||
             lower.ends_with(".local") ||
             lower.contains(".local:") ||
             lower.contains(".local/") ||

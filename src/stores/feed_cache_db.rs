@@ -355,8 +355,12 @@ mod wasm_impl {
 
                 if let Some(value) = value_opt {
                     if let Some(json_str) = value.as_string() {
-                        if let Ok(item) = serde_json::from_str::<CachedFeedItem>(&json_str) {
-                            items.push(item);
+                        match serde_json::from_str::<CachedFeedItem>(&json_str) {
+                            Ok(item) => items.push(item),
+                            Err(e) => {
+                                log::warn!("Failed to deserialize cached feed item: {} - JSON: {}...",
+                                    e, &json_str[..json_str.len().min(100)]);
+                            }
                         }
                     }
                 }
@@ -397,6 +401,57 @@ mod wasm_impl {
         /// Store feed metadata
         pub async fn put_feed_metadata(&self, feed_key: &str, metadata: &FeedCacheMetadata) -> Result<(), String> {
             self.put_value(STORE_FEED_METADATA, feed_key, metadata).await
+        }
+
+        /// Get all feed metadata entries (for eviction cleanup)
+        pub async fn get_all_feed_metadata(&self) -> Result<Vec<(String, FeedCacheMetadata)>, String> {
+            let tx = self
+                .db
+                .transaction_on_one_with_mode(STORE_FEED_METADATA, IdbTransactionMode::Readonly)
+                .map_err(|e| format!("Transaction error: {:?}", e))?;
+
+            let store = tx
+                .object_store(STORE_FEED_METADATA)
+                .map_err(|e| format!("Store error: {:?}", e))?;
+
+            let cursor = store
+                .open_cursor()
+                .map_err(|e| format!("Cursor error: {:?}", e))?
+                .await
+                .map_err(|e| format!("Cursor await error: {:?}", e))?;
+
+            let mut entries = Vec::new();
+
+            if let Some(cursor) = cursor {
+                loop {
+                    if let Some(key_js) = cursor.key() {
+                        let value_js = cursor.value();
+                        if let (Some(key_str), Some(value_str)) = (
+                            key_js.as_string(),
+                            value_js.as_string(),
+                        ) {
+                            match serde_json::from_str::<FeedCacheMetadata>(&value_str) {
+                                Ok(metadata) => entries.push((key_str, metadata)),
+                                Err(e) => {
+                                    log::warn!("Failed to deserialize feed metadata {}: {}", key_str, e);
+                                }
+                            }
+                        }
+                    }
+
+                    let has_next = cursor
+                        .continue_cursor()
+                        .map_err(|e| format!("Cursor continue error: {:?}", e))?
+                        .await
+                        .map_err(|e| format!("Cursor continue await error: {:?}", e))?;
+
+                    if !has_next {
+                        break;
+                    }
+                }
+            }
+
+            Ok(entries)
         }
 
         // ====================================================================
@@ -447,8 +502,11 @@ mod wasm_impl {
                             key_js.as_string(),
                             value_js.as_string(),
                         ) {
-                            if let Ok(entry) = serde_json::from_str::<LruEntry>(&value_str) {
-                                entries.push((key_str, entry));
+                            match serde_json::from_str::<LruEntry>(&value_str) {
+                                Ok(entry) => entries.push((key_str, entry)),
+                                Err(e) => {
+                                    log::warn!("Failed to deserialize LRU entry {}: {}", key_str, e);
+                                }
                             }
                         }
                     }

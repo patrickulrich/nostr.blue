@@ -1994,7 +1994,7 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
     }
 
     if liked_event_ids.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count });
+        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
     }
 
     // Step 2: Fetch liked events using connected relays (many authors - bypass gossip)

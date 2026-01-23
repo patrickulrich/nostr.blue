@@ -285,6 +285,16 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
         newest_ts = Some(newest_ts.map_or(sort_ts, |t| t.max(sort_ts)));
         oldest_ts = Some(oldest_ts.map_or(sort_ts, |t| t.min(sort_ts)));
 
+        // Merge feed_keys with existing item if present (instead of overwriting)
+        let mut feed_keys = vec![feed_key.clone()];
+        if let Ok(Some(existing)) = db.get_feed_item(&event_id).await {
+            for key in existing.feed_keys {
+                if !feed_keys.contains(&key) {
+                    feed_keys.push(key);
+                }
+            }
+        }
+
         // Create cached item
         let cached_item = CachedFeedItem {
             event_json: serde_json::to_string(event).map_err(|e| format!("Serialize error: {}", e))?,
@@ -297,7 +307,7 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
             },
             sort_timestamp: sort_ts,
             cached_at: now,
-            feed_keys: vec![feed_key.clone()],
+            feed_keys,
         };
 
         // Store item
@@ -386,11 +396,27 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
         .collect();
 
     let mut evicted = 0;
+    let mut evicted_ids: Vec<String> = Vec::new();
+
     for (event_id, _) in eviction_candidates {
         // Delete from all stores
         db.delete_feed_item(&event_id).await?;
         db.delete_lru_entry(&event_id).await?;
+        evicted_ids.push(event_id);
         evicted += 1;
+    }
+
+    // Remove evicted IDs from feed metadata to prevent stale references
+    if !evicted_ids.is_empty() {
+        if let Ok(all_metadata) = db.get_all_feed_metadata().await {
+            for (feed_key, mut metadata) in all_metadata {
+                let original_len = metadata.event_ids.len();
+                metadata.event_ids.retain(|id| !evicted_ids.contains(id));
+                if metadata.event_ids.len() != original_len {
+                    let _ = db.put_feed_metadata(&feed_key, &metadata).await;
+                }
+            }
+        }
     }
 
     log::info!("Evicted {} items from feed cache", evicted);
