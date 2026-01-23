@@ -70,11 +70,115 @@ pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> =
 pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
     Signal::global(HashMap::new);
 
+/// In-flight melt requests for crash recovery
+///
+/// Persisted to IndexedDB BEFORE the melt network call to ensure we can
+/// recover change proofs if the app crashes during the operation.
+///
+/// SAFETY: This is critical for fund safety - without this, a crash during
+/// melt could lose change proofs that the mint has already issued.
+pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
+    Signal::global(Vec::new);
+
+/// Currently executing operations (by transaction_id)
+///
+/// Used to prevent timeout recovery from interfering with active operations.
+/// Operations must register here before starting and unregister when done.
+pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> =
+    Signal::global(HashSet::new);
+
+// =============================================================================
+// In-Flight Melt Request Helpers
+// =============================================================================
+
+/// Add an in-flight melt request to tracking
+pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
+    let tx_id = request.transaction_id.clone();
+    IN_FLIGHT_MELT_REQUESTS.write().push(request);
+    ACTIVE_OPERATIONS.write().insert(tx_id.clone());
+    log::debug!("Added in-flight melt request: {}", tx_id);
+}
+
+/// Remove an in-flight melt request from tracking
+pub fn remove_in_flight_melt_request(transaction_id: &str) {
+    IN_FLIGHT_MELT_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    ACTIVE_OPERATIONS.write().remove(transaction_id);
+    log::debug!("Removed in-flight melt request: {}", transaction_id);
+}
+
+/// Check if a transaction is currently active
+pub fn is_transaction_active(transaction_id: &Option<String>) -> bool {
+    transaction_id
+        .as_ref()
+        .map(|id| ACTIVE_OPERATIONS.read().contains(id))
+        .unwrap_or(false)
+}
+
+/// Check if a string transaction_id is currently active
+pub fn is_transaction_id_active(transaction_id: &str) -> bool {
+    ACTIVE_OPERATIONS.read().contains(transaction_id)
+}
+
+/// Persist in-flight melt requests to IndexedDB
+///
+/// CRITICAL: This MUST be awaited and verified before proceeding with melt.
+/// If persistence fails, the melt operation should be aborted to prevent
+/// potential fund loss from crash recovery inability.
+pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            return Err("Localstore not initialized".to_string());
+        }
+    };
+
+    let requests = IN_FLIGHT_MELT_REQUESTS.read().clone();
+
+    localstore
+        .save_in_flight_melt_requests(&requests)
+        .await
+        .map_err(|e| format!("Failed to persist in-flight melt requests: {}", e))?;
+
+    log::debug!("Persisted {} in-flight melt requests to IndexedDB", requests.len());
+    Ok(())
+}
+
+/// Load in-flight melt requests from IndexedDB (call on startup)
+///
+/// Restores the in-flight melt state from the previous session for recovery.
+pub async fn load_in_flight_melt_requests() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping in-flight melt load: localstore not initialized");
+            return;
+        }
+    };
+
+    match localstore.load_in_flight_melt_requests().await {
+        Ok(Some(requests)) => {
+            if !requests.is_empty() {
+                log::info!("Loaded {} in-flight melt requests from storage", requests.len());
+                *IN_FLIGHT_MELT_REQUESTS.write() = requests;
+            }
+        }
+        Ok(None) => {
+            log::debug!("No in-flight melt requests found in storage");
+        }
+        Err(e) => {
+            log::warn!("Failed to load in-flight melt requests: {}", e);
+        }
+    }
+}
+
 // =============================================================================
 // Pending Secrets Persistence Functions
 // =============================================================================
 
-/// Persist pending secrets to IndexedDB (call after modifications)
+/// Schedule persistence of pending secrets to IndexedDB.
+///
+/// NOTE: This only schedules persistence on WASM/IndexedDB targets.
+/// On non-WASM targets, this is a no-op (pending secrets are not persisted).
 ///
 /// This ensures pending-at-mint state survives app restarts.
 /// Uses spawn to avoid blocking the caller.
@@ -85,6 +189,10 @@ pub fn schedule_persist_pending_secrets() {
         spawn(async move {
             persist_pending_secrets_impl().await;
         });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        log::debug!("schedule_persist_pending_secrets: no-op on non-WASM target");
     }
 }
 
@@ -325,6 +433,8 @@ pub fn reset_wallet_state() {
     PROOF_EVENT_MAP.write().clear();
     ACTIVE_TRANSACTIONS.write().clear();
     PENDING_BY_MINT_SECRETS.write().clear();
+    IN_FLIGHT_MELT_REQUESTS.write().clear();
+    ACTIVE_OPERATIONS.write().clear();
     *SYNC_STATE.write() = None;
 
     clear_shared_localstore();

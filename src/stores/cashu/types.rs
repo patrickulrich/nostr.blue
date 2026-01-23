@@ -900,3 +900,47 @@ pub struct OrphanSyncResult {
     /// Errors encountered during sync
     pub errors: Vec<String>,
 }
+
+// =============================================================================
+// In-Flight Melt Request Types (Crash Recovery)
+// =============================================================================
+
+/// Maximum time a proof can be Reserved before checking mint state (10 minutes)
+pub const RESERVED_PROOF_TIMEOUT_SECS: u64 = 600;
+
+/// Maximum time a proof can be PendingSpent before checking mint state (30 minutes)
+pub const PENDING_SPENT_TIMEOUT_SECS: u64 = 1800;
+
+/// Maximum time for in-flight melt before checking quote status (5 minutes)
+pub const IN_FLIGHT_MELT_TIMEOUT_SECS: u64 = 300;
+
+/// Maximum number of counter healing attempts
+pub const MAX_COUNTER_HEAL_ATTEMPTS: u32 = 3;
+
+/// Counter increments for each healing attempt
+pub const COUNTER_HEAL_INCREMENTS: [u32; 3] = [10, 50, 100];
+
+/// In-flight melt request for crash recovery
+///
+/// Persisted BEFORE the melt network call to ensure we can recover
+/// change proofs if the app crashes during the operation.
+///
+/// SAFETY: This data enables NUT-07 verification and change recovery
+/// without relying on wallet state that may be lost in a crash.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InFlightMeltRequest {
+    /// Unique transaction ID for this melt operation
+    pub transaction_id: String,
+    /// Mint URL where the melt is being performed
+    pub mint_url: String,
+    /// Melt quote ID from the mint
+    pub quote_id: String,
+    /// Proofs being used for this melt (serialized for recovery)
+    pub proofs_used: Vec<ProofData>,
+    /// Amount being melted (excluding fees)
+    pub amount: u64,
+    /// Fee reserve for this melt
+    pub fee_reserve: u64,
+    /// Timestamp when request was created (seconds since epoch)
+    pub created_at: u64,
+}

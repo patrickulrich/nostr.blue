@@ -848,16 +848,23 @@ pub async fn process_pending_events() -> Result<usize, String> {
 /// Called when a pending TokenEvent is successfully published to Nostr.
 /// Updates the token in WALLET_TOKENS from the pending_id to the real Nostr event_id.
 pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
-    let store = WALLET_TOKENS.read();
-    let mut data_signal = store.data();
-    let mut data = data_signal.write();
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data_signal = store.data();
+        let mut data = data_signal.write();
 
-    if let Some(token) = data.iter_mut().find(|t| t.event_id == pending_id) {
-        log::info!("Updating token event_id: {} -> {}", pending_id, real_event_id);
-        token.event_id = real_event_id.to_string();
-    } else {
-        log::warn!("Could not find token with pending_id {} to update", pending_id);
+        if let Some(token) = data.iter_mut().find(|t| t.event_id == pending_id) {
+            log::info!("Updating token event_id: {} -> {}", pending_id, real_event_id);
+            token.event_id = real_event_id.to_string();
+        } else {
+            log::warn!("Could not find token with pending_id {} to update", pending_id);
+            return;
+        }
+        // Drop write guard before calling rebuild (prevents deadlock)
     }
+
+    // Rebuild proof event map to stay in sync (matches fetch_tokens pattern at line 594)
+    rebuild_proof_event_map();
 }
 
 /// Publish a token event for orphaned proofs discovered in CDK
