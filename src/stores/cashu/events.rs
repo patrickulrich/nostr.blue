@@ -105,60 +105,51 @@ pub async fn queue_signed_event_for_retry(event: nostr_sdk::Event, event_type: P
     }
 }
 
-/// Queue an EventBuilder for retry when initial publication fails
-pub async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
-    let signer = match crate::stores::signer::get_signer() {
-        Some(s) => s,
-        None => {
-            log::error!("Cannot queue failed event: no signer available");
-            return;
-        }
-    };
-
-    let event_type_clone = event_type.clone();
-    let sign_and_queue = |event: nostr_sdk::Event| async move {
-        match serde_json::to_string(&event) {
-            Ok(event_json) => {
-                match queue_nostr_event(event_json, event_type_clone).await {
-                    Ok(queue_id) => {
-                        log::info!("Queued failed event for retry: {}", queue_id);
-                    }
-                    Err(queue_err) => {
-                        log::error!("Failed to queue event for retry: {}", queue_err);
-                    }
-                }
-            }
-            Err(json_err) => {
-                log::error!("Failed to serialize event for queueing: {}", json_err);
-            }
-        }
-    };
+/// Sign an EventBuilder using the current signer
+/// Returns Ok(Event) or Err(error_message)
+pub async fn sign_event_builder(builder: nostr_sdk::EventBuilder) -> Result<nostr_sdk::Event, String> {
+    let signer = crate::stores::signer::get_signer()
+        .ok_or_else(|| "No signer available".to_string())?;
 
     match signer {
         crate::stores::signer::SignerType::Keys(keys) => {
-            match builder.sign_with_keys(&keys) {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                }
-            }
+            builder.sign_with_keys(&keys)
+                .map_err(|e| format!("Failed to sign event: {}", e))
         }
         #[cfg(target_family = "wasm")]
         crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            match builder.sign(&*browser_signer).await {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
+            builder.sign(&*browser_signer).await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
+            builder.sign(&*remote_signer).await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
+    }
+}
+
+/// Queue an EventBuilder for retry when initial publication fails
+pub async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
+    match sign_event_builder(builder).await {
+        Ok(event) => {
+            match serde_json::to_string(&event) {
+                Ok(event_json) => {
+                    match queue_nostr_event(event_json, event_type).await {
+                        Ok(queue_id) => {
+                            log::info!("Queued failed event for retry: {}", queue_id);
+                        }
+                        Err(queue_err) => {
+                            log::error!("Failed to queue event for retry: {}", queue_err);
+                        }
+                    }
+                }
+                Err(json_err) => {
+                    log::error!("Failed to serialize event for queueing: {}", json_err);
                 }
             }
         }
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
-            match builder.sign(&*remote_signer).await {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                }
-            }
+        Err(sign_err) => {
+            log::error!("Failed to sign event for queueing: {}", sign_err);
         }
     }
 }
@@ -172,72 +163,45 @@ pub async fn queue_token_event_for_retry(
     pending_token_id: String,
     mint_url: String,
 ) {
-    let signer = match crate::stores::signer::get_signer() {
-        Some(s) => s,
-        None => {
-            log::error!("Cannot queue token event: no signer available");
+    // Use shared signing helper
+    let event = match sign_event_builder(builder).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("Cannot queue token event: {}", e);
             return;
         }
     };
 
-    let pending_token_id_clone = pending_token_id.clone();
-    let mint_url_clone = mint_url.clone();
-
-    let do_queue = |event: nostr_sdk::Event| async move {
-        let event_json = match serde_json::to_string(&event) {
-            Ok(j) => j,
-            Err(e) => {
-                log::error!("Failed to serialize event: {}", e);
-                return;
-            }
-        };
-
-        let pending_event = PendingNostrEvent {
-            id: uuid::Uuid::new_v4().to_string(),
-            builder_json: event_json,
-            event_type: PendingEventType::TokenEvent,
-            created_at: chrono::Utc::now().timestamp() as u64,
-            retry_count: 0,
-            last_retry_at: None,
-            pending_token_id: Some(pending_token_id_clone.clone()),
-            mint_url: Some(mint_url_clone.clone()),
-        };
-
-        // Add to in-memory queue
-        PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-
-        // Persist to IndexedDB
-        if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-            if let Err(e) = localstore.add_pending_event(&pending_event).await {
-                log::warn!("Failed to persist pending event: {}", e);
-            }
+    let event_json = match serde_json::to_string(&event) {
+        Ok(j) => j,
+        Err(e) => {
+            log::error!("Failed to serialize event: {}", e);
+            return;
         }
-
-        log::info!("Queued token event for retry, pending_id={}", pending_token_id_clone);
     };
 
-    // Sign based on signer type (same pattern as queue_event_for_retry)
-    match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            match builder.sign_with_keys(&keys) {
-                Ok(event) => do_queue(event).await,
-                Err(e) => log::error!("Failed to sign event: {}", e),
-            }
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            match builder.sign(&*browser_signer).await {
-                Ok(event) => do_queue(event).await,
-                Err(e) => log::error!("Failed to sign event: {}", e),
-            }
-        }
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
-            match builder.sign(&*remote_signer).await {
-                Ok(event) => do_queue(event).await,
-                Err(e) => log::error!("Failed to sign event: {}", e),
-            }
+    let pending_event = PendingNostrEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        builder_json: event_json,
+        event_type: PendingEventType::TokenEvent,
+        created_at: chrono::Utc::now().timestamp() as u64,
+        retry_count: 0,
+        last_retry_at: None,
+        pending_token_id: Some(pending_token_id.clone()),
+        mint_url: Some(mint_url.clone()),
+    };
+
+    // Add to in-memory queue
+    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
+
+    // Persist to IndexedDB
+    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+        if let Err(e) = localstore.add_pending_event(&pending_event).await {
+            log::warn!("Failed to persist pending event: {}", e);
         }
     }
+
+    log::info!("Queued token event for retry, pending_id={}", pending_token_id);
 }
 
 /// Get count of pending events waiting to be published

@@ -502,7 +502,7 @@ impl IndexedDbDatabase {
     /// Helper: Put a value into a store with JSON serialization
     async fn put_value<T>(&self, store_name: &str, key: &str, value: &T) -> Result<(), database::Error>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         let tx = self
             .db
@@ -792,7 +792,7 @@ impl IndexedDbDatabase {
     /// The melt operation should be aborted if this fails.
     pub async fn save_in_flight_melt_requests(
         &self,
-        requests: &Vec<crate::stores::cashu::types::InFlightMeltRequest>,
+        requests: &[crate::stores::cashu::types::InFlightMeltRequest],
     ) -> Result<(), database::Error> {
         self.put_value(STORE_IN_FLIGHT_MELTS, "current", requests).await
     }

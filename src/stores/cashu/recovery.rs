@@ -1092,7 +1092,7 @@ async fn recover_melt_change_deduplicated(
     request: &InFlightMeltRequest,
 ) -> Result<u64, String> {
     use cdk::dhke::hash_to_curve;
-    use super::signals::WALLET_TOKENS;
+    use super::signals::{WALLET_TOKENS, WALLET_BALANCE};
     use std::collections::HashSet;
 
     // Get all unspent proofs from CDK (these include any change from the melt)
@@ -1157,17 +1157,31 @@ async fn recover_melt_change_deduplicated(
         Ok(event_id) => {
             log::info!("Published recovered change proofs to Nostr: {}", event_id);
 
+            // Normalize mint URL for consistent balance lookups
+            let normalized_mint = super::utils::normalize_mint_url(&request.mint_url);
+
             // Add to WALLET_TOKENS
-            let store = WALLET_TOKENS.read();
-            let mut data = store.data();
-            let mut tokens = data.write();
-            tokens.push(TokenData {
-                event_id,
-                mint: request.mint_url.clone(),
-                unit: "sat".to_string(),
-                proofs: proof_data,
-                created_at: now_secs(),
-            });
+            {
+                let store = WALLET_TOKENS.read();
+                let mut data = store.data();
+                let mut tokens = data.write();
+                tokens.push(TokenData {
+                    event_id: event_id.clone(),
+                    mint: normalized_mint,
+                    unit: "sat".to_string(),
+                    proofs: proof_data.clone(),
+                    created_at: now_secs(),
+                });
+            }
+
+            // Update WALLET_BALANCE
+            {
+                let mut balance = WALLET_BALANCE.write();
+                *balance = balance.saturating_add(recovered_amount);
+            }
+
+            // Register proofs in event map for fast lookup
+            super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
         }
         Err(e) => {
             log::warn!("Failed to publish recovered change proofs: {}", e);
@@ -1259,7 +1273,7 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
     let recovered = recover_unrecorded_proofs_internal(mint_url).await.unwrap_or(0);
 
     Ok(MeltMintResult {
-        quotes_checked: 1, // CDK handles batching internally
+        quotes_checked: if recovered > 0 { 1 } else { 0 },
         quotes_paid: if recovered > 0 { 1 } else { 0 },
         change_recovered: recovered,
     })

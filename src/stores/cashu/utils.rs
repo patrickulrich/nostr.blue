@@ -234,7 +234,13 @@ where
                 let error_str = e.to_string();
 
                 if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS {
-                    let increment = COUNTER_HEAL_INCREMENTS[heal_attempt as usize];
+                    let increment = match COUNTER_HEAL_INCREMENTS.get(heal_attempt as usize) {
+                        Some(&inc) => inc,
+                        None => {
+                            log::error!("Counter heal increment not found for attempt {}", heal_attempt);
+                            return Err(e);
+                        }
+                    };
                     log::warn!(
                         "Counter desync detected (attempt {}/{}), incrementing keyset counter by {}",
                         heal_attempt + 1,
