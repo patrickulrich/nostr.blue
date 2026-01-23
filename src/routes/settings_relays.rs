@@ -119,18 +119,26 @@ pub fn SettingsRelays() -> Element {
             return Err("URL cannot be empty".to_string());
         }
 
-        // Already has scheme
-        if trimmed.starts_with("ws://") || trimmed.starts_with("wss://") {
+        let lower = trimmed.to_lowercase();
+
+        // Already has valid WebSocket scheme
+        if lower.starts_with("ws://") || lower.starts_with("wss://") {
             return Ok(trimmed.to_string());
         }
 
+        // Reject unsupported schemes (http, https, or any other scheme)
+        if lower.starts_with("http://") || lower.starts_with("https://") || lower.contains("://") {
+            return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
+        }
+
+        // No scheme present - add appropriate WebSocket scheme
         // Check if it's a local address
-        let is_local = trimmed.contains("127.0.0.1") ||
-            trimmed.contains("localhost") ||
-            trimmed.contains("192.168.") ||
-            trimmed.contains(".local:") ||
-            trimmed.contains(".local/") ||
-            trimmed.contains("//umbrel:");
+        let is_local = lower.contains("127.0.0.1") ||
+            lower.contains("localhost") ||
+            lower.contains("192.168.") ||
+            lower.contains(".local:") ||
+            lower.contains(".local/") ||
+            lower.contains("umbrel:");
 
         let scheme = if is_local { "ws://" } else { "wss://" };
         Ok(format!("{}{}", scheme, trimmed))
