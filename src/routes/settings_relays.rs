@@ -101,11 +101,17 @@ pub fn SettingsRelays() -> Element {
 
         // Try parsing as-is
         if let Ok(url) = nostr::Url::parse(trimmed) {
-            return Ok(url.to_string());
+            // Enforce WebSocket schemes only
+            let scheme = url.scheme();
+            if scheme == "ws" || scheme == "wss" {
+                return Ok(url.to_string());
+            }
+            return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
         }
 
-        // Try adding wss:// prefix
+        // Try adding wss:// prefix (only if no scheme present)
         if let Ok(url) = nostr::Url::parse(&format!("wss://{}", trimmed)) {
+            // Already wss:// so no need to check scheme
             return Ok(url.to_string());
         }
 
