@@ -41,15 +41,18 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-/// Group stuck proofs by transaction ID
+/// Group stuck proofs by mint URL and transaction ID
+///
+/// Groups by (mint_url, transaction_id) to prevent proofs from different mints
+/// with the same transaction_id from being incorrectly merged.
 fn group_by_transaction(
     proofs: &[StuckProofInfo],
-) -> Vec<(Option<u64>, Vec<StuckProofInfo>)> {
-    let mut groups: HashMap<Option<u64>, Vec<StuckProofInfo>> = HashMap::new();
+) -> Vec<((String, Option<u64>), Vec<StuckProofInfo>)> {
+    let mut groups: HashMap<(String, Option<u64>), Vec<StuckProofInfo>> = HashMap::new();
 
     for proof in proofs {
         groups
-            .entry(proof.transaction_id)
+            .entry((proof.mint_url.clone(), proof.transaction_id))
             .or_default()
             .push(proof.clone());
     }
@@ -219,9 +222,9 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                         div { class: "space-y-4",
                             h3 { class: "font-semibold", "Stuck Proofs" }
 
-                            for (tx_id, proofs) in grouped.iter() {
+                            for ((mint_url, tx_id), proofs) in grouped.iter() {
                                 TransactionGroup {
-                                    key: "{tx_id:?}",
+                                    key: "{mint_url}_{tx_id:?}",
                                     transaction_id: *tx_id,
                                     proofs: proofs.clone(),
                                 }

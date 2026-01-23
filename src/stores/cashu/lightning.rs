@@ -14,12 +14,13 @@ use super::internal::{
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{
+    add_in_flight_melt_request, persist_in_flight_melt_requests, remove_in_flight_melt_request,
     try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES, PENDING_MINT_QUOTES, WALLET_BALANCE,
     WALLET_TOKENS,
 };
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, MeltProgress, MeltQuoteInfo, MintQuoteInfo,
-    MintQuoteState, MeltQuoteState, ProofData, TokenData,
+    ExtendedCashuProof, ExtendedTokenEvent, InFlightMeltRequest, MeltProgress, MeltQuoteInfo,
+    MintQuoteInfo, MintQuoteState, MeltQuoteState, ProofData, TokenData,
     PendingMintQuotesStoreStoreExt, PendingMeltQuotesStoreStoreExt, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
@@ -425,14 +426,51 @@ pub async fn melt_tokens(
 
     *MELT_PROGRESS.write() = Some(MeltProgress::PayingInvoice);
 
+    // Generate unique transaction ID for in-flight tracking
+    let tx_id = format!("melt_{}", super::utils::now_secs());
+
+    // CRITICAL SAFETY: Persist in-flight melt request BEFORE network call
+    // This enables crash recovery - we can query the mint for quote state
+    // and recover change proofs if the app crashes during the melt operation.
+    let in_flight = InFlightMeltRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        quote_id: quote_id.clone(),
+        proofs_used: all_proofs.iter().map(cdk_proof_to_proof_data).collect(),
+        amount: quote_info.amount,
+        fee_reserve: quote_info.fee_reserve,
+        created_at: super::utils::now_secs(),
+    };
+    add_in_flight_melt_request(in_flight);
+
+    // SAFETY: Verify persistence before proceeding - abort if it fails
+    // Without this, a crash could lose change proofs.
+    if let Err(e) = persist_in_flight_melt_requests().await {
+        // Clean up the in-flight request we just added since we can't proceed
+        remove_in_flight_melt_request(&tx_id);
+        *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+            error: format!("Failed to persist recovery data: {}", e),
+        });
+        return Err(format!("Cannot proceed with melt: failed to persist recovery data. {}", e));
+    }
+
     // 1. Use try_operation_or_recover wrapper for CDK operation
     // This ensures proofs are synced with mint if operation fails
-    let (melted, keep_proofs) = super::internal::try_operation_or_recover(
+    let (melted, keep_proofs) = match super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
         execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed),
     )
-    .await?;
+    .await {
+        Ok(result) => result,
+        Err(e) => {
+            // Operation failed - remove in-flight tracking
+            // Recovery will happen on next startup if needed
+            remove_in_flight_melt_request(&tx_id);
+            let _ = persist_in_flight_melt_requests().await;
+            return Err(e);
+        }
+    };
 
     let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
     let preimage = melted.preimage;
@@ -523,6 +561,14 @@ pub async fn melt_tokens(
     // Sync state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync MultiMintWallet state after melt: {}", e);
+    }
+
+    // SAFETY: Remove in-flight melt request now that we've completed successfully
+    // The melt operation is done, state is updated, and Nostr events published.
+    remove_in_flight_melt_request(&tx_id);
+    if let Err(e) = persist_in_flight_melt_requests().await {
+        // Non-fatal - the request will be cleaned up on next startup
+        log::warn!("Failed to persist in-flight melt cleanup: {}", e);
     }
 
     log::info!(

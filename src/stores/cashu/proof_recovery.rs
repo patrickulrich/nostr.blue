@@ -12,22 +12,26 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
-use super::signals::{WALLET_BALANCE, WALLET_TOKENS};
-use super::types::{ProofData, ProofState, WalletTokensStoreStoreExt};
+use super::signals::{is_transaction_active, WALLET_BALANCE, WALLET_TOKENS};
+use super::types::{
+    ProofData, ProofState, WalletTokensStoreStoreExt,
+    RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
+};
 use super::utils::now_secs;
 
 // =============================================================================
 // Recovery Constants
 // =============================================================================
 
-/// Default timeout for Reserved proofs (24 hours)
-pub const RESERVED_TIMEOUT_SECS: u64 = 24 * 60 * 60;
+/// Default timeout for Reserved proofs before checking mint state
+/// Uses the more aggressive timeout from types.rs for faster recovery
+pub const RESERVED_TIMEOUT_SECS: u64 = RESERVED_PROOF_TIMEOUT_SECS;
 
-/// Default timeout for PendingSpent proofs (1 hour)
-pub const PENDING_SPENT_TIMEOUT_SECS: u64 = 60 * 60;
+/// Default timeout for PendingSpent proofs before checking mint state
+pub const PENDING_SPENT_TIMEOUT_DEFAULT: u64 = PENDING_SPENT_TIMEOUT_SECS;
 
-/// Short timeout for transactions (5 minutes)
-pub const TRANSACTION_TIMEOUT_SECS: u64 = 5 * 60;
+/// Short timeout for transactions (5 minutes) - for UI urgency display
+pub const TRANSACTION_TIMEOUT_SECS: u64 = IN_FLIGHT_MELT_TIMEOUT_SECS;
 
 // =============================================================================
 // Proof State Tracking
@@ -192,9 +196,10 @@ pub struct WalletHealthStats {
 /// Recover stuck Reserved proofs by checking with mint first
 ///
 /// SAFETY: Only recovers proofs that are:
-/// 1. Older than RESERVED_TIMEOUT_SECS (24 hours)
+/// 1. Older than RESERVED_TIMEOUT_SECS (10 minutes)
 /// 2. NOT in PENDING_BY_MINT_SECRETS (not actively being processed)
-/// 3. Confirmed unspent by the mint
+/// 3. NOT part of an active transaction (checked via ACTIVE_OPERATIONS)
+/// 4. Confirmed unspent by the mint
 ///
 /// This prevents fund loss from recovering proofs that are actually in-flight.
 pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
@@ -213,11 +218,18 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
 
     // Filter out proofs that are actively pending at mint
     let pending_secrets = PENDING_BY_MINT_SECRETS.read();
-    let safe_to_recover: Vec<_> = reserved_stuck
+    let mut safe_to_recover: Vec<_> = reserved_stuck
         .into_iter()
         .filter(|p| !pending_secrets.contains_key(&p.secret))
         .collect();
     drop(pending_secrets);
+
+    // SAFETY (Risk 4): Filter out proofs that are part of active transactions
+    // This prevents timeout recovery from interfering with still-running operations
+    safe_to_recover.retain(|p| {
+        let tx_id_str = p.transaction_id.map(|id| format!("tx_{}", id));
+        !is_transaction_active(&tx_id_str)
+    });
 
     if safe_to_recover.is_empty() {
         log::debug!("All reserved proofs are still pending at mint");
@@ -273,7 +285,7 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         }
     }
 
-    if result.recovered_count > 0 {
+    if result.recovered_count > 0 || result.spent_count > 0 {
         recalculate_balance();
         log::info!(
             "Recovered {} reserved proofs worth {} sats (confirmed unspent by mint)",
@@ -522,12 +534,20 @@ fn recalculate_balance() {
 fn calculate_urgency(duration_secs: u64) -> UrgencyLevel {
     if duration_secs > RESERVED_TIMEOUT_SECS {
         UrgencyLevel::Critical
-    } else if duration_secs > PENDING_SPENT_TIMEOUT_SECS {
+    } else if duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT {
         UrgencyLevel::High
     } else if duration_secs > TRANSACTION_TIMEOUT_SECS {
         UrgencyLevel::Warning
     } else {
         UrgencyLevel::Normal
+    }
+}
+
+/// Determine if a proof can be recovered based on its state and duration
+fn can_recover_proof(state: ProofState, duration_secs: u64) -> bool {
+    match state {
+        ProofState::PendingSpent => duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT,
+        _ => duration_secs > RESERVED_TIMEOUT_SECS,
     }
 }
 
@@ -559,7 +579,7 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
                     .unwrap_or(0);
 
                 let urgency = calculate_urgency(duration);
-                let can_recover = duration > RESERVED_TIMEOUT_SECS;
+                let can_recover = can_recover_proof(proof.state, duration);
 
                 if duration > TRANSACTION_TIMEOUT_SECS {
                     // Stuck - show in modal

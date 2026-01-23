@@ -207,6 +207,9 @@ pub async fn init_wallet() -> Result<(), String> {
                         // Load persisted pending secrets (proofs pending at mint)
                         super::signals::load_pending_secrets().await;
 
+                        // Load in-flight melt requests for crash recovery
+                        super::signals::load_in_flight_melt_requests().await;
+
                         // Start background processor for pending events
                         start_pending_events_processor();
 
@@ -260,24 +263,47 @@ pub async fn init_wallet() -> Result<(), String> {
                                 log::warn!("Pending operation recovery failed: {}", e);
                             }
 
-                            // Phase 2.5: Recover stuck proofs (SAFE: checks mint + timeouts)
-                            // Recovers proofs stuck in Reserved/PendingSpent states
-                            match super::proof_recovery::run_full_recovery().await {
-                                result if result.recovered_count > 0 || result.spent_count > 0 => {
-                                    log::info!(
-                                        "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
-                                        result.recovered_count,
-                                        result.recovered_value,
-                                        result.spent_count,
-                                        result.spent_value
-                                    );
-                                }
-                                result if !result.errors.is_empty() => {
-                                    for err in result.errors {
-                                        log::warn!("Proof recovery error: {}", err);
+                            // Phase 2.3: Recover in-flight melt requests (crash recovery)
+                            // Checks all in-flight melt requests with mints, recovers change
+                            // SAFETY: Always verifies proof states with mint (NUT-07) before reverting
+                            match super::recovery::recover_all_pending_melt_quotes().await {
+                                Ok(result) => {
+                                    if result.quotes_paid > 0 || result.change_recovered > 0 {
+                                        log::info!(
+                                            "In-flight melt recovery: {} paid, {} sats recovered",
+                                            result.quotes_paid,
+                                            result.change_recovered
+                                        );
+                                    }
+                                    if !result.errors.is_empty() {
+                                        for err in result.errors {
+                                            log::warn!("In-flight melt recovery error: {}", err);
+                                        }
                                     }
                                 }
-                                _ => {}
+                                Err(e) => {
+                                    log::warn!("In-flight melt quote recovery failed: {}", e);
+                                }
+                            }
+
+                            // Phase 2.5: Recover stuck proofs (SAFE: checks mint + timeouts)
+                            // Recovers proofs stuck in Reserved/PendingSpent states
+                            let result = super::proof_recovery::run_full_recovery().await;
+
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
+                                    result.recovered_count,
+                                    result.recovered_value,
+                                    result.spent_count,
+                                    result.spent_value
+                                );
+                            }
+
+                            if !result.errors.is_empty() {
+                                for err in &result.errors {
+                                    log::warn!("Proof recovery error: {}", err);
+                                }
                             }
 
                             // Phase 3: Check for paid mint quotes using CDK

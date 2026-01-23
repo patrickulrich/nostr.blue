@@ -148,6 +148,9 @@ pub(crate) async fn create_ephemeral_wallet(
             .map(|p| p.proof.secret.to_string())
             .collect();
 
+        // Capture input length before filtering for accurate skipped_count
+        let input_len = proofs.len();
+
         // Filter to only inject proofs that don't already exist
         let new_proofs: Vec<_> = proofs
             .into_iter()
@@ -157,10 +160,10 @@ pub(crate) async fn create_ephemeral_wallet(
         if new_proofs.is_empty() {
             log::debug!(
                 "All {} proofs already exist in CDK database, skipping injection",
-                existing_secrets.len()
+                input_len
             );
         } else {
-            let skipped_count = existing_secrets.len().saturating_sub(new_proofs.len());
+            let skipped_count = input_len.saturating_sub(new_proofs.len());
             if skipped_count > 0 {
                 log::debug!(
                     "Skipping {} duplicate proofs, injecting {} new proofs",

@@ -28,8 +28,9 @@ pub fn WalletHealthIndicator(on_open_modal: EventHandler<()>) -> Element {
             // Pending balance (yellow)
             if health.pending_count > 0 {
                 div { class: "flex items-center gap-1 text-yellow-300",
-                    span { class: "animate-pulse", "..." }
+                    span { class: "animate-pulse", aria_hidden: "true", "..." }
                     span { "{health.pending_balance} sats pending" }
+                    span { class: "sr-only", "pending balance: {health.pending_balance} sats" }
                 }
             }
 
@@ -37,6 +38,7 @@ pub fn WalletHealthIndicator(on_open_modal: EventHandler<()>) -> Element {
             if health.stuck_count > 0 {
                 button {
                     class: "flex items-center gap-1 px-2 py-1 bg-red-500/20 text-red-200 rounded-md hover:bg-red-500/30 transition",
+                    aria_label: "Open stuck proofs modal",
                     onclick: move |_| on_open_modal.call(()),
                     span { "!" }
                     span { "{health.stuck_count} stuck" }

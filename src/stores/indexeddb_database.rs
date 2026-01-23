@@ -141,6 +141,23 @@ mod native_stub {
         pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
+
+        pub async fn save_in_flight_melt_requests(
+            &self,
+            _requests: &[crate::stores::cashu::types::InFlightMeltRequest],
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_in_flight_melt_requests(
+            &self,
+        ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn clear_in_flight_melt_requests(&self) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
     }
 
     #[async_trait::async_trait]
@@ -319,7 +336,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(target_arch = "wasm32")]
-const DB_VERSION: u32 = 4;
+const DB_VERSION: u32 = 5;
 
 // Object store names
 #[cfg(target_arch = "wasm32")]
@@ -348,6 +365,8 @@ const STORE_SYNC_STATE: &str = "sync_state";
 const STORE_SHOP_ORDERS: &str = "shop_orders";
 #[cfg(target_arch = "wasm32")]
 const STORE_PENDING_SECRETS: &str = "pending_secrets";
+#[cfg(target_arch = "wasm32")]
+const STORE_IN_FLIGHT_MELTS: &str = "in_flight_melts";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(target_arch = "wasm32")]
@@ -424,6 +443,10 @@ impl IndexedDbDatabase {
             // V4: Add pending secrets store for tracking in-flight mint operations
             if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
                 db.create_object_store(STORE_PENDING_SECRETS)?;
+            }
+            // V5: Add in-flight melt requests store for crash recovery
+            if !db.object_store_names().any(|n| n == STORE_IN_FLIGHT_MELTS) {
+                db.create_object_store(STORE_IN_FLIGHT_MELTS)?;
             }
 
             Ok(())
@@ -756,6 +779,38 @@ impl IndexedDbDatabase {
     #[allow(dead_code)]
     pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
         self.delete_value(STORE_PENDING_SECRETS, "current").await
+    }
+
+    // =========================================================================
+    // In-Flight Melt Requests (Crash Recovery)
+    // =========================================================================
+
+    /// Save in-flight melt requests for crash recovery
+    ///
+    /// CRITICAL: This must be called BEFORE the melt network call to ensure
+    /// we can recover change proofs if the app crashes during the operation.
+    /// The melt operation should be aborted if this fails.
+    pub async fn save_in_flight_melt_requests(
+        &self,
+        requests: &Vec<crate::stores::cashu::types::InFlightMeltRequest>,
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_IN_FLIGHT_MELTS, "current", requests).await
+    }
+
+    /// Load in-flight melt requests for crash recovery
+    ///
+    /// Returns the list of in-flight melt requests from the previous session,
+    /// or None if no data exists.
+    pub async fn load_in_flight_melt_requests(
+        &self,
+    ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error> {
+        self.get_value(STORE_IN_FLIGHT_MELTS, "current").await
+    }
+
+    /// Clear in-flight melt requests after recovery is complete
+    #[allow(dead_code)]
+    pub async fn clear_in_flight_melt_requests(&self) -> Result<(), database::Error> {
+        self.delete_value(STORE_IN_FLIGHT_MELTS, "current").await
     }
 }
 

@@ -995,6 +995,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     // Proofs are already safely persisted in CDK IndexedDB at line 950
     let mut new_event_id: Option<String> = None;
     let mut last_error = String::new();
+    let mut retryable = true;
 
     // Retry delays: 500ms, 1s, 2s (with jitter)
     let delays = [500u32, 1000, 2000];
@@ -1041,6 +1042,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 if err_str.contains("banned") || err_str.contains("invalid") ||
                    err_str.contains("malformed") || err_str.contains("too large") {
                     log::error!("Non-retryable error: {}", last_error);
+                    retryable = false;
                     break;
                 }
                 log::warn!("Publish attempt {} failed: {}", attempt + 1, e);
@@ -1051,7 +1053,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     // Handle final result
     let new_event_id = match new_event_id {
         Some(id) => id,
-        None => {
+        None if retryable => {
             // All retries failed - queue for background retry
             log::error!("All publish attempts failed, queueing for background retry: {}", last_error);
 
@@ -1065,6 +1067,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             ).await;
 
             pending_id
+        }
+        None => {
+            // Non-retryable error - return error, don't queue
+            return Err(format!("Non-retryable publish error: {}", last_error));
         }
     };
 

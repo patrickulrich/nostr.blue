@@ -435,14 +435,20 @@ pub async fn receive_tokens_with_options(
     let mut last_error = String::new();
     let delays_ms = [500u32, 1000, 2000]; // Exponential backoff delays
 
-    for (attempt, _delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
+    for (attempt, delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
         if attempt > 0 {
             #[cfg(target_arch = "wasm32")]
             {
                 // Add jitter to prevent synchronized retries
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
-                let actual_delay = _delay_ms.saturating_sub(100) + jitter;
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
                 gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Non-WASM: use std sleep (sync context acceptable for CLI)
+                let actual_delay = delay_ms.saturating_sub(100) + 100; // Fixed jitter
+                std::thread::sleep(std::time::Duration::from_millis(actual_delay as u64));
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
@@ -478,7 +484,7 @@ pub async fn receive_tokens_with_options(
         Some(id) => id,
         None => {
             log::error!("All publish attempts failed, queueing for retry: {}", last_error);
-            let pending_id = format!("pending_{}", js_sys::Date::now() as u64);
+            let pending_id = format!("pending_{}", super::utils::now_secs());
 
             // Queue for background retry - proofs are safe in CDK, just need Nostr backup
             super::events::queue_token_event_for_retry(
