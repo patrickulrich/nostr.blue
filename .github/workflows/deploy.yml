@@ -67,7 +67,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist/public'
+          path: './target/dx/nostrblue/release/web/public'
 
   deploy:
     name: Deploy
