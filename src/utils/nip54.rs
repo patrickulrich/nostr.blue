@@ -283,7 +283,7 @@ pub fn parse_wiki_article(event: &Event) -> Result<WikiArticle, String> {
     // Validate identifier is normalized
     if !is_normalized_dtag(&identifier) {
         // Accept but log warning - some implementations may not normalize
-        tracing::warn!("Wiki article d-tag is not normalized: {}", identifier);
+        log::warn!("Wiki article d-tag is not normalized: {}", identifier);
     }
 
     // Build coordinate and naddr

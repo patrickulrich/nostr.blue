@@ -864,3 +864,16 @@ impl RecoveryResult {
         }
     }
 }
+
+/// Result type for melt recovery operations (CDK 0.14.2+)
+#[derive(Clone, Debug, Default)]
+pub struct MeltRecoveryResult {
+    /// Number of melt quotes checked
+    pub quotes_checked: usize,
+    /// Number of quotes that were paid
+    pub quotes_paid: usize,
+    /// Amount of change recovered (sats)
+    pub change_recovered: u64,
+    /// Errors encountered during recovery
+    pub errors: Vec<String>,
+}
