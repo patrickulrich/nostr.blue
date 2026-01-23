@@ -3,10 +3,12 @@ const CACHE_NAME = 'nostr-blue-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',  // Required for SPA offline fallback routing
-  // Removed: '/tailwind.css' - built to /assets/tailwind-[hash].css with cache-busting
-  // Removed: '/git-worker.js' - 672KB, only needed for /code routes (loaded on-demand)
   '/voice-recorder.js',
   '/manifest.json'
+  // Note: Hashed CSS (/assets/tailwind-[hash].css) is cached on first fetch via
+  // stale-while-revalidate strategy in the fetch handler. The hash changes on each
+  // build, so we cannot hardcode it here. For true offline-first, consider using
+  // a build-time generated precache manifest (e.g., workbox-precaching).
 ];
 
 // Install - cache static assets

@@ -101,6 +101,12 @@ pub fn Articles() -> Element {
                 .await
                 .unwrap_or_default();
 
+            // Check staleness after cache load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale articles request after cache load");
+                return;
+            }
+
             if !cached_items.is_empty() {
                 log::info!("Loaded {} articles from cache", cached_items.len());
                 let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
@@ -113,26 +119,34 @@ pub fn Articles() -> Element {
                 FeedType::Global => load_articles(None).await.map(|e| (e, false)),
             };
 
+            // Check staleness after network load
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale articles request after network load");
+                return;
+            }
+
             match result {
                 Ok((feed_events, did_fallback)) => {
-                    // Update feed_type if fallback occurred (no contacts or error)
-                    if did_fallback {
+                    // Recompute cache key if fallback occurred
+                    let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global articles feed");
                         feed_type.set(FeedType::Global);
-                    }
+                        FeedCacheKey::ArticlesGlobal  // Use Global key, not Following
+                    } else {
+                        cache_key.clone()
+                    };
 
                     // Track oldest timestamp for pagination
                     if let Some(last_event) = feed_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
 
-                    // STEP 3: Store to cache
+                    // STEP 3: Store to cache with effective key
                     let feed_items: Vec<FeedItem> = feed_events.iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
-                    let cache_key_for_store = cache_key.clone();
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ = feed_cache::store_feed_items(&effective_cache_key, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
 
@@ -167,9 +181,22 @@ pub fn Articles() -> Element {
         loading.set(true);
 
         spawn(async move {
-            // Note: During pagination, we ignore the fallback flag since feed_type is already set
+            // During pagination, handle fallback carefully to avoid mixing feeds
             let result = match current_feed_type {
-                FeedType::Following => load_following_articles(until).await.map(|(e, _)| e),
+                FeedType::Following => {
+                    match load_following_articles(until).await {
+                        Ok((events, did_fallback)) => {
+                            // During pagination, discard fallback results to avoid mixing feeds
+                            if did_fallback {
+                                log::info!("Pagination fallback detected, returning empty to preserve feed type");
+                                Ok(Vec::new())
+                            } else {
+                                Ok(events)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 FeedType::Global => load_articles(until).await,
             };
 

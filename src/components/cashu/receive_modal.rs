@@ -208,7 +208,7 @@ pub fn CashuReceiveModal(
                                 // Memo (if present) - sanitize for defense-in-depth
                                 if let Some(memo) = &p.memo {
                                     {
-                                        let sanitized_memo = ammonia::clean(memo);
+                                        let sanitized_memo = ammonia::clean_text(memo);
                                         rsx! {
                                             div {
                                                 class: "flex items-start justify-between",

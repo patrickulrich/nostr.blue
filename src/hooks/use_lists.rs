@@ -94,6 +94,7 @@ pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<S
         // Don't fetch if client not initialized yet
         // Effect will re-run when CLIENT_INITIALIZED changes
         if !client_ready {
+            loading.set(false);  // Reset to avoid stuck spinner
             return;
         }
 

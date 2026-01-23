@@ -114,11 +114,12 @@ pub fn LiveStreamShareModal(
             use wasm_bindgen::prelude::*;
 
             if let Some(window) = web_sys::window() {
-                let closure = Closure::once(Box::new(move || {
+                // Use Closure::once_into_js - memory managed by JS GC, no leak
+                let js_closure = Closure::once_into_js(move || {
                     set_cursor_position(&textarea_id, utf16_pos);
-                }) as Box<dyn FnOnce()>);
-                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
-                closure.forget(); // prevent closure from being dropped
+                });
+                let _ = window.request_animation_frame(js_closure.unchecked_ref());
+                // No forget() needed - ownership transferred to JS
             }
         }
     }

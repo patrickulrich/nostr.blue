@@ -6,7 +6,11 @@ if ('serviceWorker' in navigator) {
                 console.log('[PWA] Service Worker registered:', reg.scope);
 
                 // Check for updates periodically
-                setInterval(() => reg.update(), 60 * 60 * 1000); // Check every hour
+                setInterval(() => {
+                    reg.update().catch(err => {
+                        console.error('[PWA] Service Worker update check failed:', err);
+                    });
+                }, 60 * 60 * 1000); // Check every hour
 
                 // Listen for update found
                 reg.addEventListener('updatefound', () => {

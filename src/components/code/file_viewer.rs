@@ -317,7 +317,7 @@ pub fn CodeFileViewer(
                 if is_truncated {
                     div {
                         class: "px-4 py-3 bg-amber-500/10 border-t border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm",
-                        "⚠️ File truncated: showing first {MAX_RENDER_LINES} of {line_count} lines. Use Raw button to download full file."
+                        "⚠️ File truncated: showing first {MAX_RENDER_LINES} of {line_count} lines. Copy the content to view the full file."
                     }
                 }
             }

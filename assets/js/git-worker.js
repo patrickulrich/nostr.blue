@@ -96,6 +96,10 @@ function getCorsProxy(url) {
  * @throws {Error} If path is invalid
  */
 function validateRepoDir(dir) {
+  // Type guard: ensure dir is a string before calling string methods
+  if (typeof dir !== 'string') {
+    throw new Error('Invalid directory path');
+  }
   if (!dir || dir.includes('..') || dir.startsWith('/') || dir.includes('\0')) {
     throw new Error('Invalid directory path');
   }

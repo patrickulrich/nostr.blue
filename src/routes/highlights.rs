@@ -44,6 +44,9 @@ pub fn Highlights() -> Element {
     // Request ID for preventing stale results when feed type changes rapidly
     let mut request_id = use_signal(|| 0u32);
 
+    // Guard signal to prevent effect re-run when fallback sets FeedType::Global
+    let mut fallback_in_progress = use_signal(|| false);
+
     // Load highlights on mount and when refresh is triggered or feed type changes
     use_effect(move || {
         let _ = refresh_trigger.read();
@@ -52,6 +55,12 @@ pub fn Highlights() -> Element {
 
         // Only load if client is initialized
         if !is_initialized {
+            return;
+        }
+
+        // If we just fell back, skip this trigger to prevent re-run
+        if *fallback_in_progress.peek() {
+            fallback_in_progress.set(false);
             return;
         }
 
@@ -80,6 +89,7 @@ pub fn Highlights() -> Element {
                 Ok((new_highlights, did_fallback)) => {
                     // Update feed_type if fallback occurred
                     if did_fallback {
+                        fallback_in_progress.set(true);  // Signal to skip next effect run
                         feed_type.set(FeedType::Global);
                     }
                     // Track oldest timestamp for pagination
@@ -216,8 +226,11 @@ pub fn Highlights() -> Element {
                                 onclick: move |_| show_dropdown.set(false),
 
                                 button {
-                                    class: "w-full px-4 py-2 text-left hover:bg-accent rounded-t-lg transition-colors",
-                                    class: if *feed_type.read() == FeedType::Following { "bg-accent/50" } else { "" },
+                                    class: if *feed_type.read() == FeedType::Following {
+                                        "w-full px-4 py-2 text-left hover:bg-accent rounded-t-lg transition-colors bg-accent/50"
+                                    } else {
+                                        "w-full px-4 py-2 text-left hover:bg-accent rounded-t-lg transition-colors"
+                                    },
                                     onclick: move |_| {
                                         feed_type.set(FeedType::Following);
                                         refresh_trigger.set(refresh_trigger() + 1);
@@ -225,8 +238,11 @@ pub fn Highlights() -> Element {
                                     "Following"
                                 }
                                 button {
-                                    class: "w-full px-4 py-2 text-left hover:bg-accent rounded-b-lg transition-colors",
-                                    class: if *feed_type.read() == FeedType::Global { "bg-accent/50" } else { "" },
+                                    class: if *feed_type.read() == FeedType::Global {
+                                        "w-full px-4 py-2 text-left hover:bg-accent rounded-b-lg transition-colors bg-accent/50"
+                                    } else {
+                                        "w-full px-4 py-2 text-left hover:bg-accent rounded-b-lg transition-colors"
+                                    },
                                     onclick: move |_| {
                                         feed_type.set(FeedType::Global);
                                         refresh_trigger.set(refresh_trigger() + 1);

@@ -184,8 +184,8 @@ pub fn Home(list: String) -> Element {
         realtime_started.set(false);
 
         // Capture is_first_load BEFORE resetting the flag
-        // This allows negentropy sync for manual refreshes (same feed type)
-        let is_first_load = !*interactions_loaded.peek();
+        // Include feed_type_changed so switching feeds triggers full fetch, not sync
+        let is_first_load = !*interactions_loaded.peek() || feed_type_changed;
 
         // Reset interactions_loaded so new feed type gets full fetch (not sync)
         interactions_loaded.set(false);

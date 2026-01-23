@@ -2,9 +2,9 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.7.5-blue)
+![Version](https://img.shields.io/badge/version-0.7.6-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/rust-1.77+-orange)
+![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
 
 ## 🌟 Overview
@@ -65,7 +65,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
   - Atomic keyset counter management prevents "Blinded Message already signed" errors
 
 ### Styling & UI
-- **[TailwindCSS 3](https://tailwindcss.com/)** - Utility-first CSS framework
+- **[TailwindCSS 4](https://tailwindcss.com/)** - Utility-first CSS framework
 - Custom icon components with SVG optimization
 
 ### Additional Libraries
@@ -268,7 +268,6 @@ nostr.blue/
 ├── dist/                   # Production build
 ├── Cargo.toml              # Rust dependencies
 ├── Dioxus.toml             # Dioxus configuration
-├── tailwind.config.js      # TailwindCSS configuration
 ├── package.json            # Node.js dependencies
 └── index.html              # HTML template
 ```
@@ -277,7 +276,7 @@ nostr.blue/
 
 ### Prerequisites
 
-- **Rust 1.77+** (install via [rustup](https://rustup.rs/))
+- **Rust 1.82+** (install via [rustup](https://rustup.rs/))
 - **Node.js 18+** and **npm** (for TailwindCSS)
 - **Dioxus CLI** (development server and bundler)
 - **wasm32-unknown-unknown** target
@@ -413,7 +412,7 @@ Production builds are optimized with:
 | [NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) | Negentropy Syncing | ❌ |
 | [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) | App-specific data | ✅ |
 | [NIP-7D](https://github.com/nostr-protocol/nips/blob/master/7D.md) | Threads | ❌ |
-| [NIP-84](https://github.com/nostr-protocol/nips/blob/master/84.md) | Highlights | ❌ |
+| [NIP-84](https://github.com/nostr-protocol/nips/blob/master/84.md) | Highlights | ✅ |
 | [NIP-86](https://github.com/nostr-protocol/nips/blob/master/86.md) | Relay Management API | ❌ |
 | [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Mint Discoverability | ✅ |
 | [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls | ✅ |

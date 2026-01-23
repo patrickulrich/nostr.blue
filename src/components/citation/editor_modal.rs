@@ -269,32 +269,40 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             };
 
             // Guard state mutations: only apply if session token hasn't changed
-            if *session_token.read() == my_token {
-                match result {
-                    Ok(event_id) => {
-                        log::info!("Citation published: {}", event_id);
-
-                        // Refresh user's citations
-                        if let Some(pk) = auth_store::get_pubkey() {
-                            if let Err(e) = fetch_citations_by_author(&pk, 200).await {
-                                crate::utils::log_fetch_error("citations refresh", e);
-                            }
-                        }
-
-                        // Callback
-                        if let Some(ref handler) = on_save {
-                            handler.call(event_id);
-                        }
-
-                        show.set(false);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to publish citation: {}", e);
-                        error.set(Some(e));
-                    }
-                }
-                saving.set(false);
+            if *session_token.read() != my_token {
+                return;
             }
+
+            match result {
+                Ok(event_id) => {
+                    log::info!("Citation published: {}", event_id);
+
+                    // Refresh user's citations
+                    if let Some(pk) = auth_store::get_pubkey() {
+                        if let Err(e) = fetch_citations_by_author(&pk, 200).await {
+                            crate::utils::log_fetch_error("citations refresh", e);
+                        }
+                    }
+
+                    // Re-check session token after await to avoid stale mutations
+                    if *session_token.read() != my_token {
+                        saving.set(false);
+                        return;
+                    }
+
+                    // Callback
+                    if let Some(ref handler) = on_save {
+                        handler.call(event_id);
+                    }
+
+                    show.set(false);
+                }
+                Err(e) => {
+                    log::error!("Failed to publish citation: {}", e);
+                    error.set(Some(e));
+                }
+            }
+            saving.set(false);
         });
     };
 
