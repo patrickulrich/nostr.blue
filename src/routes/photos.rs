@@ -100,11 +100,23 @@ pub fn Photos() -> Element {
                 .await
                 .unwrap_or_default();
 
+            // Staleness check after cache await (Dioxus pattern)
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request after cache load");
+                return;
+            }
+
             if !cached_items.is_empty() {
                 log::info!("Loaded {} photos from cache", cached_items.len());
                 // Convert FeedItem to Event
                 let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
                 events.set(cached_events);
+            }
+
+            // Staleness check before network await
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request before network");
+                return;
             }
 
             // STEP 2: Load from network
@@ -113,19 +125,28 @@ pub fn Photos() -> Element {
                 FeedType::Global => load_global_photos(None).await.map(|e| (e, false)),
             };
 
+            // Staleness check after network await
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale photos request after network");
+                return;
+            }
+
             match result {
                 Ok((photo_events, did_fallback)) => {
-                    // Update feed_type if fallback occurred (no contacts or error)
-                    if did_fallback {
+                    // Recompute cache key if fallback occurred (nostr-sdk BrokenDownFilters pattern)
+                    let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global photos feed");
                         feed_type.set(FeedType::Global);
-                    }
+                        FeedCacheKey::PhotosGlobal  // Use Global key, not Following
+                    } else {
+                        cache_key.clone()
+                    };
 
-                    // STEP 3: Store to cache
+                    // STEP 3: Store to cache using effective key
                     let feed_items: Vec<FeedItem> = photo_events.iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
-                    let cache_key_for_store = cache_key.clone();
+                    let cache_key_for_store = effective_cache_key;
                     spawn(async move {
                         let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
@@ -173,9 +194,22 @@ pub fn Photos() -> Element {
         loading.set(true);
 
         spawn(async move {
-            // Note: During pagination, we ignore the fallback flag since feed_type is already set
+            // Handle fallback during pagination (nostr-sdk Orphan pattern)
+            // During pagination, discard fallback results to preserve feed type integrity
             let result = match current_feed_type {
-                FeedType::Following => load_following_photos(Some(until)).await.map(|(e, _)| e),
+                FeedType::Following => {
+                    match load_following_photos(Some(until)).await {
+                        Ok((events, did_fallback)) => {
+                            if did_fallback {
+                                log::info!("Pagination fallback detected, returning empty to preserve feed type");
+                                Ok(Vec::new())  // Triggers has_more.set(false)
+                            } else {
+                                Ok(events)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 FeedType::Global => load_global_photos(Some(until)).await,
             };
 

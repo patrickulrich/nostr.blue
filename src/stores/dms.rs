@@ -268,6 +268,9 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
 
     log::info!("Sending DM from {} to {}", sender_pk.to_hex(), recipient_pubkey);
 
+    // Ensure relays are ready before sending (nostr-sdk pattern: pool checks before send)
+    nostr_client::ensure_relays_ready(&client).await;
+
     // Build the rumor (kind 14 unsigned message)
     let rumor = EventBuilder::private_msg_rumor(recipient_pk, content.clone())
         .build(sender_pk);
@@ -327,6 +330,24 @@ pub async fn send_dm(recipient_pubkey: String, content: String) -> Result<Publis
         successful_relays,
         failed_relays,
     };
+
+    // Validate success (nostr-sdk Output pattern: check success.is_empty())
+    if combined_result.success_count() == 0 {
+        // Log failed relays for debugging (nostr-sdk pattern: inspect failed map)
+        for (relay, error) in &combined_result.failed_relays {
+            log::error!("Failed to send to {}: {}", relay, error);
+        }
+        return Err(format!(
+            "Failed to deliver DM to any relay. {} relays failed.",
+            combined_result.failed_relays.len()
+        ));
+    }
+
+    // Warn on partial delivery (nostr-sdk pattern: redundancy check)
+    if combined_result.success_count() < 2 {
+        log::warn!("DM only delivered to {} relay(s) - low redundancy",
+            combined_result.success_count());
+    }
 
     log::info!("DM sent: {} relays succeeded, {} failed",
         combined_result.success_count(),

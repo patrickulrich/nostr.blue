@@ -227,7 +227,16 @@ pub fn Home(list: String) -> Element {
                     };
 
                     // STEP 2: Stream from network, merge progressively
+                    // Capture request ID for staleness check (Dioxus signals are Copy)
+                    let stream_req_id = request_id;
+                    let stream_curr_id = current_id;
                     let result = load_following_feed_streaming(None, |batch_items| {
+                        // Guard against stale batches (Dioxus task cancellation pattern)
+                        if *stream_req_id.peek() != stream_curr_id {
+                            log::debug!("Discarding stale streaming batch");
+                            return;
+                        }
+
                         // Progressive update: merge new batch with accumulated items
                         accumulated_items = feed_cache::merge_feed_items(accumulated_items.clone(), batch_items);
 

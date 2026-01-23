@@ -127,9 +127,23 @@ pub fn Highlights() -> Element {
         request_id.set(current_id);
 
         spawn(async move {
+            // Handle fallback during pagination (nostr-sdk Orphan pattern)
+            // During pagination, discard fallback results to preserve feed type integrity
             let result = match current_feed_type {
-                FeedType::Following => load_following_highlights(until).await,
-                FeedType::Global => load_global_highlights(until).await.map(|h| (h, false)),
+                FeedType::Following => {
+                    match load_following_highlights(until).await {
+                        Ok((highlights, did_fallback)) => {
+                            if did_fallback {
+                                log::info!("Pagination fallback detected, returning empty to preserve feed type");
+                                Ok(Vec::new())  // Triggers has_more.set(false)
+                            } else {
+                                Ok(highlights)
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                FeedType::Global => load_global_highlights(until).await,
             };
 
             // Check if this request is still current (discard stale results)
@@ -139,11 +153,7 @@ pub fn Highlights() -> Element {
             }
 
             match result {
-                Ok((new_highlights, did_fallback)) => {
-                    // Update feed_type if fallback occurred
-                    if did_fallback {
-                        feed_type.set(FeedType::Global);
-                    }
+                Ok(new_highlights) => {
                     // Build existing IDs set FIRST for deduplication
                     let existing_ids: std::collections::HashSet<_> = highlights
                         .read()

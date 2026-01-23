@@ -49,6 +49,9 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                 Some(comment_value)
             };
             on_confirm.call(comment_opt);
+            // Reset immediately - parent owns the async operation
+            // If submission fails, parent can keep modal open and user can retry
+            is_submitting.set(false);
         }
     };
 

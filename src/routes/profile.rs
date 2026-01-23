@@ -1989,11 +1989,37 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
     }
 
     // Step 2: Fetch liked events using connected relays (many authors - bypass gossip)
-    let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
-    let liked_events = nostr_client::fetch_events_from_connected_relays(liked_filter, Duration::from_secs(10)).await?;
+    let liked_filter = Filter::new().ids(liked_event_ids.clone()).limit(500);
+    let mut event_vec: Vec<NostrEvent> = nostr_client::fetch_events_from_connected_relays(
+        liked_filter, Duration::from_secs(10)
+    ).await?;
+
+    // Step 2b: Gossip fallback for missing events (nostr-sdk BrokenDownFilters::Orphan pattern)
+    let found_ids: std::collections::HashSet<_> = event_vec.iter().map(|e| e.id).collect();
+    let missing_ids: Vec<_> = liked_event_ids.iter()
+        .filter(|id| !found_ids.contains(id))
+        .cloned()
+        .collect();
+
+    if !missing_ids.is_empty() {
+        log::info!("Fetching {} missing liked events via gossip fallback", missing_ids.len());
+        let gossip_filter = Filter::new().ids(missing_ids).limit(100);
+        // Use gossip (fetch_profile_events_from_relays) as fallback - same as SDK's Orphan handling
+        if let Ok(gossip_events) = nostr_client::fetch_profile_events_from_relays(
+            gossip_filter, Duration::from_secs(10)
+        ).await {
+            let mut found_via_gossip = 0;
+            for event in gossip_events {
+                if !found_ids.contains(&event.id) {
+                    event_vec.push(event);
+                    found_via_gossip += 1;
+                }
+            }
+            log::info!("Recovered {} events via gossip", found_via_gossip);
+        }
+    }
 
     // Sort by reaction time (when user liked the post), not post creation time
-    let mut event_vec: Vec<NostrEvent> = liked_events;
     event_vec.sort_by(|a, b| {
         let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
         let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);

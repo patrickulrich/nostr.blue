@@ -52,23 +52,24 @@ pub fn SettingsRelays() -> Element {
 
     // === REACTIVE EFFECTS ===
     // Watch global signals and sync to local state
+    // Use .read() to subscribe to changes (Dioxus pattern: .read() subscribes, .peek() does not)
     use_effect(move || {
-        if let Some(metadata) = relay::USER_RELAY_METADATA.peek().as_ref() {
+        if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
             general_relays.set(metadata.relays.clone());
             dm_relays.set(metadata.dm_relays.clone());
         }
     });
 
     use_effect(move || {
-        search_relays.set(relay::SEARCH_RELAYS.peek().clone());
+        search_relays.set(relay::SEARCH_RELAYS.read().clone());
     });
 
     use_effect(move || {
-        blocked_relays.set(relay::BLOCKED_RELAYS.peek().clone());
+        blocked_relays.set(relay::BLOCKED_RELAYS.read().clone());
     });
 
     use_effect(move || {
-        local_relays.set(relay::LOCAL_RELAYS.peek().clone());
+        local_relays.set(relay::LOCAL_RELAYS.read().clone());
     });
 
     // === LIVE CONNECTION STATS ===
@@ -132,13 +133,20 @@ pub fn SettingsRelays() -> Element {
         Ok(format!("{}{}", scheme, trimmed))
     };
 
-    // Strip protocol for display
+    // Strip protocol for display (include port for non-default ports)
     let display_relay_url = |url: &str| -> String {
         if let Ok(parsed) = nostr::Url::parse(url) {
+            let host = parsed.host_str().unwrap_or(url);
+            // Include port if present (critical for non-default ports like 4443)
+            let host_with_port = match parsed.port() {
+                Some(port) => format!("{}:{}", host, port),
+                None => host.to_string(),
+            };
+
             if (parsed.scheme() == "wss" || parsed.scheme() == "ws") && parsed.path() == "/" {
-                parsed.host_str().unwrap_or(url).to_string()
+                host_with_port
             } else {
-                format!("{}{}", parsed.host_str().unwrap_or(""), parsed.path())
+                format!("{}{}", host_with_port, parsed.path())
             }
         } else {
             url.to_string()

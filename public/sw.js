@@ -48,6 +48,24 @@ self.addEventListener('fetch', (event) => {
   // Skip cross-origin requests (relay connections, APIs, etc.)
   if (!event.request.url.startsWith(self.location.origin)) return;
 
+  // For critical assets (CSS/JS in /assets/), use network-first with cache fallback
+  // This ensures fresh installs can work offline after first visit
+  if (event.request.url.includes('/assets/') &&
+      (event.request.url.endsWith('.css') || event.request.url.endsWith('.js'))) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   // For navigation requests, use network-first with offline fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
