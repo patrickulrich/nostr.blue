@@ -1378,33 +1378,61 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
         remove_expired_mint_quote(id);
     }
 
-    // Call check_all_mint_quotes once (not in a loop)
-    // CDK's check_all_mint_quotes processes all pending quotes and mints any paid ones
+    // Call check_all_mint_quotes to process any paid quotes
+    // Then check each quote's state individually to correctly track which were paid
     let (paid, total_minted) = if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
-        match multi_wallet.check_all_mint_quotes(None).await {
-            Ok(amount) => {
-                let minted = u64::from(amount);
-                if minted > 0 {
-                    // CDK processed paid quotes - clear our pending tracking
-                    // We don't know exactly which quotes were paid, so clear all non-expired
-                    let non_expired_ids: Vec<_> = quotes.iter()
-                        .filter(|q| !expired_ids.contains(&q.quote_id))
-                        .map(|q| q.quote_id.clone())
-                        .collect();
-                    let paid_count = non_expired_ids.len();
-                    for id in non_expired_ids {
-                        remove_paid_mint_quote(&id);
-                    }
-                    (paid_count, minted)
-                } else {
-                    (0, 0)
-                }
-            }
+        // First, let CDK process all paid quotes and mint them
+        let minted = match multi_wallet.check_all_mint_quotes(None).await {
+            Ok(amount) => u64::from(amount),
             Err(e) => {
                 log::warn!("Failed to check mint quotes: {}", e);
-                (0, 0)
+                0
+            }
+        };
+
+        // Now check each quote's state individually to update our tracking
+        // This ensures we only remove quotes that are actually paid
+        let mut paid_count = 0;
+        let non_expired_quotes: Vec<_> = quotes.iter()
+            .filter(|q| !expired_ids.contains(&q.quote_id))
+            .cloned()
+            .collect();
+
+        for quote in non_expired_quotes {
+            // Try to get the quote state from CDK - need mint_url for check_mint_quote
+            let mint_url: cdk::mint_url::MintUrl = match quote.mint_url.parse() {
+                Ok(url) => url,
+                Err(e) => {
+                    log::warn!("Invalid mint URL for quote {}: {}", quote.quote_id, e);
+                    continue;
+                }
+            };
+
+            match multi_wallet.check_mint_quote(&mint_url, &quote.quote_id).await {
+                Ok(cdk_quote) => {
+                    // Check if quote is in Paid or Issued state (tokens already minted)
+                    use cdk::nuts::MintQuoteState;
+                    match cdk_quote.state {
+                        MintQuoteState::Paid | MintQuoteState::Issued => {
+                            // Quote was paid and tokens minted - safe to remove from pending
+                            log::debug!("Quote {} is {:?}, removing from pending", quote.quote_id, cdk_quote.state);
+                            remove_paid_mint_quote(&quote.quote_id);
+                            paid_count += 1;
+                        }
+                        MintQuoteState::Unpaid => {
+                            // Quote still unpaid - keep tracking it
+                            log::debug!("Quote {} still unpaid", quote.quote_id);
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Couldn't check quote state - don't remove it
+                    log::warn!("Failed to check quote {} state: {}", quote.quote_id, e);
+                }
             }
         }
+
+        (paid_count, minted)
     } else {
         (0, 0)
     };

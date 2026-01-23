@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use crate::components::cashu::{WalletHealthIndicator, WalletHealthModal};
 use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::format_sats_with_separator;
@@ -18,6 +19,7 @@ pub fn WalletBalanceCard(
     let balances = WALLET_BALANCES.read();
     let proof_count = cashu::get_total_proof_count();
     let mint_count = cashu::get_mints().len();
+    let mut show_health_modal = use_signal(|| false);
 
     // Format balance with thousands separator
     let formatted_balance = format_sats_with_separator(*balance);
@@ -55,6 +57,11 @@ pub fn WalletBalanceCard(
                         }
                         span { "Pending: {formatted_pending} sats" }
                     }
+                }
+
+                // Wallet health indicator (shows stuck proofs badge)
+                WalletHealthIndicator {
+                    on_open_modal: move |_| show_health_modal.set(true),
                 }
             }
 
@@ -161,6 +168,12 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
+        }
+
+        // Health modal (outside main card div)
+        WalletHealthModal {
+            open: show_health_modal,
+            on_close: move |_| show_health_modal.set(false),
         }
     }
 }

@@ -430,13 +430,68 @@ pub async fn receive_tokens_with_options(
         .ok_or("Client not initialized")?
         .clone();
 
-    let event_output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
+    // Attempt publish with immediate retries before falling back to queue
+    let mut event_id: Option<String> = None;
+    let mut last_error = String::new();
+    let delays_ms = [500u32, 1000, 2000]; // Exponential backoff delays
 
-    let event_id = event_output.id().to_hex();
-    log::info!("Published token event: {}", event_id);
+    for (attempt, _delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
+        if attempt > 0 {
+            #[cfg(target_arch = "wasm32")]
+            {
+                // Add jitter to prevent synchronized retries
+                let jitter = (js_sys::Math::random() * 200.0) as u32;
+                let actual_delay = _delay_ms.saturating_sub(100) + jitter;
+                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            log::info!("Retrying token event publish (attempt {})", attempt + 1);
+        }
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(output) => {
+                if !output.success.is_empty() {
+                    event_id = Some(output.id().to_hex());
+                    log::info!(
+                        "Published token event to {}/{} relays",
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
+                    );
+                    break;
+                } else {
+                    last_error = format!("All {} relays failed", output.failed.len());
+                }
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                // Check for permanent errors that shouldn't be retried
+                let err_str = last_error.to_lowercase();
+                if err_str.contains("banned") || err_str.contains("invalid") {
+                    log::error!("Permanent error, stopping retries: {}", last_error);
+                    break;
+                }
+            }
+        }
+    }
+
+    // If all immediate retries failed, queue for background retry
+    let event_id = match event_id {
+        Some(id) => id,
+        None => {
+            log::error!("All publish attempts failed, queueing for retry: {}", last_error);
+            let pending_id = format!("pending_{}", js_sys::Date::now() as u64);
+
+            // Queue for background retry - proofs are safe in CDK, just need Nostr backup
+            super::events::queue_token_event_for_retry(
+                builder,
+                pending_id.clone(),
+                mint_url.clone(),
+            )
+            .await;
+
+            pending_id
+        }
+    };
+    log::info!("Token event ID: {}", event_id);
 
     // Update local state
     {

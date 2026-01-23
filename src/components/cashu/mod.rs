@@ -16,6 +16,8 @@ pub mod create_request_modal;
 pub mod pay_request_modal;
 pub mod terms_modal;
 pub mod token_card;
+pub mod wallet_health;
+pub mod wallet_health_modal;
 
 // Re-export main component types for convenience
 pub use setup_wizard::CashuSetupWizard;
@@ -31,3 +33,5 @@ pub use create_request_modal::CashuCreateRequestModal;
 pub use pay_request_modal::CashuPayRequestModal;
 pub use terms_modal::CashuTermsModal;
 pub use token_card::CashuTokenCard;
+pub use wallet_health::WalletHealthIndicator;
+pub use wallet_health_modal::WalletHealthModal;

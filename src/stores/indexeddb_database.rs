@@ -124,6 +124,23 @@ mod native_stub {
         pub async fn delete_order(&self, _order_id: &str) -> Result<(), database::Error> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
+
+        pub async fn save_pending_mint_secrets(
+            &self,
+            _secrets: &std::collections::HashMap<String, u64>,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_pending_mint_secrets(
+            &self,
+        ) -> Result<Option<std::collections::HashMap<String, u64>>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
     }
 
     #[async_trait::async_trait]
@@ -302,7 +319,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(target_arch = "wasm32")]
-const DB_VERSION: u32 = 3;
+const DB_VERSION: u32 = 4;
 
 // Object store names
 #[cfg(target_arch = "wasm32")]
@@ -329,6 +346,8 @@ const STORE_PENDING_EVENTS: &str = "pending_events";
 const STORE_SYNC_STATE: &str = "sync_state";
 #[cfg(target_arch = "wasm32")]
 const STORE_SHOP_ORDERS: &str = "shop_orders";
+#[cfg(target_arch = "wasm32")]
+const STORE_PENDING_SECRETS: &str = "pending_secrets";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(target_arch = "wasm32")]
@@ -401,6 +420,10 @@ impl IndexedDbDatabase {
             // V3: Add shop orders store for marketplace order persistence
             if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
                 db.create_object_store(STORE_SHOP_ORDERS)?;
+            }
+            // V4: Add pending secrets store for tracking in-flight mint operations
+            if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
+                db.create_object_store(STORE_PENDING_SECRETS)?;
             }
 
             Ok(())
@@ -702,6 +725,37 @@ impl IndexedDbDatabase {
     /// Delete a shop order
     pub async fn delete_order(&self, order_id: &str) -> Result<(), database::Error> {
         self.delete_value(STORE_SHOP_ORDERS, order_id).await
+    }
+
+    // =========================================================================
+    // Pending Mint Secrets (tracking in-flight operations)
+    // =========================================================================
+
+    /// Save pending mint secrets with timestamps
+    ///
+    /// These track proofs that are currently pending at the mint level
+    /// (e.g., during lightning payments). Persisting ensures we don't lose
+    /// this state on app restart.
+    pub async fn save_pending_mint_secrets(
+        &self,
+        secrets: &std::collections::HashMap<String, u64>,
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_PENDING_SECRETS, "current", secrets).await
+    }
+
+    /// Load pending mint secrets
+    ///
+    /// Returns the map of proof secrets to timestamps, or None if no data exists.
+    pub async fn load_pending_mint_secrets(
+        &self,
+    ) -> Result<Option<std::collections::HashMap<String, u64>>, database::Error> {
+        self.get_value(STORE_PENDING_SECRETS, "current").await
+    }
+
+    /// Clear pending mint secrets
+    #[allow(dead_code)]
+    pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
+        self.delete_value(STORE_PENDING_SECRETS, "current").await
     }
 }
 
