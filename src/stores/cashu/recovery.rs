@@ -1189,9 +1189,8 @@ async fn recover_melt_change_deduplicated(
         }
         Err(e) => {
             log::warn!("Failed to publish recovered change proofs to Nostr: {}. Proofs safe in CDK, will retry on next sync.", e);
-            // Return 0 to indicate no proofs were fully recovered (synced to Nostr)
-            // This prevents incorrect metrics and keeps request in-flight for retry
-            Ok(0)
+            // Return error so caller keeps request in-flight for retry
+            Err(format!("Nostr publish failed: {}", e))
         }
     }
 }

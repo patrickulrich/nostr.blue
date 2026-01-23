@@ -260,11 +260,27 @@ where
                         .increment_keyset_counter(keyset_id, increment)
                         .await
                     {
-                        log::error!("Failed to increment keyset counter: {}", incr_err);
+                        log::error!(
+                            "Failed to increment keyset counter {} by {}: {} (original error: {})",
+                            keyset_id, increment, incr_err, e
+                        );
+                        // Return original error - function is generic over E, can't change type
+                        // Counter failure is logged with full context above
                         return Err(e);
                     }
 
                     heal_attempt += 1;
+
+                    // Brief delay before retry to avoid rapid-fire requests to mint
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        gloo_timers::future::TimeoutFuture::new(500).await;
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+
                     // Continue to next iteration to retry
                 } else {
                     // Not a counter error or max retries exceeded
