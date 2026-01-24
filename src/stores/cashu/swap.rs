@@ -299,33 +299,28 @@ pub async fn execute_swap_with_nip60(
     // any change proofs that CDK stored internally. The returned proofs may be
     // for ourselves (e.g., swap_to_locked) or for sending to others.
     //
-    // NOTE: CDK marks send_proofs as State::Reserved (not Unspent), so we must
-    // fetch both get_unspent_proofs() AND get_reserved_proofs() to capture all.
+    // Per CDK pattern: send_proofs from swap() ARE the reserved proofs, so we
+    // chain them with get_unspent_proofs() for change - no get_reserved_proofs().
     let output_proofs = match swap_result {
         Some(send_proofs) => {
-            // For amount=Some(x) swaps, CDK returns proofs totaling x
-            // AND stores any change proofs internally as Unspent
-            // The send_proofs are marked as Reserved in CDK's localstore
+            // For amount=Some(x) swaps, CDK returns proofs totaling x (send_proofs)
+            // AND stores any change proofs internally as Unspent.
             //
-            // We need to store ALL new proofs (send + change) in WALLET_TOKENS
-            // because this function is used for internal wallet operations
-            // (like swap_to_locked) where all proofs belong to us.
+            // Per CDK pattern (swap.rs:105-115), send_proofs IS the set that gets
+            // marked as Reserved - no need for get_reserved_proofs() which may
+            // include unrelated reserved proofs from previous operations.
+            //
+            // We merge send_proofs (from swap result) with change proofs (unspent).
             let all_unspent = wallet
                 .get_unspent_proofs()
                 .await
                 .map_err(|e| format!("Failed to get proofs after swap: {}", e))?;
 
-            // Also get reserved proofs (CDK marks send_proofs as Reserved)
-            let reserved = wallet
-                .get_reserved_proofs()
-                .await
-                .map_err(|e| format!("Failed to get reserved proofs: {}", e))?;
-
-            // Merge and dedupe by Y value, filtering out input proofs
+            // Merge send_proofs (from swap result) with change proofs (unspent)
+            // No need for get_reserved_proofs() - send_proofs IS the reserved set
             let mut seen_ys: HashSet<String> = HashSet::new();
             let merged: Vec<_> = send_proofs.iter()
                 .chain(all_unspent.iter())
-                .chain(reserved.iter())
                 .filter(|p| {
                     match p.y() {
                         Ok(y) => {
@@ -571,8 +566,54 @@ async fn publish_swap_events(
 
     // Try to publish
     match client.send_event(&signed_event).await {
-        Ok(_) => {
-            log::info!("Published swap token event: {}", event_id_hex);
+        Ok(output) => {
+            // Check if at least one relay accepted (nostr-sdk Output<T> pattern)
+            if output.success.is_empty() {
+                log::warn!(
+                    "No relays accepted swap token event (failed: {:?}), queuing for retry",
+                    output.failed.keys().collect::<Vec<_>>()
+                );
+                queue_signed_event_for_retry(
+                    signed_event,
+                    PendingEventType::TokenEvent,
+                    Some(pending_event_id.to_string()),
+                    Some(mint_url.to_string()),
+                ).await;
+
+                // Queue deletion events for retry too
+                if !event_ids_to_delete.is_empty() {
+                    let valid_event_ids: Vec<_> = event_ids_to_delete
+                        .iter()
+                        .filter_map(|id| EventId::from_hex(id).ok())
+                        .collect();
+
+                    if !valid_event_ids.is_empty() {
+                        let mut tags = Vec::new();
+                        for eid in &valid_event_ids {
+                            tags.push(nostr_sdk::Tag::event(*eid));
+                        }
+                        tags.push(nostr_sdk::Tag::custom(
+                            nostr_sdk::TagKind::custom("k"),
+                            ["7375"],
+                        ));
+
+                        let deletion_builder = nostr_sdk::EventBuilder::new(
+                            Kind::from(5),
+                            "Swapped token"
+                        ).tags(tags);
+
+                        super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
+                    }
+                }
+                return Err("No relays accepted swap token event".to_string());
+            }
+
+            log::info!(
+                "Published swap token event: {} (to {}/{} relays)",
+                event_id_hex,
+                output.success.len(),
+                output.success.len() + output.failed.len()
+            );
 
             // Publish deletion events for old tokens
             publish_deletion_events(&client, event_ids_to_delete).await;
