@@ -24,6 +24,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         }
         is_refreshing.set(true);
         error_message.set(None);
+        success_message.set(None); // Clear stale success messages on refresh
 
         spawn(async move {
             match cashu::fetch_pending_nutzaps().await {

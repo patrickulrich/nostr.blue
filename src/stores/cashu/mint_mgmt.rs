@@ -1048,7 +1048,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             // All retries failed - queue for background retry
             log::error!("All publish attempts failed, queueing for background retry: {}", last_error);
 
-            let pending_id = format!("pending_{}", js_sys::Date::now() as u64);
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
 
             // Queue with token tracking info
             super::events::queue_token_event_for_retry(

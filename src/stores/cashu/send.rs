@@ -137,7 +137,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
-    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
     update_local_state_after_send(
         &mint_url,
         &keep_proofs,
@@ -261,7 +261,7 @@ pub async fn send_tokens_p2pk(
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
-    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
     update_local_state_after_send(
         &mint_url,
         &keep_proofs,
@@ -786,16 +786,21 @@ fn update_local_state_after_send(
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
     let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
-        let keep_proof_data: Vec<ProofData> =
-            keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-        let token = TokenData {
-            event_id: event_id.clone(),
-            mint: mint_url.to_string(),
-            unit: "sat".to_string(),
-            proofs: keep_proof_data.clone(),
-            created_at: chrono::Utc::now().timestamp() as u64,
-        };
-        (vec![token], Some((event_id.clone(), keep_proof_data)))
+        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
+        if keep_proofs.is_empty() {
+            (vec![], None)
+        } else {
+            let keep_proof_data: Vec<ProofData> =
+                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let token = TokenData {
+                event_id: event_id.clone(),
+                mint: mint_url.to_string(),
+                unit: "sat".to_string(),
+                proofs: keep_proof_data.clone(),
+                created_at: chrono::Utc::now().timestamp() as u64,
+            };
+            (vec![token], Some((event_id.clone(), keep_proof_data)))
+        }
     } else {
         (vec![], None)
     };

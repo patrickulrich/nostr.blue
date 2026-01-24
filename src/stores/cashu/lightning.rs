@@ -503,7 +503,8 @@ pub async fn melt_tokens(
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
-    let pending_event_id = format!("pending_{}", super::utils::now_secs());
+    // Use UUID to prevent collision when multiple operations occur within same second
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
     update_local_state_after_melt(
         &mint_url,
         &keep_proofs,
@@ -808,20 +809,32 @@ fn update_local_state_after_melt(
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let tokens_to_add = if let Some(ref event_id) = new_event_id {
-        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-        vec![TokenData {
-            event_id: event_id.clone(),
-            mint: mint_url.to_string(),
-            unit: "sat".to_string(),
-            proofs: proof_data,
-            created_at: chrono::Utc::now().timestamp() as u64,
-        }]
+    let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
+        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
+        if keep_proofs.is_empty() {
+            (vec![], None)
+        } else {
+            let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let token = TokenData {
+                event_id: event_id.clone(),
+                mint: mint_url.to_string(),
+                unit: "sat".to_string(),
+                proofs: proof_data.clone(),
+                created_at: chrono::Utc::now().timestamp() as u64,
+            };
+            (vec![token], Some((event_id.clone(), proof_data)))
+        }
     } else {
-        vec![]
+        (vec![], None)
     };
 
     let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
+
+    // Register proofs for recovery tracking (mirrors send.rs pattern)
+    if let Some((event_id, proof_data)) = proofs_to_register {
+        register_proofs_in_event_map(&event_id, &proof_data);
+    }
+
     log::info!("Local state updated. New balance: {} sats", new_balance);
     Ok(())
 }
