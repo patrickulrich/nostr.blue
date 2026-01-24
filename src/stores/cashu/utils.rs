@@ -260,12 +260,13 @@ where
                         .increment_keyset_counter(keyset_id, increment)
                         .await
                     {
+                        // IMPORTANT: Returning original error `e` because function is generic over E
+                        // and we cannot change the error type. The counter increment failure is the
+                        // TRUE cause - callers should grep logs for "COUNTER_INCREMENT_FAILED".
                         log::error!(
-                            "Failed to increment keyset counter {} by {}: {} (original error: {})",
+                            "COUNTER_INCREMENT_FAILED: keyset={}, increment={}, counter_error='{}', triggering_error='{}'",
                             keyset_id, increment, incr_err, e
                         );
-                        // Return original error - function is generic over E, can't change type
-                        // Counter failure is logged with full context above
                         return Err(e);
                     }
 
