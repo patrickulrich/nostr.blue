@@ -688,7 +688,7 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
                 // Normalize mint URL for consistent balance lookups
                 let normalized_mint = super::utils::normalize_mint_url(&mint_url);
 
-                // Atomically add to WALLET_TOKENS and update WALLET_BALANCE
+                // Atomically add to WALLET_TOKENS and update WALLET_BALANCES
                 let new_token = TokenData {
                     event_id: event_id.clone(),
                     mint: normalized_mint,
@@ -1185,7 +1185,7 @@ async fn recover_melt_change_deduplicated(
     request: &InFlightMeltRequest,
 ) -> Result<u64, String> {
     use cdk::dhke::hash_to_curve;
-    use super::signals::{WALLET_TOKENS, WALLET_BALANCE};
+    use super::signals::WALLET_TOKENS;
     use std::collections::HashSet;
 
     // Get all unspent proofs from CDK (these include any change from the melt)
@@ -1276,11 +1276,8 @@ async fn recover_melt_change_deduplicated(
                 });
             }
 
-            // Update WALLET_BALANCE
-            {
-                let mut balance = WALLET_BALANCE.write();
-                *balance = balance.saturating_add(recovered_amount);
-            }
+            // Update balance from proof state
+            super::signals::update_wallet_balances();
 
             // Register proofs in event map for fast lookup
             super::proofs::register_proofs_in_event_map(&event_id, &proof_data);

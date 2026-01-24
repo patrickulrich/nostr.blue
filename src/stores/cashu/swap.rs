@@ -46,7 +46,7 @@ use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
     register_proofs_in_event_map,
 };
-use super::signals::{try_acquire_mint_lock, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, PendingEventType, ProofData, TokenData,
     WalletTokensStoreStoreExt,
@@ -467,23 +467,15 @@ fn update_local_state_after_swap(
     // Add new token with output proofs
     tokens_write.push(new_token);
 
-    // Calculate new balance while we have the lock
-    let new_balance: u64 = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .filter(|p| p.state.is_spendable())
-        .map(|p| p.amount)
-        .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-        .ok_or("Balance overflow")?;
-
     // Drop write guard before updating balance
     drop(tokens_write);
 
     // Register proofs in event map
     register_proofs_in_event_map(new_event_id, &proof_data);
 
-    // Update balance
-    *WALLET_BALANCE.write() = new_balance;
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
+    let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
     log::info!(
         "Local state updated after swap. Balance: {} sats",

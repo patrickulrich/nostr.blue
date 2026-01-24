@@ -16,7 +16,7 @@ use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_p
 use super::signals::{
     add_in_flight_melt_request, persist_in_flight_melt_requests, persist_single_in_flight_request,
     remove_in_flight_melt_request, try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES,
-    PENDING_MINT_QUOTES, WALLET_BALANCE, WALLET_TOKENS,
+    PENDING_MINT_QUOTES, WALLET_TOKENS,
 };
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, InFlightMeltRequest, MeltProgress, MeltQuoteInfo,
@@ -253,11 +253,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     }
 
     // Update balance
-    let current_balance = *WALLET_BALANCE.read();
-    let new_balance = current_balance
-        .checked_add(amount_minted)
-        .ok_or_else(|| "Balance overflow".to_string())?;
-    *WALLET_BALANCE.write() = new_balance;
+    super::signals::update_wallet_balances();
 
     // Create history event
     create_history_event_with_type(

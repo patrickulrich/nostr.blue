@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use cdk::nuts::{PaymentRequest, TransportType};
-use crate::stores::cashu::{self, WALLET_BALANCE};
+use crate::stores::cashu;
+use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 
 #[derive(Clone)]
 enum PayState {
@@ -36,7 +37,7 @@ pub fn CashuPayRequestModal(
     let mut pay_state = use_signal(|| PayState::Input);
 
     // Use memo for reactive balance updates while modal is open
-    let balance = use_memo(move || *WALLET_BALANCE.read());
+    let balance = use_memo(move || WALLET_BALANCES.read().available);
 
     // Handle paste from clipboard
     let handle_paste = move |_| {

@@ -27,16 +27,9 @@ pub static WALLET_TOKENS: GlobalSignal<Store<WalletTokensStore>> =
 pub static WALLET_HISTORY: GlobalSignal<Store<WalletHistoryStore>> =
     Signal::global(|| Store::new(WalletHistoryStore::default()));
 
-/// Global signal for total balance (computed from tokens)
-pub static WALLET_BALANCE: GlobalSignal<u64> = Signal::global(|| 0);
-
 /// Global signal for wallet status (loading state)
 pub static WALLET_STATUS: GlobalSignal<WalletStatus> =
     Signal::global(|| WalletStatus::Uninitialized);
-
-/// Global signal for detailed balance breakdown
-pub static WALLET_BALANCES: GlobalSignal<WalletBalances> =
-    Signal::global(WalletBalances::default);
 
 /// Global signal for terms acceptance status
 /// None = not yet checked, Some(true) = accepted, Some(false) = not accepted
@@ -170,7 +163,8 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
 /// Atomically update tokens and recalculate balance
 ///
 /// Holds WALLET_TOKENS lock during entire operation and updates
-/// WALLET_BALANCE before releasing, preventing race conditions.
+/// WALLET_BALANCES before releasing, preventing race conditions.
+/// Following CDK pattern: balance is always computed from proof state.
 pub fn atomic_token_update<F>(mutate_fn: F) -> Result<u64, String>
 where
     F: FnOnce(&mut Vec<super::types::TokenData>) -> Result<(), String>,
@@ -181,17 +175,29 @@ where
 
     mutate_fn(&mut tokens_write)?;
 
-    let new_balance: u64 = tokens_write
+    // Compute balance from mutated tokens (CDK pattern)
+    let (available, pending) = tokens_write
         .iter()
         .flat_map(|t| &t.proofs)
-        .filter(|p| p.state.is_spendable())
-        .map(|p| p.amount)
-        .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-        .ok_or("Balance calculation overflow")?;
+        .fold((0u64, 0u64), |(avail, pend), proof| {
+            if proof.state.is_spendable() {
+                (avail.saturating_add(proof.amount), pend)
+            } else if proof.state.is_pending() {
+                (avail, pend.saturating_add(proof.amount))
+            } else {
+                (avail, pend)
+            }
+        });
 
-    *WALLET_BALANCE.write() = new_balance;
+    // Update single balance signal
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances {
+            total: available.saturating_add(pending),
+            available,
+            pending,
+        };
 
-    Ok(new_balance)
+    Ok(available)
 }
 
 /// Crash-safe token replacement: add new tokens BEFORE deleting old ones
@@ -212,6 +218,34 @@ pub fn atomic_token_replace(
         }
         Ok(())
     })
+}
+
+/// Compute balance from tokens and update WALLET_BALANCES signal.
+/// This is the ONLY function that should update balance.
+/// Following CDK pattern: balance is always computed from proof state.
+pub fn update_wallet_balances() {
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    let (available, pending) = tokens
+        .iter()
+        .flat_map(|t| &t.proofs)
+        .fold((0u64, 0u64), |(avail, pend), proof| {
+            if proof.state.is_spendable() {
+                (avail.saturating_add(proof.amount), pend)
+            } else if proof.state.is_pending() {
+                (avail, pend.saturating_add(proof.amount))
+            } else {
+                (avail, pend)
+            }
+        });
+
+    let total = available.saturating_add(pending);
+
+    // Single signal for all balance data
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances { total, available, pending };
 }
 
 /// Load in-flight melt requests from IndexedDB (call on startup)
@@ -482,9 +516,9 @@ pub fn reset_wallet_state() {
         data.write().clear();
     }
 
-    *WALLET_BALANCE.write() = 0;
     *WALLET_STATUS.write() = WalletStatus::Uninitialized;
-    *WALLET_BALANCES.write() = WalletBalances::default();
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances::default();
     *TERMS_ACCEPTED.write() = None;
 
     MINT_OPERATION_LOCK.write().clear();
@@ -515,6 +549,9 @@ pub fn reset_wallet_state() {
         let mut data = store.data();
         data.write().clear();
     }
+
+    // Clear nutzap state
+    super::nutzap_signals::clear_nutzap_state();
 
     log::info!("Reset all wallet state");
 }

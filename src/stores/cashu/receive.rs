@@ -11,7 +11,7 @@ use super::internal::{
     is_token_already_spent_error,
 };
 use super::proofs::{cdk_proof_to_proof_data, register_proofs_in_event_map};
-use super::signals::{try_acquire_mint_lock, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt};
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
@@ -522,16 +522,9 @@ pub async fn receive_tokens_with_options(
         // Register proofs in event map for fast lookup
         register_proofs_in_event_map(&event_id, &proof_data);
 
-        // Recalculate balance
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-            .ok_or_else(|| "Balance calculation overflow".to_string())?;
-
-        *WALLET_BALANCE.write() = new_balance;
-        log::info!("Balance after receive: {} sats", new_balance);
+        // Update balance from proof state
+        super::signals::update_wallet_balances();
+        log::info!("Updated balance after receive");
     }
 
     let amount = u64::from(amount_received);

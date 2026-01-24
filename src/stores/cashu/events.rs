@@ -13,7 +13,7 @@ use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
 use std::time::Duration;
 
 use super::signals::{
-    PENDING_NOSTR_EVENTS, WALLET_TOKENS, WALLET_BALANCE, SHARED_LOCALSTORE, SYNC_STATE,
+    PENDING_NOSTR_EVENTS, WALLET_TOKENS, SHARED_LOCALSTORE, SYNC_STATE,
 };
 use super::types::{TokenData, ProofData, ProofState, TokenEventData, WalletTokensStoreStoreExt, PendingEventType, PendingNostrEvent, SyncState};
 use super::proofs::rebuild_proof_event_map;
@@ -529,7 +529,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 *WALLET_TOKENS.read().data().write() = tokens;
             }
 
-            *WALLET_BALANCE.write() = total_balance;
+            super::signals::update_wallet_balances();
 
             // Update sync state with new timestamp
             let new_sync_ts = Timestamp::now().as_secs();

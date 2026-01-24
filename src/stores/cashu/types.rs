@@ -399,13 +399,7 @@ impl WalletStatus {
     }
 }
 
-/// Wallet balance breakdown
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct WalletBalances {
-    pub total: u64,
-    pub available: u64,
-    pub pending: u64,
-}
+// Note: WalletBalances is defined in cashu_cdk_bridge.rs (single source of truth)
 
 // =============================================================================
 // Transaction Types
@@ -782,6 +776,50 @@ pub struct PaymentRequestPayload {
 #[derive(Clone, Debug, Default, Store)]
 pub struct WalletTokensStore {
     pub data: Vec<TokenData>,
+}
+
+impl WalletTokensStore {
+    /// Compute available (spendable) balance from unspent proofs
+    /// Following CDK pattern: balance is derived, never stored
+    pub fn available_balance(&self) -> u64 {
+        self.data
+            .iter()
+            .flat_map(|token| &token.proofs)
+            .filter(|proof| proof.state.is_spendable())
+            .map(|proof| proof.amount)
+            .fold(0u64, |acc, amt| acc.saturating_add(amt))
+    }
+
+    /// Compute pending balance (proofs in transient states)
+    pub fn pending_balance(&self) -> u64 {
+        self.data
+            .iter()
+            .flat_map(|token| &token.proofs)
+            .filter(|proof| proof.state.is_pending())
+            .map(|proof| proof.amount)
+            .fold(0u64, |acc, amt| acc.saturating_add(amt))
+    }
+
+    /// Compute total balance (available + pending)
+    pub fn total_balance(&self) -> u64 {
+        self.available_balance().saturating_add(self.pending_balance())
+    }
+
+    /// Get balance breakdown (available, pending) in single pass
+    pub fn balance_breakdown(&self) -> (u64, u64) {
+        self.data
+            .iter()
+            .flat_map(|token| &token.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
+                if proof.state.is_spendable() {
+                    (avail.saturating_add(proof.amount), pend)
+                } else if proof.state.is_pending() {
+                    (avail, pend.saturating_add(proof.amount))
+                } else {
+                    (avail, pend)
+                }
+            })
+    }
 }
 
 /// Store for wallet history with fine-grained reactivity

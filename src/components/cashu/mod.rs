@@ -18,6 +18,9 @@ pub mod terms_modal;
 pub mod token_card;
 pub mod wallet_health;
 pub mod wallet_health_modal;
+pub mod nutzap_send_modal;
+pub mod nutzap_settings_modal;
+pub mod nutzap_inbox;
 
 // Re-export main component types for convenience
 pub use setup_wizard::CashuSetupWizard;
@@ -35,3 +38,8 @@ pub use terms_modal::CashuTermsModal;
 pub use token_card::CashuTokenCard;
 pub use wallet_health::WalletHealthIndicator;
 pub use wallet_health_modal::WalletHealthModal;
+// NIP-61 Nutzap components
+#[allow(unused_imports)]
+pub use nutzap_send_modal::NutzapSendModal;  // For future use when sending nutzaps from profile/post
+pub use nutzap_settings_modal::NutzapSettingsModal;
+pub use nutzap_inbox::{NutzapInbox, NutzapBadge};

@@ -18,6 +18,8 @@ pub fn CashuWallet() -> Element {
     let mut show_transfer_modal = use_signal(|| false);
     let mut show_create_request_modal = use_signal(|| false);
     let mut show_pay_request_modal = use_signal(|| false);
+    let mut show_nutzap_settings_modal = use_signal(|| false);
+    let mut show_nutzap_inbox_modal = use_signal(|| false);
 
     // Track if we've already started the init sequence to prevent duplicate spawns
     let mut init_started = use_signal(|| false);
@@ -271,6 +273,8 @@ pub fn CashuWallet() -> Element {
                         on_transfer: move |_| show_transfer_modal.set(true),
                         on_create_request: move |_| show_create_request_modal.set(true),
                         on_pay_request: move |_| show_pay_request_modal.set(true),
+                        on_nutzap_settings: move |_| show_nutzap_settings_modal.set(true),
+                        on_nutzap_inbox: move |_| show_nutzap_inbox_modal.set(true),
                     }
 
                     // Tokens section
@@ -396,6 +400,20 @@ pub fn CashuWallet() -> Element {
             if *show_pay_request_modal.read() {
                 crate::components::CashuPayRequestModal {
                     on_close: move |_| show_pay_request_modal.set(false),
+                }
+            }
+
+            // Nutzap settings modal (NIP-61)
+            if *show_nutzap_settings_modal.read() {
+                crate::components::cashu::NutzapSettingsModal {
+                    on_close: move |_| show_nutzap_settings_modal.set(false),
+                }
+            }
+
+            // Nutzap inbox modal (NIP-61)
+            if *show_nutzap_inbox_modal.read() {
+                crate::components::cashu::NutzapInbox {
+                    on_close: move |_| show_nutzap_inbox_modal.set(false),
                 }
             }
         }
