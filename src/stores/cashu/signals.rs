@@ -176,8 +176,16 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
 
     // Persist the FULL in-memory list (not load-append-save pattern)
     let requests = IN_FLIGHT_MELT_REQUESTS.read().clone();
-    localstore.save_in_flight_melt_requests(&requests).await
-        .map_err(|e| format!("Failed to save in-flight request: {}", e))?;
+    if let Err(e) = localstore.save_in_flight_melt_requests(&requests).await {
+        // Rollback in-memory changes if persist fails
+        {
+            let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
+            requests.retain(|r| r.transaction_id != request.transaction_id);
+        }
+        ACTIVE_OPERATIONS.write().remove(&request.transaction_id);
+        log::warn!("Rolled back in-memory state after persist failure for {}", request.transaction_id);
+        return Err(format!("Failed to save in-flight request: {}", e));
+    }
 
     log::debug!("Persisted in-flight melt request {}", request.transaction_id);
     Ok(())

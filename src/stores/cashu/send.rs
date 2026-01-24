@@ -763,7 +763,7 @@ async fn publish_send_events(
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                 }
             }
         }
