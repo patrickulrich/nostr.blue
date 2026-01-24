@@ -320,27 +320,53 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
 
 /// Validate that we can send a nutzap to a recipient
 ///
-/// Checks that the recipient has nutzap info and we have a compatible mint.
+/// Checks that the recipient has nutzap info and we have a compatible mint+unit.
 pub async fn validate_nutzap_recipient(pubkey: &str) -> Result<NutzapMint, String> {
     let info = fetch_nutzap_info(pubkey).await?;
+    validate_nutzap_recipient_with_info(&info)
+}
 
+/// Validate nutzap recipient using pre-fetched info (avoids duplicate network fetch)
+///
+/// CDK pattern: Always filter by unit when checking proof availability
+fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
     // Get our mints
     let our_mints = super::get_mints();
 
-    // Find a compatible mint (one we have that they accept)
+    // Find a compatible mint+unit (CDK pattern: one wallet = one mint+unit pair)
     for their_mint in &info.mints {
         let their_url = normalize_mint_url(&their_mint.url);
         for our_mint in &our_mints {
             if mint_matches(our_mint, &their_url) {
-                log::debug!("Found compatible mint: {}", their_url);
-                return Ok(their_mint.clone());
+                // CDK pattern: filter by unit - check we have proofs for this specific unit
+                match get_proofs_for_mint(&their_url, &their_mint.unit) {
+                    Ok(proofs) if !proofs.is_empty() => {
+                        log::debug!(
+                            "Found compatible mint+unit: {} ({}) with {} proofs",
+                            their_url, their_mint.unit, proofs.len()
+                        );
+                        return Ok(their_mint.clone());
+                    }
+                    Ok(_) => {
+                        log::debug!(
+                            "Mint {} matches but no proofs for unit {}",
+                            their_url, their_mint.unit
+                        );
+                    }
+                    Err(e) => {
+                        log::debug!(
+                            "Error checking proofs for {}/{}: {}",
+                            their_url, their_mint.unit, e
+                        );
+                    }
+                }
             }
         }
     }
 
     Err(format!(
-        "No compatible mint found. Recipient accepts: {:?}",
-        info.mints.iter().map(|m| &m.url).collect::<Vec<_>>()
+        "No compatible mint+unit found. Recipient accepts: {:?}",
+        info.mints.iter().map(|m| format!("{}:{}", m.url, m.unit)).collect::<Vec<_>>()
     ))
 }
 
@@ -364,11 +390,11 @@ pub async fn send_nutzap(
         &recipient_pubkey[..8.min(recipient_pubkey.len())]
     );
 
-    // Get recipient's nutzap info
+    // Get recipient's nutzap info (single network fetch)
     let recipient_info = fetch_nutzap_info(recipient_pubkey).await?;
 
-    // Find compatible mint and get balance
-    let compatible_mint = validate_nutzap_recipient(recipient_pubkey).await?;
+    // Find compatible mint+unit (uses pre-fetched info, no duplicate fetch)
+    let compatible_mint = validate_nutzap_recipient_with_info(&recipient_info)?;
     let mint_url = normalize_mint_url(&compatible_mint.url);
 
     // Acquire mint lock
@@ -884,6 +910,13 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
         ..Default::default()
     };
 
+    // Snapshot existing proof secrets BEFORE receive (nostr-sdk pattern: HashSet for dedup)
+    let pre_receive_secrets: std::collections::HashSet<String> = wallet
+        .get_unspent_proofs()
+        .await
+        .map(|proofs| proofs.iter().map(|p| p.secret.to_string()).collect())
+        .unwrap_or_default();
+
     let amount_received = wallet
         .receive(&token.to_string(), receive_opts)
         .await
@@ -892,13 +925,28 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
     let amount = u64::from(amount_received);
     log::info!("Received {} sats from nutzap", amount);
 
-    // Get new proofs from wallet
-    let new_proofs = wallet
+    // Get proofs AFTER receive and filter to only NEW ones
+    // CDK pattern: only track proofs we actually received, not all unspent
+    let all_proofs = wallet
         .get_unspent_proofs()
         .await
         .map_err(|e| format!("Failed to get proofs: {}", e))?;
 
-    // Publish token event with new proofs
+    let new_proofs: Vec<_> = all_proofs
+        .into_iter()
+        .filter(|p| !pre_receive_secrets.contains(&p.secret.to_string()))
+        .collect();
+
+    if new_proofs.is_empty() {
+        // This shouldn't happen if receive() returned a non-zero amount
+        log::warn!("Receive returned {} sats but no new proofs found in database", amount);
+        return Err("Receive succeeded but no new proofs found".to_string());
+    }
+
+    log::debug!("Filtered to {} new proofs (excluded {} pre-existing)",
+        new_proofs.len(), pre_receive_secrets.len());
+
+    // Publish token event with ONLY new proofs
     let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs).await?;
 
     // Update local state

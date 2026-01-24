@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::ReadableExt;
+use futures::stream::{self, StreamExt};
 
 use crate::stores::cashu_cdk_bridge;
 use super::internal::get_or_create_wallet;
@@ -29,6 +30,10 @@ pub const MIN_DUST_COUNT: usize = 10;
 
 /// Maximum dust value to consider for consolidation (in sats)
 pub const MAX_DUST_TOTAL: u64 = 100;
+
+/// Maximum concurrent mint consolidations to prevent overwhelming WASM event loop
+/// and reduce risk of mint API rate limiting
+const MAX_CONCURRENT_CONSOLIDATIONS: usize = 3;
 
 // =============================================================================
 // Dust Detection
@@ -234,7 +239,10 @@ pub async fn consolidate_dust(
     })
 }
 
-/// Consolidate dust across all mints (parallel execution)
+/// Consolidate dust across all mints (bounded parallel execution)
+///
+/// Uses `buffer_unordered` to cap concurrent consolidations at `MAX_CONCURRENT_CONSOLIDATIONS`.
+/// This prevents overwhelming the WASM event loop and reduces mint API rate-limit risk.
 pub async fn consolidate_all_dust(
     threshold: u64,
 ) -> HashMap<String, Result<DustConsolidationResult, String>> {
@@ -251,19 +259,21 @@ pub async fn consolidate_all_dust(
         return HashMap::new();
     }
 
-    // Parallel dust consolidation - each mint has its own lock
-    let futures: Vec<_> = mints_to_consolidate
-        .iter()
-        .map(|mint_url| {
-            let mint_url = mint_url.clone();
-            async move {
-                let result = consolidate_dust(&mint_url, threshold).await;
-                (mint_url, result)
-            }
-        })
-        .collect();
+    log::info!(
+        "Consolidating dust for {} mints (max {} concurrent)",
+        mints_to_consolidate.len(),
+        MAX_CONCURRENT_CONSOLIDATIONS
+    );
 
-    let results = futures::future::join_all(futures).await;
+    // Bounded parallel dust consolidation - caps concurrent swaps to keep UX responsive
+    let results: Vec<_> = stream::iter(mints_to_consolidate)
+        .map(|mint_url| async move {
+            let result = consolidate_dust(&mint_url, threshold).await;
+            (mint_url, result)
+        })
+        .buffer_unordered(MAX_CONCURRENT_CONSOLIDATIONS)
+        .collect()
+        .await;
 
     results.into_iter().collect()
 }

@@ -862,25 +862,27 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
 // Atomic Recovery Wrapper (CDK pattern: try_proof_operation_or_reclaim)
 // =============================================================================
 
-use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
-/// Per-mint recovery lock to prevent concurrent recovery operations on the same mint
-/// while allowing recovery for different mints to proceed in parallel.
-///
-/// Using RwLock instead of a single AtomicBool ensures:
-/// - Recovery for mint A doesn't block recovery for mint B
-/// - Still prevents concurrent recovery for the same mint
-static MINTS_IN_RECOVERY: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+/// Per-mint recovery state - combines lock flag and pending queue atomically
+/// CDK pattern: single lock per wallet, but we need per-mint for parallel recovery
+#[derive(Default)]
+struct MintRecoveryState {
+    /// True if recovery is currently running for this mint
+    in_recovery: bool,
+    /// Proofs queued while recovery was in progress
+    pending_proofs: Vec<cdk::nuts::Proof>,
+}
 
-/// Per-mint queue of proofs awaiting recovery (when recovery is already in progress)
-///
-/// When an operation fails while recovery is already running for a mint, the proofs
-/// are queued here. When the active recovery completes, it drains this queue and
-/// processes all queued proofs before releasing the lock.
-static MINT_PENDING_PROOFS: Lazy<RwLock<HashMap<String, Vec<cdk::nuts::Proof>>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
+/// Per-mint recovery coordination - mutex ensures atomic check-and-enqueue
+/// Key is normalized mint URL
+static MINT_RECOVERY_STATE: Lazy<Mutex<HashMap<String, MintRecoveryState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// CDK pattern: batch proof syncs to avoid overwhelming mint API
+const BATCH_PROOF_SIZE: usize = 100;
 
 /// Execute an operation with automatic proof state recovery on failure
 ///
@@ -910,33 +912,43 @@ where
                 mint_url
             );
 
-            // Normalize mint URL for consistent keying
+            // Normalize mint URL for consistent keying (CDK pattern: MintUrl normalization)
             let normalized_mint = normalize_mint_url(mint_url);
 
-            // Per-mint lock - only blocks recovery for THIS mint
-            let should_recover = {
-                let mut recovering = MINTS_IN_RECOVERY.write().unwrap();
-                if recovering.contains(&normalized_mint) {
-                    false
+            // Atomic check-and-set under single mutex (prevents TOCTOU race)
+            // Returns Some(proofs) if we should recover, None if proofs were queued
+            let proofs_to_recover = {
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let state = states.entry(normalized_mint.clone()).or_default();
+
+                if state.in_recovery {
+                    // Recovery already running - queue proofs atomically
+                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs.len());
+                    state.pending_proofs.extend(proofs);
+                    None
                 } else {
-                    recovering.insert(normalized_mint.clone());
-                    true
+                    // We become the recovery thread
+                    state.in_recovery = true;
+                    Some(proofs)
                 }
             };
 
-            if should_recover {
+            if let Some(proofs) = proofs_to_recover {
                 log::info!("Syncing proof states with mint {} after failure", mint_url);
 
-                // Sync initial proofs with mint
-                if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, &proofs).await {
-                    log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
+                // Sync initial proofs with mint (CDK pattern: batch in chunks of 100)
+                for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
+                    if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                        log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
+                    }
                 }
 
                 // Drain and process any queued proofs for this mint
                 loop {
                     let queued_proofs = {
-                        let mut pending = MINT_PENDING_PROOFS.write().unwrap();
-                        pending.remove(&normalized_mint).unwrap_or_default()
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let state = states.entry(normalized_mint.clone()).or_default();
+                        std::mem::take(&mut state.pending_proofs)
                     };
 
                     if queued_proofs.is_empty() {
@@ -944,18 +956,25 @@ where
                     }
 
                     log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
-                    if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, &queued_proofs).await {
-                        log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                    // CDK pattern: batch in chunks of 100
+                    for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                        }
                     }
                 }
 
-                // Release per-mint recovery lock
-                MINTS_IN_RECOVERY.write().unwrap().remove(&normalized_mint);
-            } else {
-                // Queue proofs for processing when current recovery completes
-                log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs.len());
-                let mut pending = MINT_PENDING_PROOFS.write().unwrap();
-                pending.entry(normalized_mint).or_default().extend(proofs);
+                // Release recovery lock
+                {
+                    let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                    if let Some(state) = states.get_mut(&normalized_mint) {
+                        state.in_recovery = false;
+                        // Clean up empty entries to prevent unbounded growth
+                        if state.pending_proofs.is_empty() {
+                            states.remove(&normalized_mint);
+                        }
+                    }
+                }
             }
 
             Err(err)
@@ -1048,32 +1067,42 @@ pub(crate) async fn try_swap_or_recover(
             let err_str = err.to_string();
             log::error!("Swap failed for {}: {}", mint_url, err_str);
 
-            // Normalize mint URL for consistent keying
+            // Normalize mint URL for consistent keying (CDK pattern: MintUrl normalization)
             let normalized_mint = normalize_mint_url(mint_url);
 
-            // Per-mint lock for recovery
-            let should_recover = {
-                let mut recovering = MINTS_IN_RECOVERY.write().unwrap();
-                if recovering.contains(&normalized_mint) {
-                    false
+            // Atomic check-and-set under single mutex (prevents TOCTOU race)
+            // Returns Some(proofs) if we should recover, None if proofs were queued
+            let proofs_to_recover = {
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let state = states.entry(normalized_mint.clone()).or_default();
+
+                if state.in_recovery {
+                    // Recovery already running - queue proofs atomically
+                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs_clone.len());
+                    state.pending_proofs.extend(proofs_clone);
+                    None
                 } else {
-                    recovering.insert(normalized_mint.clone());
-                    true
+                    // We become the recovery thread
+                    state.in_recovery = true;
+                    Some(proofs_clone)
                 }
             };
 
-            if should_recover {
-                // Sync initial proofs with mint
-                match sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await {
-                    Ok(_) => log::debug!("Recovery completed for mint {}", mint_url),
-                    Err(e) => log::error!("Recovery failed for mint {}: {}", mint_url, e),
+            if let Some(proofs) = proofs_to_recover {
+                // Sync initial proofs with mint (CDK pattern: batch in chunks of 100)
+                for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
+                    match sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                        Ok(_) => log::debug!("Recovery batch completed for mint {}", mint_url),
+                        Err(e) => log::error!("Recovery failed for mint {}: {}", mint_url, e),
+                    }
                 }
 
                 // Drain and process any queued proofs for this mint
                 loop {
                     let queued_proofs = {
-                        let mut pending = MINT_PENDING_PROOFS.write().unwrap();
-                        pending.remove(&normalized_mint).unwrap_or_default()
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let state = states.entry(normalized_mint.clone()).or_default();
+                        std::mem::take(&mut state.pending_proofs)
                     };
 
                     if queued_proofs.is_empty() {
@@ -1081,17 +1110,25 @@ pub(crate) async fn try_swap_or_recover(
                     }
 
                     log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
-                    if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, &queued_proofs).await {
-                        log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                    // CDK pattern: batch in chunks of 100
+                    for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                        }
                     }
                 }
 
-                MINTS_IN_RECOVERY.write().unwrap().remove(&normalized_mint);
-            } else {
-                // Queue proofs for processing when current recovery completes
-                log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs_clone.len());
-                let mut pending = MINT_PENDING_PROOFS.write().unwrap();
-                pending.entry(normalized_mint).or_default().extend(proofs_clone);
+                // Release recovery lock
+                {
+                    let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                    if let Some(state) = states.get_mut(&normalized_mint) {
+                        state.in_recovery = false;
+                        // Clean up empty entries to prevent unbounded growth
+                        if state.pending_proofs.is_empty() {
+                            states.remove(&normalized_mint);
+                        }
+                    }
+                }
             }
 
             Err(err_str)
