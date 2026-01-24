@@ -259,6 +259,17 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             // Try payment based on preference
             match payment_preference.as_str() {
                 "cashu_first" => {
+                    // Wait for nutzap eligibility check to complete before proceeding
+                    // This prevents premature fallback to Lightning while still checking
+                    let mut attempts = 0;
+                    while *checking_nutzap.read() && attempts < 50 {
+                        gloo_timers::future::TimeoutFuture::new(100).await;
+                        attempts += 1;
+                    }
+                    if *checking_nutzap.read() {
+                        log::warn!("Nutzap eligibility check timed out, proceeding with Lightning");
+                    }
+
                     // Check if nutzap is possible using per-mint balance
                     if let Some(mint) = nutzap_mint.read().as_ref() {
                         // Use per-mint balance instead of aggregate to ensure this mint has funds

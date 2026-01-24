@@ -349,33 +349,31 @@ pub async fn execute_swap_with_nip60(
 
             // Merge send_proofs (from swap result) with change proofs (unspent)
             // No need for get_reserved_proofs() - send_proofs IS the reserved set
+            //
+            // FAIL-FAST PATTERN: Y() errors should fail the operation, not silently drop proofs
+            // Silent filtering could cause fund loss if proofs are valid but Y() computation fails
             let mut seen_ys: HashSet<String> = HashSet::new();
-            let merged: Vec<_> = send_proofs.iter()
+            let merged: Vec<cdk::nuts::Proof> = send_proofs.iter()
                 .chain(all_unspent.iter())
-                .filter(|p| {
-                    match p.y() {
-                        Ok(y) => {
-                            let y_str = y.to_string();
-                            // Skip if it's an input proof or already seen
-                            if input_ys.contains(&y_str) || seen_ys.contains(&y_str) {
-                                false
-                            } else {
-                                seen_ys.insert(y_str);
-                                true
-                            }
-                        }
-                        Err(e) => {
-                            // Escalate to error level for visibility - this should never happen
-                            // and indicates a potential fund loss scenario
-                            log::error!(
-                                "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - PROOF SKIPPED",
-                                u64::from(p.amount), e
-                            );
-                            false
-                        }
+                .map(|p| {
+                    let y = p.y().map_err(|e| format!(
+                        "Failed to compute Y for proof (amount={} sats): {} - this indicates a critical error",
+                        u64::from(p.amount), e
+                    ))?;
+                    Ok((p.clone(), y.to_string()))
+                })
+                .collect::<Result<Vec<_>, String>>()? // Fail-fast on first Y() error
+                .into_iter()
+                .filter(|(_, y_str)| {
+                    // Skip if it's an input proof or already seen
+                    if input_ys.contains(y_str) || seen_ys.contains(y_str) {
+                        false
+                    } else {
+                        seen_ys.insert(y_str.clone());
+                        true
                     }
                 })
-                .cloned()
+                .map(|(p, _)| p)
                 .collect();
 
             if merged.len() > send_proofs.len() {

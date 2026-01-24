@@ -486,7 +486,8 @@ pub async fn receive_tokens_with_options(
         None => {
             if retryable {
                 log::error!("All publish attempts failed, queueing for retry: {}", last_error);
-                let pending_id = format!("pending_{}", super::utils::now_secs());
+                // Use UUID for collision-resistant pending IDs (Issue #13)
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
 
                 // Queue for background retry - proofs are safe in CDK, just need Nostr backup
                 super::events::queue_token_event_for_retry(
@@ -499,7 +500,8 @@ pub async fn receive_tokens_with_options(
                 pending_id
             } else {
                 log::warn!("Permanent error - not queueing for retry: {}", last_error);
-                format!("local_{}", super::utils::now_secs())
+                // Use UUID for collision-resistant local IDs
+                format!("local_{}", uuid::Uuid::new_v4())
             }
         }
     };

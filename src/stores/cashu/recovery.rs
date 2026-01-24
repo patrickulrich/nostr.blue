@@ -1283,31 +1283,14 @@ async fn recover_melt_change_deduplicated(
         .collect();
 
     // Publish orphaned proofs event (uses existing event publishing logic)
+    // Note: publish_orphaned_proofs_event now internally adds tokens to WALLET_TOKENS
+    // using the saga pattern (persist before publish), so we don't need to add them here
     match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data).await {
         Ok(event_id) => {
             log::info!("Published recovered change proofs to Nostr: {}", event_id);
 
-            // Normalize mint URL for consistent balance lookups
-            let normalized_mint = super::utils::normalize_mint_url(&request.mint_url);
-
-            // Add to WALLET_TOKENS
-            {
-                let store = WALLET_TOKENS.read();
-                let mut data = store.data();
-                let mut tokens = data.write();
-                tokens.push(TokenData {
-                    event_id: event_id.clone(),
-                    mint: normalized_mint,
-                    unit: "sat".to_string(),
-                    proofs: proof_data.clone(),
-                    created_at: now_secs(),
-                });
-            }
-
-            // Update balance from proof state
-            super::signals::update_wallet_balances();
-
             // Register proofs in event map for fast lookup
+            // (Token already added to WALLET_TOKENS by publish_orphaned_proofs_event)
             super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
 
             Ok(recovered_amount)

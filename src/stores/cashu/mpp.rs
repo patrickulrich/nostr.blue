@@ -403,9 +403,20 @@ pub async fn execute_mpp_melt(
                             queue_event_for_retry(
                                 builder,
                                 PendingEventType::TokenEvent,
-                                Some(pending_id),
+                                Some(pending_id.clone()),
                                 Some(mint_url.clone()),
                             ).await;
+
+                            // CRITICAL: Persist proofs with pending_id to prevent token loss
+                            // When background retry succeeds, update_token_event_id will fix the event_id
+                            new_tokens.push(TokenData {
+                                event_id: pending_id,
+                                mint: mint_url.clone(),
+                                unit: "sat".to_string(),
+                                proofs: proof_data,
+                                created_at: super::proofs::now_secs(),
+                            });
+
                             publish_failures += 1;
                         }
                     }

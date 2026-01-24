@@ -38,6 +38,9 @@ pub fn NutzapSendModal(
         spawn(async move {
             is_loading_info.set(true);
             load_error.set(None);
+            // Clear stale data before fetching new recipient info
+            recipient_info.set(None);
+            compatible_mint.set(None);
 
             match cashu::fetch_nutzap_info(&recipient).await {
                 Ok(info) => {
