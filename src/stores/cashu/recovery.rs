@@ -1431,22 +1431,8 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
                 missing.len(), recovered_amount, event_id
             );
 
-            let normalized_mint = super::utils::normalize_mint_url(mint_url);
-            let new_token = TokenData {
-                event_id: event_id.clone(),
-                mint: normalized_mint,
-                unit: "sat".to_string(),
-                proofs: proof_data.clone(),
-                created_at: now_secs(),
-            };
-
-            if let Err(e) = super::signals::atomic_token_update(|tokens| {
-                tokens.push(new_token);
-                Ok(())
-            }) {
-                log::error!("Failed to update tokens atomically: {}", e);
-            }
-
+            // Token insertion handled by publish_orphaned_proofs_event
+            // Only register in event map for fast lookup
             super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
         }
         Err(e) => {
