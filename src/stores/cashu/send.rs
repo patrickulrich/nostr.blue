@@ -171,17 +171,16 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
     // nostr-sdk saves to local database before relay transmission
-    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
-    {
-        Ok(Some(real_event_id)) => {
-            // Update token with real Nostr event ID
-            super::events::update_token_event_id(&pending_event_id, &real_event_id);
-            Some(real_event_id)
-        }
-        Ok(None) => None, // No proofs to publish
+    let new_event_id = match publish_send_events(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &pending_event_id,
+    ).await {
+        Ok(Some(event_id)) => Some(event_id),
+        Ok(None) => None,
         Err(e) => {
-            // Event already queued for retry by publish_send_events
-            log::warn!("Nostr publish failed, queued for retry: {}", e);
+            log::warn!("Nostr publish failed: {}", e);
             Some(pending_event_id.clone())
         }
     };
@@ -318,17 +317,16 @@ pub async fn send_tokens_p2pk(
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
     // nostr-sdk saves to local database before relay transmission
-    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
-    {
-        Ok(Some(real_event_id)) => {
-            // Update token with real Nostr event ID
-            super::events::update_token_event_id(&pending_event_id, &real_event_id);
-            Some(real_event_id)
-        }
-        Ok(None) => None, // No proofs to publish
+    let new_event_id = match publish_send_events(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &pending_event_id,
+    ).await {
+        Ok(Some(event_id)) => Some(event_id),
+        Ok(None) => None,
         Err(e) => {
-            // Event already queued for retry by publish_send_events
-            log::warn!("Nostr P2PK publish failed, queued for retry: {}", e);
+            log::warn!("Nostr P2PK publish failed: {}", e);
             Some(pending_event_id.clone())
         }
     };
@@ -710,6 +708,7 @@ async fn publish_send_events(
     mint_url: &str,
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
+    pending_event_id: &str,
 ) -> Result<Option<String>, String> {
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
@@ -764,21 +763,42 @@ async fn publish_send_events(
 
         // Try to publish
         match client.send_event(&signed_event).await {
-            Ok(_) => {
-                log::info!("Published new token event: {}", event_id_hex);
+            Ok(output) => {
+                if !output.success.is_empty() {
+                    // At least one relay accepted - update token with real event ID
+                    super::events::update_token_event_id(pending_event_id, &event_id_hex);
+                    log::info!(
+                        "Published new token event: {} (to {} relays)",
+                        event_id_hex,
+                        output.success.len()
+                    );
+                    new_event_id = Some(event_id_hex);
+                } else {
+                    // No relays accepted - queue for retry with pending_event_id
+                    log::warn!(
+                        "No relays accepted token event (failed: {}), queuing for retry",
+                        output.failed.len()
+                    );
+                    queue_signed_event_for_retry(
+                        signed_event,
+                        PendingEventType::TokenEvent,
+                        Some(pending_event_id.to_string()),
+                        Some(mint_url.to_string()),
+                    ).await;
+                    new_event_id = Some(pending_event_id.to_string());
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
                 queue_signed_event_for_retry(
                     signed_event,
                     PendingEventType::TokenEvent,
-                    Some(event_id_hex.clone()),
+                    Some(pending_event_id.to_string()),
                     Some(mint_url.to_string()),
                 ).await;
+                new_event_id = Some(pending_event_id.to_string());
             }
         }
-
-        new_event_id = Some(event_id_hex);
     }
 
     // Publish deletion event for old token events

@@ -1025,8 +1025,8 @@ async fn update_local_state_after_nutzap_send(
         return Ok(());
     }
 
-    // Publish new token event with change proofs
-    let new_event_id = publish_change_token_event(mint_url, unit, keep_proofs).await?;
+    // Publish new token event with change proofs (include del field for consumed events)
+    let new_event_id = publish_change_token_event(mint_url, unit, keep_proofs, event_ids_to_delete).await?;
 
     // Update local state
     let keep_proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -1050,6 +1050,7 @@ async fn publish_change_token_event(
     mint_url: &str,
     unit: &str,
     proofs: &[cdk::nuts::Proof],
+    event_ids_to_delete: &[String],
 ) -> Result<String, String> {
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
@@ -1069,7 +1070,7 @@ async fn publish_change_token_event(
         mint: mint_url.to_string(),
         unit: unit.to_string(),
         proofs: extended_proofs,
-        del: vec![],
+        del: event_ids_to_delete.to_vec(),
     };
 
     let json_content = serde_json::to_string(&token_event_data)
@@ -1131,8 +1132,8 @@ async fn publish_redeemed_token_event(
     unit: &str,
     proofs: &[cdk::nuts::Proof],
 ) -> Result<String, String> {
-    // Same as change event, just different context
-    publish_change_token_event(mint_url, unit, proofs).await
+    // Redeemed nutzaps don't replace existing token events, so del is empty
+    publish_change_token_event(mint_url, unit, proofs, &[]).await
 }
 
 /// Fetch existing nutzaps from relays (for initial load)
