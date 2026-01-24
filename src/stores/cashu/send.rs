@@ -14,9 +14,10 @@ use super::internal::{
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt,
+    ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, ProofData, TokenData,
+    WalletTokensStoreStoreExt,
 };
-use super::utils::{mint_matches, normalize_mint_url};
+use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 use super::types::PendingEventType;
 
@@ -120,9 +121,27 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         ));
     }
 
+    // Generate transaction ID for tracking
+    let tx_id = format!("send_{}", uuid::Uuid::new_v4());
+
+    // Collect proof secrets for in-flight tracking
+    let proof_secrets: Vec<String> = all_proofs.iter().map(|p| p.secret.to_string()).collect();
+
+    // SAFETY: Add in-flight tracking BEFORE the send operation
+    // This protects proofs from being reclaimed by proof_recovery
+    let in_flight = InFlightSendRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        proof_secrets,
+        amount,
+        operation_type: "send".to_string(),
+        created_at: now_secs(),
+    };
+    super::signals::add_in_flight_send_request(in_flight);
+
     // 1. Use try_operation_or_recover wrapper for CDK operation
     // This ensures proofs are synced with mint if operation fails
-    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
+    let result = super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
         execute_send_with_retry(
@@ -132,7 +151,12 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             None, // No P2PK conditions
         ),
     )
-    .await?;
+    .await;
+
+    // SAFETY: Remove in-flight tracking regardless of success/failure
+    super::signals::remove_in_flight_send_request(&tx_id);
+
+    let (token_string, keep_proofs) = result?;
 
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
@@ -244,9 +268,27 @@ pub async fn send_tokens_p2pk(
         ));
     }
 
+    // Generate transaction ID for tracking
+    let tx_id = format!("send_p2pk_{}", uuid::Uuid::new_v4());
+
+    // Collect proof secrets for in-flight tracking
+    let proof_secrets: Vec<String> = all_proofs.iter().map(|p| p.secret.to_string()).collect();
+
+    // SAFETY: Add in-flight tracking BEFORE the send operation
+    // This protects proofs from being reclaimed by proof_recovery
+    let in_flight = InFlightSendRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        proof_secrets,
+        amount,
+        operation_type: "send_p2pk".to_string(),
+        created_at: now_secs(),
+    };
+    super::signals::add_in_flight_send_request(in_flight);
+
     // 1. Use try_operation_or_recover wrapper for CDK operation
     // This ensures proofs are synced with mint if operation fails
-    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
+    let result = super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
         execute_p2pk_send_via_swap(
@@ -256,7 +298,12 @@ pub async fn send_tokens_p2pk(
             spending_conditions,
         ),
     )
-    .await?;
+    .await;
+
+    // SAFETY: Remove in-flight tracking regardless of success/failure
+    super::signals::remove_in_flight_send_request(&tx_id);
+
+    let (token_string, keep_proofs) = result?;
 
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish

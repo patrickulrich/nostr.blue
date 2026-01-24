@@ -272,8 +272,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
                     // Check if nutzap is possible using per-mint balance
                     if let Some(mint) = nutzap_mint.read().as_ref() {
+                        // Normalize mint URL for consistent balance lookups
+                        let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
                         // Use per-mint balance instead of aggregate to ensure this mint has funds
-                        let balance = cashu::get_mint_balance(&mint.url);
+                        let balance = cashu::get_mint_balance(&normalized_mint_url);
                         if balance >= amount {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap

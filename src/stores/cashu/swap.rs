@@ -48,8 +48,8 @@ use super::proofs::{
 };
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, PendingEventType, ProofData, TokenData,
-    WalletTokensStoreStoreExt,
+    ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, PendingEventType, ProofData,
+    TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
@@ -305,6 +305,24 @@ pub async fn execute_swap_with_nip60(
         mint_url
     );
 
+    // Generate transaction ID for tracking
+    let tx_id = format!("swap_{}", uuid::Uuid::new_v4());
+
+    // Collect proof secrets for in-flight tracking
+    let proof_secrets: Vec<String> = cdk_proofs.iter().map(|p| p.secret.to_string()).collect();
+
+    // SAFETY: Add in-flight tracking BEFORE the swap operation
+    // This protects proofs from being reclaimed by proof_recovery
+    let in_flight = InFlightSendRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        proof_secrets,
+        amount: input_value,
+        operation_type: "swap".to_string(),
+        created_at: now_secs(),
+    };
+    super::signals::add_in_flight_send_request(in_flight);
+
     // 4. Get wallet and execute swap
     // NOTE: CDK's swap() has built-in try_proof_operation_or_reclaim - don't wrap again
     let wallet = get_or_create_wallet(&mint_url).await?;
@@ -319,8 +337,12 @@ pub async fn execute_swap_with_nip60(
             options.conditions.clone(),
             options.include_fee,
         )
-        .await
-        .map_err(|e| format!("Swap failed: {}", e))?;
+        .await;
+
+    // SAFETY: Remove in-flight tracking regardless of success/failure
+    super::signals::remove_in_flight_send_request(&tx_id);
+
+    let swap_result = swap_result.map_err(|e| format!("Swap failed: {}", e))?;
 
     // 5. Handle Option<Proofs> return type
     // - amount=Some(x): Returns Some(proofs) to send, change stored internally
