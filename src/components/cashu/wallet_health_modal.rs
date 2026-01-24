@@ -77,11 +77,17 @@ fn group_by_transaction(proofs: &[StuckProofInfo]) -> Vec<ProofGroup> {
         })
         .collect();
 
-    // Sort by urgency of first proof in group (critical first)
+    // Sort by maximum urgency across all proofs in group (critical first)
     result.sort_by(|a, b| {
-        let a_urgency = a.proofs.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
-        let b_urgency = b.proofs.first().map(|p| p.urgency).unwrap_or(UrgencyLevel::Normal);
-        b_urgency.cmp(&a_urgency)
+        let a_max_urgency = a.proofs.iter()
+            .map(|p| p.urgency)
+            .max()
+            .unwrap_or(UrgencyLevel::Normal);
+        let b_max_urgency = b.proofs.iter()
+            .map(|p| p.urgency)
+            .max()
+            .unwrap_or(UrgencyLevel::Normal);
+        b_max_urgency.cmp(&a_max_urgency)
     });
 
     result
@@ -131,8 +137,9 @@ fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
 fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) -> Element {
     let total: u64 = proofs.iter().map(|p| p.amount).sum();
     let urgency = proofs
-        .first()
+        .iter()
         .map(|p| p.urgency)
+        .max()
         .unwrap_or(UrgencyLevel::Normal);
     let can_recover = proofs.iter().any(|p| p.can_recover);
 
@@ -187,7 +194,15 @@ fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) ->
 /// Detailed wallet health modal
 #[component]
 pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Element {
-    let stats = use_memo(proof_recovery::get_wallet_health_stats);
+    // Refresh signal - incrementing triggers stats memo to recompute
+    let mut refresh_counter = use_signal(|| 0u32);
+
+    let stats = use_memo(move || {
+        // Calling refresh_counter() creates reactive dependency
+        // Memo recomputes whenever refresh_counter changes
+        let _ = refresh_counter();
+        proof_recovery::get_wallet_health_stats()
+    });
     let mut is_recovering = use_signal(|| false);
     let mut recovery_result = use_signal(|| Option::<String>::None);
 
@@ -223,6 +238,8 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
             };
 
             recovery_result.set(Some(msg));
+            // Trigger stats refresh after recovery completes
+            refresh_counter.set(refresh_counter() + 1);
             is_recovering.set(false);
         });
     };

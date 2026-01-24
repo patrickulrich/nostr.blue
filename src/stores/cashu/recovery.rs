@@ -501,6 +501,9 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
 /// Maximum proofs per batch for NUT-07 state check
 const ORPHAN_SYNC_BATCH_SIZE: usize = 100;
 
+/// Maximum errors per mint before stopping orphan sync to prevent unbounded accumulation
+const MAX_ERRORS_PER_MINT: usize = 5;
+
 /// Sync orphaned proofs from CDK to NIP-60
 ///
 /// Detects proofs that exist in CDK's IndexedDB but are not in WALLET_TOKENS.
@@ -617,6 +620,16 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
                     result
                         .errors
                         .push(format!("Mint verification failed for {}: {}", mint_url, e));
+
+                    // Stop processing this mint if too many errors
+                    if result.errors.len() >= MAX_ERRORS_PER_MINT {
+                        log::warn!(
+                            "Stopping orphan sync for {} after {} errors to prevent unbounded accumulation",
+                            mint_url,
+                            MAX_ERRORS_PER_MINT
+                        );
+                        break; // Exit the batch loop for this mint
+                    }
                 }
             }
         }
@@ -1275,6 +1288,10 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
     // After CDK processes quotes, check for recovered change
     let recovered = recover_unrecorded_proofs_internal(mint_url).await.unwrap_or(0);
 
+    // NOTE: quotes_checked/quotes_paid are batch operation markers (1 if recovery
+    // occurred, 0 otherwise). CDK's check_pending_melt_quotes() returns Result<(), Error>
+    // (void) and loops internally per-quote without returning per-quote statistics.
+    // We use recovered > 0 as a proxy to indicate the batch operation had results.
     Ok(MeltMintResult {
         quotes_checked: if recovered > 0 { 1 } else { 0 },
         quotes_paid: if recovered > 0 { 1 } else { 0 },
