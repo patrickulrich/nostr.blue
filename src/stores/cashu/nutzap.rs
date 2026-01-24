@@ -966,9 +966,28 @@ async fn publish_change_token_event(
         .clone();
 
     let output = client
-        .send_event_builder(builder)
+        .send_event_builder(builder.clone())
         .await
         .map_err(|e| format!("Failed to publish token event: {}", e))?;
+
+    // Check if at least one relay succeeded
+    if output.success.is_empty() {
+        // No relays accepted - generate pending ID and queue for retry
+        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+        log::warn!(
+            "No relays accepted change token event, using pending ID: {}",
+            pending_id
+        );
+
+        // Queue the event for retry
+        super::events::queue_token_event_for_retry(
+            builder,
+            pending_id.clone(),
+            mint_url.to_string(),
+        ).await;
+
+        return Ok(pending_id);
+    }
 
     Ok(output.id().to_hex())
 }
