@@ -416,11 +416,8 @@ pub async fn send_nutzap(
         .await
         .map_err(|e| format!("Failed to get change proofs: {}", e))?;
 
-    // Update local state with change proofs
-    let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
-    update_local_state_after_nutzap_send(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
-
-    // Build kind:9321 event
+    // Build kind:9321 event BEFORE updating local state
+    // This ensures we can recover if publish fails
     let mut tags = Vec::new();
 
     // Add proof tags (each proof as separate tag with DLEQ)
@@ -451,7 +448,7 @@ pub async fn send_nutzap(
         }
     }
 
-    // Build and publish event
+    // Build and publish event FIRST (before local state update)
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
 
@@ -461,14 +458,27 @@ pub async fn send_nutzap(
         .ok_or("Client not initialized")?
         .clone();
 
-    // Publish to recipient's preferred relays if available
+    // Publish to recipient's preferred relays
     let output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish nutzap: {}", e))?;
 
+    // Check if at least one relay succeeded (nostr-sdk auto-saves to local DB before relay)
+    if output.success.is_empty() {
+        // All relays failed - proofs are still in CDK, recoverable on next sync
+        return Err(format!(
+            "Nutzap failed on all relays: {:?}",
+            output.failed.keys().collect::<Vec<_>>()
+        ));
+    }
+
     let event_id = output.id().to_hex();
-    log::info!("Published nutzap event: {}", event_id);
+    log::info!("Published nutzap event: {} (to {} relays)", event_id, output.success.len());
+
+    // NOW update local state - proofs have been successfully sent
+    let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
+    update_local_state_after_nutzap_send(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
 
     // Create history event
     if let Err(e) =
@@ -597,6 +607,21 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
     }
 
     let mint_url = mint_url.ok_or("Nutzap missing mint URL")?;
+
+    // Validate mint against accepted mints from kind:10019
+    {
+        let my_info = MY_NUTZAP_INFO.read();
+        if let Some(info) = my_info.as_ref() {
+            let accepted = info.mints.iter().any(|m|
+                super::utils::mint_matches(&m.url, &mint_url)
+            );
+            if !accepted {
+                return Err(format!("Nutzap from unaccepted mint: {}", mint_url));
+            }
+        } else {
+            return Err("Nutzap info not configured - cannot validate mint".to_string());
+        }
+    }
 
     if proofs_json.is_empty() {
         return Err("Nutzap contains no proofs".to_string());
@@ -796,6 +821,8 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
     }
 
     // Create history event with "redeemed" tag referencing the nutzap event
+    // Note: create_history_event_full returns Result<(), String>, not an event ID
+    // Set history_event_id to None since we don't have access to the actual history event ID
     let history_event_id = match super::events::create_history_event_full(
         "in",
         amount,
@@ -805,7 +832,7 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
     )
     .await
     {
-        Ok(()) => Some(new_event_id.clone()),
+        Ok(()) => None, // History event created successfully but we don't have its ID
         Err(e) => {
             log::error!("Failed to create history event: {}", e);
             None
@@ -831,7 +858,7 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
 // Internal Helpers
 // =============================================================================
 
-/// Get CDK proofs for a specific mint
+/// Get CDK proofs for a specific mint (only spendable proofs)
 fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
@@ -841,7 +868,10 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> 
 
     for token in tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)) {
         for proof in &token.proofs {
-            all_proofs.push(super::proofs::proof_data_to_cdk_proof(proof)?);
+            // Only include spendable proofs (filter out pending/spent)
+            if proof.state == super::types::ProofState::Unspent {
+                all_proofs.push(super::proofs::proof_data_to_cdk_proof(proof)?);
+            }
         }
     }
 

@@ -317,8 +317,10 @@ pub async fn execute_swap_with_nip60(
                     match p.y() {
                         Ok(y) => !input_ys.contains(&y.to_string()),
                         Err(e) => {
-                            log::warn!(
-                                "Y_VALUE_COMPUTATION_FAILED in swap: proof_amount={}, error='{}' - skipping",
+                            // Escalate to error level for visibility - this should never happen
+                            // and indicates a potential fund loss scenario
+                            log::error!(
+                                "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - PROOF SKIPPED",
                                 u64::from(p.amount), e
                             );
                             false
@@ -352,8 +354,10 @@ pub async fn execute_swap_with_nip60(
                     match p.y() {
                         Ok(y) => !input_ys.contains(&y.to_string()),
                         Err(e) => {
-                            log::warn!(
-                                "Y_VALUE_COMPUTATION_FAILED in swap: proof_amount={}, error='{}' - skipping",
+                            // Escalate to error level for visibility - this should never happen
+                            // and indicates a potential fund loss scenario
+                            log::error!(
+                                "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - PROOF SKIPPED",
                                 u64::from(p.amount), e
                             );
                             false

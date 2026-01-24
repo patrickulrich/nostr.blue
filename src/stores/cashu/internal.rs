@@ -1000,8 +1000,13 @@ pub(crate) async fn try_swap_or_recover(
             };
 
             if should_recover {
-                let _ = sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await;
+                match sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await {
+                    Ok(_) => log::debug!("Recovery completed for mint {}", mint_url),
+                    Err(e) => log::error!("Recovery failed for mint {}: {}", mint_url, e),
+                }
                 MINTS_IN_RECOVERY.write().unwrap().remove(mint_url);
+            } else {
+                log::warn!("Recovery skipped for mint {} - already in recovery", mint_url);
             }
 
             Err(err_str)

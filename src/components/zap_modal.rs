@@ -4,7 +4,6 @@ use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
 use crate::stores::{signer, nwc_store, settings_store, cashu};
-use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use qrcode::QrCode;
 use qrcode::render::svg;
 use wasm_bindgen::prelude::*;
@@ -260,9 +259,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             // Try payment based on preference
             match payment_preference.as_str() {
                 "cashu_first" => {
-                    // Check if nutzap is possible
+                    // Check if nutzap is possible using per-mint balance
                     if let Some(mint) = nutzap_mint.read().as_ref() {
-                        let balance = WALLET_BALANCES.read().available;
+                        // Use per-mint balance instead of aggregate to ensure this mint has funds
+                        let balance = cashu::get_mint_balance(&mint.url);
                         if balance >= amount {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap
@@ -601,13 +601,14 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             } else if let Some(mint) = nutzap_mint.read().as_ref() {
                                 {
-                                    let balance = WALLET_BALANCES.read().available;
+                                    // Show per-mint balance for this specific mint
+                                    let balance = cashu::get_mint_balance(&mint.url);
                                     rsx! {
                                         div {
                                             class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
                                             p {
                                                 class: "text-sm text-green-700 dark:text-green-300",
-                                                "✓ Nutzap available via {mint.url} ({balance} sats in wallet)"
+                                                "✓ Nutzap available via {mint.url} ({balance} sats at mint)"
                                             }
                                         }
                                     }

@@ -1076,22 +1076,36 @@ pub fn start_pending_events_processor() {
                     _ => {}
                 }
 
-                // Run proof recovery to catch any stuck proofs
-                match super::proof_recovery::run_full_recovery().await {
-                    result if result.recovered_count > 0 || result.spent_count > 0 => {
-                        log::info!(
-                            "Periodic recovery: {} recovered, {} spent",
-                            result.recovered_count,
-                            result.spent_count
-                        );
-                    }
-                    result if !result.errors.is_empty() => {
-                        for err in result.errors {
-                            log::debug!("Periodic recovery error: {}", err);
+                // Run proof recovery in a separate task to avoid blocking the event loop
+                // Uses futures::select! for WASM-compatible timeout
+                spawn(async {
+                    use futures::FutureExt;
+
+                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
+                    let timeout_future = TimeoutFuture::new(180_000).fuse(); // 3 min timeout
+
+                    futures::pin_mut!(recovery_future, timeout_future);
+
+                    futures::select! {
+                        result = recovery_future => {
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Periodic recovery: {} recovered, {} spent",
+                                    result.recovered_count,
+                                    result.spent_count
+                                );
+                            }
+                            if !result.errors.is_empty() {
+                                for err in result.errors {
+                                    log::debug!("Periodic recovery error: {}", err);
+                                }
+                            }
+                        }
+                        _ = timeout_future => {
+                            log::warn!("Periodic recovery timed out after 3 minutes");
                         }
                     }
-                    _ => {}
-                }
+                });
             }
         }
     });

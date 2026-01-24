@@ -621,6 +621,34 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
         for chunk in potentially_orphaned.chunks(ORPHAN_SYNC_BATCH_SIZE) {
             match wallet.check_proofs_spent(chunk.to_vec()).await {
                 Ok(states) => {
+                    // CRITICAL: CDK returns ProofState matched by Y value - validate array alignment
+                    // If lengths don't match, zip() would silently truncate
+                    if states.len() != chunk.len() {
+                        log::warn!(
+                            "Mint {} returned {} states for {} proofs - using per-proof fallback",
+                            mint_url, states.len(), chunk.len()
+                        );
+                        // Fallback: check each proof individually to avoid silent truncation
+                        for proof in chunk {
+                            match wallet.check_proofs_spent(vec![proof.clone()]).await {
+                                Ok(single_states) if !single_states.is_empty() => {
+                                    if single_states[0].state == cdk::nuts::State::Unspent {
+                                        confirmed_orphaned.push(proof.clone());
+                                    } else {
+                                        log::debug!(
+                                            "Proof Y={} is {:?}, skipping",
+                                            proof.y().map(|y| y.to_string()).unwrap_or_default(),
+                                            single_states[0].state
+                                        );
+                                    }
+                                }
+                                Ok(_) => log::warn!("Empty state returned for proof"),
+                                Err(e) => log::warn!("Per-proof check failed: {}", e),
+                            }
+                        }
+                        continue; // Skip the normal zip logic below
+                    }
+
                     // CRITICAL: Only consider proofs that mint confirms as UNSPENT
                     for (proof, state) in chunk.iter().zip(states.iter()) {
                         if state.state == cdk::nuts::State::Unspent {
@@ -1370,7 +1398,13 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
         .map_err(|e| format!("check_pending_melt_quotes failed: {}", e))?;
 
     // After CDK processes quotes, check for recovered change
-    let recovered = recover_unrecorded_proofs_internal(mint_url).await.unwrap_or(0);
+    let recovered = match recover_unrecorded_proofs_internal(mint_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to recover unrecorded proofs for {}: {}", mint_url, e);
+            return Err(format!("Recovery failed: {}", e));
+        }
+    };
 
     // NOTE: quotes_checked/quotes_paid are batch operation markers (1 if recovery
     // occurred, 0 otherwise). CDK's check_pending_melt_quotes() returns Result<(), Error>
