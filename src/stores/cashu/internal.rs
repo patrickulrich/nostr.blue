@@ -594,40 +594,23 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         }
     }
 
-    // Update local state
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
+    // Update local state with crash-safe atomic replacement
+    // Uses add-before-delete pattern: worst case on crash is duplicate tokens (recoverable),
+    // never lost tokens.
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
+        vec![super::types::TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
+    } else {
+        vec![]
+    };
 
-        // Remove old token events
-        tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-        // Add new token with remaining proofs
-        if let Some(ref event_id) = new_event_id {
-            use super::types::TokenData;
-
-            tokens_write.push(TokenData {
-                event_id: event_id.clone(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: available_proofs,
-                created_at: chrono::Utc::now().timestamp() as u64,
-            });
-        }
-
-        // Update balance with overflow protection (following CDK try_sum pattern)
-        let new_balance: u64 = tokens_write
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-            .unwrap_or_else(|| {
-                log::error!("Balance overflow detected during cleanup!");
-                u64::MAX
-            });
-
-        *super::signals::WALLET_BALANCE.write() = new_balance;
+    if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
+        log::error!("Failed atomic token replacement during cleanup: {}", e);
     }
 
     log::info!(

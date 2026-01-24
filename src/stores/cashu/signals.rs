@@ -167,6 +167,53 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
     Ok(())
 }
 
+/// Atomically update tokens and recalculate balance
+///
+/// Holds WALLET_TOKENS lock during entire operation and updates
+/// WALLET_BALANCE before releasing, preventing race conditions.
+pub fn atomic_token_update<F>(mutate_fn: F) -> Result<u64, String>
+where
+    F: FnOnce(&mut Vec<super::types::TokenData>) -> Result<(), String>,
+{
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
+
+    mutate_fn(&mut tokens_write)?;
+
+    let new_balance: u64 = tokens_write
+        .iter()
+        .flat_map(|t| &t.proofs)
+        .filter(|p| p.state.is_spendable())
+        .map(|p| p.amount)
+        .try_fold(0u64, |acc, amt| acc.checked_add(amt))
+        .ok_or("Balance calculation overflow")?;
+
+    *WALLET_BALANCE.write() = new_balance;
+
+    Ok(new_balance)
+}
+
+/// Crash-safe token replacement: add new tokens BEFORE deleting old ones
+///
+/// Ensures worst case on crash is duplicate tokens (recoverable), never lost tokens.
+pub fn atomic_token_replace(
+    tokens_to_add: Vec<super::types::TokenData>,
+    event_ids_to_delete: &[String],
+) -> Result<u64, String> {
+    atomic_token_update(|tokens| {
+        // ADD FIRST (crash-safe)
+        for token in tokens_to_add {
+            tokens.push(token);
+        }
+        // DELETE AFTER
+        if !event_ids_to_delete.is_empty() {
+            tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+        }
+        Ok(())
+    })
+}
+
 /// Load in-flight melt requests from IndexedDB (call on startup)
 ///
 /// Restores the in-flight melt state from the previous session for recovery.
