@@ -259,11 +259,13 @@ pub async fn execute_swap_with_nip60(
 
     // Track input Y values for filtering change proofs later
     // CDK stores change proofs internally, we need to identify them
+    // Use fail-fast error handling - Y computation almost never fails for valid proofs
     use std::collections::HashSet;
     let input_ys: HashSet<String> = cdk_proofs
         .iter()
-        .filter_map(|p| p.y().ok().map(|y| y.to_string()))
-        .collect();
+        .map(|p| p.y().map(|y| y.to_string()))
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|e| format!("Failed to compute Y value for input proof: {}", e))?;
 
     log::info!(
         "Executing NIP-60 swap: {} proofs ({} sats) at {}",
@@ -558,7 +560,38 @@ async fn publish_swap_events(
                 "Failed to publish swap token event, queuing for retry: {}",
                 e
             );
-            queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+            queue_signed_event_for_retry(
+                signed_event,
+                PendingEventType::TokenEvent,
+                Some(event_id_hex.clone()),
+                Some(mint_url.to_string()),
+            ).await;
+
+            // Also queue deletion events for retry if there are any
+            if !event_ids_to_delete.is_empty() {
+                let valid_event_ids: Vec<_> = event_ids_to_delete
+                    .iter()
+                    .filter_map(|id| EventId::from_hex(id).ok())
+                    .collect();
+
+                if !valid_event_ids.is_empty() {
+                    let mut tags = Vec::new();
+                    for eid in &valid_event_ids {
+                        tags.push(nostr_sdk::Tag::event(*eid));
+                    }
+                    tags.push(nostr_sdk::Tag::custom(
+                        nostr_sdk::TagKind::custom("k"),
+                        ["7375"],
+                    ));
+
+                    let deletion_builder = nostr_sdk::EventBuilder::new(
+                        Kind::from(5),
+                        "Swapped token"
+                    ).tags(tags);
+
+                    super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                }
+            }
             // Still return the event ID - it will be published on retry
         }
     }

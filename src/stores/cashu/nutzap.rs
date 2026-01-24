@@ -196,10 +196,18 @@ pub async fn publish_nutzap_info(
         .await
         .map_err(|e| format!("Failed to publish nutzap info: {}", e))?;
 
-    let event_id = output.id().to_hex();
-    log::info!("Published nutzap info event: {}", event_id);
+    // Check if at least one relay succeeded (nostr-sdk pattern)
+    if output.success.is_empty() {
+        return Err(format!(
+            "Nutzap info failed on all relays: {:?}",
+            output.failed.keys().collect::<Vec<_>>()
+        ));
+    }
 
-    // Update local state
+    let event_id = output.id().to_hex();
+    log::info!("Published nutzap info event: {} (to {} relays)", event_id, output.success.len());
+
+    // NOW update local state (after confirmed publish)
     let info = NutzapInfo {
         pubkey: pubkey_str.clone(),
         p2pk_pubkey,
@@ -543,17 +551,41 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
             }
         };
 
-        // Subscribe to events
-        // Note: nostr-sdk handles reconnection automatically
-        match client.subscribe(filter, None).await {
-            Ok(subscription_id) => {
-                log::info!("Nutzap subscription started: {:?}", subscription_id);
-            }
+        // Subscribe first
+        let sub_output = match client.subscribe(filter, None).await {
+            Ok(output) => output,
             Err(e) => {
                 log::error!("Failed to subscribe to nutzaps: {}", e);
                 *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
+                return;
             }
+        };
+        let sub_id = sub_output.val;
+        log::info!("Nutzap subscription started: {:?}", sub_id);
+
+        // Handle notifications in a loop (nostr-sdk pattern)
+        if let Err(e) = client
+            .handle_notifications(|notification| async {
+                if let nostr_sdk::RelayPoolNotification::Event {
+                    subscription_id,
+                    event,
+                    ..
+                } = notification
+                {
+                    if subscription_id == sub_id && event.kind == Kind::from(9321) {
+                        if let Err(e) = process_nutzap_event(&event).await {
+                            log::warn!("Failed to process nutzap {}: {}", event.id.to_hex(), e);
+                        }
+                    }
+                }
+                Ok(false) // Continue listening
+            })
+            .await
+        {
+            log::error!("Nutzap notification handler error: {}", e);
         }
+
+        *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
     });
 
     Ok(())

@@ -87,22 +87,47 @@ pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
 }
 
 /// Queue an already-signed Event for retry when publication fails
-pub async fn queue_signed_event_for_retry(event: nostr_sdk::Event, event_type: PendingEventType) {
-    match serde_json::to_string(&event) {
-        Ok(event_json) => {
-            match queue_nostr_event(event_json, event_type).await {
-                Ok(queue_id) => {
-                    log::info!("Queued signed event {} for retry: {}", event.id.to_hex(), queue_id);
-                }
-                Err(queue_err) => {
-                    log::error!("Failed to queue event for retry: {}", queue_err);
-                }
-            }
+///
+/// Optional `pending_token_id` and `mint_url` link this pending event to a token
+/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
+/// publish succeeds.
+pub async fn queue_signed_event_for_retry(
+    event: nostr_sdk::Event,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) {
+    let event_id = event.id.to_hex();
+    let event_json = match serde_json::to_string(&event) {
+        Ok(j) => j,
+        Err(e) => {
+            log::error!("Failed to serialize event for queueing: {}", e);
+            return;
         }
-        Err(json_err) => {
-            log::error!("Failed to serialize event for queueing: {}", json_err);
+    };
+
+    let pending_event = PendingNostrEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        builder_json: event_json,
+        event_type: event_type.clone(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+        retry_count: 0,
+        last_retry_at: None,
+        pending_token_id,
+        mint_url,
+    };
+
+    // Add to in-memory queue
+    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
+
+    // Persist to IndexedDB
+    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+        if let Err(e) = localstore.add_pending_event(&pending_event).await {
+            log::warn!("Failed to persist pending event: {}", e);
         }
     }
+
+    log::info!("Queued signed event {} for retry: {}", event_id, pending_event.id);
 }
 
 /// Sign an EventBuilder using the current signer
@@ -1017,22 +1042,33 @@ pub async fn publish_orphaned_proofs_event(
                     "Published orphaned proofs token event: {} (to {} relays)",
                     event_id_hex, output.success.len()
                 );
+                Ok(event_id_hex)
             } else {
-                // No relays accepted - queue for retry
+                // No relays accepted - queue for retry with token tracking info
                 log::warn!(
                     "No relays accepted orphaned proofs event {}, queuing for retry",
                     event_id_hex
                 );
-                queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+                queue_signed_event_for_retry(
+                    signed_event,
+                    PendingEventType::TokenEvent,
+                    Some(event_id_hex.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
+                Err(format!("Nostr publish failed: no relays accepted event {}", event_id_hex))
             }
         }
         Err(e) => {
             log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);
-            queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+            queue_signed_event_for_retry(
+                signed_event,
+                PendingEventType::TokenEvent,
+                Some(event_id_hex.clone()),
+                Some(mint_url.to_string()),
+            ).await;
+            Err(format!("Nostr publish failed: {}", e))
         }
     }
-
-    Ok(event_id_hex)
 }
 
 /// Guard to prevent multiple processor spawns
@@ -1067,12 +1103,12 @@ pub fn start_pending_events_processor() {
         let mut recovery_counter = 0u32;
 
         loop {
-            // Adaptive interval: 30s when pending events exist, 5min otherwise
+            // Adaptive interval: 30s when pending events exist, 60s otherwise
             let pending_count = PENDING_NOSTR_EVENTS.read().len();
             let interval_ms = if pending_count > 0 {
                 30_000  // 30 seconds when there's work
             } else {
-                5 * 60 * 1000  // 5 minutes when idle
+                60_000  // 60 seconds when idle (faster pickup of newly queued events)
             };
 
             TimeoutFuture::new(interval_ms).await;

@@ -722,7 +722,12 @@ async fn publish_send_events(
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
-                queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+                queue_signed_event_for_retry(
+                    signed_event,
+                    PendingEventType::TokenEvent,
+                    Some(event_id_hex.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
             }
         }
 

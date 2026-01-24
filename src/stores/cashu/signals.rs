@@ -87,7 +87,17 @@ pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> =
 /// Add an in-flight melt request to tracking
 pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
     let tx_id = request.transaction_id.clone();
-    IN_FLIGHT_MELT_REQUESTS.write().push(request);
+
+    // Check for duplicate before adding (matches persist_single_in_flight_request pattern)
+    {
+        let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
+        if requests.iter().any(|r| r.transaction_id == tx_id) {
+            log::debug!("In-flight request {} already exists, skipping", tx_id);
+            return;
+        }
+        requests.push(request);
+    }
+
     ACTIVE_OPERATIONS.write().insert(tx_id.clone());
     log::debug!("Added in-flight melt request: {}", tx_id);
 }
@@ -233,9 +243,12 @@ pub fn atomic_token_replace(
     })
 }
 
-/// Compute balance from tokens and update WALLET_BALANCES signal.
-/// This is the ONLY function that should update balance.
-/// Following CDK pattern: balance is always computed from proof state.
+/// Recalculate wallet balances from WALLET_TOKENS
+///
+/// This performs a standalone recomputation of balances from WALLET_TOKENS.
+/// Note: `atomic_token_update` also updates WALLET_BALANCES as part of atomic
+/// token mutations. Use this function for explicit balance refresh; use
+/// atomic_token_update/atomic_token_replace for transactional token changes.
 pub fn update_wallet_balances() {
     let store = WALLET_TOKENS.read();
     let data = store.data();
@@ -277,6 +290,15 @@ pub async fn load_in_flight_melt_requests() {
         Ok(Some(requests)) => {
             if !requests.is_empty() {
                 log::info!("Loaded {} in-flight melt requests from storage", requests.len());
+
+                // Populate ACTIVE_OPERATIONS from loaded requests
+                {
+                    let mut active_ops = ACTIVE_OPERATIONS.write();
+                    for req in &requests {
+                        active_ops.insert(req.transaction_id.clone());
+                    }
+                }
+
                 *IN_FLIGHT_MELT_REQUESTS.write() = requests;
             }
         }
