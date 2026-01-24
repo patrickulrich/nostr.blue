@@ -445,8 +445,8 @@ pub async fn send_nutzap(
     // Mint URL
     tags.push(Tag::custom(TagKind::custom("u"), [mint_url.as_str()]));
 
-    // Unit
-    tags.push(Tag::custom(TagKind::custom("unit"), ["sat"]));
+    // Unit (use recipient mint's unit, not hardcoded "sat")
+    tags.push(Tag::custom(TagKind::custom("unit"), [compatible_mint.unit.as_str()]));
 
     // Recipient pubkey
     let recipient_nostr_pubkey = PublicKey::parse(recipient_pubkey)
@@ -1010,10 +1010,20 @@ async fn publish_change_token_event(
         .ok_or("Client not initialized")?
         .clone();
 
-    let output = client
-        .send_event_builder(builder.clone())
-        .await
-        .map_err(|e| format!("Failed to publish token event: {}", e))?;
+    let output = match client.send_event_builder(builder.clone()).await {
+        Ok(out) => out,
+        Err(e) => {
+            // Queue for retry instead of failing - local state is already updated
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+            log::warn!("Failed to publish token event, queuing for retry: {}", e);
+            super::events::queue_token_event_for_retry(
+                builder,
+                pending_id.clone(),
+                mint_url.to_string(),
+            ).await;
+            return Ok(pending_id);
+        }
+    };
 
     // Check if at least one relay succeeded
     if output.success.is_empty() {
