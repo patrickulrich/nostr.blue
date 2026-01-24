@@ -251,12 +251,11 @@ pub async fn receive_tokens_with_options(
 
                     if let Some(keyset_info) = keysets.iter().find(|k| k.id == keyset_id) {
                         if !keyset_info.active {
-                            log::warn!(
-                                "Token uses inactive keyset {} - mint has rotated keys",
+                            log::info!(
+                                "Token uses inactive keyset {} - will be migrated to active keyset during receive",
                                 keyset_id
                             );
-                            // Don't reject outright - the receive will still work (swap to new keyset)
-                            // But log a warning so we can track this
+                            // CDK's receive() automatically migrates to active keyset via create_swap()
                         }
                     } else {
                         log::warn!("Keyset {} not found on mint {}", keyset_id, mint_url);
