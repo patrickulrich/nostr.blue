@@ -12,7 +12,7 @@ use super::internal::{
     is_token_spent_error_string, nostr_pubkey_to_cdk_pubkey, validate_proofs_with_mint,
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
-use super::signals::{try_acquire_mint_lock, WALLET_BALANCE, WALLET_STATE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt,
 };
@@ -120,21 +120,47 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         ));
     }
 
-    // Prepare and confirm send with auto-retry on spent proofs
-    let (token_string, keep_proofs) = execute_send_with_retry(
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
         &mint_url,
-        amount,
-        all_proofs,
-        None, // No P2PK conditions
+        all_proofs.clone(),
+        execute_send_with_retry(
+            &mint_url,
+            amount,
+            all_proofs,
+            None, // No P2PK conditions
+        ),
     )
     .await?;
 
-    // Publish events and update state
-    let new_event_id =
-        publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
+    update_local_state_after_send(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_send(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_send_events
+            log::warn!("Nostr publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
@@ -218,21 +244,47 @@ pub async fn send_tokens_p2pk(
         ));
     }
 
-    // Execute P2PK send using swap directly (bypasses CDK's buggy proof selection)
-    let (token_string, keep_proofs) = execute_p2pk_send_via_swap(
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (token_string, keep_proofs) = super::internal::try_operation_or_recover(
         &mint_url,
-        amount,
-        all_proofs,
-        spending_conditions,
+        all_proofs.clone(),
+        execute_p2pk_send_via_swap(
+            &mint_url,
+            amount,
+            all_proofs,
+            spending_conditions,
+        ),
     )
     .await?;
 
-    // Publish events and update state
-    let new_event_id =
-        publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
+    update_local_state_after_send(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_send(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_send_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_send_events
+            log::warn!("Nostr P2PK publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
@@ -670,7 +722,12 @@ async fn publish_send_events(
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
-                queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+                queue_signed_event_for_retry(
+                    signed_event,
+                    PendingEventType::TokenEvent,
+                    Some(event_id_hex.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
             }
         }
 
@@ -706,7 +763,7 @@ async fn publish_send_events(
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                 }
             }
         }
@@ -723,49 +780,43 @@ async fn publish_send_events(
     Ok(new_event_id)
 }
 
-/// Update local state after a successful send
+/// Update local state after a successful send using atomic token replacement
+///
+/// Uses crash-safe atomic replacement: add new tokens BEFORE deleting old ones.
+/// This ensures worst case on crash is duplicate tokens (recoverable), never lost tokens.
 fn update_local_state_after_send(
     mint_url: &str,
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let store = WALLET_TOKENS.read();
-    let mut data = store.data();
-    let mut tokens_write = data.write();
+    let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
+        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
+        if keep_proofs.is_empty() {
+            (vec![], None)
+        } else {
+            let keep_proof_data: Vec<ProofData> =
+                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let token = TokenData {
+                event_id: event_id.clone(),
+                mint: mint_url.to_string(),
+                unit: "sat".to_string(),
+                proofs: keep_proof_data.clone(),
+                created_at: chrono::Utc::now().timestamp() as u64,
+            };
+            (vec![token], Some((event_id.clone(), keep_proof_data)))
+        }
+    } else {
+        (vec![], None)
+    };
 
-    // Remove old token events
-    tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+    let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
-    // Add new token with remaining proofs
-    if let Some(ref event_id) = new_event_id {
-        let keep_proof_data: Vec<ProofData> =
-            keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-
-        tokens_write.push(TokenData {
-            event_id: event_id.clone(),
-            mint: mint_url.to_string(),
-            unit: "sat".to_string(),
-            proofs: keep_proof_data.clone(),
-            created_at: chrono::Utc::now().timestamp() as u64,
-        });
-
-        // Register proofs in event map
-        register_proofs_in_event_map(event_id, &keep_proof_data);
+    if let Some((event_id, proof_data)) = proofs_to_register {
+        register_proofs_in_event_map(&event_id, &proof_data);
     }
 
-    // Update balance
-    let new_balance: u64 = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .map(|p| p.amount)
-        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-        .ok_or_else(|| "Balance calculation overflow".to_string())?;
-
-    *WALLET_BALANCE.write() = new_balance;
-
     log::info!("Local state updated. Balance after send: {} sats", new_balance);
-
     Ok(())
 }
 

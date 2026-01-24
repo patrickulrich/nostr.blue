@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use crate::routes::Route;
 use crate::stores::shop_store::{CART_ITEMS, CART_TOTAL_SATS, clear_cart, get_cart_count, create_shop_order, fetch_shipping_options, set_cart_item_shipping};
 use crate::utils::nip99::{CartItem, ShippingOption};
-use crate::stores::cashu::{WALLET_BALANCE, send_tokens_p2pk, get_balances_per_mint};
+use crate::stores::cashu::{send_tokens_p2pk, get_balances_per_mint};
+use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::stores::nwc_store;
 use crate::stores::profiles;
 use crate::services::lnurl;
@@ -90,7 +91,7 @@ pub fn ShopCheckout() -> Element {
     let cart_items = CART_ITEMS.read();
     let total_sats = *CART_TOTAL_SATS.read();
     let item_count = get_cart_count();
-    let cashu_balance = *WALLET_BALANCE.read();
+    let cashu_balance = WALLET_BALANCES.read().available;
     let nwc_connected = nwc_store::is_connected();
 
     // Get all unique merchant pubkeys from cart

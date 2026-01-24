@@ -3,7 +3,7 @@ use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
-use crate::stores::{signer, nwc_store, settings_store};
+use crate::stores::{signer, nwc_store, settings_store, cashu};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use wasm_bindgen::prelude::*;
@@ -74,6 +74,26 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut qr_code_svg = use_signal(|| None::<String>);
     let webln_available = is_webln_available();
     let toast = consume_toast();
+
+    // Nutzap eligibility check
+    let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
+    let mut checking_nutzap = use_signal(|| false);
+
+    // Check nutzap eligibility on modal open
+    {
+        let recipient_pubkey = props.recipient_pubkey.clone();
+        use_effect(move || {
+            let pubkey = recipient_pubkey.clone();
+            checking_nutzap.set(true);
+            spawn(async move {
+                match cashu::validate_nutzap_recipient(&pubkey).await {
+                    Ok(mint) => nutzap_mint.set(Some(mint)),
+                    Err(_) => nutzap_mint.set(None),
+                }
+                checking_nutzap.set(false);
+            });
+        });
+    }
 
     // Preset amounts in sats
     let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
@@ -238,6 +258,71 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             // Try payment based on preference
             match payment_preference.as_str() {
+                "cashu_first" => {
+                    // Check if nutzap is possible using per-mint balance
+                    if let Some(mint) = nutzap_mint.read().as_ref() {
+                        // Use per-mint balance instead of aggregate to ensure this mint has funds
+                        let balance = cashu::get_mint_balance(&mint.url);
+                        if balance >= amount {
+                            log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
+                            // Get event_id as hex string for nutzap
+                            let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
+                            // Get comment from zap_message signal (message was moved earlier)
+                            let nutzap_comment = zap_message.read().clone();
+                            let nutzap_comment_opt = if nutzap_comment.is_empty() { None } else { Some(nutzap_comment) };
+                            match cashu::send_nutzap(
+                                &recipient_pubkey_str,
+                                amount,
+                                nutzap_event_id.as_deref(),
+                                None, // target_kind
+                                nutzap_comment_opt.as_deref(),
+                            ).await {
+                                Ok(result) => {
+                                    log::info!("Nutzap successful: {} sats (fee: {} sats)", result.amount, result.fee);
+                                    loading.set(false);
+                                    toast_api.success(
+                                        "Nutzap sent!".to_string(),
+                                        ToastOptions::new()
+                                            .description(format!("Sent {} sats via ecash (fee: {} sats)", result.amount, result.fee))
+                                            .duration(Duration::from_secs(3))
+                                            .permanent(false),
+                                    );
+                                    props.on_close.call(());
+                                    return;
+                                }
+                                Err(e) => {
+                                    log::warn!("Nutzap failed, falling back to Lightning: {}", e);
+                                    // Continue to Lightning fallback
+                                }
+                            }
+                        } else {
+                            log::info!("Insufficient Cashu balance ({} < {}), using Lightning", balance, amount);
+                        }
+                    } else {
+                        log::info!("Recipient doesn't support nutzaps, using Lightning");
+                    }
+                    // Fall through to Lightning (try NWC if available)
+                    if nwc_available {
+                        match nwc_store::pay_invoice(inv_clone.clone()).await {
+                            Ok(_) => {
+                                loading.set(false);
+                                toast_api.success(
+                                    "Zap sent!".to_string(),
+                                    ToastOptions::new()
+                                        .description("Zap successfully sent via Nostr Wallet Connect")
+                                        .duration(Duration::from_secs(2))
+                                        .permanent(false),
+                                );
+                                props.on_close.call(());
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!("NWC payment failed: {}", e);
+                                // Continue to WebLN/manual fallback
+                            }
+                        }
+                    }
+                }
                 "nwc_first" if nwc_available => {
                     // Try NWC first
                     log::info!("Attempting payment with NWC");
@@ -507,6 +592,38 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                         }
                     } else {
+                        // Nutzap availability indicator
+                        if settings_store::SETTINGS.read().payment_method_preference == "cashu_first" {
+                            if *checking_nutzap.read() {
+                                div {
+                                    class: "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4",
+                                    p { class: "text-sm text-blue-700 dark:text-blue-300", "Checking nutzap availability..." }
+                                }
+                            } else if let Some(mint) = nutzap_mint.read().as_ref() {
+                                {
+                                    // Show per-mint balance for this specific mint
+                                    let balance = cashu::get_mint_balance(&mint.url);
+                                    rsx! {
+                                        div {
+                                            class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
+                                            p {
+                                                class: "text-sm text-green-700 dark:text-green-300",
+                                                "✓ Nutzap available via {mint.url} ({balance} sats at mint)"
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div {
+                                    class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
+                                    p {
+                                        class: "text-sm text-amber-700 dark:text-amber-300",
+                                        "Recipient doesn't support nutzaps. Will use Lightning."
+                                    }
+                                }
+                            }
+                        }
+
                         // Amount selection
                         div {
                             class: "space-y-2",

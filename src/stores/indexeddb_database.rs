@@ -124,6 +124,80 @@ mod native_stub {
         pub async fn delete_order(&self, _order_id: &str) -> Result<(), database::Error> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
+
+        pub async fn save_pending_mint_secrets(
+            &self,
+            _secrets: &std::collections::HashMap<String, u64>,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_pending_mint_secrets(
+            &self,
+        ) -> Result<Option<std::collections::HashMap<String, u64>>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn save_in_flight_melt_requests(
+            &self,
+            _requests: &[crate::stores::cashu::types::InFlightMeltRequest],
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_in_flight_melt_requests(
+            &self,
+        ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn clear_in_flight_melt_requests(&self) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        // NIP-61 Nutzap persistence
+        pub async fn save_nutzap_settings(
+            &self,
+            _settings: &crate::stores::cashu::nutzap::NutzapInfo,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_nutzap_settings(
+            &self,
+        ) -> Result<Option<crate::stores::cashu::nutzap::NutzapInfo>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn save_pending_nutzaps(
+            &self,
+            _nutzaps: &[crate::stores::cashu::nutzap::PendingNutzap],
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_pending_nutzaps(
+            &self,
+        ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn save_nutzap_auto_redeem(
+            &self,
+            _enabled: bool,
+        ) -> Result<(), database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
+
+        pub async fn load_nutzap_auto_redeem(
+            &self,
+        ) -> Result<Option<bool>, database::Error> {
+            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
+        }
     }
 
     #[async_trait::async_trait]
@@ -302,7 +376,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(target_arch = "wasm32")]
-const DB_VERSION: u32 = 3;
+const DB_VERSION: u32 = 5;
 
 // Object store names
 #[cfg(target_arch = "wasm32")]
@@ -329,6 +403,14 @@ const STORE_PENDING_EVENTS: &str = "pending_events";
 const STORE_SYNC_STATE: &str = "sync_state";
 #[cfg(target_arch = "wasm32")]
 const STORE_SHOP_ORDERS: &str = "shop_orders";
+#[cfg(target_arch = "wasm32")]
+const STORE_PENDING_SECRETS: &str = "pending_secrets";
+#[cfg(target_arch = "wasm32")]
+const STORE_IN_FLIGHT_MELTS: &str = "in_flight_melts";
+#[cfg(target_arch = "wasm32")]
+const STORE_NUTZAP_SETTINGS: &str = "nutzap_settings";
+#[cfg(target_arch = "wasm32")]
+const STORE_PENDING_NUTZAPS: &str = "pending_nutzaps";
 
 /// IndexedDB-backed implementation of WalletDatabase
 #[cfg(target_arch = "wasm32")]
@@ -402,6 +484,14 @@ impl IndexedDbDatabase {
             if !db.object_store_names().any(|n| n == STORE_SHOP_ORDERS) {
                 db.create_object_store(STORE_SHOP_ORDERS)?;
             }
+            // V4: Add pending secrets store for tracking in-flight mint operations
+            if !db.object_store_names().any(|n| n == STORE_PENDING_SECRETS) {
+                db.create_object_store(STORE_PENDING_SECRETS)?;
+            }
+            // V5: Add in-flight melt requests store for crash recovery
+            if !db.object_store_names().any(|n| n == STORE_IN_FLIGHT_MELTS) {
+                db.create_object_store(STORE_IN_FLIGHT_MELTS)?;
+            }
 
             Ok(())
         }));
@@ -456,7 +546,7 @@ impl IndexedDbDatabase {
     /// Helper: Put a value into a store with JSON serialization
     async fn put_value<T>(&self, store_name: &str, key: &str, value: &T) -> Result<(), database::Error>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         let tx = self
             .db
@@ -702,6 +792,127 @@ impl IndexedDbDatabase {
     /// Delete a shop order
     pub async fn delete_order(&self, order_id: &str) -> Result<(), database::Error> {
         self.delete_value(STORE_SHOP_ORDERS, order_id).await
+    }
+
+    // =========================================================================
+    // Pending Mint Secrets (tracking in-flight operations)
+    // =========================================================================
+
+    /// Save pending mint secrets with timestamps
+    ///
+    /// These track proofs that are currently pending at the mint level
+    /// (e.g., during lightning payments). Persisting ensures we don't lose
+    /// this state on app restart.
+    pub async fn save_pending_mint_secrets(
+        &self,
+        secrets: &std::collections::HashMap<String, u64>,
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_PENDING_SECRETS, "current", secrets).await
+    }
+
+    /// Load pending mint secrets
+    ///
+    /// Returns the map of proof secrets to timestamps, or None if no data exists.
+    pub async fn load_pending_mint_secrets(
+        &self,
+    ) -> Result<Option<std::collections::HashMap<String, u64>>, database::Error> {
+        self.get_value(STORE_PENDING_SECRETS, "current").await
+    }
+
+    /// Clear pending mint secrets
+    #[allow(dead_code)]
+    pub async fn clear_pending_mint_secrets(&self) -> Result<(), database::Error> {
+        self.delete_value(STORE_PENDING_SECRETS, "current").await
+    }
+
+    // =========================================================================
+    // In-Flight Melt Requests (Crash Recovery)
+    // =========================================================================
+
+    /// Save in-flight melt requests for crash recovery
+    ///
+    /// CRITICAL: This must be called BEFORE the melt network call to ensure
+    /// we can recover change proofs if the app crashes during the operation.
+    /// The melt operation should be aborted if this fails.
+    pub async fn save_in_flight_melt_requests(
+        &self,
+        requests: &[crate::stores::cashu::types::InFlightMeltRequest],
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_IN_FLIGHT_MELTS, "current", requests).await
+    }
+
+    /// Load in-flight melt requests for crash recovery
+    ///
+    /// Returns the list of in-flight melt requests from the previous session,
+    /// or None if no data exists.
+    pub async fn load_in_flight_melt_requests(
+        &self,
+    ) -> Result<Option<Vec<crate::stores::cashu::types::InFlightMeltRequest>>, database::Error> {
+        self.get_value(STORE_IN_FLIGHT_MELTS, "current").await
+    }
+
+    /// Clear in-flight melt requests after recovery is complete
+    #[allow(dead_code)]
+    pub async fn clear_in_flight_melt_requests(&self) -> Result<(), database::Error> {
+        self.delete_value(STORE_IN_FLIGHT_MELTS, "current").await
+    }
+
+    // =========================================================================
+    // NIP-61 Nutzap Persistence
+    // =========================================================================
+
+    /// Save nutzap settings (NutzapInfo)
+    ///
+    /// Persists the user's nutzap configuration including P2PK pubkey,
+    /// accepted mints, and delivery relays.
+    pub async fn save_nutzap_settings(
+        &self,
+        settings: &crate::stores::cashu::nutzap::NutzapInfo,
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_NUTZAP_SETTINGS, "current", settings).await
+    }
+
+    /// Load nutzap settings
+    ///
+    /// Returns the saved nutzap configuration, or None if not configured.
+    pub async fn load_nutzap_settings(
+        &self,
+    ) -> Result<Option<crate::stores::cashu::nutzap::NutzapInfo>, database::Error> {
+        self.get_value(STORE_NUTZAP_SETTINGS, "current").await
+    }
+
+    /// Save pending nutzaps awaiting redemption
+    ///
+    /// Persists nutzaps that have been received but not yet redeemed.
+    pub async fn save_pending_nutzaps(
+        &self,
+        nutzaps: &[crate::stores::cashu::nutzap::PendingNutzap],
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_PENDING_NUTZAPS, "current", nutzaps).await
+    }
+
+    /// Load pending nutzaps
+    ///
+    /// Returns the list of pending nutzaps, or None if none exist.
+    pub async fn load_pending_nutzaps(
+        &self,
+    ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error> {
+        self.get_value(STORE_PENDING_NUTZAPS, "current").await
+    }
+
+    /// Save nutzap auto-redeem setting
+    pub async fn save_nutzap_auto_redeem(
+        &self,
+        enabled: bool,
+    ) -> Result<(), database::Error> {
+        self.put_value(STORE_NUTZAP_SETTINGS, "auto_redeem", &enabled).await
+    }
+
+    /// Load nutzap auto-redeem setting
+    pub async fn load_nutzap_auto_redeem(
+        &self,
+    ) -> Result<Option<bool>, database::Error> {
+        self.get_value(STORE_NUTZAP_SETTINGS, "auto_redeem").await
     }
 }
 

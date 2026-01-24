@@ -2,12 +2,16 @@
 /// Stores user settings on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
+use gloo_storage::Storage;
 use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
+
+/// localStorage key for settings cache
+const SETTINGS_LOCAL_STORAGE_KEY: &str = "nostr_blue_settings";
 
 /// App settings stored on Nostr via NIP-78
 /// Note: Relay configuration is now stored via NIP-65 (kind 10002) and NIP-17 (kind 10050)
@@ -23,6 +27,8 @@ pub struct AppSettings {
     pub payment_method_preference: String, // "nwc_first", "webln_first", "manual_only", "always_ask"
     #[serde(default = "default_mempool_endpoint")]
     pub mempool_endpoint: String, // Custom mempool.space API endpoint
+    #[serde(default)]
+    pub cashu_wallet_auto_load: bool, // Auto-initialize Cashu wallet on app startup
     #[serde(default)]
     pub version: u32, // Settings schema version
 }
@@ -40,7 +46,8 @@ impl Default for AppSettings {
             sync_notifications: false, // Privacy-first: opt-in by default
             payment_method_preference: "nwc_first".to_string(), // Default to NWC if connected
             mempool_endpoint: default_mempool_endpoint(),
-            version: 4, // Incremented for mempool_endpoint addition
+            cashu_wallet_auto_load: false, // Opt-in, default off
+            version: 5, // Incremented for cashu_wallet_auto_load addition
         }
     }
 }
@@ -55,6 +62,33 @@ const SETTINGS_D_TAG: &str = "nostr.blue/settings";
 pub static SETTINGS: GlobalSignal<AppSettings> = Signal::global(AppSettings::default);
 pub static SETTINGS_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 pub static SETTINGS_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None);
+
+// =============================================================================
+// localStorage Cache Functions (for instant synchronous loading)
+// =============================================================================
+
+/// Load cached settings from localStorage (synchronous)
+fn load_cached_settings() -> Option<AppSettings> {
+    gloo_storage::LocalStorage::get::<String>(SETTINGS_LOCAL_STORAGE_KEY)
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+}
+
+/// Save settings to localStorage cache
+fn cache_settings(settings: &AppSettings) {
+    if let Ok(json) = serde_json::to_string(settings) {
+        let _ = gloo_storage::LocalStorage::set(SETTINGS_LOCAL_STORAGE_KEY, json);
+    }
+}
+
+/// Initialize settings from localStorage cache (synchronous, for instant UI)
+/// Call this during app init BEFORE async client initialization
+pub fn init_settings_from_cache() {
+    if let Some(cached) = load_cached_settings() {
+        log::info!("Initialized settings from localStorage cache");
+        *SETTINGS.write() = cached;
+    }
+}
 
 /// Load settings from Nostr relays (NIP-78)
 pub async fn load_settings() -> Result<(), String> {
@@ -115,6 +149,9 @@ pub async fn load_settings() -> Result<(), String> {
                             *blossom_store::BLOSSOM_SERVERS.read().data().write() = settings.blossom_servers.clone();
                         }
 
+                        // Cache to localStorage for instant loading next time
+                        cache_settings(&settings);
+
                         // Update global settings
                         SETTINGS.write().clone_from(&settings);
                         SETTINGS_LOADING.write().clone_from(&false);
@@ -172,6 +209,9 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
 
     log::info!("Settings saved to Nostr successfully");
+
+    // Cache to localStorage for instant loading next time
+    cache_settings(&settings_to_save);
 
     // Update global settings
     SETTINGS.write().clone_from(&settings_to_save);
@@ -250,4 +290,16 @@ pub async fn update_mempool_endpoint(endpoint: String) {
 /// Reset mempool endpoint to default
 pub async fn reset_mempool_endpoint() {
     update_mempool_endpoint(default_mempool_endpoint()).await;
+}
+
+/// Update Cashu wallet auto-load setting and save to Nostr
+pub async fn update_cashu_wallet_auto_load(enabled: bool) {
+    // Clone settings out before async work (Dioxus best practice)
+    let mut settings = SETTINGS.read().clone();
+    settings.cashu_wallet_auto_load = enabled;
+
+    // Async save - doesn't hold signal borrow
+    if let Err(e) = save_settings(&settings).await {
+        log::error!("Failed to save Cashu wallet auto-load setting: {}", e);
+    }
 }

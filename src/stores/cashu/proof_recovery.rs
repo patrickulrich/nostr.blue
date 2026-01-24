@@ -2,9 +2,9 @@
 //!
 //! Handles automatic recovery of proofs stuck in transient states.
 //! Implements timeout-based recovery for Reserved/PendingSpent proofs.
-
-// Allow dead_code for planned features not yet wired to UI
-#![allow(dead_code)]
+//!
+//! SAFETY: This module checks with mints before recovering proofs to prevent
+//! fund loss from recovering proofs that are actually in-flight.
 
 use std::collections::HashMap;
 
@@ -12,22 +12,26 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
-use super::signals::{WALLET_BALANCE, WALLET_TOKENS};
-use super::types::{ProofData, ProofState, WalletTokensStoreStoreExt};
+use super::signals::{IN_FLIGHT_MELT_REQUESTS, WALLET_TOKENS};
+use super::types::{
+    ProofData, ProofState, WalletTokensStoreStoreExt,
+    RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
+};
 use super::utils::now_secs;
 
 // =============================================================================
 // Recovery Constants
 // =============================================================================
 
-/// Default timeout for Reserved proofs (24 hours)
-pub const RESERVED_TIMEOUT_SECS: u64 = 24 * 60 * 60;
+/// Default timeout for Reserved proofs before checking mint state
+/// Uses the more aggressive timeout from types.rs for faster recovery
+pub const RESERVED_TIMEOUT_SECS: u64 = RESERVED_PROOF_TIMEOUT_SECS;
 
-/// Default timeout for PendingSpent proofs (1 hour)
-pub const PENDING_SPENT_TIMEOUT_SECS: u64 = 60 * 60;
+/// Default timeout for PendingSpent proofs before checking mint state
+pub const PENDING_SPENT_TIMEOUT_DEFAULT: u64 = PENDING_SPENT_TIMEOUT_SECS;
 
-/// Short timeout for transactions (5 minutes)
-pub const TRANSACTION_TIMEOUT_SECS: u64 = 5 * 60;
+/// Short timeout for transactions (5 minutes) - for UI urgency display
+pub const TRANSACTION_TIMEOUT_SECS: u64 = IN_FLIGHT_MELT_TIMEOUT_SECS;
 
 // =============================================================================
 // Proof State Tracking
@@ -40,9 +44,11 @@ pub struct TrackedProofState {
     pub secret: String,
     /// Current state
     pub state: ProofState,
-    /// Timestamp when state was set
+    /// Timestamp when state was set (available for debugging/external use)
+    #[allow(dead_code)]
     pub state_set_at: u64,
-    /// Associated transaction ID (if any)
+    /// Associated transaction ID (if any, available for debugging/external use)
+    #[allow(dead_code)]
     pub transaction_id: Option<u64>,
     /// Mint URL
     pub mint_url: String,
@@ -89,7 +95,8 @@ pub fn detect_stuck_proofs(timeout_secs: u64) -> Vec<TrackedProofState> {
     stuck_proofs
 }
 
-/// Find proofs in Reserved state
+/// Find proofs in Reserved state (available for debugging/external use)
+#[allow(dead_code)]
 pub fn find_reserved_proofs() -> Vec<(String, ProofData)> {
     let store = WALLET_TOKENS();
     let data = store.data();
@@ -146,56 +153,153 @@ pub struct ProofRecoveryResult {
     pub errors: Vec<String>,
 }
 
-/// Recover stuck Reserved proofs by resetting to Unspent
-///
-/// This should only be called when we're certain the proofs weren't used.
-pub fn recover_reserved_proofs() -> ProofRecoveryResult {
-    let reserved = find_reserved_proofs();
+// =============================================================================
+// Wallet Health Stats (for UI)
+// =============================================================================
 
-    if reserved.is_empty() {
+/// Urgency level for stuck proof display
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UrgencyLevel {
+    /// < 5 min (TRANSACTION_TIMEOUT_SECS = 300s)
+    Normal,
+    /// 5-10 min (TRANSACTION_TIMEOUT_SECS to RESERVED_TIMEOUT_SECS)
+    Warning,
+    /// 10-30 min (RESERVED_TIMEOUT_SECS to PENDING_SPENT_TIMEOUT_DEFAULT)
+    High,
+    /// > 30 min (PENDING_SPENT_TIMEOUT_DEFAULT = 1800s)
+    Critical,
+}
+
+/// Stuck proof info for UI display
+#[derive(Debug, Clone, PartialEq)]
+pub struct StuckProofInfo {
+    pub mint_url: String,
+    pub amount: u64,
+    pub state: ProofState,
+    pub stuck_duration_secs: u64,
+    pub transaction_id: Option<u64>,
+    pub urgency: UrgencyLevel,
+    pub can_recover: bool,
+}
+
+/// Health stats for UI display
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WalletHealthStats {
+    pub spendable_balance: u64,
+    pub pending_balance: u64,
+    pub pending_count: usize,
+    pub stuck_balance: u64,
+    pub stuck_count: usize,
+    pub stuck_proofs: Vec<StuckProofInfo>,
+}
+
+/// Recover stuck Reserved proofs by checking with mint first
+///
+/// SAFETY: Only recovers proofs that are:
+/// 1. Older than RESERVED_TIMEOUT_SECS (10 minutes)
+/// 2. NOT in PENDING_BY_MINT_SECRETS (not actively being processed)
+/// 3. NOT part of an active transaction (checked via ACTIVE_OPERATIONS)
+/// 4. Confirmed unspent by the mint
+///
+/// This prevents fund loss from recovering proofs that are actually in-flight.
+pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
+    use super::signals::PENDING_BY_MINT_SECRETS;
+
+    // Find Reserved proofs that have exceeded timeout
+    let stuck_proofs = detect_stuck_proofs(RESERVED_TIMEOUT_SECS);
+    let reserved_stuck: Vec<_> = stuck_proofs
+        .into_iter()
+        .filter(|p| matches!(p.state, ProofState::Reserved))
+        .collect();
+
+    if reserved_stuck.is_empty() {
         return ProofRecoveryResult::default();
     }
 
-    log::info!("Recovering {} reserved proofs", reserved.len());
+    // Filter out proofs that are actively pending at mint
+    let pending_secrets = PENDING_BY_MINT_SECRETS.read();
+    let mut safe_to_recover: Vec<_> = reserved_stuck
+        .into_iter()
+        .filter(|p| !pending_secrets.contains_key(&p.secret))
+        .collect();
+    drop(pending_secrets);
 
-    let secrets: Vec<String> = reserved.iter().map(|(_, p)| p.secret.clone()).collect();
-    let recovered_value: u64 = reserved
-        .iter()
-        .map(|(_, p)| p.amount)
-        .fold(0u64, |acc, amt| acc.saturating_add(amt));
-
-    // Reset states in storage
+    // SAFETY (Risk 4): Filter out proofs that are part of active in-flight melt operations
+    // This prevents timeout recovery from interfering with still-running operations
     {
-        let store = WALLET_TOKENS();
-        let mut data = store.data();
-        let mut tokens = data.write();
+        let in_flight = IN_FLIGHT_MELT_REQUESTS.read();
+        let in_flight_secrets: std::collections::HashSet<&str> = in_flight
+            .iter()
+            .flat_map(|req| req.proofs_used.iter().map(|p| p.secret.as_str()))
+            .collect();
 
-        for token in tokens.iter_mut() {
-            for proof in token.proofs.iter_mut() {
-                if secrets.contains(&proof.secret) {
-                    proof.state = ProofState::Unspent;
-                    proof.transaction_id = None;
+        safe_to_recover.retain(|p| !in_flight_secrets.contains(p.secret.as_str()));
+    }
+
+    if safe_to_recover.is_empty() {
+        log::debug!("All reserved proofs are still pending at mint");
+        return ProofRecoveryResult::default();
+    }
+
+    log::info!(
+        "Checking {} timed-out reserved proofs with mints",
+        safe_to_recover.len()
+    );
+
+    let mut result = ProofRecoveryResult::default();
+
+    // DIOXUS PATTERN: Snapshot ALL data before any async operations
+    // Never hold signal locks across await points
+    let proof_data_by_mint: std::collections::HashMap<String, Vec<ProofData>> = {
+        let store = WALLET_TOKENS();
+        let data = store.data();
+        let tokens = data.read(); // Single lock acquisition
+
+        let mut by_mint: std::collections::HashMap<String, Vec<ProofData>> =
+            std::collections::HashMap::new();
+
+        for tracked in &safe_to_recover {
+            for token in tokens.iter() {
+                if super::utils::mint_matches(&token.mint, &tracked.mint_url) {
+                    for proof in &token.proofs {
+                        if proof.secret == tracked.secret {
+                            by_mint
+                                .entry(tracked.mint_url.clone())
+                                .or_default()
+                                .push(proof.clone());
+                        }
+                    }
                 }
+            }
+        }
+        by_mint
+    }; // Lock released here, before any async operations
+
+    // Now safe to do async operations - no signal locks held
+    for (mint_url, proof_data) in proof_data_by_mint {
+        match check_and_recover_proofs(&mint_url, proof_data).await {
+            Ok(mint_result) => {
+                result.recovered_count += mint_result.recovered_count;
+                result.recovered_value += mint_result.recovered_value;
+                result.spent_count += mint_result.spent_count;
+                result.spent_value += mint_result.spent_value;
+            }
+            Err(e) => {
+                result.errors.push(format!("{}: {}", mint_url, e));
             }
         }
     }
 
-    // Update balance
-    recalculate_balance();
-
-    log::info!(
-        "Recovered {} reserved proofs worth {} sats",
-        reserved.len(),
-        recovered_value
-    );
-
-    ProofRecoveryResult {
-        recovered_count: reserved.len(),
-        recovered_value,
-        spent_count: 0,
-        spent_value: 0,
-        errors: Vec::new(),
+    if result.recovered_count > 0 || result.spent_count > 0 {
+        recalculate_balance();
+        log::info!(
+            "Recovered {} reserved proofs worth {} sats (confirmed unspent by mint)",
+            result.recovered_count,
+            result.recovered_value
+        );
     }
+
+    result
 }
 
 /// Check PendingSpent proofs with mint and recover or mark spent
@@ -352,25 +456,44 @@ async fn check_and_recover_proofs(
 // =============================================================================
 
 /// Run full proof recovery - check all stuck proofs and recover/cleanup
+///
+/// This function:
+/// 1. Recovers stuck Reserved proofs (checks mint + uses timeout)
+/// 2. Recovers stuck PendingSpent proofs (checks mint)
+///
+/// Only proofs that have been stuck longer than the timeout AND are confirmed
+/// unspent by the mint will be recovered. This prevents fund loss.
 pub async fn run_full_recovery() -> ProofRecoveryResult {
     log::info!("Running full proof recovery");
 
-    // First recover reserved proofs (local operation)
-    let reserved_result = recover_reserved_proofs();
+    // First recover reserved proofs (now async - checks with mint)
+    let reserved_result = recover_reserved_proofs().await;
 
     // Then check pending spent proofs with mints
     let pending_result = recover_pending_spent_proofs().await;
 
+    let total_recovered = reserved_result.recovered_count + pending_result.recovered_count;
+    let total_spent = reserved_result.spent_count + pending_result.spent_count;
+
+    if total_recovered > 0 || total_spent > 0 {
+        log::info!(
+            "Proof recovery complete: {} recovered, {} confirmed spent",
+            total_recovered,
+            total_spent
+        );
+    }
+
     ProofRecoveryResult {
-        recovered_count: reserved_result.recovered_count + pending_result.recovered_count,
+        recovered_count: total_recovered,
         recovered_value: reserved_result.recovered_value + pending_result.recovered_value,
-        spent_count: reserved_result.spent_count + pending_result.spent_count,
+        spent_count: total_spent,
         spent_value: reserved_result.spent_value + pending_result.spent_value,
         errors: [reserved_result.errors, pending_result.errors].concat(),
     }
 }
 
-/// Get recovery stats without performing recovery
+/// Get recovery stats without performing recovery (available for debugging/external use)
+#[allow(dead_code)]
 pub fn get_recovery_stats() -> (usize, u64, usize, u64) {
     let reserved = find_reserved_proofs();
     let pending_spent = find_pending_spent_proofs();
@@ -397,19 +520,112 @@ pub fn get_recovery_stats() -> (usize, u64, usize, u64) {
 // =============================================================================
 
 /// Recalculate and update wallet balance
-fn recalculate_balance() {
+pub(crate) fn recalculate_balance() {
     let store = WALLET_TOKENS();
     let data = store.data();
     let tokens = data.read();
 
-    let new_balance: u64 = tokens
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .filter(|p| p.state.is_spendable())
-        .map(|p| p.amount)
-        .fold(0u64, |acc, amt| acc.saturating_add(amt));
+    drop(tokens);
 
-    *WALLET_BALANCE.write() = new_balance;
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
+}
+
+/// Calculate urgency level based on how long proof has been stuck
+///
+/// Thresholds (checked in descending order):
+/// - > 1800s (30 min, PENDING_SPENT_TIMEOUT_DEFAULT) = Critical
+/// - > 600s (10 min, RESERVED_TIMEOUT_SECS) = High
+/// - > 300s (5 min, TRANSACTION_TIMEOUT_SECS) = Warning
+/// - <= 300s = Normal
+fn calculate_urgency(duration_secs: u64) -> UrgencyLevel {
+    if duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT {
+        UrgencyLevel::Critical
+    } else if duration_secs > RESERVED_TIMEOUT_SECS {
+        UrgencyLevel::High
+    } else if duration_secs > TRANSACTION_TIMEOUT_SECS {
+        UrgencyLevel::Warning
+    } else {
+        UrgencyLevel::Normal
+    }
+}
+
+/// Determine if a proof can be recovered based on its state and duration
+fn can_recover_proof(state: ProofState, duration_secs: u64) -> bool {
+    match state {
+        ProofState::PendingSpent => duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT,
+        _ => duration_secs > RESERVED_TIMEOUT_SECS,
+    }
+}
+
+/// Get comprehensive wallet health stats for UI
+///
+/// Returns stats about pending and stuck proofs, categorized by urgency.
+/// Proofs are considered "stuck" if they've been pending longer than TRANSACTION_TIMEOUT_SECS.
+pub fn get_wallet_health_stats() -> WalletHealthStats {
+    let now = now_secs();
+
+    // Get spendable balance
+    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
+
+    // Get all proofs and categorize
+    let store = WALLET_TOKENS();
+    let data = store.data();
+    let tokens = data.read();
+
+    let mut pending_balance = 0u64;
+    let mut pending_count = 0usize;
+    let mut stuck_proofs = Vec::new();
+
+    for token in tokens.iter() {
+        for proof in &token.proofs {
+            if proof.state.is_pending() {
+                let duration = proof
+                    .state_set_at
+                    .map(|t| now.saturating_sub(t))
+                    .unwrap_or(0);
+
+                let urgency = calculate_urgency(duration);
+                let can_recover = can_recover_proof(proof.state, duration);
+
+                if duration > TRANSACTION_TIMEOUT_SECS {
+                    // Stuck - show in modal
+                    stuck_proofs.push(StuckProofInfo {
+                        mint_url: token.mint.clone(),
+                        amount: proof.amount,
+                        state: proof.state,
+                        stuck_duration_secs: duration,
+                        transaction_id: proof.transaction_id,
+                        urgency,
+                        can_recover,
+                    });
+                } else {
+                    // Just pending - normal operation
+                    pending_balance = pending_balance.saturating_add(proof.amount);
+                    pending_count += 1;
+                }
+            }
+        }
+    }
+
+    let stuck_balance: u64 = stuck_proofs.iter().map(|p| p.amount).sum();
+    let stuck_count = stuck_proofs.len();
+
+    // Sort by urgency (critical first) then by amount
+    stuck_proofs.sort_by(|a, b| {
+        b.urgency
+            .cmp(&a.urgency)
+            .then_with(|| b.amount.cmp(&a.amount))
+    });
+
+    WalletHealthStats {
+        spendable_balance: spendable,
+        pending_balance,
+        pending_count,
+        stuck_balance,
+        stuck_count,
+        stuck_proofs,
+    }
 }
 
 // =============================================================================

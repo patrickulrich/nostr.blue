@@ -107,6 +107,9 @@ pub(crate) async fn get_or_create_wallet(mint_url: &str) -> Result<Arc<Wallet>, 
 ///
 /// Uses the cached wallet system for performance. Proofs are injected into
 /// the shared IndexedDB store which all wallets share.
+///
+/// Duplicate Check: Proofs that already exist in CDK database are skipped
+/// to prevent balance corruption from duplicate entries.
 pub(crate) async fn create_ephemeral_wallet(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>,
@@ -131,18 +134,56 @@ pub(crate) async fn create_ephemeral_wallet(
             .parse()
             .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-        let proof_infos: Vec<_> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, mint_url_parsed.clone(), State::Unspent, CurrencyUnit::Sat))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to create proof info: {}", e))?;
-
-        // Inject proofs via shared localstore
+        // Get shared localstore for both checking and injecting
         let localstore = get_shared_localstore().await?;
-        localstore
-            .update_proofs(proof_infos, vec![])
+
+        // Check which proofs already exist in CDK database to prevent duplicates
+        let existing_proofs = localstore
+            .get_proofs(Some(mint_url_parsed.clone()), None, None, None)
             .await
-            .map_err(|e| format!("Failed to inject proofs: {}", e))?;
+            .map_err(|e| format!("Failed to query existing proofs: {}", e))?;
+
+        let existing_secrets: std::collections::HashSet<String> = existing_proofs
+            .iter()
+            .map(|p| p.proof.secret.to_string())
+            .collect();
+
+        // Capture input length before filtering for accurate skipped_count
+        let input_len = proofs.len();
+
+        // Filter to only inject proofs that don't already exist
+        let new_proofs: Vec<_> = proofs
+            .into_iter()
+            .filter(|p| !existing_secrets.contains(&p.secret.to_string()))
+            .collect();
+
+        if new_proofs.is_empty() {
+            log::debug!(
+                "All {} proofs already exist in CDK database, skipping injection",
+                input_len
+            );
+        } else {
+            let skipped_count = input_len.saturating_sub(new_proofs.len());
+            if skipped_count > 0 {
+                log::debug!(
+                    "Skipping {} duplicate proofs, injecting {} new proofs",
+                    skipped_count,
+                    new_proofs.len()
+                );
+            }
+
+            let proof_infos: Vec<_> = new_proofs
+                .into_iter()
+                .map(|p| ProofInfo::new(p, mint_url_parsed.clone(), State::Unspent, CurrencyUnit::Sat))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to create proof info: {}", e))?;
+
+            // Inject only new proofs via shared localstore
+            localstore
+                .update_proofs(proof_infos, vec![])
+                .await
+                .map_err(|e| format!("Failed to inject proofs: {}", e))?;
+        }
     }
 
     Ok(wallet)
@@ -547,46 +588,35 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                     super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
                     ).await;
                 }
             }
         }
     }
 
-    // Update local state
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
+    // Update local state with crash-safe atomic replacement
+    // Uses add-before-delete pattern: worst case on crash is duplicate tokens (recoverable),
+    // never lost tokens.
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
+        vec![super::types::TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
+    } else {
+        vec![]
+    };
 
-        // Remove old token events
-        tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-        // Add new token with remaining proofs
-        if let Some(ref event_id) = new_event_id {
-            use super::types::TokenData;
-
-            tokens_write.push(TokenData {
-                event_id: event_id.clone(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: available_proofs,
-                created_at: chrono::Utc::now().timestamp() as u64,
-            });
-        }
-
-        // Update balance with overflow protection (following CDK try_sum pattern)
-        let new_balance: u64 = tokens_write
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-            .unwrap_or_else(|| {
-                log::error!("Balance overflow detected during cleanup!");
-                u64::MAX
-            });
-
-        *super::signals::WALLET_BALANCE.write() = new_balance;
+    if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
+        log::error!("Failed atomic token replacement during cleanup: {}", e);
+    } else {
+        // Rebuild derived PROOF_EVENT_MAP from updated WALLET_TOKENS
+        // This ensures the map stays consistent with token state
+        super::proofs::rebuild_proof_event_map();
     }
 
     log::info!(
@@ -809,10 +839,17 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
 // Atomic Recovery Wrapper (CDK pattern: try_proof_operation_or_reclaim)
 // =============================================================================
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashSet;
+use std::sync::RwLock;
+use once_cell::sync::Lazy;
 
-/// Global flag to prevent concurrent recovery operations
-static IN_ERROR_RECOVERY: AtomicBool = AtomicBool::new(false);
+/// Per-mint recovery lock to prevent concurrent recovery operations on the same mint
+/// while allowing recovery for different mints to proceed in parallel.
+///
+/// Using RwLock instead of a single AtomicBool ensures:
+/// - Recovery for mint A doesn't block recovery for mint B
+/// - Still prevents concurrent recovery for the same mint
+static MINTS_IN_RECOVERY: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 
 /// Execute an operation with automatic proof state recovery on failure
 ///
@@ -821,6 +858,9 @@ static IN_ERROR_RECOVERY: AtomicBool = AtomicBool::new(false);
 /// might be spent at the mint but our local state doesn't reflect this.
 ///
 /// Based on CDK's `try_proof_operation_or_reclaim` pattern.
+///
+/// Uses per-mint locking to allow recovery for different mints to proceed in parallel
+/// while preventing concurrent recovery for the same mint.
 pub(crate) async fn try_operation_or_recover<F, R>(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>,
@@ -833,27 +873,35 @@ where
         Ok(result) => Ok(result),
         Err(err) => {
             log::error!(
-                "Operation failed with '{}', attempting to recover {} proofs",
+                "Operation failed with '{}', attempting to recover {} proofs for {}",
                 err,
-                proofs.len()
+                proofs.len(),
+                mint_url
             );
 
-            // Try to acquire recovery lock to prevent concurrent recovery
-            if IN_ERROR_RECOVERY
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                log::info!("Syncing proof states with mint after failure");
+            // Per-mint lock - only blocks recovery for THIS mint
+            let should_recover = {
+                let mut recovering = MINTS_IN_RECOVERY.write().unwrap();
+                if recovering.contains(mint_url) {
+                    false
+                } else {
+                    recovering.insert(mint_url.to_string());
+                    true
+                }
+            };
+
+            if should_recover {
+                log::info!("Syncing proof states with mint {} after failure", mint_url);
 
                 // Sync proof states with mint
                 if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, &proofs).await {
-                    log::warn!("Failed to sync proof states: {}", sync_err);
+                    log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
                 }
 
-                // Release recovery lock
-                IN_ERROR_RECOVERY.store(false, Ordering::SeqCst);
+                // Release per-mint recovery lock
+                MINTS_IN_RECOVERY.write().unwrap().remove(mint_url);
             } else {
-                log::debug!("Recovery already in progress, skipping duplicate sync");
+                log::debug!("Recovery already in progress for {}, skipping duplicate sync", mint_url);
             }
 
             Err(err)
@@ -931,6 +979,7 @@ async fn sync_proofs_with_mint_after_failure(
 /// Execute a wallet swap operation with automatic recovery
 ///
 /// Convenience wrapper for swap/send operations that handles proof recovery.
+/// Uses per-mint locking to allow recovery for different mints to proceed in parallel.
 pub(crate) async fn try_swap_or_recover(
     _wallet: &Wallet,
     mint_url: &str,
@@ -943,15 +992,27 @@ pub(crate) async fn try_swap_or_recover(
         Ok(result) => Ok(result),
         Err(err) => {
             let err_str = err.to_string();
-            log::error!("Swap failed: {}", err_str);
+            log::error!("Swap failed for {}: {}", mint_url, err_str);
 
-            // Sync proofs with mint
-            if IN_ERROR_RECOVERY
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                let _ = sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await;
-                IN_ERROR_RECOVERY.store(false, Ordering::SeqCst);
+            // Per-mint lock for recovery
+            let should_recover = {
+                let mut recovering = MINTS_IN_RECOVERY.write().unwrap();
+                if recovering.contains(mint_url) {
+                    false
+                } else {
+                    recovering.insert(mint_url.to_string());
+                    true
+                }
+            };
+
+            if should_recover {
+                match sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await {
+                    Ok(_) => log::debug!("Recovery completed for mint {}", mint_url),
+                    Err(e) => log::error!("Recovery failed for mint {}: {}", mint_url, e),
+                }
+                MINTS_IN_RECOVERY.write().unwrap().remove(mint_url);
+            } else {
+                log::warn!("Recovery skipped for mint {} - already in recovery", mint_url);
             }
 
             Err(err_str)

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, feed_cache, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay, shop_store, sidebar_store};
+use stores::{auth_store, cashu, feed_cache, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay, settings_store, shop_store, sidebar_store};
 
 // Modules
 mod components;
@@ -49,6 +49,7 @@ fn App() -> Element {
         sidebar_store::init_sidebar_from_cache();
         reactions_store::init_reactions_from_cache();
         relay::init_local_relays_from_cache();
+        settings_store::init_settings_from_cache();
 
         // Initialize Nostr client (async)
         spawn(async move {
@@ -76,6 +77,28 @@ fn App() -> Element {
                         async {
                             if let Err(e) = feed_cache::init_feed_cache().await {
                                 log::warn!("Failed to initialize feed cache: {}", e);
+                            }
+                        },
+                        // Auto-load Cashu wallet if enabled in settings
+                        async {
+                            // Clone settings out before async work (Dioxus best practice)
+                            let settings = settings_store::SETTINGS.read().clone();
+                            if settings.cashu_wallet_auto_load {
+                                // Only auto-load if terms were previously accepted
+                                match cashu::check_terms_accepted().await {
+                                    Ok(true) => {
+                                        log::info!("Auto-loading Cashu wallet...");
+                                        if let Err(e) = cashu::init_wallet().await {
+                                            log::warn!("Failed to auto-load Cashu wallet: {}", e);
+                                        }
+                                    }
+                                    Ok(false) => {
+                                        log::debug!("Cashu terms not yet accepted, skipping auto-load");
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to check Cashu terms: {}", e);
+                                    }
+                                }
                             }
                         },
                     );

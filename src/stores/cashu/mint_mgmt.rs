@@ -15,7 +15,7 @@ use super::errors::CashuResult;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{proof_data_to_cdk_proof, cdk_proof_to_proof_data};
 use super::signals::{
-    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS, WALLET_BALANCE,
+    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
     try_acquire_mint_lock,
 };
 use super::types::{
@@ -56,14 +56,30 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     // Get existing keyset IDs from all current mints
     let mut existing_keyset_to_mint: HashMap<String, String> = HashMap::new();
 
-    // Collect keysets from all existing mints in the MultiMintWallet
+    // Collect keysets from all existing mints in parallel (read-only, safe)
     if let Some(ref multi_wallet) = *cashu_cdk_bridge::MULTI_WALLET.read() {
-        for wallet in multi_wallet.get_wallets().await {
-            let mint_url = wallet.mint_url.to_string();
-            if let Ok(keysets) = wallet.get_mint_keysets().await {
-                for keyset in keysets {
-                    existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
+        let wallets = multi_wallet.get_wallets().await;
+
+        let futures: Vec<_> = wallets
+            .iter()
+            .map(|wallet| {
+                let mint_url = wallet.mint_url.to_string();
+                let wallet = wallet.clone();
+                async move {
+                    match wallet.get_mint_keysets().await {
+                        Ok(keysets) => Some((mint_url, keysets)),
+                        Err(_) => None,
+                    }
                 }
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        for result in results.into_iter().flatten() {
+            let (mint_url, keysets) = result;
+            for keyset in keysets {
+                existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
             }
         }
     }
@@ -790,17 +806,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         }
     }
 
-    // Recalculate balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Removed mint {} ({} sats)", mint_url, total_amount);
 
@@ -975,16 +982,86 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Publish new token event
-    let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => {
-            let id = event_output.id().to_hex();
-            log::info!("Published consolidated token event: {}", id);
-            id
+    // Attempt publish with immediate retries
+    // Proofs are already safely persisted in CDK IndexedDB at line 950
+    let mut new_event_id: Option<String> = None;
+    let mut last_error = String::new();
+    let mut retryable = true;
+
+    // Retry delays: 500ms, 1s, 2s (with jitter)
+    let delays = [500u32, 1000, 2000];
+
+    for (attempt, delay_ms) in std::iter::once(0).chain(delays.iter().copied()).enumerate() {
+        if attempt > 0 {
+            // Add jitter: ±100ms
+            #[cfg(target_arch = "wasm32")]
+            {
+                let jitter = (js_sys::Math::random() * 200.0) as u32;
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
+                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+            }
+            log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
-        Err(e) => {
-            log::error!("Failed to publish token event: {}", e);
-            return Err(format!("Failed to publish: {}", e));
+
+        match client.send_event_builder(builder.clone()).await {
+            Ok(output) => {
+                // Check for partial success (at least 1 relay succeeded)
+                if !output.success.is_empty() {
+                    let id = output.id().to_hex();
+                    log::info!(
+                        "Published token event {} to {}/{} relays",
+                        id,
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
+                    );
+                    new_event_id = Some(id);
+                    break;
+                } else {
+                    // All relays failed - treat as error
+                    last_error = format!("All {} relays failed", output.failed.len());
+                    log::warn!("Publish attempt {} - all relays failed", attempt + 1);
+                }
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                // Check for non-retryable errors
+                let err_str = last_error.to_lowercase();
+                if err_str.contains("banned") || err_str.contains("invalid") ||
+                   err_str.contains("malformed") || err_str.contains("too large") {
+                    log::error!("Non-retryable error: {}", last_error);
+                    retryable = false;
+                    break;
+                }
+                log::warn!("Publish attempt {} failed: {}", attempt + 1, e);
+            }
+        }
+    }
+
+    // Handle final result
+    let new_event_id = match new_event_id {
+        Some(id) => id,
+        None if retryable => {
+            // All retries failed - queue for background retry
+            log::error!("All publish attempts failed, queueing for background retry: {}", last_error);
+
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+
+            // Queue with token tracking info
+            super::events::queue_token_event_for_retry(
+                builder,
+                pending_id.clone(),
+                mint_url.clone(),
+            ).await;
+
+            pending_id
+        }
+        None => {
+            // Non-retryable error - return error, don't queue
+            return Err(format!("Non-retryable publish error: {}", last_error));
         }
     };
 
@@ -1020,17 +1097,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         log::warn!("Failed to publish deletion event: {}", e);
     }
 
-    // Recalculate balance from all tokens
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     // Sync MultiMintWallet state (non-critical)
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
@@ -1046,24 +1114,38 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     })
 }
 
-/// Consolidate proofs across all mints
+/// Consolidate proofs across all mints (parallel execution)
 pub async fn consolidate_all_mints() -> Result<Vec<(String, ConsolidationResult)>, String> {
     let mints = get_mints();
-    let mut results = Vec::new();
 
-    for mint in mints {
-        match consolidate_proofs(mint.clone()).await {
-            Ok(result) => {
-                results.push((mint, result));
+    if mints.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Parallel consolidation - each mint has its own lock
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint| {
+            let mint = mint.clone();
+            async move {
+                let result = consolidate_proofs(mint.clone()).await;
+                (mint, result)
             }
-            Err(e) => {
-                log::warn!("Failed to consolidate {}: {}", mint, e);
-                // Continue with other mints even if one fails
-            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    // Collect successful results, log failures
+    let mut output = Vec::new();
+    for (mint, result) in results {
+        match result {
+            Ok(r) => output.push((mint, r)),
+            Err(e) => log::warn!("Failed to consolidate {}: {}", mint, e),
         }
     }
 
-    Ok(results)
+    Ok(output)
 }
 
 // =============================================================================
