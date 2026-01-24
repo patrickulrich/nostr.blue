@@ -15,7 +15,7 @@ use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Kind, PublicKey, EventId};
 
 use crate::stores::cashu_cdk_bridge::{MULTI_WALLET, sync_wallet_state};
-use super::signals::{WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::WALLET_TOKENS;
 use super::types::{
     TokenData, ProofData, ExtendedCashuProof, ExtendedTokenEvent,
     PendingEventType, WalletTokensStoreStoreExt,
@@ -420,15 +420,11 @@ pub async fn execute_mpp_melt(
                 tokens_write.push(token);
             }
 
-            // Update balance atomically
-            let new_balance: u64 = tokens_write.iter()
-                .flat_map(|t| &t.proofs)
-                .map(|p| p.amount)
-                .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-                .ok_or_else(|| "Balance calculation overflow in execute_mpp_melt".to_string())?;
-
-            *WALLET_BALANCE.write() = new_balance;
             drop(tokens_write);
+
+            // Update balance from proof state
+            super::signals::update_wallet_balances();
+            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
             log::info!("MPP melt: local state updated. New balance: {} sats", new_balance);
             if publish_failures > 0 {

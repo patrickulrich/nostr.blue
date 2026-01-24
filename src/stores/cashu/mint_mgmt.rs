@@ -15,7 +15,7 @@ use super::errors::CashuResult;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{proof_data_to_cdk_proof, cdk_proof_to_proof_data};
 use super::signals::{
-    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS, WALLET_BALANCE,
+    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
     try_acquire_mint_lock,
 };
 use super::types::{
@@ -806,17 +806,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         }
     }
 
-    // Recalculate balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Removed mint {} ({} sats)", mint_url, total_amount);
 
@@ -1106,17 +1097,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         log::warn!("Failed to publish deletion event: {}", e);
     }
 
-    // Recalculate balance from all tokens
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     // Sync MultiMintWallet state (non-critical)
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {

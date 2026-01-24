@@ -28,7 +28,7 @@ use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{
-    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS, WALLET_BALANCE,
+    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS,
     WALLET_TOKENS,
 };
 use super::types::{
@@ -503,18 +503,8 @@ pub async fn pay_payment_request(
         }
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Payment request paid: {} sats", amount);
 
@@ -791,18 +781,8 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         register_proofs_in_event_map(&event_id, &proof_data);
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Received {} sats from payment request", amount);
 

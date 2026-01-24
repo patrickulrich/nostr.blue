@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::cashu::{WalletHealthIndicator, WalletHealthModal};
+use crate::components::cashu::{WalletHealthIndicator, WalletHealthModal, NutzapBadge};
 use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::format_sats_with_separator;
@@ -14,15 +14,16 @@ pub fn WalletBalanceCard(
     on_transfer: EventHandler<()>,
     on_create_request: EventHandler<()>,
     on_pay_request: EventHandler<()>,
+    on_nutzap_settings: EventHandler<()>,
+    on_nutzap_inbox: EventHandler<()>,
 ) -> Element {
-    let balance = cashu::WALLET_BALANCE.read();
     let balances = WALLET_BALANCES.read();
     let proof_count = cashu::get_total_proof_count();
     let mint_count = cashu::get_mints().len();
     let mut show_health_modal = use_signal(|| false);
 
-    // Format balance with thousands separator
-    let formatted_balance = format_sats_with_separator(*balance);
+    // Format balance with thousands separator (use available balance)
+    let formatted_balance = format_sats_with_separator(balances.available);
 
     // Check if there are pending funds
     let has_pending = balances.pending > 0;
@@ -132,6 +133,36 @@ pub fn WalletBalanceCard(
                         onclick: move |_| on_pay_request.call(()),
                         span { "💸" }
                         span { "Pay Request" }
+                    }
+                }
+            }
+
+            // Action buttons row 4: Nutzaps (NIP-61)
+            div {
+                class: "mt-3",
+                div {
+                    class: "text-xs opacity-75 mb-2",
+                    "Nutzaps"
+                }
+                div {
+                    class: "flex gap-3",
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
+                        onclick: move |_| on_nutzap_settings.call(()),
+                        span { "⚡" }
+                        span { "Zap Settings" }
+                    }
+                    button {
+                        class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2 relative",
+                        onclick: move |_| on_nutzap_inbox.call(()),
+                        span { "📥" }
+                        span { "Zap Inbox" }
+                        if cashu::pending_nutzap_count() > 0 {
+                            div {
+                                class: "absolute -top-1 -right-1",
+                                NutzapBadge {}
+                            }
+                        }
                     }
                 }
             }

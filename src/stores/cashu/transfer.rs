@@ -11,7 +11,7 @@ use super::internal::{create_ephemeral_wallet, get_or_create_wallet};
 use super::utils::normalize_mint_url;
 use super::mint_mgmt::get_mint_balance;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
-use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_TOKENS};
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, TransferProgress, TransferResult,
     WalletTokensStoreStoreExt,
@@ -457,18 +457,8 @@ pub async fn transfer_between_mints(
         register_proofs_in_event_map(&target_event_id, &target_proof_data);
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     // Calculate result
     let amount_sent = amount + fee_paid;

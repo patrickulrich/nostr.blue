@@ -12,7 +12,7 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
-use super::signals::{IN_FLIGHT_MELT_REQUESTS, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{IN_FLIGHT_MELT_REQUESTS, WALLET_TOKENS};
 use super::types::{
     ProofData, ProofState, WalletTokensStoreStoreExt,
     RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
@@ -525,14 +525,10 @@ pub(crate) fn recalculate_balance() {
     let data = store.data();
     let tokens = data.read();
 
-    let new_balance: u64 = tokens
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .filter(|p| p.state.is_spendable())
-        .map(|p| p.amount)
-        .fold(0u64, |acc, amt| acc.saturating_add(amt));
+    drop(tokens);
 
-    *WALLET_BALANCE.write() = new_balance;
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 }
 
 /// Calculate urgency level based on how long proof has been stuck
@@ -570,7 +566,7 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
     let now = now_secs();
 
     // Get spendable balance
-    let spendable = *WALLET_BALANCE.read();
+    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
     // Get all proofs and categorize
     let store = WALLET_TOKENS();
