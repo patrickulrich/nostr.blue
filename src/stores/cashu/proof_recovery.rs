@@ -12,7 +12,7 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
-use super::signals::{IN_FLIGHT_MELT_REQUESTS, WALLET_TOKENS};
+use super::signals::{IN_FLIGHT_MELT_REQUESTS, IN_FLIGHT_SEND_REQUESTS, WALLET_TOKENS};
 use super::types::{
     ProofData, ProofState, WalletTokensStoreStoreExt,
     RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
@@ -224,11 +224,17 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         .collect();
     drop(pending_secrets);
 
-    // SAFETY (Risk 4): Filter out proofs that are part of active in-flight melt operations
-    // This prevents timeout recovery from interfering with still-running operations
-    // Note: ACTIVE_OPERATIONS tracks melt transaction IDs (strings), which is already
-    // covered by IN_FLIGHT_MELT_REQUESTS check via proof secrets. The numeric
-    // transaction_id in ProofData is a different concept used for local state tracking.
+    // SAFETY: Filter out proofs from active operations
+    // Proofs are protected from recovery if they are part of:
+    // 1. PENDING_BY_MINT_SECRETS - proofs pending at mint (checked above)
+    // 2. IN_FLIGHT_MELT_REQUESTS - proofs in active melt operations
+    // 3. IN_FLIGHT_SEND_REQUESTS - proofs in active send/swap operations
+    //
+    // Note: ACTIVE_OPERATIONS tracks transaction IDs (strings) which are already
+    // covered by the proof-level checks below. The numeric transaction_id in
+    // ProofData is a different concept used for local state tracking.
+
+    // Check 2: Filter out proofs from active MELT operations
     {
         let in_flight = IN_FLIGHT_MELT_REQUESTS.read();
         let in_flight_secrets: std::collections::HashSet<&str> = in_flight
@@ -236,11 +242,32 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
             .flat_map(|req| req.proofs_used.iter().map(|p| p.secret.as_str()))
             .collect();
 
+        let before_count = safe_to_recover.len();
         safe_to_recover.retain(|p| !in_flight_secrets.contains(p.secret.as_str()));
+        let filtered = before_count - safe_to_recover.len();
+        if filtered > 0 {
+            log::debug!("Excluded {} proofs from active melt operations", filtered);
+        }
+    }
+
+    // Check 3: Filter out proofs from active SEND/SWAP operations
+    {
+        let in_flight_sends = IN_FLIGHT_SEND_REQUESTS.read();
+        let send_secrets: std::collections::HashSet<&str> = in_flight_sends
+            .iter()
+            .flat_map(|req| req.proof_secrets.iter().map(|s| s.as_str()))
+            .collect();
+
+        let before_count = safe_to_recover.len();
+        safe_to_recover.retain(|p| !send_secrets.contains(p.secret.as_str()));
+        let filtered = before_count - safe_to_recover.len();
+        if filtered > 0 {
+            log::debug!("Excluded {} proofs from active send/swap operations", filtered);
+        }
     }
 
     if safe_to_recover.is_empty() {
-        log::debug!("All reserved proofs are still pending at mint");
+        log::debug!("All reserved proofs are still pending at mint or in active operations");
         return ProofRecoveryResult::default();
     }
 

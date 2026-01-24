@@ -708,10 +708,13 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, Stri
         let my_info = MY_NUTZAP_INFO.read();
         if let Some(info) = my_info.as_ref() {
             let accepted = info.mints.iter().any(|m|
-                super::utils::mint_matches(&m.url, &mint_url)
+                super::utils::mint_matches(&m.url, &mint_url) && m.unit == unit
             );
             if !accepted {
-                return Err(format!("Nutzap from unaccepted mint: {}", mint_url));
+                return Err(format!(
+                    "Nutzap from unaccepted mint/unit: {} (unit: {})",
+                    mint_url, unit
+                ));
             }
         } else {
             return Err("Nutzap info not configured - cannot validate mint".to_string());

@@ -605,6 +605,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     // - If available_proofs.is_empty(): No proofs left to track, safe to delete old events
     // - Otherwise: Publish failed but proofs exist - do NOT delete old events or we lose tokens
     let available_proofs_is_empty = available_proofs.is_empty();
+    let available_proofs_count = available_proofs.len(); // Capture BEFORE move
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
         vec![super::types::TokenData {
             event_id: event_id.clone(),
@@ -628,7 +629,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     } else {
         log::error!(
             "Skipping atomic_token_replace: publish failed but {} proofs remain - keeping old token events to prevent token loss",
-            tokens_to_add.len()
+            available_proofs_count
         );
     }
 

@@ -979,3 +979,27 @@ pub struct InFlightMeltRequest {
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
 }
+
+/// Tracks in-flight send/swap operations for crash recovery and proof protection
+///
+/// Similar to InFlightMeltRequest but for send/swap operations that don't have
+/// their own tracking. This ensures proof_recovery doesn't reclaim proofs that
+/// are actively being used in send/swap operations.
+///
+/// SAFETY: Without this tracking, recover_reserved_proofs() could incorrectly
+/// reclaim proofs from active send/swap operations, causing fund loss.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InFlightSendRequest {
+    /// Unique transaction ID ("send_{uuid}" or "swap_{uuid}")
+    pub transaction_id: String,
+    /// Mint URL where the operation is being performed
+    pub mint_url: String,
+    /// Secrets of proofs being used (for filtering in recovery)
+    pub proof_secrets: Vec<String>,
+    /// Amount being sent/swapped
+    pub amount: u64,
+    /// Operation type: "send" or "swap"
+    pub operation_type: String,
+    /// Timestamp when request was created (seconds since epoch)
+    pub created_at: u64,
+}

@@ -713,26 +713,8 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
             Ok(event_id) => {
                 log::info!("Published orphaned proofs to Nostr: {}", event_id);
 
-                // Normalize mint URL for consistent balance lookups
-                let normalized_mint = super::utils::normalize_mint_url(&mint_url);
-
-                // Atomically add to WALLET_TOKENS and update WALLET_BALANCES
-                let new_token = TokenData {
-                    event_id: event_id.clone(),
-                    mint: normalized_mint,
-                    unit: "sat".to_string(),
-                    proofs: proof_data.clone(),
-                    created_at: now_secs(),
-                };
-
-                if let Err(e) = super::signals::atomic_token_update(|tokens| {
-                    tokens.push(new_token);
-                    Ok(())
-                }) {
-                    log::error!("Failed to update tokens atomically: {}", e);
-                }
-
-                // Register proofs in event map for fast lookup
+                // Token insertion handled by publish_orphaned_proofs_event
+                // Only register in event map for fast lookup
                 super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
 
                 // Update known_ys with newly-published proof Y values
@@ -1155,16 +1137,18 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     }
                 }
 
-                // Step 4: Mark spent proofs as spent locally (sync state)
+                // Step 4: Mark spent proofs as spent locally and clear pending tracking
                 if !spent_secrets.is_empty() {
                     log::info!("Marking {} proofs as spent (confirmed by mint)", spent_secrets.len());
                     move_proofs_to_spent(&spent_secrets);
+                    remove_from_pending_at_mint(&spent_secrets);
                 }
 
-                // Step 5: ONLY revert proofs confirmed UNSPENT by mint
+                // Step 5: Revert unspent proofs and clear pending tracking
                 if !unspent_secrets.is_empty() {
                     log::info!("Reverting {} proofs to spendable (confirmed unspent by mint)", unspent_secrets.len());
                     revert_proofs_to_spendable(&unspent_secrets);
+                    remove_from_pending_at_mint(&unspent_secrets);
                 }
 
                 // Step 6: Leave pending proofs alone (lightning may still complete)

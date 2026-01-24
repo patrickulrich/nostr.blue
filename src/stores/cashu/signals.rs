@@ -80,6 +80,16 @@ pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
 pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> =
     Signal::global(HashSet::new);
 
+/// In-flight send/swap requests for proof recovery protection
+///
+/// Tracks active send/swap operations to prevent proof_recovery from
+/// incorrectly reclaiming proofs that are actively being used.
+///
+/// SAFETY: This is critical for fund safety - without this, recovery could
+/// reclaim proofs from active send/swap operations, causing fund loss.
+pub static IN_FLIGHT_SEND_REQUESTS: GlobalSignal<Vec<super::types::InFlightSendRequest>> =
+    Signal::global(Vec::new);
+
 // =============================================================================
 // In-Flight Melt Request Helpers
 // =============================================================================
@@ -120,6 +130,41 @@ pub fn is_transaction_active(transaction_id: &Option<String>) -> bool {
 /// Check if a string transaction_id is currently active
 pub fn is_transaction_id_active(transaction_id: &str) -> bool {
     ACTIVE_OPERATIONS.read().contains(transaction_id)
+}
+
+// =============================================================================
+// In-Flight Send/Swap Request Helpers
+// =============================================================================
+
+/// Add an in-flight send/swap request to tracking (also adds to ACTIVE_OPERATIONS)
+///
+/// SAFETY: Must be called BEFORE the send/swap operation to ensure proofs are
+/// protected from timeout recovery during the operation.
+pub fn add_in_flight_send_request(request: super::types::InFlightSendRequest) {
+    let tx_id = request.transaction_id.clone();
+
+    // Check for duplicate before adding
+    {
+        let mut requests = IN_FLIGHT_SEND_REQUESTS.write();
+        if requests.iter().any(|r| r.transaction_id == tx_id) {
+            log::debug!("In-flight send request {} already exists, skipping", tx_id);
+            return;
+        }
+        requests.push(request);
+    }
+
+    ACTIVE_OPERATIONS.write().insert(tx_id.clone());
+    log::debug!("Added in-flight send request: {}", tx_id);
+}
+
+/// Remove an in-flight send/swap request from tracking
+///
+/// SAFETY: Must be called AFTER the send/swap operation completes (success or error)
+/// to allow proofs to be recovered if needed.
+pub fn remove_in_flight_send_request(transaction_id: &str) {
+    IN_FLIGHT_SEND_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    ACTIVE_OPERATIONS.write().remove(transaction_id);
+    log::debug!("Removed in-flight send request: {}", transaction_id);
 }
 
 /// Persist in-flight melt requests to IndexedDB
@@ -569,6 +614,7 @@ pub fn reset_wallet_state() {
     ACTIVE_TRANSACTIONS.write().clear();
     PENDING_BY_MINT_SECRETS.write().clear();
     IN_FLIGHT_MELT_REQUESTS.write().clear();
+    IN_FLIGHT_SEND_REQUESTS.write().clear();
     ACTIVE_OPERATIONS.write().clear();
     *SYNC_STATE.write() = None;
 
