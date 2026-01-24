@@ -255,9 +255,10 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
         // SAFETY: Warn if state count doesn't match proof count
         // CDK guarantees one state per Y-value, but network issues could cause misalignment
         if states.len() != batch.len() {
+            let skipped = batch.len().saturating_sub(states.len());
             log::warn!(
-                "State count mismatch: {} proofs, {} states - some proofs not verified",
-                batch.len(), states.len()
+                "State count mismatch: {} proofs, {} states - {} trailing proofs skipped (will retry next sync)",
+                batch.len(), states.len(), skipped
             );
         }
 
@@ -542,7 +543,8 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
 
     // Get all proof Y values currently in WALLET_TOKENS (NIP-60 source of truth)
     // CDK best practice: Use Y values for proof identification, not secrets
-    let known_ys: HashSet<String> = {
+    // Mutable so we can update it after publishing new proofs
+    let mut known_ys: HashSet<String> = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
@@ -617,9 +619,7 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
         let mut per_mint_errors = 0;  // Track errors per-mint, not global
 
         for chunk in potentially_orphaned.chunks(ORPHAN_SYNC_BATCH_SIZE) {
-            let chunk_proofs: Vec<_> = chunk.to_vec();
-
-            match wallet.check_proofs_spent(chunk_proofs.clone()).await {
+            match wallet.check_proofs_spent(chunk.to_vec()).await {
                 Ok(states) => {
                     // CRITICAL: Only consider proofs that mint confirms as UNSPENT
                     for (proof, state) in chunk.iter().zip(states.iter()) {
@@ -688,28 +688,32 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
                 // Normalize mint URL for consistent balance lookups
                 let normalized_mint = super::utils::normalize_mint_url(&mint_url);
 
-                // Add to WALLET_TOKENS
-                {
-                    let store = WALLET_TOKENS.read();
-                    let mut data = store.data();
-                    let mut tokens = data.write();
-                    tokens.push(TokenData {
-                        event_id: event_id.clone(),
-                        mint: normalized_mint,
-                        unit: "sat".to_string(),
-                        proofs: proof_data.clone(),
-                        created_at: now_secs(),
-                    });
-                }
+                // Atomically add to WALLET_TOKENS and update WALLET_BALANCE
+                let new_token = TokenData {
+                    event_id: event_id.clone(),
+                    mint: normalized_mint,
+                    unit: "sat".to_string(),
+                    proofs: proof_data.clone(),
+                    created_at: now_secs(),
+                };
 
-                // Update WALLET_BALANCE
-                {
-                    let mut balance = super::signals::WALLET_BALANCE.write();
-                    *balance = balance.saturating_add(orphaned_amount);
+                if let Err(e) = super::signals::atomic_token_update(|tokens| {
+                    tokens.push(new_token);
+                    Ok(())
+                }) {
+                    log::error!("Failed to update tokens atomically: {}", e);
                 }
 
                 // Register proofs in event map for fast lookup
                 super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
+
+                // Update known_ys with newly-published proof Y values
+                // This prevents re-processing these proofs in subsequent wallet iterations
+                for proof in &confirmed_orphaned {
+                    if let Ok(y) = proof.y() {
+                        known_ys.insert(y.to_string());
+                    }
+                }
 
                 result.proofs_recovered += confirmed_orphaned.len();
                 result.sats_recovered += orphaned_amount;
@@ -984,18 +988,21 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                 }
             };
 
-            // Final proof state check
-            let cdk_proofs: Vec<_> = request.proofs_used.iter()
-                .filter_map(|p| proof_data_to_cdk_proof(p).ok())
+            // Final proof state check using paired approach to maintain alignment
+            // between original ProofData and CDK proofs
+            let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request.proofs_used.iter()
+                .filter_map(|p| proof_data_to_cdk_proof(p).ok().map(|cdk_p| (p, cdk_p)))
                 .collect();
 
-            if !cdk_proofs.is_empty() {
-                if let Ok(states) = wallet.check_proofs_spent(cdk_proofs.clone()).await {
-                    // Mark spent proofs
-                    let spent_secrets: Vec<_> = cdk_proofs.iter()
+            if !valid_pairs.is_empty() {
+                let cdk_proofs: Vec<_> = valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
+
+                if let Ok(states) = wallet.check_proofs_spent(cdk_proofs).await {
+                    // Mark spent proofs using original proof secrets for correct alignment
+                    let spent_secrets: Vec<_> = valid_pairs.iter()
                         .zip(states.iter())
                         .filter(|(_, s)| s.state == State::Spent)
-                        .map(|(p, _)| p.secret.to_string())
+                        .map(|((original, _), _)| original.secret.clone())
                         .collect();
 
                     if !spent_secrets.is_empty() {
@@ -1379,9 +1386,13 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
     })
 }
 
-/// Internal version that returns amount only (for use in batch recovery)
+/// Internal version that recovers and publishes missing proofs to Nostr
+///
+/// Finds proofs in CDK that aren't in WALLET_TOKENS and publishes them to Nostr.
+/// This ensures change proofs from melt operations are properly synced.
 async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, String> {
     use crate::stores::cashu_cdk_bridge;
+    use super::proofs::cdk_proof_to_proof_data;
 
     let wallet = cashu_cdk_bridge::get_wallet(mint_url)
         .await
@@ -1409,6 +1420,41 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
         .iter()
         .map(|p| u64::from(p.amount))
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
+
+    // Publish missing proofs to Nostr
+    let proof_data: Vec<ProofData> = missing.iter()
+        .map(|p| cdk_proof_to_proof_data(p))
+        .collect();
+
+    match super::events::publish_orphaned_proofs_event(mint_url, &proof_data).await {
+        Ok(event_id) => {
+            log::info!(
+                "Published {} recovered proofs ({} sats) to Nostr: {}",
+                missing.len(), recovered_amount, event_id
+            );
+
+            let normalized_mint = super::utils::normalize_mint_url(mint_url);
+            let new_token = TokenData {
+                event_id: event_id.clone(),
+                mint: normalized_mint,
+                unit: "sat".to_string(),
+                proofs: proof_data.clone(),
+                created_at: now_secs(),
+            };
+
+            if let Err(e) = super::signals::atomic_token_update(|tokens| {
+                tokens.push(new_token);
+                Ok(())
+            }) {
+                log::error!("Failed to update tokens atomically: {}", e);
+            }
+
+            super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
+        }
+        Err(e) => {
+            log::warn!("Failed to publish recovered proofs: {}", e);
+        }
+    }
 
     Ok(recovered_amount)
 }

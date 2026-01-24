@@ -427,7 +427,8 @@ pub async fn melt_tokens(
     *MELT_PROGRESS.write() = Some(MeltProgress::PayingInvoice);
 
     // Generate unique transaction ID for in-flight tracking
-    let tx_id = format!("melt_{}", super::utils::now_secs());
+    // Using UUID v4 to prevent collisions on rapid consecutive melts
+    let tx_id = format!("melt_{}", uuid::Uuid::new_v4());
 
     // CRITICAL SAFETY: Persist in-flight melt request BEFORE network call
     // This enables crash recovery - we can query the mint for quote state
@@ -470,7 +471,9 @@ pub async fn melt_tokens(
             // Operation failed - remove in-flight tracking
             // Recovery will happen on next startup if needed
             remove_in_flight_melt_request(&tx_id);
-            let _ = persist_in_flight_melt_requests().await;
+            if let Err(persist_err) = persist_in_flight_melt_requests().await {
+                log::warn!("Failed to persist in-flight melt cleanup after error: {}", persist_err);
+            }
             return Err(e);
         }
     };
@@ -570,8 +573,11 @@ pub async fn melt_tokens(
     // The melt operation is done, state is updated, and Nostr events published.
     remove_in_flight_melt_request(&tx_id);
     if let Err(e) = persist_in_flight_melt_requests().await {
-        // Non-fatal - the request will be cleaned up on next startup
-        log::warn!("Failed to persist in-flight melt cleanup: {}", e);
+        log::error!(
+            "Failed to persist in-flight melt cleanup for tx_id={}: {}. \
+             May cause spurious recovery on next startup.",
+            tx_id, e
+        );
     }
 
     log::info!(
@@ -796,45 +802,31 @@ async fn publish_melt_events(
     Ok(new_event_id)
 }
 
-/// Update local state after melt
+/// Update local state after melt using atomic token replacement
+///
+/// Uses crash-safe atomic replacement: add new tokens BEFORE deleting old ones.
+/// This ensures worst case on crash is duplicate tokens (recoverable), never lost tokens.
 fn update_local_state_after_melt(
     mint_url: &str,
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let store = WALLET_TOKENS.read();
-    let mut data = store.data();
-    let mut tokens_write = data.write();
-
-    // Remove old token events
-    tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-    // Add new token with remaining proofs
-    if let Some(ref event_id) = new_event_id {
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
         let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-
-        tokens_write.push(TokenData {
+        vec![TokenData {
             event_id: event_id.clone(),
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: proof_data,
             created_at: chrono::Utc::now().timestamp() as u64,
-        });
-    }
+        }]
+    } else {
+        vec![]
+    };
 
-    // Update balance
-    let new_balance: u64 = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .map(|p| p.amount)
-        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-        .ok_or_else(|| "Balance calculation overflow".to_string())?;
-
-    *WALLET_BALANCE.write() = new_balance;
-
+    let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
     log::info!("Local state updated. New balance: {} sats", new_balance);
-
     Ok(())
 }
 
