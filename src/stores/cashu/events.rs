@@ -971,8 +971,12 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
 /// Used by `sync_orphaned_cdk_proofs_to_nostr()` to publish proofs that exist in CDK
 /// but are not in WALLET_TOKENS (e.g., from crashed send/melt operations).
 ///
-/// nostr-sdk saves events to local database before relay transmission,
-/// so data is persisted even if relay publish fails.
+/// CRASH SAFETY (CDK Saga Pattern): Persists state BEFORE external operations.
+/// 1. Generate pending_id BEFORE any network operation
+/// 2. Insert TokenData into WALLET_TOKENS first
+/// 3. Attempt publish
+/// 4. On success: update pending_id to real event_id
+/// 5. On failure: proofs remain accessible via pending_id for retry
 pub async fn publish_orphaned_proofs_event(
     mint_url: &str,
     proofs: &[ProofData],
@@ -997,6 +1001,9 @@ pub async fn publish_orphaned_proofs_event(
         .ok_or("Client not initialized")?
         .clone();
 
+    // 1. Generate pending_id BEFORE any network operation (CDK Saga Pattern)
+    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+
     // Convert to extended proofs format
     let extended_proofs: Vec<ExtendedCashuProof> = proofs
         .iter()
@@ -1020,50 +1027,70 @@ pub async fn publish_orphaned_proofs_event(
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Pre-compute event ID from unsigned event
-    let mut unsigned = builder.clone().build(pubkey);
-    let event_id_hex = unsigned.id().to_hex();
-
     // Sign the event
+    let unsigned = builder.clone().build(pubkey);
     let signed_event = unsigned
         .sign(&signer)
         .await
         .map_err(|e| format!("Failed to sign: {}", e))?;
 
-    // Publish (nostr-sdk saves locally first)
+    // 2. Insert into WALLET_TOKENS right before publish (saga setup - persist before network)
+    // This ensures we don't leave dangling entries if serialize/encrypt/sign fails
+    let token_data = TokenData {
+        event_id: pending_id.clone(),
+        mint: mint_url.to_string(),
+        unit: "sat".to_string(),
+        proofs: proofs.to_vec(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+    };
+    if let Err(e) = super::signals::atomic_token_update(|tokens| {
+        tokens.push(token_data);
+        Ok(())
+    }) {
+        log::warn!("Failed to pre-persist orphaned proofs token: {}", e);
+        // Continue anyway - better to try publish than fail entirely
+    }
+
+    // 3. Attempt publish
     match client.send_event(&signed_event).await {
         Ok(output) => {
             // Check if at least one relay succeeded
             if !output.success.is_empty() {
+                let real_event_id = output.id().to_hex();
+                // 4. On success: update pending_id to real event_id
+                update_token_event_id(&pending_id, &real_event_id);
                 log::info!(
                     "Published orphaned proofs token event: {} (to {} relays)",
-                    event_id_hex, output.success.len()
+                    real_event_id, output.success.len()
                 );
-                Ok(event_id_hex)
+                Ok(real_event_id)
             } else {
-                // No relays accepted - queue for retry with token tracking info
+                // No relays accepted - token already persisted with pending_id
                 log::warn!(
-                    "No relays accepted orphaned proofs event {}, queuing for retry",
-                    event_id_hex
+                    "No relays accepted orphaned proofs event, queuing for retry: {}",
+                    pending_id
                 );
                 queue_signed_event_for_retry(
                     signed_event,
                     PendingEventType::TokenEvent,
-                    Some(event_id_hex.clone()),
+                    Some(pending_id.clone()),
                     Some(mint_url.to_string()),
                 ).await;
-                Err(format!("Nostr publish failed: no relays accepted event {}", event_id_hex))
+                // Return the pending_id since proofs are now tracked under it
+                Ok(pending_id)
             }
         }
         Err(e) => {
+            // 5. On failure: proofs remain accessible via pending_id for retry
             log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);
             queue_signed_event_for_retry(
                 signed_event,
                 PendingEventType::TokenEvent,
-                Some(event_id_hex.clone()),
+                Some(pending_id.clone()),
                 Some(mint_url.to_string()),
             ).await;
-            Err(format!("Nostr publish failed: {}", e))
+            // Return the pending_id since proofs are now tracked under it
+            Ok(pending_id)
         }
     }
 }

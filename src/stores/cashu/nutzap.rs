@@ -107,6 +107,8 @@ pub struct NutzapSendResult {
     pub amount: u64,
     /// Fee paid
     pub fee: u64,
+    /// True if event was queued for retry (publish failed but tokens sent)
+    pub is_pending_retry: bool,
 }
 
 /// Result of redeeming a nutzap
@@ -114,8 +116,6 @@ pub struct NutzapSendResult {
 pub struct NutzapRedeemResult {
     /// Amount redeemed
     pub amount: u64,
-    /// History event ID
-    pub history_event_id: Option<String>,
 }
 
 // =============================================================================
@@ -485,7 +485,7 @@ pub async fn send_nutzap(
         .map_err(|e| format!("Failed to publish nutzap: {}", e))?;
 
     // Check if at least one relay succeeded
-    let event_id = if output.success.is_empty() {
+    let (event_id, is_pending_retry) = if output.success.is_empty() {
         // All relays failed - local state already updated, queue nutzap for retry
         // Reuse tags for retry builder
         let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
@@ -499,11 +499,11 @@ pub async fn send_nutzap(
             "Nutzap failed on all relays, queued for retry: {:?}",
             output.failed.keys().collect::<Vec<_>>()
         );
-        pending_event_id.clone()
+        (pending_event_id.clone(), true)
     } else {
         let real_event_id = output.id().to_hex();
         log::info!("Published nutzap event: {} (to {} relays)", real_event_id, output.success.len());
-        real_event_id
+        (real_event_id, false)
     };
 
     // Create history event
@@ -523,12 +523,55 @@ pub async fn send_nutzap(
         event_id,
         amount,
         fee: fee_u64,
+        is_pending_retry,
     })
 }
 
 // =============================================================================
 // Receiving Nutzaps (Kind 9321)
 // =============================================================================
+
+/// RAII guard that clears subscription flag on drop
+/// Ensures cleanup regardless of how the subscription exits (normal, panic, early return)
+struct SubscriptionGuard;
+
+impl SubscriptionGuard {
+    fn new() -> Self {
+        // Flag already set to true by caller
+        Self
+    }
+}
+
+impl Drop for SubscriptionGuard {
+    fn drop(&mut self) {
+        *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
+        log::debug!("Nutzap subscription guard dropped, flag cleared");
+    }
+}
+
+/// Classify whether a redemption error is transient (retry-able) or permanent
+///
+/// CDK Error Classification Pattern:
+/// - Permanent errors (no retry): TokenAlreadySpent, InvalidProofs, KeysetNotFound
+/// - Transient errors (retry): Network, Timeout, Connection, Relay issues
+fn is_transient_error(err: &str) -> bool {
+    let err_lower = err.to_lowercase();
+    // Transient: network/connection issues
+    if err_lower.contains("network") || err_lower.contains("timeout")
+        || err_lower.contains("connection") || err_lower.contains("relay")
+        || err_lower.contains("http") || err_lower.contains("fetch")
+        || err_lower.contains("unavailable") || err_lower.contains("temporary") {
+        return true;
+    }
+    // Permanent: proof/token validation failures
+    if err_lower.contains("already spent") || err_lower.contains("invalid")
+        || err_lower.contains("unknown") || err_lower.contains("keyset")
+        || err_lower.contains("expired") || err_lower.contains("malformed") {
+        return false;
+    }
+    // Default to transient (safer to retry)
+    true
+}
 
 /// Start subscription for incoming nutzaps
 ///
@@ -560,12 +603,14 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 
     // Spawn subscription handler
     spawn(async move {
+        // RAII guard ensures flag is cleared on any exit path
+        let _guard = SubscriptionGuard::new();
+
         let client = match nostr_client::NOSTR_CLIENT.read().as_ref() {
             Some(c) => c.clone(),
             None => {
                 log::error!("Client not initialized for nutzap subscription");
-                *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
-                return;
+                return; // Guard auto-clears flag
             }
         };
 
@@ -574,8 +619,7 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
             Ok(output) => output,
             Err(e) => {
                 log::error!("Failed to subscribe to nutzaps: {}", e);
-                *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
-                return;
+                return; // Guard auto-clears flag
             }
         };
         let sub_id = sub_output.val;
@@ -603,7 +647,7 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
             log::error!("Nutzap notification handler error: {}", e);
         }
 
-        *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
+        // Guard auto-clears flag on drop
     });
 
     Ok(())
@@ -612,7 +656,8 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 /// Process an incoming nutzap event
 ///
 /// Validates the P2PK lock and adds to pending nutzaps for redemption.
-pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String> {
+/// Returns `Ok(true)` if newly added, `Ok(false)` if duplicate.
+pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, String> {
     log::info!("Processing nutzap event: {}", event.id.to_hex());
 
     // Extract data from tags
@@ -720,17 +765,28 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
                     log::info!("Auto-redeemed nutzap: {} sats", result.amount);
                 }
                 Err(e) => {
-                    log::error!("Failed to auto-redeem nutzap: {}", e);
-                    update_pending_nutzap_status(
-                        &pending.event_id,
-                        NutzapStatus::Failed(e),
-                    );
+                    // Classify error: only mark as Failed for permanent errors
+                    // Transient errors keep Pending status for background retry
+                    if is_transient_error(&e) {
+                        log::warn!("Transient error auto-redeeming nutzap {}, will retry: {}", pending.event_id, e);
+                        // Leave status as Pending for background retry
+                        update_pending_nutzap_status(
+                            &pending.event_id,
+                            NutzapStatus::Pending,
+                        );
+                    } else {
+                        log::error!("Permanent error auto-redeeming nutzap {}: {}", pending.event_id, e);
+                        update_pending_nutzap_status(
+                            &pending.event_id,
+                            NutzapStatus::Failed(e),
+                        );
+                    }
                 }
             }
         });
     }
 
-    Ok(())
+    Ok(was_added)
 }
 
 /// Validate that proofs are P2PK-locked to our pubkey
@@ -862,9 +918,7 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
     }
 
     // Create history event with "redeemed" tag referencing the nutzap event
-    // Note: create_history_event_full returns Result<(), String>, not an event ID
-    // Set history_event_id to None since we don't have access to the actual history event ID
-    let history_event_id = match super::events::create_history_event_full(
+    if let Err(e) = super::events::create_history_event_full(
         "in",
         amount,
         vec![new_event_id.clone()],
@@ -873,22 +927,15 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
     )
     .await
     {
-        Ok(()) => None, // History event created successfully but we don't have its ID
-        Err(e) => {
-            log::error!("Failed to create history event: {}", e);
-            None
-        }
-    };
+        log::error!("Failed to create history event: {}", e);
+    }
 
     // Sync wallet state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync wallet state after nutzap redeem: {}", e);
     }
 
-    Ok(NutzapRedeemResult {
-        amount,
-        history_event_id,
-    })
+    Ok(NutzapRedeemResult { amount })
 }
 
 /// Redeem a pending nutzap
@@ -1116,15 +1163,15 @@ pub async fn fetch_pending_nutzaps() -> Result<usize, String> {
         .await
         .map_err(|e| format!("Failed to fetch nutzaps: {}", e))?;
 
-    let mut count = 0;
+    let mut new_count = 0;
     for event in events {
-        if let Err(e) = process_nutzap_event(&event).await {
-            log::warn!("Failed to process nutzap {}: {}", event.id.to_hex(), e);
-        } else {
-            count += 1;
+        match process_nutzap_event(&event).await {
+            Ok(true) => new_count += 1, // Newly added
+            Ok(false) => {} // Duplicate, don't count
+            Err(e) => log::warn!("Failed to process nutzap {}: {}", event.id.to_hex(), e),
         }
     }
 
-    log::info!("Fetched {} pending nutzaps", count);
-    Ok(count)
+    log::info!("Fetched {} new pending nutzaps", new_count);
+    Ok(new_count)
 }

@@ -376,7 +376,7 @@ use web_sys::IdbTransactionMode;
 #[cfg(target_arch = "wasm32")]
 const DB_NAME: &str = "cashu_wallet_db";
 #[cfg(target_arch = "wasm32")]
-const DB_VERSION: u32 = 5;
+const DB_VERSION: u32 = 6;
 
 // Object store names
 #[cfg(target_arch = "wasm32")]
@@ -491,6 +491,13 @@ impl IndexedDbDatabase {
             // V5: Add in-flight melt requests store for crash recovery
             if !db.object_store_names().any(|n| n == STORE_IN_FLIGHT_MELTS) {
                 db.create_object_store(STORE_IN_FLIGHT_MELTS)?;
+            }
+            // V6: Add nutzap stores for NIP-61 nutzap persistence
+            if !db.object_store_names().any(|n| n == STORE_NUTZAP_SETTINGS) {
+                db.create_object_store(STORE_NUTZAP_SETTINGS)?;
+            }
+            if !db.object_store_names().any(|n| n == STORE_PENDING_NUTZAPS) {
+                db.create_object_store(STORE_PENDING_NUTZAPS)?;
             }
 
             Ok(())

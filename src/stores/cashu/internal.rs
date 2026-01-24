@@ -599,6 +599,12 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     // Update local state with crash-safe atomic replacement
     // Uses add-before-delete pattern: worst case on crash is duplicate tokens (recoverable),
     // never lost tokens.
+    //
+    // SAFETY: Only perform atomic_token_replace when it's safe to do so:
+    // - If new_event_id.is_some(): We have a new token event, safe to replace
+    // - If available_proofs.is_empty(): No proofs left to track, safe to delete old events
+    // - Otherwise: Publish failed but proofs exist - do NOT delete old events or we lose tokens
+    let available_proofs_is_empty = available_proofs.is_empty();
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
         vec![super::types::TokenData {
             event_id: event_id.clone(),
@@ -611,12 +617,19 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         vec![]
     };
 
-    if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
-        log::error!("Failed atomic token replacement during cleanup: {}", e);
+    if new_event_id.is_some() || available_proofs_is_empty {
+        if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
+            log::error!("Failed atomic token replacement during cleanup: {}", e);
+        } else {
+            // Rebuild derived PROOF_EVENT_MAP from updated WALLET_TOKENS
+            // This ensures the map stays consistent with token state
+            super::proofs::rebuild_proof_event_map();
+        }
     } else {
-        // Rebuild derived PROOF_EVENT_MAP from updated WALLET_TOKENS
-        // This ensures the map stays consistent with token state
-        super::proofs::rebuild_proof_event_map();
+        log::error!(
+            "Skipping atomic_token_replace: publish failed but {} proofs remain - keeping old token events to prevent token loss",
+            tokens_to_add.len()
+        );
     }
 
     log::info!(

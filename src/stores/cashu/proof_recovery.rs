@@ -226,6 +226,9 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
 
     // SAFETY (Risk 4): Filter out proofs that are part of active in-flight melt operations
     // This prevents timeout recovery from interfering with still-running operations
+    // Note: ACTIVE_OPERATIONS tracks melt transaction IDs (strings), which is already
+    // covered by IN_FLIGHT_MELT_REQUESTS check via proof secrets. The numeric
+    // transaction_id in ProofData is a different concept used for local state tracking.
     {
         let in_flight = IN_FLIGHT_MELT_REQUESTS.read();
         let in_flight_secrets: std::collections::HashSet<&str> = in_flight

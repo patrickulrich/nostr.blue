@@ -63,7 +63,7 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         });
     };
 
-    // Redeem all pending nutzaps
+    // Redeem all pending nutzaps sequentially to avoid overwhelming the mint
     let on_redeem_all = move |_| {
         // Read from signal to get current state
         let pending: Vec<String> = cashu::PENDING_NUTZAPS
@@ -80,17 +80,50 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
         error_message.set(None);
         success_message.set(None);
 
-        for event_id in pending {
-            let event_id_clone = event_id.clone();
+        // Mark all pending IDs as redeeming upfront (optimistic UI update)
+        for event_id in &pending {
             redeeming_ids.write().insert(event_id.clone());
-
-            spawn(async move {
-                if let Err(e) = cashu::redeem_nutzap(&event_id_clone).await {
-                    log::error!("Failed to redeem {}: {}", event_id_clone, e);
-                }
-                redeeming_ids.write().remove(&event_id_clone);
-            });
         }
+
+        // Use single spawn with sequential processing to avoid overwhelming mint
+        spawn(async move {
+            let mut success_count = 0u32;
+            let mut error_count = 0u32;
+            let mut total_redeemed = 0u64;
+
+            for event_id in pending {
+                match cashu::redeem_nutzap(&event_id).await {
+                    Ok(result) => {
+                        success_count += 1;
+                        total_redeemed += result.amount;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to redeem {}: {}", event_id, e);
+                        error_count += 1;
+                    }
+                }
+                redeeming_ids.write().remove(&event_id);
+
+                // Small delay between redemptions to avoid overwhelming the mint
+                gloo_timers::future::TimeoutFuture::new(100).await;
+            }
+
+            // Set summary message after all complete
+            if error_count == 0 {
+                success_message.set(Some(format!(
+                    "Redeemed {} nutzaps ({} sats total)",
+                    success_count, total_redeemed
+                )));
+            } else {
+                success_message.set(Some(format!(
+                    "Redeemed {}/{} nutzaps ({} sats). {} failed.",
+                    success_count,
+                    success_count + error_count,
+                    total_redeemed,
+                    error_count
+                )));
+            }
+        });
     };
 
     // Calculate totals - read from signal for reactivity

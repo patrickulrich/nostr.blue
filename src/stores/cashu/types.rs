@@ -781,31 +781,26 @@ pub struct WalletTokensStore {
 impl WalletTokensStore {
     /// Compute available (spendable) balance from unspent proofs
     /// Following CDK pattern: balance is derived, never stored
+    /// Optimized: reuses single-pass balance_breakdown()
     pub fn available_balance(&self) -> u64 {
-        self.data
-            .iter()
-            .flat_map(|token| &token.proofs)
-            .filter(|proof| proof.state.is_spendable())
-            .map(|proof| proof.amount)
-            .fold(0u64, |acc, amt| acc.saturating_add(amt))
+        self.balance_breakdown().0
     }
 
     /// Compute pending balance (proofs in transient states)
+    /// Optimized: reuses single-pass balance_breakdown()
     pub fn pending_balance(&self) -> u64 {
-        self.data
-            .iter()
-            .flat_map(|token| &token.proofs)
-            .filter(|proof| proof.state.is_pending())
-            .map(|proof| proof.amount)
-            .fold(0u64, |acc, amt| acc.saturating_add(amt))
+        self.balance_breakdown().1
     }
 
     /// Compute total balance (available + pending)
+    /// Optimized: reuses single-pass balance_breakdown()
     pub fn total_balance(&self) -> u64 {
-        self.available_balance().saturating_add(self.pending_balance())
+        let (avail, pend) = self.balance_breakdown();
+        avail.saturating_add(pend)
     }
 
     /// Get balance breakdown (available, pending) in single pass
+    /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
         self.data
             .iter()
