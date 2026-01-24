@@ -375,8 +375,8 @@ pub async fn send_nutzap(
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation in progress for mint: {}", mint_url))?;
 
-    // Get our proofs for this mint
-    let all_proofs = get_proofs_for_mint(&mint_url)?;
+    // Get our proofs for this mint and unit
+    let all_proofs = get_proofs_for_mint(&mint_url, &compatible_mint.unit)?;
     if all_proofs.is_empty() {
         return Err("No tokens found for compatible mint".to_string());
     }
@@ -433,8 +433,8 @@ pub async fn send_nutzap(
     // Proofs are already spent at the mint - WALLET_TOKENS must reflect this
     // If publish fails later, the nutzap event will be queued for retry
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-    let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
-    update_local_state_after_nutzap_send(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    let event_ids_to_delete = get_event_ids_for_mint(&mint_url, &compatible_mint.unit);
+    update_local_state_after_nutzap_send(&mint_url, &compatible_mint.unit, &keep_proofs, &event_ids_to_delete).await?;
 
     // Build kind:9321 event AFTER updating local state
     // This ensures proofs are tracked even if publish fails
@@ -710,10 +710,10 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
         received_at: event.created_at.as_secs(),
     };
 
-    add_pending_nutzap(pending.clone());
+    let was_added = add_pending_nutzap(pending.clone());
 
-    // Auto-redeem if enabled
-    if *NUTZAP_AUTO_REDEEM.read() {
+    // Auto-redeem only for NEW nutzaps (not duplicates)
+    if was_added && *NUTZAP_AUTO_REDEEM.read() {
         spawn(async move {
             match redeem_nutzap(&pending.event_id).await {
                 Ok(result) => {
@@ -840,7 +840,7 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
         .map_err(|e| format!("Failed to get proofs: {}", e))?;
 
     // Publish token event with new proofs
-    let new_event_id = publish_redeemed_token_event(mint_url, &new_proofs).await?;
+    let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs).await?;
 
     // Update local state
     {
@@ -926,15 +926,18 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
 // Internal Helpers
 // =============================================================================
 
-/// Get CDK proofs for a specific mint (only spendable proofs)
-fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> {
+/// Get CDK proofs for a specific mint and unit (only spendable proofs)
+fn get_proofs_for_mint(mint_url: &str, unit: &str) -> Result<Vec<cdk::nuts::Proof>, String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
 
     let mut all_proofs = Vec::new();
 
-    for token in tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)) {
+    for token in tokens
+        .iter()
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
+    {
         for proof in &token.proofs {
             // Only include spendable proofs (filter out pending/spent)
             if proof.state == super::types::ProofState::Unspent {
@@ -946,15 +949,15 @@ fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> 
     Ok(all_proofs)
 }
 
-/// Get event IDs for a specific mint's tokens
-fn get_event_ids_for_mint(mint_url: &str) -> Vec<String> {
+/// Get event IDs for a specific mint and unit's tokens
+fn get_event_ids_for_mint(mint_url: &str, unit: &str) -> Vec<String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
 
     tokens
         .iter()
-        .filter(|t| mint_matches(&t.mint, mint_url))
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
         .map(|t| t.event_id.clone())
         .collect()
 }
@@ -962,6 +965,7 @@ fn get_event_ids_for_mint(mint_url: &str) -> Vec<String> {
 /// Update local state after sending a nutzap
 async fn update_local_state_after_nutzap_send(
     mint_url: &str,
+    unit: &str,
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
 ) -> Result<(), String> {
@@ -972,7 +976,7 @@ async fn update_local_state_after_nutzap_send(
     }
 
     // Publish new token event with change proofs
-    let new_event_id = publish_change_token_event(mint_url, keep_proofs).await?;
+    let new_event_id = publish_change_token_event(mint_url, unit, keep_proofs).await?;
 
     // Update local state
     let keep_proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -980,7 +984,7 @@ async fn update_local_state_after_nutzap_send(
     let token = TokenData {
         event_id: new_event_id.clone(),
         mint: mint_url.to_string(),
-        unit: "sat".to_string(),
+        unit: unit.to_string(),
         proofs: keep_proof_data.clone(),
         created_at: chrono::Utc::now().timestamp() as u64,
     };
@@ -994,6 +998,7 @@ async fn update_local_state_after_nutzap_send(
 /// Publish a token event for change proofs after nutzap send
 async fn publish_change_token_event(
     mint_url: &str,
+    unit: &str,
     proofs: &[cdk::nuts::Proof],
 ) -> Result<String, String> {
     let signer = crate::stores::signer::get_signer()
@@ -1012,7 +1017,7 @@ async fn publish_change_token_event(
 
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.to_string(),
-        unit: "sat".to_string(),
+        unit: unit.to_string(),
         proofs: extended_proofs,
         del: vec![],
     };
@@ -1073,10 +1078,11 @@ async fn publish_change_token_event(
 /// Publish a token event for redeemed nutzap proofs
 async fn publish_redeemed_token_event(
     mint_url: &str,
+    unit: &str,
     proofs: &[cdk::nuts::Proof],
 ) -> Result<String, String> {
     // Same as change event, just different context
-    publish_change_token_event(mint_url, proofs).await
+    publish_change_token_event(mint_url, unit, proofs).await
 }
 
 /// Fetch existing nutzaps from relays (for initial load)

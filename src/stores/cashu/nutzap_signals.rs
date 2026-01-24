@@ -58,15 +58,21 @@ pub fn get_cached_nutzap_info(pubkey: &str) -> Option<NutzapInfo> {
 }
 
 /// Add a pending nutzap
-pub fn add_pending_nutzap(nutzap: PendingNutzap) {
+///
+/// Returns `true` if the nutzap was added, `false` if it was a duplicate.
+/// This allows callers to skip auto-redeem for duplicates.
+pub fn add_pending_nutzap(nutzap: PendingNutzap) -> bool {
     let event_id = nutzap.event_id.clone();
     let mut pending = PENDING_NUTZAPS.write();
 
-    // Avoid duplicates
-    if !pending.iter().any(|n| n.event_id == event_id) {
-        pending.push(nutzap);
-        log::debug!("Added pending nutzap: {}", event_id);
+    if pending.iter().any(|n| n.event_id == event_id) {
+        log::debug!("Skipped duplicate nutzap: {}", event_id);
+        return false;
     }
+
+    pending.push(nutzap);
+    log::debug!("Added pending nutzap: {}", event_id);
+    true
 }
 
 /// Remove a pending nutzap by event ID
