@@ -5,6 +5,21 @@
 //! - Proof consolidation
 //! - Denomination optimization
 //! - Atomic swaps between keysets
+//!
+//! # State Management Warning
+//!
+//! These functions call CDK's swap directly. CDK handles proof state in its
+//! localstore (IndexedDB), but these functions do NOT:
+//! - Update WALLET_TOKENS (NIP-60 Nostr state)
+//! - Publish token events (kind 7375) to Nostr relays
+//! - Create history events (kind 7376)
+//! - Handle relay publish failures or retry queuing
+//!
+//! CDK's crash recovery will restore proofs to its localstore, but without
+//! NIP-60 sync, proofs won't appear in wallet UI or sync across devices.
+//!
+//! Currently marked as dead_code until NIP-60 state wrappers are added.
+//! For safe operations, use send.rs/receive.rs which handle full state sync.
 
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]

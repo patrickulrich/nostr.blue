@@ -323,6 +323,11 @@ pub async fn init_wallet() -> Result<(), String> {
                                 }
                             }
 
+                            // Phase 4: Final balance consistency check
+                            // Ensures balance matches proofs regardless of what recovery phases did
+                            super::proof_recovery::recalculate_balance();
+                            log::debug!("Final balance recalculation complete");
+
                             log::info!("Wallet recovery complete");
                             *WALLET_STATUS.write() = WalletStatus::Ready;
                         });

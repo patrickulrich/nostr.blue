@@ -69,20 +69,27 @@ pub fn get_event_ids_for_proofs(proof_secrets: &[String]) -> Vec<String> {
 
 /// Rebuild the proof-to-event map from WALLET_TOKENS (called on initialization)
 pub fn rebuild_proof_event_map() {
-    let mut map = PROOF_EVENT_MAP.write();
-    map.clear();
+    // Build new map without holding the write lock
+    // Readers can still access old map during this phase
+    let new_map = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
 
-    let store = WALLET_TOKENS.read();
-    let data = store.data();
-    let tokens = data.read();
-
-    for token in tokens.iter() {
-        for proof in &token.proofs {
-            map.insert(proof.secret.clone(), token.event_id.clone());
+        let mut map = std::collections::HashMap::new();
+        for token in tokens.iter() {
+            for proof in &token.proofs {
+                map.insert(proof.secret.clone(), token.event_id.clone());
+            }
         }
-    }
+        map
+    };
 
-    log::debug!("Rebuilt proof-event map with {} entries", map.len());
+    // Atomic swap - minimal write lock time
+    // Readers see either complete old map OR complete new map, never empty
+    *PROOF_EVENT_MAP.write() = new_map;
+
+    log::debug!("Rebuilt proof-event map with {} entries", PROOF_EVENT_MAP.read().len());
 }
 
 // =============================================================================
