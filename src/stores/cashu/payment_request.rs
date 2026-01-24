@@ -446,22 +446,35 @@ pub async fn pay_payment_request(
 
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-        match client.send_event_builder(builder.clone()).await {
+        new_event_id = Some(match client.send_event_builder(builder.clone()).await {
             Ok(event_output) => {
-                new_event_id = Some(event_output.id().to_hex());
+                // Check if at least one relay accepted (nostr-sdk Output<T> pattern)
+                if event_output.success.is_empty() {
+                    log::warn!("No relays accepted token event, queuing for retry");
+                    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                    queue_event_for_retry(
+                        builder,
+                        PendingEventType::TokenEvent,
+                        Some(pending_id.clone()),
+                        Some(mint_url.clone()),
+                    ).await;
+                    pending_id
+                } else {
+                    event_output.id().to_hex()
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish token event: {}", e);
-                // Generate pending ID for retry tracking
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                 queue_event_for_retry(
                     builder,
                     PendingEventType::TokenEvent,
-                    Some(pending_id),
+                    Some(pending_id.clone()),
                     Some(mint_url.clone()),
                 ).await;
+                pending_id
             }
-        }
+        });
     } else {
         // No remaining proofs - publish deletion
         if !event_ids_to_delete.is_empty() {

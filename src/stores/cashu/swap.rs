@@ -241,6 +241,37 @@ pub async fn execute_swap_with_nip60(
     let _lock = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation in progress for {}", mint_url))?;
 
+    // Validate that input_proofs is the COMPLETE spendable set for this mint
+    // This prevents orphaned events from partial proof sets
+    let all_spendable = get_proofs_for_mint(&mint_url)?;
+    if input_proofs.len() != all_spendable.len() {
+        // Quick check: if counts differ, definitely incomplete
+        return Err(format!(
+            "Incomplete proof set: got {} proofs, wallet has {} spendable proofs for {}. \
+             Use get_proofs_for_mint() or a high-level function like swap_refresh().",
+            input_proofs.len(),
+            all_spendable.len(),
+            mint_url
+        ));
+    }
+
+    // Full validation: compare proof secrets to ensure exact match
+    let input_secrets: std::collections::HashSet<_> = input_proofs
+        .iter()
+        .map(|p| &p.secret)
+        .collect();
+    let wallet_secrets: std::collections::HashSet<_> = all_spendable
+        .iter()
+        .map(|p| &p.secret)
+        .collect();
+
+    if input_secrets != wallet_secrets {
+        return Err(
+            "Proof set mismatch: input proofs don't match wallet's spendable proofs. \
+             Ensure you're passing the complete set from get_proofs_for_mint().".to_string()
+        );
+    }
+
     // 2. Get event IDs for input proofs (for del tags)
     let input_secrets: Vec<String> = input_proofs.iter().map(|p| p.secret.clone()).collect();
     let event_ids_to_delete = get_event_ids_for_proofs(&input_secrets);
