@@ -424,8 +424,15 @@ pub async fn send_nutzap(
         .await
         .map_err(|e| format!("Failed to get change proofs: {}", e))?;
 
-    // Build kind:9321 event BEFORE updating local state
-    // This ensures we can recover if publish fails
+    // CRITICAL: Update local state IMMEDIATELY after successful swap
+    // Proofs are already spent at the mint - WALLET_TOKENS must reflect this
+    // If publish fails later, the nutzap event will be queued for retry
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
+    let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
+    update_local_state_after_nutzap_send(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+
+    // Build kind:9321 event AFTER updating local state
+    // This ensures proofs are tracked even if publish fails
     let mut tags = Vec::new();
 
     // Add proof tags (each proof as separate tag with DLEQ)
@@ -456,9 +463,9 @@ pub async fn send_nutzap(
         }
     }
 
-    // Build and publish event FIRST (before local state update)
+    // Build and publish event (after local state update)
     let content = comment.unwrap_or("");
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
+    let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -472,21 +479,27 @@ pub async fn send_nutzap(
         .await
         .map_err(|e| format!("Failed to publish nutzap: {}", e))?;
 
-    // Check if at least one relay succeeded (nostr-sdk auto-saves to local DB before relay)
-    if output.success.is_empty() {
-        // All relays failed - proofs are still in CDK, recoverable on next sync
-        return Err(format!(
-            "Nutzap failed on all relays: {:?}",
+    // Check if at least one relay succeeded
+    let event_id = if output.success.is_empty() {
+        // All relays failed - local state already updated, queue nutzap for retry
+        // Reuse tags for retry builder
+        let builder_for_retry = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags);
+        super::events::queue_event_for_retry(
+            builder_for_retry,
+            super::types::PendingEventType::NutzapEvent,
+            Some(pending_event_id.clone()),
+            Some(mint_url.to_string()),
+        ).await;
+        log::warn!(
+            "Nutzap failed on all relays, queued for retry: {:?}",
             output.failed.keys().collect::<Vec<_>>()
-        ));
-    }
-
-    let event_id = output.id().to_hex();
-    log::info!("Published nutzap event: {} (to {} relays)", event_id, output.success.len());
-
-    // NOW update local state - proofs have been successfully sent
-    let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
-    update_local_state_after_nutzap_send(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+        );
+        pending_event_id.clone()
+    } else {
+        let real_event_id = output.id().to_hex();
+        log::info!("Published nutzap event: {} (to {} relays)", real_event_id, output.success.len());
+        real_event_id
+    };
 
     // Create history event
     if let Err(e) =

@@ -452,7 +452,14 @@ pub async fn pay_payment_request(
             }
             Err(e) => {
                 log::warn!("Failed to publish token event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                // Generate pending ID for retry tracking
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id),
+                    Some(mint_url.clone()),
+                ).await;
             }
         }
     } else {
@@ -469,7 +476,7 @@ pub async fn pay_payment_request(
             let builder = nostr_sdk::EventBuilder::delete(deletion_request);
             if let Err(e) = client.send_event_builder(builder.clone()).await {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent).await;
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
             }
         }
     }
@@ -753,11 +760,18 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
     let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => Some(event_output.id().to_hex()),
+        Ok(event_output) => event_output.id().to_hex(),
         Err(e) => {
             log::warn!("Failed to publish token event: {}", e);
-            queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
-            None
+            // Generate pending ID for retry tracking
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+            queue_event_for_retry(
+                builder,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            ).await;
+            pending_id
         }
     };
 
@@ -767,8 +781,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         let mut data = store.data();
         let mut tokens = data.write();
 
-        let event_id =
-            new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+        let event_id = new_event_id;
         tokens.push(TokenData {
             event_id: event_id.clone(),
             mint: mint_url.to_string(),

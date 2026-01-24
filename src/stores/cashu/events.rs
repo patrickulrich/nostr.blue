@@ -64,6 +64,7 @@ pub async fn queue_nostr_event(
             PendingEventType::DeletionEvent => "deletion",
             PendingEventType::HistoryEvent => "history",
             PendingEventType::QuoteEvent => "quote",
+            PendingEventType::NutzapEvent => "nutzap",
         },
         event_id);
 
@@ -154,29 +155,25 @@ pub async fn sign_event_builder(builder: nostr_sdk::EventBuilder) -> Result<nost
 }
 
 /// Queue an EventBuilder for retry when initial publication fails
-pub async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
-    match sign_event_builder(builder).await {
-        Ok(event) => {
-            match serde_json::to_string(&event) {
-                Ok(event_json) => {
-                    match queue_nostr_event(event_json, event_type).await {
-                        Ok(queue_id) => {
-                            log::info!("Queued failed event for retry: {}", queue_id);
-                        }
-                        Err(queue_err) => {
-                            log::error!("Failed to queue event for retry: {}", queue_err);
-                        }
-                    }
-                }
-                Err(json_err) => {
-                    log::error!("Failed to serialize event for queueing: {}", json_err);
-                }
-            }
+///
+/// Optional `pending_token_id` and `mint_url` link this pending event to a token
+/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
+/// publish succeeds.
+pub async fn queue_event_for_retry(
+    builder: nostr_sdk::EventBuilder,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) {
+    let event = match sign_event_builder(builder).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("Failed to sign event for queueing: {}", e);
+            return;
         }
-        Err(sign_err) => {
-            log::error!("Failed to sign event for queueing: {}", sign_err);
-        }
-    }
+    };
+
+    queue_signed_event_for_retry(event, event_type, pending_token_id, mint_url).await;
 }
 
 /// Queue a token event for retry with tracking info

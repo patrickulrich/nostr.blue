@@ -398,7 +398,14 @@ pub async fn execute_mpp_melt(
                         }
                         Err(e) => {
                             log::warn!("Failed to publish MPP token event for {}, queuing for retry: {}", mint_url, e);
-                            queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                            // Generate pending ID for retry tracking
+                            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                            queue_event_for_retry(
+                                builder,
+                                PendingEventType::TokenEvent,
+                                Some(pending_id),
+                                Some(mint_url.clone()),
+                            ).await;
                             publish_failures += 1;
                         }
                     }
@@ -463,7 +470,7 @@ pub async fn execute_mpp_melt(
                     }
                     Err(e) => {
                         log::warn!("Failed to publish MPP deletion event, will queue for retry: {}", e);
-                        queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                        queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                     }
                 }
             }

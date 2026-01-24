@@ -852,6 +852,8 @@ pub enum PendingEventType {
     DeletionEvent,
     HistoryEvent,
     QuoteEvent,
+    /// NIP-61 nutzap events (kind 9321)
+    NutzapEvent,
 }
 
 /// Pending Nostr event awaiting publication

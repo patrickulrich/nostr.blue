@@ -298,10 +298,14 @@ pub async fn execute_swap_with_nip60(
     // CRITICAL: For amount=Some(x), we must store BOTH the returned proofs AND
     // any change proofs that CDK stored internally. The returned proofs may be
     // for ourselves (e.g., swap_to_locked) or for sending to others.
+    //
+    // NOTE: CDK marks send_proofs as State::Reserved (not Unspent), so we must
+    // fetch both get_unspent_proofs() AND get_reserved_proofs() to capture all.
     let output_proofs = match swap_result {
         Some(send_proofs) => {
             // For amount=Some(x) swaps, CDK returns proofs totaling x
             // AND stores any change proofs internally as Unspent
+            // The send_proofs are marked as Reserved in CDK's localstore
             //
             // We need to store ALL new proofs (send + change) in WALLET_TOKENS
             // because this function is used for internal wallet operations
@@ -311,13 +315,29 @@ pub async fn execute_swap_with_nip60(
                 .await
                 .map_err(|e| format!("Failed to get proofs after swap: {}", e))?;
 
-            // Filter to only NEW proofs (those with Y values not in input_ys)
-            // This includes both send_proofs and change_proofs
-            let new_proofs: Vec<_> = all_unspent
-                .into_iter()
+            // Also get reserved proofs (CDK marks send_proofs as Reserved)
+            let reserved = wallet
+                .get_reserved_proofs()
+                .await
+                .map_err(|e| format!("Failed to get reserved proofs: {}", e))?;
+
+            // Merge and dedupe by Y value, filtering out input proofs
+            let mut seen_ys: HashSet<String> = HashSet::new();
+            let merged: Vec<_> = send_proofs.iter()
+                .chain(all_unspent.iter())
+                .chain(reserved.iter())
                 .filter(|p| {
                     match p.y() {
-                        Ok(y) => !input_ys.contains(&y.to_string()),
+                        Ok(y) => {
+                            let y_str = y.to_string();
+                            // Skip if it's an input proof or already seen
+                            if input_ys.contains(&y_str) || seen_ys.contains(&y_str) {
+                                false
+                            } else {
+                                seen_ys.insert(y_str);
+                                true
+                            }
+                        }
                         Err(e) => {
                             // Escalate to error level for visibility - this should never happen
                             // and indicates a potential fund loss scenario
@@ -329,17 +349,18 @@ pub async fn execute_swap_with_nip60(
                         }
                     }
                 })
+                .cloned()
                 .collect();
 
-            if new_proofs.len() > send_proofs.len() {
+            if merged.len() > send_proofs.len() {
                 log::info!(
                     "Swap produced {} send proofs + {} change proofs",
                     send_proofs.len(),
-                    new_proofs.len() - send_proofs.len()
+                    merged.len() - send_proofs.len()
                 );
             }
 
-            new_proofs
+            merged
         }
         None => {
             // For amount=None swaps, ALL new proofs stored internally
@@ -392,7 +413,7 @@ pub async fn execute_swap_with_nip60(
     // 7. Attempt Nostr publish (safe to fail - local state already updated)
     // nostr-sdk saves to local database before relay transmission
     let final_event_id =
-        match publish_swap_events(&mint_url, &output_proofs, &event_ids_to_delete).await {
+        match publish_swap_events(&mint_url, &output_proofs, &event_ids_to_delete, &pending_event_id).await {
             Ok(real_id) => {
                 // Update token with real Nostr event ID
                 update_token_event_id(&pending_event_id, &real_id);
@@ -494,6 +515,7 @@ async fn publish_swap_events(
     mint_url: &str,
     output_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
+    pending_event_id: &str,
 ) -> Result<String, String> {
     if output_proofs.is_empty() {
         return Err("No proofs to publish".to_string());
@@ -560,10 +582,11 @@ async fn publish_swap_events(
                 "Failed to publish swap token event, queuing for retry: {}",
                 e
             );
+            // Use pending_event_id (not event_id_hex) so retry can find the token in WALLET_TOKENS
             queue_signed_event_for_retry(
                 signed_event,
                 PendingEventType::TokenEvent,
-                Some(event_id_hex.clone()),
+                Some(pending_event_id.to_string()),
                 Some(mint_url.to_string()),
             ).await;
 
@@ -589,7 +612,7 @@ async fn publish_swap_events(
                         "Swapped token"
                     ).tags(tags);
 
-                    super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                    super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                 }
             }
             // Still return the event ID - it will be published on retry
@@ -637,7 +660,7 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         }
         Err(e) => {
             log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-            super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent)
+            super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None)
                 .await;
         }
     }
