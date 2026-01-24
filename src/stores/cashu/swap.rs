@@ -378,7 +378,8 @@ pub async fn execute_swap_with_nip60(
     // 6. IMMEDIATELY update local state with pending event ID
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
-    let pending_event_id = format!("pending_{}", now_secs());
+    // Use UUID to prevent collision when multiple operations occur within same second
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
     update_local_state_after_swap(
         &mint_url,
         &output_proofs,
@@ -442,13 +443,21 @@ pub async fn execute_swap_with_nip60(
     })
 }
 
-/// Update local state after swap using Dioxus write pattern
+/// Update local state after swap using crash-safe atomic replacement
+///
+/// Uses add-before-delete pattern via atomic_token_replace: worst case on crash
+/// is duplicate tokens (recoverable), never lost tokens.
 fn update_local_state_after_swap(
     mint_url: &str,
     output_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
     new_event_id: &str,
 ) -> Result<(), String> {
+    // CRITICAL: Validate output_proofs is non-empty before any destructive operation
+    if output_proofs.is_empty() {
+        return Err("Cannot update state with empty output proofs".to_string());
+    }
+
     // Convert proofs first (outside the lock)
     let proof_data: Vec<ProofData> = output_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
@@ -460,19 +469,8 @@ fn update_local_state_after_swap(
         created_at: now_secs(),
     };
 
-    // Update WALLET_TOKENS
-    let store = WALLET_TOKENS.read();
-    let mut data = store.data();
-    let mut tokens_write = data.write();
-
-    // Remove old token events
-    tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-    // Add new token with output proofs
-    tokens_write.push(new_token);
-
-    // Drop write guard before updating balance
-    drop(tokens_write);
+    // Crash-safe: ADD FIRST, then DELETE (via atomic_token_replace)
+    super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
 
     // Register proofs in event map
     register_proofs_in_event_map(new_event_id, &proof_data);

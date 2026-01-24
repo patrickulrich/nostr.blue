@@ -611,6 +611,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
 
     if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
         log::error!("Failed atomic token replacement during cleanup: {}", e);
+    } else {
+        // Rebuild derived PROOF_EVENT_MAP from updated WALLET_TOKENS
+        // This ensures the map stays consistent with token state
+        super::proofs::rebuild_proof_event_map();
     }
 
     log::info!(

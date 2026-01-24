@@ -910,12 +910,24 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
 
         match client.send_event_builder(builder).await {
             Ok(output) => {
-                let real_event_id = output.id().to_hex();
-                log::info!("Reconciled pending token: {} -> {}", old_event_id, real_event_id);
+                // Check if at least one relay succeeded (nostr-sdk auto-saves locally before relay)
+                if !output.success.is_empty() {
+                    let real_event_id = output.id().to_hex();
+                    log::info!(
+                        "Reconciled pending token: {} -> {} (to {} relays)",
+                        old_event_id, real_event_id, output.success.len()
+                    );
 
-                // Update in WALLET_TOKENS
-                update_token_event_id(&old_event_id, &real_event_id);
-                reconciled += 1;
+                    // Update in WALLET_TOKENS
+                    update_token_event_id(&old_event_id, &real_event_id);
+                    reconciled += 1;
+                } else {
+                    // No relays accepted - keep pending ID for future retry
+                    log::warn!(
+                        "No relays accepted reconciliation event for {}, will retry later",
+                        old_event_id
+                    );
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish reconciliation event for {}: {}", old_event_id, e);
@@ -998,8 +1010,21 @@ pub async fn publish_orphaned_proofs_event(
 
     // Publish (nostr-sdk saves locally first)
     match client.send_event(&signed_event).await {
-        Ok(_) => {
-            log::info!("Published orphaned proofs token event: {}", event_id_hex);
+        Ok(output) => {
+            // Check if at least one relay succeeded
+            if !output.success.is_empty() {
+                log::info!(
+                    "Published orphaned proofs token event: {} (to {} relays)",
+                    event_id_hex, output.success.len()
+                );
+            } else {
+                // No relays accepted - queue for retry
+                log::warn!(
+                    "No relays accepted orphaned proofs event {}, queuing for retry",
+                    event_id_hex
+                );
+                queue_signed_event_for_retry(signed_event, PendingEventType::TokenEvent).await;
+            }
         }
         Err(e) => {
             log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);

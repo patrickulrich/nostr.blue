@@ -143,10 +143,23 @@ pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
 /// pattern by making the in-memory signal the source of truth during execution.
 /// On crash/reload, IndexedDB provides the persistent copy for recovery.
 pub async fn persist_single_in_flight_request(request: &super::types::InFlightMeltRequest) -> Result<(), String> {
-    // 1. Update in-memory signal FIRST (instant, non-async) - no race window
-    IN_FLIGHT_MELT_REQUESTS.write().push(request.clone());
+    // 1. Check for duplicate and update in-memory signal atomically
+    {
+        let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
 
-    // 2. Then persist to IndexedDB (async, for crash recovery)
+        // Dedupe: skip if transaction_id already exists
+        if requests.iter().any(|r| r.transaction_id == request.transaction_id) {
+            log::debug!("In-flight request {} already exists, skipping", request.transaction_id);
+            return Ok(());
+        }
+
+        requests.push(request.clone());
+    }
+
+    // 2. Update ACTIVE_OPERATIONS in same synchronous section
+    ACTIVE_OPERATIONS.write().insert(request.transaction_id.clone());
+
+    // 3. Then persist to IndexedDB (async, for crash recovery)
     let localstore = SHARED_LOCALSTORE.read().as_ref()
         .ok_or("Localstore not initialized")?
         .clone();
