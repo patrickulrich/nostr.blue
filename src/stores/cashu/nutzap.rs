@@ -69,6 +69,8 @@ pub struct PendingNutzap {
     pub amount: u64,
     /// Mint URL
     pub mint_url: String,
+    /// Currency unit (e.g., "sat", "usd")
+    pub unit: String,
     /// Optional comment from sender
     pub comment: Option<String>,
     /// Event being nutzapped (optional)
@@ -244,15 +246,18 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
 
     let filter = Filter::new()
         .author(pubkey_parsed)
-        .kind(Kind::from(10019))
-        .limit(1);
+        .kind(Kind::from(10019));
 
     let events = client
         .fetch_events(filter, Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch nutzap info: {}", e))?;
 
-    let event = events
+    // Sort by created_at descending and take newest
+    let mut events_vec: Vec<_> = events.into_iter().collect();
+    events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    let event = events_vec
         .into_iter()
         .next()
         .ok_or_else(|| format!("No nutzap info found for {}", pubkey))?;
@@ -613,7 +618,7 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
     // Extract data from tags
     let mut proofs_json = Vec::new();
     let mut mint_url = None;
-    let mut _unit = "sat".to_string();
+    let mut unit = "sat".to_string();
     let mut target_event_id = None;
     let mut target_kind = None;
 
@@ -634,7 +639,7 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
             }
             "unit" => {
                 if let Some(content) = tag_content {
-                    _unit = content.to_string();
+                    unit = content.to_string();
                 }
             }
             "e" => {
@@ -692,6 +697,7 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<(), String
         sender_pubkey: event.pubkey.to_hex(),
         amount,
         mint_url,
+        unit,
         comment: if event.content.is_empty() {
             None
         } else {
@@ -771,25 +777,11 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
     Ok(())
 }
 
-/// Redeem a pending nutzap
-///
-/// Receives the P2PK-locked proofs and creates a history event with "redeemed" tag.
-pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String> {
+/// Internal redemption logic - extracted for proper error handling
+async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<NutzapRedeemResult, String> {
     use cdk::nuts::Token;
     use cdk::wallet::ReceiveOptions;
-
-    log::info!("Redeeming nutzap: {}", event_id);
-
-    // Find the pending nutzap
-    let pending = PENDING_NUTZAPS
-        .read()
-        .iter()
-        .find(|n| n.event_id == event_id)
-        .cloned()
-        .ok_or_else(|| format!("Pending nutzap not found: {}", event_id))?;
-
-    // Update status to redeeming
-    update_pending_nutzap_status(event_id, NutzapStatus::Redeeming);
+    use std::str::FromStr;
 
     let mint_url = &pending.mint_url;
 
@@ -816,11 +808,15 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
         .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
+    // CurrencyUnit::from_str never fails - unknown units become Custom(String)
+    let currency_unit = cdk::nuts::CurrencyUnit::from_str(&pending.unit)
+        .expect("CurrencyUnit::from_str never fails");
+
     let token = Token::new(
         mint_url_parsed,
         cdk_proofs,
         None,
-        cdk::nuts::CurrencyUnit::Sat,
+        currency_unit,
     );
 
     // Receive with P2PK signing keys
@@ -856,7 +852,7 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
         tokens.push(TokenData {
             event_id: new_event_id.clone(),
             mint: mint_url.to_string(),
-            unit: "sat".to_string(),
+            unit: pending.unit.clone(),
             proofs: proof_data.clone(),
             created_at: chrono::Utc::now().timestamp() as u64,
         });
@@ -884,10 +880,6 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
         }
     };
 
-    // Update nutzap status
-    update_pending_nutzap_status(event_id, NutzapStatus::Redeemed);
-    remove_pending_nutzap(event_id);
-
     // Sync wallet state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync wallet state after nutzap redeem: {}", e);
@@ -897,6 +889,37 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
         amount,
         history_event_id,
     })
+}
+
+/// Redeem a pending nutzap
+///
+/// Receives the P2PK-locked proofs and creates a history event with "redeemed" tag.
+pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String> {
+    log::info!("Redeeming nutzap: {}", event_id);
+
+    // Find the pending nutzap
+    let pending = PENDING_NUTZAPS
+        .read()
+        .iter()
+        .find(|n| n.event_id == event_id)
+        .cloned()
+        .ok_or_else(|| format!("Pending nutzap not found: {}", event_id))?;
+
+    // Update status to redeeming
+    update_pending_nutzap_status(event_id, NutzapStatus::Redeeming);
+
+    // Call inner function and handle status updates
+    match redeem_nutzap_inner(&pending, event_id).await {
+        Ok(result) => {
+            update_pending_nutzap_status(event_id, NutzapStatus::Redeemed);
+            remove_pending_nutzap(event_id);
+            Ok(result)
+        }
+        Err(e) => {
+            update_pending_nutzap_status(event_id, NutzapStatus::Failed(e.clone()));
+            Err(e)
+        }
+    }
 }
 
 // =============================================================================
