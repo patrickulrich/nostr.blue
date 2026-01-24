@@ -143,6 +143,30 @@ pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
     Ok(())
 }
 
+/// Persist a single in-flight melt request atomically
+///
+/// SAFETY: Called BEFORE adding to memory to ensure crash recovery data exists.
+/// This follows CDK's write-ahead logging pattern - persist first, then modify memory.
+/// If persistence fails, the caller should abort the melt operation.
+pub async fn persist_single_in_flight_request(request: &super::types::InFlightMeltRequest) -> Result<(), String> {
+    let localstore = SHARED_LOCALSTORE.read().as_ref()
+        .ok_or("Localstore not initialized")?
+        .clone();
+
+    // Load existing requests, append new one, save all
+    let mut requests = localstore.load_in_flight_melt_requests().await
+        .map_err(|e| format!("Failed to load existing requests: {}", e))?
+        .unwrap_or_default();
+
+    requests.push(request.clone());
+
+    localstore.save_in_flight_melt_requests(&requests).await
+        .map_err(|e| format!("Failed to save in-flight request: {}", e))?;
+
+    log::debug!("Persisted in-flight melt request {} to IndexedDB (write-ahead)", request.transaction_id);
+    Ok(())
+}
+
 /// Load in-flight melt requests from IndexedDB (call on startup)
 ///
 /// Restores the in-flight melt state from the previous session for recovery.

@@ -257,6 +257,14 @@ pub async fn execute_swap_with_nip60(
         .ok_or("Input value overflow")?;
     let input_count = cdk_proofs.len();
 
+    // Track input Y values for filtering change proofs later
+    // CDK stores change proofs internally, we need to identify them
+    use std::collections::HashSet;
+    let input_ys: HashSet<String> = cdk_proofs
+        .iter()
+        .filter_map(|p| p.y().ok().map(|y| y.to_string()))
+        .collect();
+
     log::info!(
         "Executing NIP-60 swap: {} proofs ({} sats) at {}",
         input_count,
@@ -284,15 +292,75 @@ pub async fn execute_swap_with_nip60(
     // 5. Handle Option<Proofs> return type
     // - amount=Some(x): Returns Some(proofs) to send, change stored internally
     // - amount=None: Returns None, ALL new proofs stored internally
+    //
+    // CRITICAL: For amount=Some(x), we must store BOTH the returned proofs AND
+    // any change proofs that CDK stored internally. The returned proofs may be
+    // for ourselves (e.g., swap_to_locked) or for sending to others.
     let output_proofs = match swap_result {
-        Some(proofs) => proofs,
-        None => {
-            // For amount=None swaps, fetch new proofs from CDK localstore
-            // They were stored as Unspent during the swap
-            wallet
+        Some(send_proofs) => {
+            // For amount=Some(x) swaps, CDK returns proofs totaling x
+            // AND stores any change proofs internally as Unspent
+            //
+            // We need to store ALL new proofs (send + change) in WALLET_TOKENS
+            // because this function is used for internal wallet operations
+            // (like swap_to_locked) where all proofs belong to us.
+            let all_unspent = wallet
                 .get_unspent_proofs()
                 .await
-                .map_err(|e| format!("Failed to get swapped proofs: {}", e))?
+                .map_err(|e| format!("Failed to get proofs after swap: {}", e))?;
+
+            // Filter to only NEW proofs (those with Y values not in input_ys)
+            // This includes both send_proofs and change_proofs
+            let new_proofs: Vec<_> = all_unspent
+                .into_iter()
+                .filter(|p| {
+                    match p.y() {
+                        Ok(y) => !input_ys.contains(&y.to_string()),
+                        Err(e) => {
+                            log::warn!(
+                                "Y_VALUE_COMPUTATION_FAILED in swap: proof_amount={}, error='{}' - skipping",
+                                u64::from(p.amount), e
+                            );
+                            false
+                        }
+                    }
+                })
+                .collect();
+
+            if new_proofs.len() > send_proofs.len() {
+                log::info!(
+                    "Swap produced {} send proofs + {} change proofs",
+                    send_proofs.len(),
+                    new_proofs.len() - send_proofs.len()
+                );
+            }
+
+            new_proofs
+        }
+        None => {
+            // For amount=None swaps, ALL new proofs stored internally
+            // Get all unspent and filter to only new proofs
+            let all_unspent = wallet
+                .get_unspent_proofs()
+                .await
+                .map_err(|e| format!("Failed to get swapped proofs: {}", e))?;
+
+            // Filter to only NEW proofs (those with Y values not in input_ys)
+            all_unspent
+                .into_iter()
+                .filter(|p| {
+                    match p.y() {
+                        Ok(y) => !input_ys.contains(&y.to_string()),
+                        Err(e) => {
+                            log::warn!(
+                                "Y_VALUE_COMPUTATION_FAILED in swap: proof_amount={}, error='{}' - skipping",
+                                u64::from(p.amount), e
+                            );
+                            false
+                        }
+                    }
+                })
+                .collect()
         }
     };
 

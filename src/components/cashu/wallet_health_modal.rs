@@ -165,8 +165,10 @@ fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) ->
 
             // Proofs list
             div { class: "space-y-1 text-sm text-muted-foreground",
-                for proof in proofs.iter() {
-                    div { class: "flex justify-between pl-4",
+                for (index, proof) in proofs.iter().enumerate() {
+                    div {
+                        key: "{index}",
+                        class: "flex justify-between pl-4",
                         span { "{format_sats_with_separator(proof.amount)} - {proof.state:?}" }
                         span { "{format_duration(proof.stuck_duration_secs)}" }
                     }
