@@ -474,9 +474,17 @@ pub async fn pay_payment_request(
             }
 
             let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-            if let Err(e) = client.send_event_builder(builder.clone()).await {
-                log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+            match client.send_event_builder(builder.clone()).await {
+                Ok(output) => {
+                    if output.success.is_empty() {
+                        log::warn!("No relays accepted deletion event, queuing for retry");
+                        queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish deletion event: {}", e);
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                }
             }
         }
     }

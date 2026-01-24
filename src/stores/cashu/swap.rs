@@ -656,7 +656,7 @@ async fn publish_swap_events(
                     super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                 }
             }
-            // Still return the event ID - it will be published on retry
+            return Err(format!("Failed to publish swap token event: {}", e));
         }
     }
 
@@ -693,11 +693,19 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
 
     match client.send_event_builder(deletion_builder.clone()).await {
-        Ok(_) => {
-            log::info!(
-                "Published deletion events for {} token events",
-                valid_event_ids.len()
-            );
+        Ok(output) => {
+            if output.success.is_empty() {
+                log::warn!("No relays accepted deletion event, queuing for retry");
+                super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None)
+                    .await;
+            } else {
+                log::info!(
+                    "Published deletion events for {} token events (to {}/{} relays)",
+                    valid_event_ids.len(),
+                    output.success.len(),
+                    output.success.len() + output.failed.len()
+                );
+            }
         }
         Err(e) => {
             log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
