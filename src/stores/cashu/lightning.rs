@@ -14,9 +14,9 @@ use super::internal::{
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{
-    add_in_flight_melt_request, persist_in_flight_melt_requests, remove_in_flight_melt_request,
-    try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES, PENDING_MINT_QUOTES, WALLET_BALANCE,
-    WALLET_TOKENS,
+    add_in_flight_melt_request, persist_in_flight_melt_requests, persist_single_in_flight_request,
+    remove_in_flight_melt_request, try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES,
+    PENDING_MINT_QUOTES, WALLET_BALANCE, WALLET_TOKENS,
 };
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, InFlightMeltRequest, MeltProgress, MeltQuoteInfo,
@@ -432,6 +432,9 @@ pub async fn melt_tokens(
     // CRITICAL SAFETY: Persist in-flight melt request BEFORE network call
     // This enables crash recovery - we can query the mint for quote state
     // and recover change proofs if the app crashes during the melt operation.
+    //
+    // CDK Pattern: Write-ahead logging - persist to disk BEFORE modifying memory.
+    // This ensures crash recovery data exists even if app crashes immediately after.
     let in_flight = InFlightMeltRequest {
         transaction_id: tx_id.clone(),
         mint_url: mint_url.clone(),
@@ -441,18 +444,18 @@ pub async fn melt_tokens(
         fee_reserve: quote_info.fee_reserve,
         created_at: super::utils::now_secs(),
     };
-    add_in_flight_melt_request(in_flight);
 
-    // SAFETY: Verify persistence before proceeding - abort if it fails
-    // Without this, a crash could lose change proofs.
-    if let Err(e) = persist_in_flight_melt_requests().await {
-        // Clean up the in-flight request we just added since we can't proceed
-        remove_in_flight_melt_request(&tx_id);
+    // SAFETY: Persist BEFORE adding to memory (write-ahead logging pattern)
+    // If persistence fails, we haven't modified memory state yet - safe to abort.
+    if let Err(e) = persist_single_in_flight_request(&in_flight).await {
         *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
             error: format!("Failed to persist recovery data: {}", e),
         });
         return Err(format!("Cannot proceed with melt: failed to persist recovery data. {}", e));
     }
+
+    // Only add to memory AFTER successful persistence
+    add_in_flight_melt_request(in_flight);
 
     // 1. Use try_operation_or_recover wrapper for CDK operation
     // This ensures proofs are synced with mint if operation fails

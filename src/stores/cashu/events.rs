@@ -831,6 +831,106 @@ pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
     rebuild_proof_event_map();
 }
 
+/// Reconcile tokens with pending event IDs
+///
+/// Finds tokens in WALLET_TOKENS that have `pending_*` event IDs and attempts
+/// to publish them to Nostr. This handles cases where background retry failed
+/// permanently but proofs are valid in CDK.
+///
+/// CDK Pattern: Similar to CDK's `check_all_pending_proofs()` which reconciles
+/// pending proof states. We apply the same pattern for NIP-60 event IDs.
+///
+/// Called periodically by the background processor.
+pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
+    use nostr_sdk::signer::NostrSigner;
+    use super::types::ExtendedCashuProof;
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // Find tokens with pending_* event IDs
+    let pending_tokens: Vec<TokenData> = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        tokens.iter()
+            .filter(|t| t.event_id.starts_with("pending_"))
+            .cloned()
+            .collect()
+    };
+
+    if pending_tokens.is_empty() {
+        return Ok(0);
+    }
+
+    log::info!("Found {} tokens with pending event IDs to reconcile", pending_tokens.len());
+
+    let mut reconciled = 0;
+
+    for token in pending_tokens {
+        let old_event_id = token.event_id.clone();
+
+        // Build and publish token event
+        let extended_proofs: Vec<ExtendedCashuProof> = token.proofs.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = super::types::ExtendedTokenEvent {
+            mint: token.mint.clone(),
+            unit: token.unit.clone(),
+            proofs: extended_proofs,
+            del: vec![],
+        };
+
+        let json_content = match serde_json::to_string(&token_event_data) {
+            Ok(j) => j,
+            Err(e) => {
+                log::warn!("Failed to serialize token {}: {}", old_event_id, e);
+                continue;
+            }
+        };
+
+        let encrypted = match signer.nip44_encrypt(&pubkey, &json_content).await {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("Failed to encrypt token {}: {}", old_event_id, e);
+                continue;
+            }
+        };
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder).await {
+            Ok(output) => {
+                let real_event_id = output.id().to_hex();
+                log::info!("Reconciled pending token: {} -> {}", old_event_id, real_event_id);
+
+                // Update in WALLET_TOKENS
+                update_token_event_id(&old_event_id, &real_event_id);
+                reconciled += 1;
+            }
+            Err(e) => {
+                log::warn!("Failed to publish reconciliation event for {}: {}", old_event_id, e);
+                // Will retry on next reconciliation pass
+            }
+        }
+    }
+
+    if reconciled > 0 {
+        log::info!("Reconciled {} pending event IDs", reconciled);
+    }
+
+    Ok(reconciled)
+}
+
 /// Publish a token event for orphaned proofs discovered in CDK
 ///
 /// This follows the same pattern as publish_send_events but without deletion events.
@@ -964,6 +1064,17 @@ pub fn start_pending_events_processor() {
 
                 // Clean expired pending secrets (proofs pending at mint for >1 hour)
                 super::signals::cleanup_expired_pending_secrets().await;
+
+                // Reconcile any stuck pending event IDs (tokens with pending_* that never got real IDs)
+                match reconcile_pending_event_ids().await {
+                    Ok(count) if count > 0 => {
+                        log::info!("Reconciled {} pending event IDs", count);
+                    }
+                    Err(e) => {
+                        log::debug!("Pending event ID reconciliation error: {}", e);
+                    }
+                    _ => {}
+                }
 
                 // Run proof recovery to catch any stuck proofs
                 match super::proof_recovery::run_full_recovery().await {

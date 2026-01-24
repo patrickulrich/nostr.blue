@@ -252,6 +252,15 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
             }
         };
 
+        // SAFETY: Warn if state count doesn't match proof count
+        // CDK guarantees one state per Y-value, but network issues could cause misalignment
+        if states.len() != batch.len() {
+            log::warn!(
+                "State count mismatch: {} proofs, {} states - some proofs not verified",
+                batch.len(), states.len()
+            );
+        }
+
         // Process each proof state
         for (proof, state) in batch.iter().zip(states.iter()) {
             match state.state {
@@ -504,6 +513,10 @@ const ORPHAN_SYNC_BATCH_SIZE: usize = 100;
 /// Maximum errors per mint before stopping orphan sync to prevent unbounded accumulation
 const MAX_ERRORS_PER_MINT: usize = 5;
 
+/// Maximum age for in-flight melt requests before forced cleanup (24 hours)
+/// CDK keeps sagas indefinitely, but client-side wallets need expiry for UX.
+const IN_FLIGHT_MAX_AGE_SECS: u64 = 24 * 60 * 60;
+
 /// Sync orphaned proofs from CDK to NIP-60
 ///
 /// Detects proofs that exist in CDK's IndexedDB but are not in WALLET_TOKENS.
@@ -570,13 +583,20 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
 
         // Find potentially orphaned proofs (in CDK but not in WALLET_TOKENS)
         // Use Y values for comparison per CDK pattern
+        // SAFETY: If Y computation fails, skip the proof to prevent balance inflation
         let potentially_orphaned: Vec<_> = cdk_proofs
             .iter()
             .filter(|p| {
-                p.y()
-                    .ok()
-                    .map(|y| !known_ys.contains(&y.to_string()))
-                    .unwrap_or(false)
+                match p.y() {
+                    Ok(y) => !known_ys.contains(&y.to_string()),
+                    Err(e) => {
+                        log::warn!(
+                            "Y_VALUE_COMPUTATION_FAILED in orphan check: proof_amount={}, error='{}' - skipping",
+                            u64::from(p.amount), e
+                        );
+                        false  // Skip this proof
+                    }
+                }
             })
             .cloned()
             .collect();
@@ -594,6 +614,7 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
         // CDK best practice: Verify with mint before assuming orphaned (NUT-07)
         // Process in batches of ORPHAN_SYNC_BATCH_SIZE
         let mut confirmed_orphaned = Vec::new();
+        let mut per_mint_errors = 0;  // Track errors per-mint, not global
 
         for chunk in potentially_orphaned.chunks(ORPHAN_SYNC_BATCH_SIZE) {
             let chunk_proofs: Vec<_> = chunk.to_vec();
@@ -621,14 +642,16 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
                         .errors
                         .push(format!("Mint verification failed for {}: {}", mint_url, e));
 
-                    // Stop processing this mint if too many errors
-                    if result.errors.len() >= MAX_ERRORS_PER_MINT {
+                    // Track per-mint errors (not global) to prevent one mint's issues
+                    // from affecting processing of other mints
+                    per_mint_errors += 1;
+                    if per_mint_errors >= MAX_ERRORS_PER_MINT {
                         log::warn!(
-                            "Stopping orphan sync for {} after {} errors to prevent unbounded accumulation",
+                            "Stopping orphan sync for {} after {} errors",
                             mint_url,
-                            MAX_ERRORS_PER_MINT
+                            per_mint_errors
                         );
-                        break; // Exit the batch loop for this mint
+                        break; // Exit the batch loop for this mint only
                     }
                 }
             }
@@ -939,6 +962,54 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
     let mut result = MeltRecoveryResult::default();
 
     for request in in_flight {
+        let now = now_secs();
+        let age = now.saturating_sub(request.created_at);
+
+        // Check if request is expired (older than 24 hours)
+        if age > IN_FLIGHT_MAX_AGE_SECS {
+            log::warn!(
+                "In-flight melt request {} is {} hours old, forcing cleanup",
+                request.quote_id,
+                age / 3600
+            );
+
+            // Try one final NUT-07 check
+            let wallet = match cashu_cdk_bridge::get_wallet(&request.mint_url).await {
+                Ok(w) => w,
+                Err(_) => {
+                    // Mint unreachable - remove tracking, orphan sync will handle proofs
+                    log::warn!("Mint {} unreachable for expired request, removing tracking", request.mint_url);
+                    remove_in_flight_melt_request(&request.transaction_id);
+                    continue;
+                }
+            };
+
+            // Final proof state check
+            let cdk_proofs: Vec<_> = request.proofs_used.iter()
+                .filter_map(|p| proof_data_to_cdk_proof(p).ok())
+                .collect();
+
+            if !cdk_proofs.is_empty() {
+                if let Ok(states) = wallet.check_proofs_spent(cdk_proofs.clone()).await {
+                    // Mark spent proofs
+                    let spent_secrets: Vec<_> = cdk_proofs.iter()
+                        .zip(states.iter())
+                        .filter(|(_, s)| s.state == State::Spent)
+                        .map(|(p, _)| p.secret.to_string())
+                        .collect();
+
+                    if !spent_secrets.is_empty() {
+                        move_proofs_to_spent(&spent_secrets);
+                    }
+                }
+            }
+
+            // Remove expired request - proofs safe in CDK, orphan sync handles recovery
+            remove_in_flight_melt_request(&request.transaction_id);
+            result.quotes_checked += 1;
+            continue;
+        }
+
         // SAFETY: Acquire mint lock to prevent concurrent operations
         let _guard = match try_acquire_mint_lock(&request.mint_url) {
             Some(g) => g,
@@ -1134,13 +1205,22 @@ async fn recover_melt_change_deduplicated(
     };
 
     // Find proofs in CDK that are NOT already in WALLET_TOKENS (the change proofs)
+    // SAFETY: If Y computation fails, treat as duplicate to prevent balance inflation
     let new_proofs: Vec<_> = cdk_proofs
         .iter()
         .filter(|p| {
-            p.y()
-                .ok()
-                .map(|y| !existing_ys.contains(&y.to_string()))
-                .unwrap_or(false)
+            match p.y() {
+                Ok(y) => !existing_ys.contains(&y.to_string()),
+                Err(e) => {
+                    // SAFETY: If we can't compute Y, assume it's a duplicate
+                    // This prevents balance inflation from Y computation failures
+                    log::warn!(
+                        "Y_VALUE_COMPUTATION_FAILED: proof_amount={}, error='{}' - treating as duplicate",
+                        u64::from(p.amount), e
+                    );
+                    false  // Treat as duplicate = don't add
+                }
+            }
         })
         .collect();
 
