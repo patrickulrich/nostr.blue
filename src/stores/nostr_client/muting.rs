@@ -25,10 +25,11 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
     let pubkey = nostr::PublicKey::from_hex(&current_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
+    // Note: No .limit(1) - let aggregation collect all versions from multiple relays.
+    // Relays may return stale versions; max_by_key(created_at) selects the newest.
     let filter = nostr::Filter::new()
         .author(pubkey)
-        .kind(nostr::Kind::from(10000))
-        .limit(1);
+        .kind(nostr::Kind::from(10000));
 
     // Fetch from database/relays
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {

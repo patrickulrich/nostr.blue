@@ -81,15 +81,21 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             return;
         }
 
-        let relays: Vec<String> = relay_input
+        // Accept both wss:// and ws:// (ws:// useful for local dev)
+        let (relays, rejected): (Vec<String>, Vec<String>) = relay_input
             .read()
             .lines()
             .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l.starts_with("wss://"))
-            .collect();
+            .filter(|l| !l.is_empty())
+            .partition(|l| l.starts_with("wss://") || l.starts_with("ws://"));
+
+        // Log warning for rejected entries
+        if !rejected.is_empty() {
+            log::warn!("Rejected relay URLs (invalid scheme): {:?}", rejected);
+        }
 
         if relays.is_empty() {
-            error_message.set(Some("Please enter at least one relay URL".to_string()));
+            error_message.set(Some("Please enter at least one valid relay URL (wss:// or ws://)".to_string()));
             return;
         }
 

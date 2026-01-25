@@ -41,10 +41,12 @@
 #![allow(unused_imports)]  // Re-exports are public API for external consumers
 
 use dioxus::prelude::*;
+use dioxus_core::spawn_forever;
 use futures::future::join_all;
 use nostr_sdk::Client;
 use nostr_sdk::prelude::*;
 use nostr::Url;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -200,9 +202,12 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
         log::info!("IndexedDB opened successfully");
 
-        // Enable gossip with in-memory storage
+        // Enable gossip with bounded in-memory storage to prevent unbounded memory growth
         // NostrGossipMemory is WASM-compatible and provides automatic relay routing
-        let gossip = nostr_gossip_memory::store::NostrGossipMemory::unbounded();
+        // Limit to 10,000 entries (conservative; nostr-sdk defaults to 35,000 for events)
+        let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
+            NonZeroUsize::new(10_000).expect("10_000 is non-zero")
+        );
 
         // Configure client options for gossip-discovered relays
         // This is CRITICAL: Without this, gossip relays won't verify events match filters
@@ -401,11 +406,10 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     // 2. Apply local relays (browser-only storage)
     // 3. Load NIP-51 lists (search/blocked - not handled by gossip)
     //
-    // NOTE: Dioxus spawns are scoped to the component that calls set_signer.
-    // These init tasks should complete before the component unmounts.
-    // If this becomes an issue, consider moving to App-level use_effect.
+    // Using spawn_forever to ensure tasks run at root scope and survive component unmounts.
+    // These background init tasks should not be cancelled if the calling component unmounts.
     let client_clone = client.clone();
-    spawn(async move {
+    spawn_forever(async move {
         // Apply local relays FIRST (browser-only storage) - this is instant
         relay::apply_local_relays_to_client(client_clone.clone()).await;
 
@@ -431,7 +435,7 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     });
 
     // Load user's pinned notes (kind 10001) in background
-    spawn(async move {
+    spawn_forever(async move {
         if let Err(e) = pinned_notes::init_pinned_notes().await {
             log::warn!("Failed to load user pinned notes: {}", e);
         }

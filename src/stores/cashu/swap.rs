@@ -318,7 +318,7 @@ pub async fn execute_swap_with_nip60(
         mint_url: mint_url.clone(),
         proof_secrets,
         amount: input_value,
-        operation_type: "swap".to_string(),
+        operation_type: super::types::OperationType::Swap,
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
@@ -471,18 +471,26 @@ pub async fn execute_swap_with_nip60(
 
     // 8. Create history event using nostr-sdk SpendingHistory
     // Use "in" direction - we're receiving new proofs (swap creates new tokens)
-    let valid_created: Vec<String> = vec![final_event_id];
+    // Filter out pending_* IDs - they're not valid hex event IDs
+    let valid_created: Vec<String> = if final_event_id.starts_with("pending_") {
+        vec![]
+    } else {
+        vec![final_event_id]
+    };
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
-    if let Err(e) =
-        super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
-            .await
-    {
-        log::error!("Failed to create history event: {}", e);
+    // Skip history event if both are empty (no valid event IDs to reference)
+    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+        if let Err(e) =
+            super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
+                .await
+        {
+            log::error!("Failed to create history event: {}", e);
+        }
     }
 
     // 9. Sync CDK bridge state (non-critical)
@@ -536,14 +544,11 @@ fn update_local_state_after_swap(
     };
 
     // Crash-safe: ADD FIRST, then DELETE (via atomic_token_replace)
-    super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
+    // Note: atomic_token_replace already updates wallet balances internally
+    let new_balance = super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
 
     // Register proofs in event map
     register_proofs_in_event_map(new_event_id, &proof_data);
-
-    // Update balance from proof state
-    super::signals::update_wallet_balances();
-    let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
     log::info!(
         "Local state updated after swap. Balance: {} sats",

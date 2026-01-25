@@ -3,6 +3,7 @@
 //! UI for sending nutzaps (NIP-61 P2PK-locked ecash via Nostr events).
 
 use dioxus::prelude::*;
+use dioxus::hooks::use_reactive;
 use crate::stores::cashu;
 use crate::utils::{shorten_url, format::truncate_pubkey};
 
@@ -31,10 +32,11 @@ pub fn NutzapSendModal(
     let mut is_loading_info = use_signal(|| true);
     let mut load_error = use_signal(|| Option::<String>::None);
 
-    // Fetch recipient nutzap info on mount
-    let recipient_pubkey_clone = recipient_pubkey.clone();
-    use_effect(move || {
-        let recipient = recipient_pubkey_clone.clone();
+    // Fetch recipient nutzap info when recipient changes
+    // Use use_reactive! to track non-signal prop and re-run when recipient_pubkey changes
+    let recipient_pubkey_for_effect = recipient_pubkey.clone();
+    use_effect(use_reactive!(|(recipient_pubkey_for_effect,)| {
+        let recipient = recipient_pubkey_for_effect.clone();
         spawn(async move {
             is_loading_info.set(true);
             load_error.set(None);
@@ -62,7 +64,7 @@ pub fn NutzapSendModal(
             }
             is_loading_info.set(false);
         });
-    });
+    }));
 
     let on_send = {
         let recipient_pubkey = recipient_pubkey.clone();

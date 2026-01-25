@@ -981,6 +981,28 @@ pub struct InFlightMeltRequest {
     pub created_at: u64,
 }
 
+/// Operation types for in-flight send/swap requests
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationType {
+    /// Standard send operation
+    Send,
+    /// P2PK locked send operation
+    SendP2pk,
+    /// Token swap/consolidation operation
+    Swap,
+}
+
+impl std::fmt::Display for OperationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationType::Send => write!(f, "send"),
+            OperationType::SendP2pk => write!(f, "send_p2pk"),
+            OperationType::Swap => write!(f, "swap"),
+        }
+    }
+}
+
 /// Tracks in-flight send/swap operations for crash recovery and proof protection
 ///
 /// Similar to InFlightMeltRequest but for send/swap operations that don't have
@@ -999,8 +1021,8 @@ pub struct InFlightSendRequest {
     pub proof_secrets: Vec<String>,
     /// Amount being sent/swapped
     pub amount: u64,
-    /// Operation type: "send" or "swap"
-    pub operation_type: String,
+    /// Operation type (send, send_p2pk, or swap)
+    pub operation_type: OperationType,
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
 }

@@ -114,12 +114,18 @@ pub async fn publish_article_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    // Validate required fields
-    if identifier.trim().is_empty() {
+    // Trim all text inputs up front (shadow the parameters)
+    let identifier = identifier.trim();
+    let title = title.trim();
+    let summary = summary.trim();
+    let cover_image = cover_image.trim();
+
+    // Validate trimmed values
+    if identifier.is_empty() {
         return Err("Identifier cannot be empty".to_string());
     }
 
-    if title.trim().is_empty() {
+    if title.is_empty() {
         return Err("Title cannot be empty".to_string());
     }
 
@@ -129,19 +135,19 @@ pub async fn publish_article_tracked(
 
     log::info!("Publishing article: {}", title);
 
-    // Build tags
+    // Build tags using trimmed values
     use nostr::Tag;
     use nostr_sdk::nips::nip01::Coordinate;
 
     let mut tags = vec![
-        Tag::identifier(identifier.clone()),
-        Tag::title(title.clone()),
+        Tag::identifier(identifier.to_string()),
+        Tag::title(title.to_string()),
         // Add 'a' tag for addressable event: <kind>:<pubkey>:<d-identifier>
         Tag::coordinate(
             Coordinate::new(
                 nostr::Kind::from(30023),
                 pubkey,
-            ).identifier(identifier),
+            ).identifier(identifier.to_string()),
             None, // relay_url
         ),
     ];
@@ -150,7 +156,7 @@ pub async fn publish_article_tracked(
     if !summary.is_empty() {
         tags.push(Tag::custom(
             nostr::TagKind::Custom("summary".into()),
-            vec![summary]
+            vec![summary.to_string()]
         ));
     }
 
@@ -158,7 +164,7 @@ pub async fn publish_article_tracked(
     if !cover_image.is_empty() {
         tags.push(Tag::custom(
             nostr::TagKind::Custom("image".into()),
-            vec![cover_image]
+            vec![cover_image.to_string()]
         ));
     }
 

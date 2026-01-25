@@ -43,8 +43,9 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
     fetch_contacts_from_relay(pubkey_str).await
 }
 
-/// Internal function to fetch contacts from relay and update cache
-async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
+/// Fetch contacts directly from relay, bypassing cache
+/// Use this when you need guaranteed fresh data (e.g., after modifications)
+pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
     log::info!("Fetching contacts from relay for: {}", pubkey_str);
 
     // Parse pubkey
@@ -164,9 +165,6 @@ pub async fn publish_contacts(contacts: Vec<String>) -> std::result::Result<Stri
 
 /// Follow a user (adds to contact list and publishes)
 pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), String> {
-    // Invalidate contacts cache since we're modifying it
-    invalidate_contacts_cache();
-
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_follow)?;
 
@@ -174,8 +172,9 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
-    // Fetch current contacts
-    let mut contacts = fetch_contacts(current_pubkey.clone()).await?;
+    // Invalidate cache and fetch directly from relay to avoid race with background refresher
+    invalidate_contacts_cache();
+    let mut contacts = fetch_contacts_from_relay(current_pubkey.clone()).await?;
 
     // Add new contact if not already following
     if !contacts.contains(&normalized_pubkey) {
@@ -193,9 +192,6 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
 
 /// Unfollow a user (removes from contact list and publishes)
 pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<(), String> {
-    // Invalidate contacts cache since we're modifying it
-    invalidate_contacts_cache();
-
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_unfollow)?;
 
@@ -203,8 +199,9 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
-    // Fetch current contacts
-    let mut contacts = fetch_contacts(current_pubkey.clone()).await?;
+    // Invalidate cache and fetch directly from relay to avoid race with background refresher
+    invalidate_contacts_cache();
+    let mut contacts = fetch_contacts_from_relay(current_pubkey.clone()).await?;
 
     // Remove contact if following
     if let Some(pos) = contacts.iter().position(|x| x == &normalized_pubkey) {

@@ -29,7 +29,8 @@ pub fn get_cached_pubkey() -> std::result::Result<PublicKey, String> {
 }
 
 /// Get the current user's public key (uses cache, no signer call)
-pub async fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
+/// Note: This is a sync wrapper for API consistency; prefer get_cached_pubkey() directly
+pub fn get_user_pubkey() -> std::result::Result<PublicKey, String> {
     get_cached_pubkey()
 }
 
