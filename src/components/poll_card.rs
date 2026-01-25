@@ -76,7 +76,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
                     votes.set(vote_events.clone());
 
                     // Check if current user has voted
-                    if let Ok(user_pubkey) = nostr_client::get_user_pubkey() {
+                    if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                         let user_pubkey_str = user_pubkey.to_string();
                         if let Some(user_vote_event) = vote_events.iter()
                             .find(|v| v.pubkey.to_string() == user_pubkey_str) {
@@ -147,7 +147,7 @@ pub fn PollCard(event: NostrEvent) -> Element {
                             votes.set(vote_events.clone());
 
                             // Update user vote state - find the user's vote in the refreshed list
-                            if let Ok(user_pubkey) = nostr_client::get_user_pubkey() {
+                            if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                                 let user_pubkey_str = user_pubkey.to_string();
                                 if let Some(user_vote_event) = vote_events.iter()
                                     .find(|v| v.pubkey.to_string() == user_pubkey_str) {

@@ -139,7 +139,7 @@ pub use media::{
     publish_voice_message_reply_tracked, publish_voice_message_reply,
 };
 pub use polls::{
-    get_cached_pubkey, get_user_pubkey,
+    get_cached_pubkey,
     publish_poll_vote_tracked, publish_poll_vote,
     publish_poll_tracked, publish_poll,
 };

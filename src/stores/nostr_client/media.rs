@@ -59,6 +59,43 @@ fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<Publ
 }
 
 // =============================================================================
+// Voice Message Validation Helper
+// =============================================================================
+
+/// Maximum waveform samples (256 is reasonable for display)
+const MAX_WAVEFORM_LEN: usize = 256;
+
+/// Validate voice message parameters (Dioxus pattern: early returns, single responsibility)
+///
+/// Returns (duration_u64, capped_waveform) on success.
+fn validate_voice_params(duration: f64, waveform: &[u8]) -> Result<(u64, Vec<u8>), String> {
+    // Early return validation (Dioxus is_valid_* pattern)
+    if duration.is_nan() {
+        return Err("Duration must be a valid number".to_string());
+    }
+    if !duration.is_finite() {
+        return Err("Duration must be finite".to_string());
+    }
+    if duration < 0.0 {
+        return Err("Duration must be non-negative".to_string());
+    }
+
+    let duration_u64 = duration.round() as u64;
+    let capped_waveform = if waveform.len() > MAX_WAVEFORM_LEN {
+        log::warn!(
+            "Waveform truncated from {} to {} samples",
+            waveform.len(),
+            MAX_WAVEFORM_LEN
+        );
+        waveform[..MAX_WAVEFORM_LEN].to_vec()
+    } else {
+        waveform.to_vec()
+    };
+
+    Ok((duration_u64, capped_waveform))
+}
+
+// =============================================================================
 // Picture Publishing (Kind 20 - NIP-68)
 // =============================================================================
 
@@ -96,6 +133,9 @@ pub async fn publish_picture_tracked(
         if url.is_empty() {
             return Err("Image URLs cannot be empty".to_string());
         }
+        // nostr-sdk URL validation pattern: validate with Url::parse
+        nostr::Url::parse(url)
+            .map_err(|e| format!("Invalid image URL '{}': {}", url, e))?;
 
         let mut imeta_fields = vec![format!("url {}", url)];
 
@@ -185,8 +225,19 @@ pub async fn publish_video_tracked(
     }
 
     // Validate required fields
-    if video_url.trim().is_empty() {
+    let video_url = video_url.trim();
+    if video_url.is_empty() {
         return Err("Video URL is required".to_string());
+    }
+    // nostr-sdk URL validation pattern: validate with Url::parse
+    nostr::Url::parse(video_url)
+        .map_err(|e| format!("Invalid video URL: {}", e))?;
+
+    // Also validate optional thumbnail URL if provided
+    let thumbnail_url = thumbnail_url.trim();
+    if !thumbnail_url.is_empty() {
+        nostr::Url::parse(thumbnail_url)
+            .map_err(|e| format!("Invalid thumbnail URL: {}", e))?;
     }
 
     if title.trim().is_empty() {
@@ -313,24 +364,8 @@ pub async fn publish_voice_message_tracked(
 
     log::info!("Publishing voice message: {}", audio_url);
 
-    // Validate duration (CDK pattern: is_nan(), is_finite(), non-negative)
-    if duration.is_nan() {
-        return Err("Duration must be a valid number".to_string());
-    }
-    if !duration.is_finite() {
-        return Err("Duration must be finite".to_string());
-    }
-    if duration < 0.0 {
-        return Err("Duration must be non-negative".to_string());
-    }
-
-    // Cap waveform length (256 samples is reasonable for display)
-    const MAX_WAVEFORM_LEN: usize = 256;
-    let waveform = if waveform.len() > MAX_WAVEFORM_LEN {
-        &waveform[..MAX_WAVEFORM_LEN]
-    } else {
-        &waveform[..]
-    };
+    // Validate duration and waveform using extracted helper
+    let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
 
     // Parse URL
     let url = nostr::Url::parse(&audio_url)
@@ -344,8 +379,6 @@ pub async fn publish_voice_message_tracked(
     let mut tags = Vec::new();
 
     // Add imeta tag with duration and waveform (NIP-92)
-    // Safe cast after validation
-    let duration_u64 = duration.round() as u64;
     let waveform_str = waveform.iter()
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
@@ -430,27 +463,8 @@ pub async fn publish_voice_message_reply_tracked(
 
     log::info!("Publishing voice message reply to: {}", reply_to.id.to_hex());
 
-    // Validate duration (CDK pattern: is_nan(), is_finite(), non-negative)
-    if duration.is_nan() {
-        return Err("Duration must be a valid number".to_string());
-    }
-    if !duration.is_finite() {
-        return Err("Duration must be finite".to_string());
-    }
-    if duration < 0.0 {
-        return Err("Duration must be non-negative".to_string());
-    }
-
-    // Cap waveform length (256 samples is reasonable for display)
-    const MAX_WAVEFORM_LEN: usize = 256;
-    let waveform = if waveform.len() > MAX_WAVEFORM_LEN {
-        &waveform[..MAX_WAVEFORM_LEN]
-    } else {
-        &waveform[..]
-    };
-
-    // Safe cast after validation
-    let duration_u64 = duration.round() as u64;
+    // Validate duration and waveform using extracted helper
+    let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
 
     // Parse URL
     let url = nostr::Url::parse(&audio_url)

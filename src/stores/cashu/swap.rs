@@ -33,7 +33,7 @@
 #![allow(dead_code)]
 
 use cdk::nuts::SpendingConditions;
-use dioxus::prelude::*;
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
@@ -687,30 +687,7 @@ async fn publish_swap_events(
                 ).await;
 
                 // Queue deletion events for retry too
-                if !event_ids_to_delete.is_empty() {
-                    let valid_event_ids: Vec<_> = event_ids_to_delete
-                        .iter()
-                        .filter_map(|id| EventId::from_hex(id).ok())
-                        .collect();
-
-                    if !valid_event_ids.is_empty() {
-                        let mut tags = Vec::new();
-                        for eid in &valid_event_ids {
-                            tags.push(nostr_sdk::Tag::event(*eid));
-                        }
-                        tags.push(nostr_sdk::Tag::custom(
-                            nostr_sdk::TagKind::custom("k"),
-                            ["7375"],
-                        ));
-
-                        let deletion_builder = nostr_sdk::EventBuilder::new(
-                            Kind::from(5),
-                            "Swapped token"
-                        ).tags(tags);
-
-                        super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
-                    }
-                }
+                queue_deletion_event_retry(event_ids_to_delete).await;
                 return Err("No relays accepted swap token event".to_string());
             }
 
@@ -738,35 +715,50 @@ async fn publish_swap_events(
             ).await;
 
             // Also queue deletion events for retry if there are any
-            if !event_ids_to_delete.is_empty() {
-                let valid_event_ids: Vec<_> = event_ids_to_delete
-                    .iter()
-                    .filter_map(|id| EventId::from_hex(id).ok())
-                    .collect();
-
-                if !valid_event_ids.is_empty() {
-                    let mut tags = Vec::new();
-                    for eid in &valid_event_ids {
-                        tags.push(nostr_sdk::Tag::event(*eid));
-                    }
-                    tags.push(nostr_sdk::Tag::custom(
-                        nostr_sdk::TagKind::custom("k"),
-                        ["7375"],
-                    ));
-
-                    let deletion_builder = nostr_sdk::EventBuilder::new(
-                        Kind::from(5),
-                        "Swapped token"
-                    ).tags(tags);
-
-                    super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
-                }
-            }
+            queue_deletion_event_retry(event_ids_to_delete).await;
             return Err(format!("Failed to publish swap token event: {}", e));
         }
     }
 
     Ok(event_id_hex)
+}
+
+/// Queue deletion event for retry (extracted helper to reduce duplication)
+///
+/// CDK pattern: centralize deletion event queueing logic
+async fn queue_deletion_event_retry(event_ids_to_delete: &[String]) {
+    if event_ids_to_delete.is_empty() {
+        return;
+    }
+
+    let valid_event_ids: Vec<EventId> = event_ids_to_delete
+        .iter()
+        .filter_map(|id| EventId::from_hex(id).ok())
+        .collect();
+
+    if valid_event_ids.is_empty() {
+        return;
+    }
+
+    let mut tags = Vec::new();
+    for eid in &valid_event_ids {
+        tags.push(nostr_sdk::Tag::event(*eid));
+    }
+    tags.push(nostr_sdk::Tag::custom(
+        nostr_sdk::TagKind::custom("k"),
+        ["7375"],
+    ));
+
+    let deletion_builder =
+        nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
+
+    super::events::queue_event_for_retry(
+        deletion_builder,
+        PendingEventType::DeletionEvent,
+        None,
+        None,
+    )
+    .await;
 }
 
 /// Publish deletion events for consumed token events
