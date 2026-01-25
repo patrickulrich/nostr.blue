@@ -204,6 +204,12 @@ pub async fn init_wallet() -> Result<(), String> {
                             log::warn!("Failed to load pending events: {}", e);
                         }
 
+                        // Load persisted pending secrets (proofs pending at mint)
+                        super::signals::load_pending_secrets().await;
+
+                        // Load in-flight melt requests for crash recovery
+                        super::signals::load_in_flight_melt_requests().await;
+
                         // Start background processor for pending events
                         start_pending_events_processor();
 
@@ -216,6 +222,34 @@ pub async fn init_wallet() -> Result<(), String> {
                             #[cfg(target_arch = "wasm32")]
                             gloo_timers::future::TimeoutFuture::new(500).await;
 
+                            // Phase 0: Clean up any expired pending secrets from previous sessions
+                            super::signals::cleanup_expired_pending_secrets().await;
+
+                            // Phase 0.5: Sync orphaned CDK proofs to NIP-60
+                            // This recovers proofs from crashed send/melt operations:
+                            // - Proofs exist in CDK's IndexedDB but not in WALLET_TOKENS
+                            // - Verified with mint (NUT-07) before publishing to Nostr
+                            // Must run AFTER inject_nip60_proofs_to_cdk() but BEFORE sync_state_with_all_mints()
+                            match super::recovery::sync_orphaned_cdk_proofs_to_nostr().await {
+                                Ok(result) => {
+                                    if result.proofs_recovered > 0 {
+                                        log::info!(
+                                            "Orphan sync: recovered {} proofs ({} sats) from CDK to NIP-60",
+                                            result.proofs_recovered,
+                                            result.sats_recovered
+                                        );
+                                    }
+                                    if !result.errors.is_empty() {
+                                        for err in result.errors {
+                                            log::warn!("Orphan sync error: {}", err);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Orphan sync failed: {}", e);
+                                }
+                            }
+
                             // Phase 1: Sync proof states with all mints (NUT-07)
                             // Detects proofs spent elsewhere, proofs pending at mint
                             log::info!("Starting wallet recovery - syncing with mints...");
@@ -227,6 +261,49 @@ pub async fn init_wallet() -> Result<(), String> {
                             // Completes paid-but-not-minted quotes, recovers change, etc.
                             if let Err(e) = recover_pending_operations().await {
                                 log::warn!("Pending operation recovery failed: {}", e);
+                            }
+
+                            // Phase 2.3: Recover in-flight melt requests (crash recovery)
+                            // Checks all in-flight melt requests with mints, recovers change
+                            // SAFETY: Always verifies proof states with mint (NUT-07) before reverting
+                            match super::recovery::recover_all_pending_melt_quotes().await {
+                                Ok(result) => {
+                                    if result.quotes_paid > 0 || result.change_recovered > 0 {
+                                        log::info!(
+                                            "In-flight melt recovery: {} paid, {} sats recovered",
+                                            result.quotes_paid,
+                                            result.change_recovered
+                                        );
+                                    }
+                                    if !result.errors.is_empty() {
+                                        for err in result.errors {
+                                            log::warn!("In-flight melt recovery error: {}", err);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("In-flight melt quote recovery failed: {}", e);
+                                }
+                            }
+
+                            // Phase 2.5: Recover stuck proofs (SAFE: checks mint + timeouts)
+                            // Recovers proofs stuck in Reserved/PendingSpent states
+                            let result = super::proof_recovery::run_full_recovery().await;
+
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Proof recovery: {} recovered ({} sats), {} spent ({} sats)",
+                                    result.recovered_count,
+                                    result.recovered_value,
+                                    result.spent_count,
+                                    result.spent_value
+                                );
+                            }
+
+                            if !result.errors.is_empty() {
+                                for err in &result.errors {
+                                    log::warn!("Proof recovery error: {}", err);
+                                }
                             }
 
                             // Phase 3: Check for paid mint quotes using CDK
@@ -245,6 +322,11 @@ pub async fn init_wallet() -> Result<(), String> {
                                     }
                                 }
                             }
+
+                            // Phase 4: Final balance consistency check
+                            // Ensures balance matches proofs regardless of what recovery phases did
+                            super::proof_recovery::recalculate_balance();
+                            log::debug!("Final balance recalculation complete");
 
                             log::info!("Wallet recovery complete");
                             *WALLET_STATUS.write() = WalletStatus::Ready;

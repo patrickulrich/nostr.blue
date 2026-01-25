@@ -27,16 +27,9 @@ pub static WALLET_TOKENS: GlobalSignal<Store<WalletTokensStore>> =
 pub static WALLET_HISTORY: GlobalSignal<Store<WalletHistoryStore>> =
     Signal::global(|| Store::new(WalletHistoryStore::default()));
 
-/// Global signal for total balance (computed from tokens)
-pub static WALLET_BALANCE: GlobalSignal<u64> = Signal::global(|| 0);
-
 /// Global signal for wallet status (loading state)
 pub static WALLET_STATUS: GlobalSignal<WalletStatus> =
     Signal::global(|| WalletStatus::Uninitialized);
-
-/// Global signal for detailed balance breakdown
-pub static WALLET_BALANCES: GlobalSignal<WalletBalances> =
-    Signal::global(WalletBalances::default);
 
 /// Global signal for terms acceptance status
 /// None = not yet checked, Some(true) = accepted, Some(false) = not accepted
@@ -69,6 +62,404 @@ pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> =
 /// Key: proof secret, Value: timestamp when registered (seconds since epoch)
 pub static PENDING_BY_MINT_SECRETS: GlobalSignal<HashMap<String, u64>> =
     Signal::global(HashMap::new);
+
+/// In-flight melt requests for crash recovery
+///
+/// Persisted to IndexedDB BEFORE the melt network call to ensure we can
+/// recover change proofs if the app crashes during the operation.
+///
+/// SAFETY: This is critical for fund safety - without this, a crash during
+/// melt could lose change proofs that the mint has already issued.
+pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
+    Signal::global(Vec::new);
+
+/// Currently executing operations (by transaction_id)
+///
+/// Used to prevent timeout recovery from interfering with active operations.
+/// Operations must register here before starting and unregister when done.
+pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> =
+    Signal::global(HashSet::new);
+
+/// In-flight send/swap requests for proof recovery protection
+///
+/// Tracks active send/swap operations to prevent proof_recovery from
+/// incorrectly reclaiming proofs that are actively being used.
+///
+/// SAFETY: This is critical for fund safety - without this, recovery could
+/// reclaim proofs from active send/swap operations, causing fund loss.
+pub static IN_FLIGHT_SEND_REQUESTS: GlobalSignal<Vec<super::types::InFlightSendRequest>> =
+    Signal::global(Vec::new);
+
+// =============================================================================
+// In-Flight Melt Request Helpers
+// =============================================================================
+
+/// Add an in-flight melt request to tracking
+pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
+    let tx_id = request.transaction_id.clone();
+
+    // Check for duplicate before adding (matches persist_single_in_flight_request pattern)
+    {
+        let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
+        if requests.iter().any(|r| r.transaction_id == tx_id) {
+            log::debug!("In-flight request {} already exists, skipping", tx_id);
+            return;
+        }
+        requests.push(request);
+    }
+
+    ACTIVE_OPERATIONS.write().insert(tx_id.clone());
+    log::debug!("Added in-flight melt request: {}", tx_id);
+}
+
+/// Remove an in-flight melt request from tracking
+pub fn remove_in_flight_melt_request(transaction_id: &str) {
+    IN_FLIGHT_MELT_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    ACTIVE_OPERATIONS.write().remove(transaction_id);
+    log::debug!("Removed in-flight melt request: {}", transaction_id);
+}
+
+/// Check if a transaction is currently active
+pub fn is_transaction_active(transaction_id: &Option<String>) -> bool {
+    transaction_id
+        .as_ref()
+        .map(|id| ACTIVE_OPERATIONS.read().contains(id))
+        .unwrap_or(false)
+}
+
+/// Check if a string transaction_id is currently active
+pub fn is_transaction_id_active(transaction_id: &str) -> bool {
+    ACTIVE_OPERATIONS.read().contains(transaction_id)
+}
+
+// =============================================================================
+// In-Flight Send/Swap Request Helpers
+// =============================================================================
+
+/// Add an in-flight send/swap request to tracking (also adds to ACTIVE_OPERATIONS)
+///
+/// SAFETY: Must be called BEFORE the send/swap operation to ensure proofs are
+/// protected from timeout recovery during the operation.
+pub fn add_in_flight_send_request(request: super::types::InFlightSendRequest) {
+    let tx_id = request.transaction_id.clone();
+
+    // Check for duplicate before adding
+    {
+        let mut requests = IN_FLIGHT_SEND_REQUESTS.write();
+        if requests.iter().any(|r| r.transaction_id == tx_id) {
+            log::debug!("In-flight send request {} already exists, skipping", tx_id);
+            return;
+        }
+        requests.push(request);
+    }
+
+    ACTIVE_OPERATIONS.write().insert(tx_id.clone());
+    log::debug!("Added in-flight send request: {}", tx_id);
+}
+
+/// Remove an in-flight send/swap request from tracking
+///
+/// SAFETY: Must be called AFTER the send/swap operation completes (success or error)
+/// to allow proofs to be recovered if needed.
+pub fn remove_in_flight_send_request(transaction_id: &str) {
+    IN_FLIGHT_SEND_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    ACTIVE_OPERATIONS.write().remove(transaction_id);
+    log::debug!("Removed in-flight send request: {}", transaction_id);
+}
+
+/// Persist in-flight melt requests to IndexedDB
+///
+/// CRITICAL: This MUST be awaited and verified before proceeding with melt.
+/// If persistence fails, the melt operation should be aborted to prevent
+/// potential fund loss from crash recovery inability.
+pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            return Err("Localstore not initialized".to_string());
+        }
+    };
+
+    let requests = IN_FLIGHT_MELT_REQUESTS.read().clone();
+
+    localstore
+        .save_in_flight_melt_requests(&requests)
+        .await
+        .map_err(|e| format!("Failed to persist in-flight melt requests: {}", e))?;
+
+    log::debug!("Persisted {} in-flight melt requests to IndexedDB", requests.len());
+    Ok(())
+}
+
+/// Persist a single in-flight melt request atomically
+///
+/// SAFETY: Uses Dioxus pattern - update in-memory signal first (instant, non-async),
+/// then persist to IndexedDB. This prevents race conditions in the load-append-save
+/// pattern by making the in-memory signal the source of truth during execution.
+/// On crash/reload, IndexedDB provides the persistent copy for recovery.
+pub async fn persist_single_in_flight_request(request: &super::types::InFlightMeltRequest) -> Result<(), String> {
+    // 1. Check for duplicate and update in-memory signal atomically
+    {
+        let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
+
+        // Dedupe: skip if transaction_id already exists
+        if requests.iter().any(|r| r.transaction_id == request.transaction_id) {
+            log::debug!("In-flight request {} already exists, skipping", request.transaction_id);
+            return Ok(());
+        }
+
+        requests.push(request.clone());
+    }
+
+    // 2. Update ACTIVE_OPERATIONS in same synchronous section
+    ACTIVE_OPERATIONS.write().insert(request.transaction_id.clone());
+
+    // 3. Then persist to IndexedDB (async, for crash recovery)
+    let localstore = SHARED_LOCALSTORE.read().as_ref()
+        .ok_or("Localstore not initialized")?
+        .clone();
+
+    // Persist the FULL in-memory list (not load-append-save pattern)
+    let requests = IN_FLIGHT_MELT_REQUESTS.read().clone();
+    if let Err(e) = localstore.save_in_flight_melt_requests(&requests).await {
+        // Rollback in-memory changes if persist fails
+        {
+            let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
+            requests.retain(|r| r.transaction_id != request.transaction_id);
+        }
+        ACTIVE_OPERATIONS.write().remove(&request.transaction_id);
+        log::warn!("Rolled back in-memory state after persist failure for {}", request.transaction_id);
+        return Err(format!("Failed to save in-flight request: {}", e));
+    }
+
+    log::debug!("Persisted in-flight melt request {}", request.transaction_id);
+    Ok(())
+}
+
+/// Atomically update tokens and recalculate balance
+///
+/// Holds WALLET_TOKENS lock during entire operation and updates
+/// WALLET_BALANCES before releasing, preventing race conditions.
+/// Following CDK pattern: balance is always computed from proof state.
+pub fn atomic_token_update<F>(mutate_fn: F) -> Result<u64, String>
+where
+    F: FnOnce(&mut Vec<super::types::TokenData>) -> Result<(), String>,
+{
+    let store = WALLET_TOKENS.read();
+    let mut data = store.data();
+    let mut tokens_write = data.write();
+
+    mutate_fn(&mut tokens_write)?;
+
+    // Compute balance from mutated tokens (CDK pattern)
+    let (available, pending) = tokens_write
+        .iter()
+        .flat_map(|t| &t.proofs)
+        .fold((0u64, 0u64), |(avail, pend), proof| {
+            if proof.state.is_spendable() {
+                (avail.saturating_add(proof.amount), pend)
+            } else if proof.state.is_pending() {
+                (avail, pend.saturating_add(proof.amount))
+            } else {
+                (avail, pend)
+            }
+        });
+
+    // Update single balance signal
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances {
+            total: available.saturating_add(pending),
+            available,
+            pending,
+        };
+
+    Ok(available)
+}
+
+/// Crash-safe token replacement: add new tokens BEFORE deleting old ones
+///
+/// Ensures worst case on crash is duplicate tokens (recoverable), never lost tokens.
+pub fn atomic_token_replace(
+    tokens_to_add: Vec<super::types::TokenData>,
+    event_ids_to_delete: &[String],
+) -> Result<u64, String> {
+    atomic_token_update(|tokens| {
+        // ADD FIRST (crash-safe)
+        for token in tokens_to_add {
+            tokens.push(token);
+        }
+        // DELETE AFTER
+        if !event_ids_to_delete.is_empty() {
+            tokens.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+        }
+        Ok(())
+    })
+}
+
+/// Recalculate wallet balances from WALLET_TOKENS
+///
+/// This performs a standalone recomputation of balances from WALLET_TOKENS.
+/// Note: `atomic_token_update` also updates WALLET_BALANCES as part of atomic
+/// token mutations. Use this function for explicit balance refresh; use
+/// atomic_token_update/atomic_token_replace for transactional token changes.
+pub fn update_wallet_balances() {
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    let (available, pending) = tokens
+        .iter()
+        .flat_map(|t| &t.proofs)
+        .fold((0u64, 0u64), |(avail, pend), proof| {
+            if proof.state.is_spendable() {
+                (avail.saturating_add(proof.amount), pend)
+            } else if proof.state.is_pending() {
+                (avail, pend.saturating_add(proof.amount))
+            } else {
+                (avail, pend)
+            }
+        });
+
+    let total = available.saturating_add(pending);
+
+    // Single signal for all balance data
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances { total, available, pending };
+}
+
+/// Load in-flight melt requests from IndexedDB (call on startup)
+///
+/// Restores the in-flight melt state from the previous session for recovery.
+pub async fn load_in_flight_melt_requests() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping in-flight melt load: localstore not initialized");
+            return;
+        }
+    };
+
+    match localstore.load_in_flight_melt_requests().await {
+        Ok(Some(requests)) => {
+            if !requests.is_empty() {
+                log::info!("Loaded {} in-flight melt requests from storage", requests.len());
+
+                // Populate ACTIVE_OPERATIONS from loaded requests
+                {
+                    let mut active_ops = ACTIVE_OPERATIONS.write();
+                    for req in &requests {
+                        active_ops.insert(req.transaction_id.clone());
+                    }
+                }
+
+                *IN_FLIGHT_MELT_REQUESTS.write() = requests;
+            }
+        }
+        Ok(None) => {
+            log::debug!("No in-flight melt requests found in storage");
+        }
+        Err(e) => {
+            log::warn!("Failed to load in-flight melt requests: {}", e);
+        }
+    }
+}
+
+// =============================================================================
+// Pending Secrets Persistence Functions
+// =============================================================================
+
+/// Schedule persistence of pending secrets to IndexedDB.
+///
+/// NOTE: This only schedules persistence on WASM/IndexedDB targets.
+/// On non-WASM targets, this is a no-op (pending secrets are not persisted).
+///
+/// This ensures pending-at-mint state survives app restarts.
+/// Uses spawn to avoid blocking the caller.
+pub fn schedule_persist_pending_secrets() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use dioxus::prelude::spawn;
+        spawn(async move {
+            persist_pending_secrets_impl().await;
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        log::debug!("schedule_persist_pending_secrets: no-op on non-WASM target");
+    }
+}
+
+/// Internal implementation for persisting pending secrets
+async fn persist_pending_secrets_impl() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping pending secrets persistence: localstore not initialized");
+            return;
+        }
+    };
+
+    // Snapshot the current state
+    let secrets = PENDING_BY_MINT_SECRETS.read().clone();
+
+    if let Err(e) = localstore.save_pending_mint_secrets(&secrets).await {
+        log::warn!("Failed to persist pending secrets: {}", e);
+    } else {
+        log::debug!("Persisted {} pending secrets to IndexedDB", secrets.len());
+    }
+}
+
+/// Load pending secrets from IndexedDB (call on startup)
+///
+/// Restores the pending-at-mint state from the previous session.
+pub async fn load_pending_secrets() {
+    let localstore = match SHARED_LOCALSTORE.read().as_ref() {
+        Some(store) => store.clone(),
+        None => {
+            log::debug!("Skipping pending secrets load: localstore not initialized");
+            return;
+        }
+    };
+
+    match localstore.load_pending_mint_secrets().await {
+        Ok(Some(secrets)) => {
+            if !secrets.is_empty() {
+                log::info!("Loaded {} pending mint secrets from storage", secrets.len());
+                *PENDING_BY_MINT_SECRETS.write() = secrets;
+            }
+        }
+        Ok(None) => {
+            log::debug!("No pending secrets found in storage");
+        }
+        Err(e) => {
+            log::warn!("Failed to load pending secrets: {}", e);
+        }
+    }
+}
+
+/// Clean up expired pending secrets (older than 1 hour)
+///
+/// Pending proofs should resolve within a reasonable time.
+/// This prevents stale entries from accumulating indefinitely.
+pub async fn cleanup_expired_pending_secrets() {
+    const ONE_HOUR_SECS: u64 = 60 * 60;
+
+    let now = super::utils::now_secs();
+
+    let (before_count, removed_count) = {
+        let mut secrets = PENDING_BY_MINT_SECRETS.write();
+        let before = secrets.len();
+        secrets.retain(|_, timestamp| now.saturating_sub(*timestamp) < ONE_HOUR_SECS);
+        let after = secrets.len();
+        (before, before - after)
+    };
+
+    if removed_count > 0 {
+        log::info!("Cleaned up {} expired pending secrets ({} remaining)", removed_count, before_count - removed_count);
+        // Persist after cleanup
+        persist_pending_secrets_impl().await;
+    }
+}
 
 // =============================================================================
 // Sync State Signals
@@ -213,15 +604,18 @@ pub fn reset_wallet_state() {
         data.write().clear();
     }
 
-    *WALLET_BALANCE.write() = 0;
     *WALLET_STATUS.write() = WalletStatus::Uninitialized;
-    *WALLET_BALANCES.write() = WalletBalances::default();
+    *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
+        crate::stores::cashu_cdk_bridge::WalletBalances::default();
     *TERMS_ACCEPTED.write() = None;
 
     MINT_OPERATION_LOCK.write().clear();
     PROOF_EVENT_MAP.write().clear();
     ACTIVE_TRANSACTIONS.write().clear();
     PENDING_BY_MINT_SECRETS.write().clear();
+    IN_FLIGHT_MELT_REQUESTS.write().clear();
+    IN_FLIGHT_SEND_REQUESTS.write().clear();
+    ACTIVE_OPERATIONS.write().clear();
     *SYNC_STATE.write() = None;
 
     clear_shared_localstore();
@@ -244,6 +638,9 @@ pub fn reset_wallet_state() {
         let mut data = store.data();
         data.write().clear();
     }
+
+    // Clear nutzap state
+    super::nutzap_signals::clear_nutzap_state();
 
     log::info!("Reset all wallet state");
 }

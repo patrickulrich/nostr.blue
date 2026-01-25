@@ -69,20 +69,27 @@ pub fn get_event_ids_for_proofs(proof_secrets: &[String]) -> Vec<String> {
 
 /// Rebuild the proof-to-event map from WALLET_TOKENS (called on initialization)
 pub fn rebuild_proof_event_map() {
-    let mut map = PROOF_EVENT_MAP.write();
-    map.clear();
+    // Build new map without holding the write lock
+    // Readers can still access old map during this phase
+    let new_map = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
 
-    let store = WALLET_TOKENS.read();
-    let data = store.data();
-    let tokens = data.read();
-
-    for token in tokens.iter() {
-        for proof in &token.proofs {
-            map.insert(proof.secret.clone(), token.event_id.clone());
+        let mut map = std::collections::HashMap::new();
+        for token in tokens.iter() {
+            for proof in &token.proofs {
+                map.insert(proof.secret.clone(), token.event_id.clone());
+            }
         }
-    }
+        map
+    };
 
-    log::debug!("Rebuilt proof-event map with {} entries", map.len());
+    // Atomic swap - minimal write lock time
+    // Readers see either complete old map OR complete new map, never empty
+    *PROOF_EVENT_MAP.write() = new_map;
+
+    log::debug!("Rebuilt proof-event map with {} entries", PROOF_EVENT_MAP.read().len());
 }
 
 // =============================================================================
@@ -227,24 +234,32 @@ pub fn get_all_proofs_for_mint(mint_url: &str) -> Vec<ProofData> {
 /// CDK best practice: Store timestamp for TTL-based cleanup
 pub fn register_proofs_pending_at_mint(proof_secrets: &[String]) {
     let now = now_secs();
-    let mut pending = PENDING_BY_MINT_SECRETS.write();
-    for secret in proof_secrets {
-        pending.insert(secret.clone(), now);
+    {
+        let mut pending = PENDING_BY_MINT_SECRETS.write();
+        for secret in proof_secrets {
+            pending.insert(secret.clone(), now);
+        }
     }
     log::debug!(
         "Registered {} proofs as pending at mint (ts={})",
         proof_secrets.len(),
         now
     );
+    // Persist to IndexedDB asynchronously
+    super::signals::schedule_persist_pending_secrets();
 }
 
 /// Remove proofs from pending-at-mint state (called when mint state changes to SPENT or UNSPENT)
 pub fn remove_from_pending_at_mint(proof_secrets: &[String]) {
-    let mut pending = PENDING_BY_MINT_SECRETS.write();
-    for secret in proof_secrets {
-        pending.remove(secret);
+    {
+        let mut pending = PENDING_BY_MINT_SECRETS.write();
+        for secret in proof_secrets {
+            pending.remove(secret);
+        }
     }
     log::debug!("Removed {} proofs from pending at mint", proof_secrets.len());
+    // Persist to IndexedDB asynchronously
+    super::signals::schedule_persist_pending_secrets();
 }
 
 /// Check if a proof is pending at the mint level
@@ -261,6 +276,8 @@ pub fn get_proofs_pending_at_mint() -> Vec<String> {
 pub fn clear_pending_at_mint() {
     PENDING_BY_MINT_SECRETS.write().clear();
     log::debug!("Cleared all pending-at-mint proofs");
+    // Persist to IndexedDB asynchronously
+    super::signals::schedule_persist_pending_secrets();
 }
 
 /// Cleanup stale pending-at-mint entries (TTL-based garbage collection)

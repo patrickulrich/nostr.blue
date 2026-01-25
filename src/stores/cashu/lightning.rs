@@ -14,12 +14,13 @@ use super::internal::{
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{
-    try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES, PENDING_MINT_QUOTES, WALLET_BALANCE,
-    WALLET_TOKENS,
+    add_in_flight_melt_request, persist_in_flight_melt_requests, persist_single_in_flight_request,
+    remove_in_flight_melt_request, try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES,
+    PENDING_MINT_QUOTES, WALLET_TOKENS,
 };
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, MeltProgress, MeltQuoteInfo, MintQuoteInfo,
-    MintQuoteState, MeltQuoteState, ProofData, TokenData,
+    ExtendedCashuProof, ExtendedTokenEvent, InFlightMeltRequest, MeltProgress, MeltQuoteInfo,
+    MintQuoteInfo, MintQuoteState, MeltQuoteState, ProofData, TokenData,
     PendingMintQuotesStoreStoreExt, PendingMeltQuotesStoreStoreExt, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
@@ -252,11 +253,7 @@ pub async fn mint_tokens_from_quote(mint_url: String, quote_id: String) -> Resul
     }
 
     // Update balance
-    let current_balance = *WALLET_BALANCE.read();
-    let new_balance = current_balance
-        .checked_add(amount_minted)
-        .ok_or_else(|| "Balance overflow".to_string())?;
-    *WALLET_BALANCE.write() = new_balance;
+    super::signals::update_wallet_balances();
 
     // Create history event
     create_history_event_with_type(
@@ -425,9 +422,57 @@ pub async fn melt_tokens(
 
     *MELT_PROGRESS.write() = Some(MeltProgress::PayingInvoice);
 
-    // Execute melt with auto-retry
-    let (melted, keep_proofs) =
-        execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed).await?;
+    // Generate unique transaction ID for in-flight tracking
+    // Using UUID v4 to prevent collisions on rapid consecutive melts
+    let tx_id = format!("melt_{}", uuid::Uuid::new_v4());
+
+    // CRITICAL SAFETY: Persist in-flight melt request BEFORE network call
+    // This enables crash recovery - we can query the mint for quote state
+    // and recover change proofs if the app crashes during the melt operation.
+    //
+    // CDK Pattern: Write-ahead logging - persist to disk BEFORE modifying memory.
+    // This ensures crash recovery data exists even if app crashes immediately after.
+    let in_flight = InFlightMeltRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        quote_id: quote_id.clone(),
+        proofs_used: all_proofs.iter().map(cdk_proof_to_proof_data).collect(),
+        amount: quote_info.amount,
+        fee_reserve: quote_info.fee_reserve,
+        created_at: super::utils::now_secs(),
+    };
+
+    // SAFETY: Persist BEFORE adding to memory (write-ahead logging pattern)
+    // If persistence fails, we haven't modified memory state yet - safe to abort.
+    if let Err(e) = persist_single_in_flight_request(&in_flight).await {
+        *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+            error: format!("Failed to persist recovery data: {}", e),
+        });
+        return Err(format!("Cannot proceed with melt: failed to persist recovery data. {}", e));
+    }
+
+    // Only add to memory AFTER successful persistence
+    add_in_flight_melt_request(in_flight);
+
+    // 1. Use try_operation_or_recover wrapper for CDK operation
+    // This ensures proofs are synced with mint if operation fails
+    let (melted, keep_proofs) = match super::internal::try_operation_or_recover(
+        &mint_url,
+        all_proofs.clone(),
+        execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed),
+    )
+    .await {
+        Ok(result) => result,
+        Err(e) => {
+            // Operation failed - remove in-flight tracking
+            // Recovery will happen on next startup if needed
+            remove_in_flight_melt_request(&tx_id);
+            if let Err(persist_err) = persist_in_flight_melt_requests().await {
+                log::warn!("Failed to persist in-flight melt cleanup after error: {}", persist_err);
+            }
+            return Err(e);
+        }
+    };
 
     let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
     let preimage = melted.preimage;
@@ -455,12 +500,34 @@ pub async fn melt_tokens(
         *MELT_PROGRESS.write() = Some(MeltProgress::WaitingForConfirmation);
     }
 
-    // Publish events and update state
-    let new_event_id =
-        publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await?;
+    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
+    // This uses a pending event ID that we'll update after Nostr publish
+    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
+    // Use UUID to prevent collision when multiple operations occur within same second
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
+    update_local_state_after_melt(
+        &mint_url,
+        &keep_proofs,
+        &event_ids_to_delete,
+        &Some(pending_event_id.clone()),
+    )?;
 
-    // Update local state
-    update_local_state_after_melt(&mint_url, &keep_proofs, &event_ids_to_delete, &new_event_id)?;
+    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
+    // nostr-sdk saves to local database before relay transmission
+    let new_event_id = match publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
+    {
+        Ok(Some(real_event_id)) => {
+            // Update token with real Nostr event ID
+            super::events::update_token_event_id(&pending_event_id, &real_event_id);
+            Some(real_event_id)
+        }
+        Ok(None) => None, // No proofs to publish
+        Err(e) => {
+            // Event already queued for retry by publish_melt_events
+            log::warn!("Nostr melt publish failed, queued for retry: {}", e);
+            Some(pending_event_id.clone())
+        }
+    };
 
     // Create history event
     let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
@@ -497,6 +564,17 @@ pub async fn melt_tokens(
     // Sync state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync MultiMintWallet state after melt: {}", e);
+    }
+
+    // SAFETY: Remove in-flight melt request now that we've completed successfully
+    // The melt operation is done, state is updated, and Nostr events published.
+    remove_in_flight_melt_request(&tx_id);
+    if let Err(e) = persist_in_flight_melt_requests().await {
+        log::error!(
+            "Failed to persist in-flight melt cleanup for tx_id={}: {}. \
+             May cause spurious recovery on next startup.",
+            tx_id, e
+        );
     }
 
     log::info!(
@@ -678,7 +756,15 @@ async fn publish_melt_events(
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                // Generate pending ID for retry tracking
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
+                new_event_id = Some(pending_id);
             }
         }
     }
@@ -712,7 +798,7 @@ async fn publish_melt_events(
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                 }
             }
         }
@@ -721,45 +807,43 @@ async fn publish_melt_events(
     Ok(new_event_id)
 }
 
-/// Update local state after melt
+/// Update local state after melt using atomic token replacement
+///
+/// Uses crash-safe atomic replacement: add new tokens BEFORE deleting old ones.
+/// This ensures worst case on crash is duplicate tokens (recoverable), never lost tokens.
 fn update_local_state_after_melt(
     mint_url: &str,
     keep_proofs: &[cdk::nuts::Proof],
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let store = WALLET_TOKENS.read();
-    let mut data = store.data();
-    let mut tokens_write = data.write();
+    let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
+        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
+        if keep_proofs.is_empty() {
+            (vec![], None)
+        } else {
+            let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let token = TokenData {
+                event_id: event_id.clone(),
+                mint: mint_url.to_string(),
+                unit: "sat".to_string(),
+                proofs: proof_data.clone(),
+                created_at: chrono::Utc::now().timestamp() as u64,
+            };
+            (vec![token], Some((event_id.clone(), proof_data)))
+        }
+    } else {
+        (vec![], None)
+    };
 
-    // Remove old token events
-    tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
+    let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
-    // Add new token with remaining proofs
-    if let Some(ref event_id) = new_event_id {
-        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-
-        tokens_write.push(TokenData {
-            event_id: event_id.clone(),
-            mint: mint_url.to_string(),
-            unit: "sat".to_string(),
-            proofs: proof_data,
-            created_at: chrono::Utc::now().timestamp() as u64,
-        });
+    // Register proofs for recovery tracking (mirrors send.rs pattern)
+    if let Some((event_id, proof_data)) = proofs_to_register {
+        register_proofs_in_event_map(&event_id, &proof_data);
     }
 
-    // Update balance
-    let new_balance: u64 = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .map(|p| p.amount)
-        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-        .ok_or_else(|| "Balance calculation overflow".to_string())?;
-
-    *WALLET_BALANCE.write() = new_balance;
-
     log::info!("Local state updated. New balance: {} sats", new_balance);
-
     Ok(())
 }
 

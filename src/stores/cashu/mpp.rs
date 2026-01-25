@@ -15,7 +15,7 @@ use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{Kind, PublicKey, EventId};
 
 use crate::stores::cashu_cdk_bridge::{MULTI_WALLET, sync_wallet_state};
-use super::signals::{WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::WALLET_TOKENS;
 use super::types::{
     TokenData, ProofData, ExtendedCashuProof, ExtendedTokenEvent,
     PendingEventType, WalletTokensStoreStoreExt,
@@ -398,7 +398,25 @@ pub async fn execute_mpp_melt(
                         }
                         Err(e) => {
                             log::warn!("Failed to publish MPP token event for {}, queuing for retry: {}", mint_url, e);
-                            queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                            // Generate pending ID for retry tracking
+                            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                            queue_event_for_retry(
+                                builder,
+                                PendingEventType::TokenEvent,
+                                Some(pending_id.clone()),
+                                Some(mint_url.clone()),
+                            ).await;
+
+                            // CRITICAL: Persist proofs with pending_id to prevent token loss
+                            // When background retry succeeds, update_token_event_id will fix the event_id
+                            new_tokens.push(TokenData {
+                                event_id: pending_id,
+                                mint: mint_url.clone(),
+                                unit: "sat".to_string(),
+                                proofs: proof_data,
+                                created_at: super::proofs::now_secs(),
+                            });
+
                             publish_failures += 1;
                         }
                     }
@@ -420,15 +438,11 @@ pub async fn execute_mpp_melt(
                 tokens_write.push(token);
             }
 
-            // Update balance atomically
-            let new_balance: u64 = tokens_write.iter()
-                .flat_map(|t| &t.proofs)
-                .map(|p| p.amount)
-                .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-                .ok_or_else(|| "Balance calculation overflow in execute_mpp_melt".to_string())?;
-
-            *WALLET_BALANCE.write() = new_balance;
             drop(tokens_write);
+
+            // Update balance from proof state
+            super::signals::update_wallet_balances();
+            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
             log::info!("MPP melt: local state updated. New balance: {} sats", new_balance);
             if publish_failures > 0 {
@@ -467,7 +481,7 @@ pub async fn execute_mpp_melt(
                     }
                     Err(e) => {
                         log::warn!("Failed to publish MPP deletion event, will queue for retry: {}", e);
-                        queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent).await;
+                        queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
                     }
                 }
             }
