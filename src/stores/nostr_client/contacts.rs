@@ -258,6 +258,18 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
 }
 
 /// Check if current user is following a specific pubkey
+///
+/// Uses the cached `fetch_contacts()` function with a 5-minute TTL.
+///
+/// # Note
+/// This may return stale results if contacts changed elsewhere (e.g., from
+/// another client). For guaranteed fresh data, call `fetch_contacts_from_relay()`
+/// directly to bypass the cache.
+///
+/// # Return values
+/// - `Ok(true)` if the user is following the pubkey
+/// - `Ok(false)` if the user is not following the pubkey
+/// - `Err(...)` if not logged in or pubkey is invalid
 pub async fn is_following(pubkey: String) -> std::result::Result<bool, String> {
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;

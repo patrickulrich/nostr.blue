@@ -12,6 +12,40 @@ use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 
 // =============================================================================
+// Relay URL Parsing Helper
+// =============================================================================
+
+/// Parse relay URLs with validation logging
+///
+/// Returns validated URLs and logs warnings for any invalid URLs.
+/// Returns an error if no valid URLs remain after filtering.
+///
+/// # Errors
+/// Returns `Err` if all provided URLs are invalid.
+fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::RelayUrl>, String> {
+    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
+        .iter()
+        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
+        .partition(|(_, result)| result.is_ok());
+
+    // Log invalid URLs
+    for (url, _) in &invalid_urls {
+        log::warn!("Invalid relay URL skipped: {}", url);
+    }
+
+    let urls: Vec<nostr::RelayUrl> = valid_urls
+        .into_iter()
+        .filter_map(|(_, r)| r.ok())
+        .collect();
+
+    if urls.is_empty() {
+        return Err("No valid relay URLs provided".to_string());
+    }
+
+    Ok(urls)
+}
+
+// =============================================================================
 // Relay-Specific Note Publishing
 // =============================================================================
 
@@ -41,18 +75,9 @@ pub async fn publish_note_to_relays(
             match tag[0].as_str() {
                 "e" if tag.len() >= 2 => {
                     EventId::from_hex(&tag[1]).ok().map(|id| {
-                        // Get optional relay hint (index 2) and marker (index 3)
-                        let relay_hint = tag.get(2).filter(|s| !s.is_empty()).cloned();
-                        let marker = tag.get(3).filter(|s| !s.is_empty()).cloned();
-
-                        if relay_hint.is_some() || marker.is_some() {
-                            // Build full tag with all fields preserved
-                            let mut fields = vec![id.to_hex()];
-                            fields.push(relay_hint.unwrap_or_default());
-                            if let Some(m) = marker {
-                                fields.push(m);
-                            }
-                            nostr::Tag::custom(nostr::TagKind::e(), fields)
+                        if tag.len() > 2 {
+                            // Preserve ALL trailing fields (nostr-sdk pattern)
+                            nostr::Tag::custom(nostr::TagKind::e(), tag[1..].to_vec())
                         } else {
                             nostr::Tag::event(id)
                         }
@@ -60,11 +85,8 @@ pub async fn publish_note_to_relays(
                 }
                 "p" if tag.len() >= 2 => {
                     PublicKey::from_hex(&tag[1]).ok().map(|pk| {
-                        // Get optional relay hint (index 2)
-                        let relay_hint = tag.get(2).filter(|s| !s.is_empty()).cloned();
-
-                        if relay_hint.is_some() {
-                            // Preserve relay hint using custom tag
+                        if tag.len() > 2 {
+                            // Preserve ALL trailing fields (nostr-sdk pattern)
                             nostr::Tag::custom(nostr::TagKind::p(), tag[1..].to_vec())
                         } else {
                             nostr::Tag::public_key(pk)
@@ -85,24 +107,7 @@ pub async fn publish_note_to_relays(
     let builder = nostr::EventBuilder::text_note(&content)
         .tags(nostr_tags);
 
-    // Parse relay URLs with validation logging
-    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
-        .iter()
-        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
-        .partition(|(_, result)| result.is_ok());
-
-    for (url, _) in &invalid_urls {
-        log::warn!("Invalid relay URL skipped: {}", url);
-    }
-
-    let urls: Vec<nostr::RelayUrl> = valid_urls
-        .into_iter()
-        .filter_map(|(_, r)| r.ok())
-        .collect();
-
-    if urls.is_empty() {
-        return Err("No valid relay URLs provided".to_string());
-    }
+    let urls = parse_relay_urls(&relay_urls)?;
 
     let output = client.send_event_builder_to(urls.clone(), builder)
         .await
@@ -162,24 +167,7 @@ pub async fn publish_reaction_to_relays(
 
     let builder = EventBuilder::reaction(target, reaction);
 
-    // Parse relay URLs with validation logging (matching publish_note_to_relays pattern)
-    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
-        .iter()
-        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
-        .partition(|(_, result)| result.is_ok());
-
-    for (url, _) in &invalid_urls {
-        log::warn!("Invalid relay URL skipped in reaction publish: {}", url);
-    }
-
-    let urls: Vec<nostr::RelayUrl> = valid_urls
-        .into_iter()
-        .filter_map(|(_, r)| r.ok())
-        .collect();
-
-    if urls.is_empty() {
-        return Err("No valid relay URLs provided".to_string());
-    }
+    let urls = parse_relay_urls(&relay_urls)?;
 
     let output = client.send_event_builder_to(urls, builder)
         .await
@@ -218,24 +206,7 @@ pub async fn send_presigned_event_to_relays(
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
-    // Parse relay URLs with validation logging
-    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
-        .iter()
-        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
-        .partition(|(_, result)| result.is_ok());
-
-    for (url, _) in &invalid_urls {
-        log::warn!("Invalid relay URL skipped: {}", url);
-    }
-
-    let urls: Vec<nostr::RelayUrl> = valid_urls
-        .into_iter()
-        .filter_map(|(_, r)| r.ok())
-        .collect();
-
-    if urls.is_empty() {
-        return Err("No valid relay URLs provided".to_string());
-    }
+    let urls = parse_relay_urls(&relay_urls)?;
 
     let output = client.send_event_to(urls, &event)
         .await

@@ -160,7 +160,7 @@ pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
         Some(event) => {
             // Use SDK's public_keys() method to extract p-tags
             let blocked_users: Vec<String> = event.tags.public_keys()
-                .map(|pk| pk.to_string())
+                .map(|pk| pk.to_hex())  // Explicit hex for consistency with normalize_pubkey
                 .collect();
             Ok(blocked_users)
         }
@@ -278,12 +278,13 @@ pub async fn report_post(
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Build report event (kind 1984)
-    // NIP-56: Required 'p' tag for user, 'e' tag for event, report type as 3rd entry
+    // NIP-56: Required 'p' tag for user, 'e' tag for event with report type
+    // Format: ["e", <event-id>, <report-type>] (no empty relay field)
     let tags = vec![
         Tag::public_key(target_pubkey),
         Tag::custom(
             nostr::TagKind::e(),
-            vec![target_event_id.to_hex(), String::new(), report_type],
+            vec![target_event_id.to_hex(), report_type],
         ),
     ];
 

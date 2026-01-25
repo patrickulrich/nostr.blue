@@ -177,10 +177,18 @@ pub async fn publish_poll_tracked(
 
     log::info!("Publishing poll: {}", title);
 
-    // Parse relay URLs
+    // Parse relay URLs with validation logging
     let relay_urls: Vec<nostr::RelayUrl> = relays
         .into_iter()
-        .filter_map(|r| nostr::RelayUrl::parse(&r).ok())
+        .filter_map(|r| {
+            match nostr::RelayUrl::parse(&r) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    log::warn!("Invalid relay URL skipped: {} ({})", r, e);
+                    None
+                }
+            }
+        })
         .collect();
 
     // Build poll struct (clone relay_urls since we need it for publishing too)
