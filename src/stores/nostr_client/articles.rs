@@ -10,12 +10,6 @@ use crate::stores::relay;
 use super::fetching::{get_client, fetch_events_aggregated};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
-use crate::stores::signer::SignerType;
-
-/// Get the current signer (re-exported from signals)
-fn get_signer() -> Option<SignerType> {
-    super::signals::CURRENT_SIGNER.read().clone()
-}
 
 // =============================================================================
 // Article Fetching
@@ -125,27 +119,16 @@ pub async fn publish_article_tracked(
         return Err("Title cannot be empty".to_string());
     }
 
-    // Get signer pubkey for the 'a' tag
-    let signer = get_signer().ok_or("No signer available")?;
-    let pubkey = signer.public_key().await?;
-
     log::info!("Publishing article: {}", title);
 
     // Build tags using trimmed values
+    // NIP-23: Addressable events are identified by kind+pubkey+d-tag
+    // No self-referencing 'a' tag needed (would be redundant)
     use nostr::Tag;
-    use nostr_sdk::nips::nip01::Coordinate;
 
     let mut tags = vec![
         Tag::identifier(identifier.to_string()),
         Tag::title(title.to_string()),
-        // Add 'a' tag for addressable event: <kind>:<pubkey>:<d-identifier>
-        Tag::coordinate(
-            Coordinate::new(
-                nostr::Kind::from(30023),
-                pubkey,
-            ).identifier(identifier.to_string()),
-            None, // relay_url
-        ),
     ];
 
     // Add optional summary

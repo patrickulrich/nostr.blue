@@ -92,6 +92,11 @@ pub async fn publish_picture_tracked(
     // Add imeta tags for each image
     // Detect MIME type from extension or omit if unknown
     for url in &image_urls {
+        let url = url.trim();
+        if url.is_empty() {
+            return Err("Image URLs cannot be empty".to_string());
+        }
+
         let mut imeta_fields = vec![format!("url {}", url)];
 
         // Add MIME type if we can detect it from the extension
@@ -203,7 +208,8 @@ pub async fn publish_video_tracked(
     ];
 
     // Detect video mime type from extension (video-specific, not using detect_mime_type)
-    let video_mime = {
+    // Return None for unknown extensions instead of forcing a default
+    let video_mime: Option<&str> = {
         let url_lower = video_url.to_lowercase();
         // Strip fragments first (e.g., video.webm#t=10) then query params
         let path = url_lower
@@ -211,17 +217,20 @@ pub async fn publish_video_tracked(
             .split('?').next().unwrap_or(&url_lower);
         let ext = path.split('.').next_back().unwrap_or("");
         match ext {
-            "mp4" | "m4v" => "video/mp4",
-            "webm" => "video/webm",
-            "mov" => "video/quicktime",
-            "avi" => "video/x-msvideo",
-            "mkv" => "video/x-matroska",
-            "m3u8" => "application/x-mpegURL",
-            "ts" => "video/MP2T",
-            _ => "video/mp4", // Default to mp4
+            "mp4" | "m4v" => Some("video/mp4"),
+            "webm" => Some("video/webm"),
+            "mov" => Some("video/quicktime"),
+            "avi" => Some("video/x-msvideo"),
+            "mkv" => Some("video/x-matroska"),
+            "m3u8" => Some("application/x-mpegURL"),
+            "ts" => Some("video/MP2T"),
+            _ => None, // Unknown extension - don't force a type
         }
     };
-    imeta_fields.push(format!("m {}", video_mime));
+    // Only add MIME field if type is known
+    if let Some(mime) = video_mime {
+        imeta_fields.push(format!("m {}", mime));
+    }
 
     // Add thumbnail as image in imeta if provided
     if !thumbnail_url.is_empty() {
@@ -304,6 +313,25 @@ pub async fn publish_voice_message_tracked(
 
     log::info!("Publishing voice message: {}", audio_url);
 
+    // Validate duration (CDK pattern: is_nan(), is_finite(), non-negative)
+    if duration.is_nan() {
+        return Err("Duration must be a valid number".to_string());
+    }
+    if !duration.is_finite() {
+        return Err("Duration must be finite".to_string());
+    }
+    if duration < 0.0 {
+        return Err("Duration must be non-negative".to_string());
+    }
+
+    // Cap waveform length (256 samples is reasonable for display)
+    const MAX_WAVEFORM_LEN: usize = 256;
+    let waveform = if waveform.len() > MAX_WAVEFORM_LEN {
+        &waveform[..MAX_WAVEFORM_LEN]
+    } else {
+        &waveform[..]
+    };
+
     // Parse URL
     let url = nostr::Url::parse(&audio_url)
         .map_err(|e| format!("Invalid audio URL: {}", e))?;
@@ -316,6 +344,8 @@ pub async fn publish_voice_message_tracked(
     let mut tags = Vec::new();
 
     // Add imeta tag with duration and waveform (NIP-92)
+    // Safe cast after validation
+    let duration_u64 = duration.round() as u64;
     let waveform_str = waveform.iter()
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
@@ -323,7 +353,7 @@ pub async fn publish_voice_message_tracked(
 
     let mut imeta_fields = vec![
         format!("url {}", audio_url),
-        format!("duration {}", duration.round() as u64),
+        format!("duration {}", duration_u64),
         format!("waveform {}", waveform_str),
     ];
 
@@ -400,6 +430,28 @@ pub async fn publish_voice_message_reply_tracked(
 
     log::info!("Publishing voice message reply to: {}", reply_to.id.to_hex());
 
+    // Validate duration (CDK pattern: is_nan(), is_finite(), non-negative)
+    if duration.is_nan() {
+        return Err("Duration must be a valid number".to_string());
+    }
+    if !duration.is_finite() {
+        return Err("Duration must be finite".to_string());
+    }
+    if duration < 0.0 {
+        return Err("Duration must be non-negative".to_string());
+    }
+
+    // Cap waveform length (256 samples is reasonable for display)
+    const MAX_WAVEFORM_LEN: usize = 256;
+    let waveform = if waveform.len() > MAX_WAVEFORM_LEN {
+        &waveform[..MAX_WAVEFORM_LEN]
+    } else {
+        &waveform[..]
+    };
+
+    // Safe cast after validation
+    let duration_u64 = duration.round() as u64;
+
     // Parse URL
     let url = nostr::Url::parse(&audio_url)
         .map_err(|e| format!("Invalid audio URL: {}", e))?;
@@ -458,7 +510,7 @@ pub async fn publish_voice_message_reply_tracked(
 
     let mut imeta_fields = vec![
         format!("url {}", audio_url),
-        format!("duration {}", duration.round() as u64),
+        format!("duration {}", duration_u64),
         format!("waveform {}", waveform_str),
     ];
 

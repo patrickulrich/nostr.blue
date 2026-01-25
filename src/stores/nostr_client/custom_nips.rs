@@ -158,10 +158,23 @@ pub fn generate_custom_nip_naddr(
     let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey)
         .identifier(identifier);
 
+    let mut failed_count = 0;
     let relay_urls: Vec<nostr::RelayUrl> = relays
         .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .filter_map(|r| {
+            match nostr::RelayUrl::parse(r) {
+                Ok(url) => Some(url),
+                Err(_) => {
+                    failed_count += 1;
+                    None
+                }
+            }
+        })
         .collect();
+
+    if failed_count > 0 {
+        log::warn!("{} relay URL(s) failed to parse for naddr", failed_count);
+    }
 
     let nip19_coord = Nip19Coordinate::new(coordinate, relay_urls);
 
