@@ -34,7 +34,7 @@ pub async fn fetch_articles(
     }
 
     // Use aggregated fetch pattern (DB cache first, background relay sync)
-    match fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
+    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let mut sorted: Vec<_> = events.into_iter().collect();
             sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
