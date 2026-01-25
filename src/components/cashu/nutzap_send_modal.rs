@@ -44,8 +44,8 @@ pub fn NutzapSendModal(
 
             match cashu::fetch_nutzap_info(&recipient).await {
                 Ok(info) => {
-                    // Check for compatible mint
-                    match cashu::validate_nutzap_recipient(&recipient).await {
+                    // Check for compatible mint using already-fetched info (avoids double-fetch)
+                    match cashu::validate_nutzap_recipient_with_info(&info) {
                         Ok(mint) => {
                             compatible_mint.set(Some(mint));
                         }

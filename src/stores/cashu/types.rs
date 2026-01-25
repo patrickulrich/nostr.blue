@@ -796,20 +796,21 @@ impl WalletTokensStore {
     /// Optimized: reuses single-pass balance_breakdown()
     pub fn total_balance(&self) -> u64 {
         let (avail, pend) = self.balance_breakdown();
-        avail.saturating_add(pend)
+        avail + pend
     }
 
     /// Get balance breakdown (available, pending) in single pass
     /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
+        // Use normal addition - wallet balances can't realistically overflow u64
         self.data
             .iter()
             .flat_map(|token| &token.proofs)
             .fold((0u64, 0u64), |(avail, pend), proof| {
                 if proof.state.is_spendable() {
-                    (avail.saturating_add(proof.amount), pend)
+                    (avail + proof.amount, pend)
                 } else if proof.state.is_pending() {
-                    (avail, pend.saturating_add(proof.amount))
+                    (avail, pend + proof.amount)
                 } else {
                     (avail, pend)
                 }

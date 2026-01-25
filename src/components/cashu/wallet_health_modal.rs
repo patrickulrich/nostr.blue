@@ -165,9 +165,10 @@ fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) ->
 
             // Proofs list
             div { class: "space-y-1 text-sm text-muted-foreground",
-                for (index, proof) in proofs.iter().enumerate() {
+                for proof in proofs.iter() {
                     div {
-                        key: "{index}",
+                        // Use proof secret as stable key (Dioxus pattern)
+                        key: "{proof.secret}",
                         class: "flex justify-between pl-4",
                         span { "{format_sats_with_separator(proof.amount)} - {proof.state:?}" }
                         span { "{format_duration(proof.stuck_duration_secs)}" }
@@ -279,9 +280,10 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                         div { class: "space-y-4",
                             h3 { class: "font-semibold", "Stuck Proofs" }
 
-                            for group in grouped.iter() {
+                            for (idx, group) in grouped.iter().enumerate() {
                                 TransactionGroup {
-                                    key: "{group.mint_url}_{group.transaction_id:?}",
+                                    // Use composite key with index fallback for None transaction_id
+                                    key: "{group.mint_url}_{group.transaction_id.unwrap_or(idx as u64)}",
                                     transaction_id: group.transaction_id,
                                     proofs: group.proofs.clone(),
                                 }

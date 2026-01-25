@@ -156,7 +156,10 @@ pub async fn publish_video_tracked(
     // Detect video mime type from extension (video-specific, not using detect_mime_type)
     let video_mime = {
         let url_lower = video_url.to_lowercase();
-        let path = url_lower.split('?').next().unwrap_or(&url_lower);
+        // Strip fragments first (e.g., video.webm#t=10) then query params
+        let path = url_lower
+            .split('#').next().unwrap_or(&url_lower)
+            .split('?').next().unwrap_or(&url_lower);
         let ext = path.split('.').next_back().unwrap_or("");
         match ext {
             "mp4" | "m4v" => "video/mp4",

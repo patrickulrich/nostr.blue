@@ -157,10 +157,19 @@ pub fn WalletBalanceCard(
                         onclick: move |_| on_nutzap_inbox.call(()),
                         span { "📥" }
                         span { "Zap Inbox" }
-                        if cashu::pending_nutzap_count() > 0 {
-                            div {
-                                class: "absolute -top-1 -right-1",
-                                NutzapBadge {}
+                        {
+                            // Compute once and pass to badge (avoid redundant signal reads)
+                            let pending_count = cashu::pending_nutzap_count();
+                            let pending_value = cashu::pending_nutzap_value();
+                            if pending_count > 0 {
+                                rsx! {
+                                    div {
+                                        class: "absolute -top-1 -right-1",
+                                        NutzapBadge { count: pending_count, value: pending_value }
+                                    }
+                                }
+                            } else {
+                                rsx! {}
                             }
                         }
                     }

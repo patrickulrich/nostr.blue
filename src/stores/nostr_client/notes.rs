@@ -96,8 +96,7 @@ pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> st
     let mut mention_tags = create_mention_tags(&mentioned_pubkeys);
     log::debug!("Extracted {} mentions from content", mentioned_pubkeys.len());
 
-    // Track tagged pubkeys for Outbox routing (currently unused but prepared for future outbox implementation)
-    let mut _tagged_pubkeys: Vec<PublicKey> = mentioned_pubkeys.clone();
+    // Note: tagged pubkeys can be derived from mentioned_pubkeys for future outbox routing
 
     // Convert tags to nostr Tag format
     use nostr::Tag;
@@ -151,9 +150,8 @@ pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> st
                     ))
                 },
                 "p" if tag_vec.len() >= 2 => {
-                    // Extract pubkey for Outbox routing (currently unused but prepared for future)
+                    // Extract pubkey for Outbox routing
                     if let Ok(pubkey) = nostr::PublicKey::from_hex(&tag_vec[1]) {
-                        _tagged_pubkeys.push(pubkey);
                         Some(Tag::public_key(pubkey))
                     } else {
                         None

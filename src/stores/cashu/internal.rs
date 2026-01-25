@@ -944,14 +944,24 @@ where
                 }
 
                 // Drain and process any queued proofs for this mint
+                // TOCTOU fix: Atomic check+clear in single lock (nostr-sdk pattern)
                 loop {
-                    let queued_proofs = {
+                    let (queued_proofs, should_exit) = {
                         let mut states = MINT_RECOVERY_STATE.lock().unwrap();
                         let state = states.entry(normalized_mint.clone()).or_default();
-                        std::mem::take(&mut state.pending_proofs)
+                        let proofs = std::mem::take(&mut state.pending_proofs);
+
+                        if proofs.is_empty() {
+                            // Atomically check empty AND clear in_recovery to prevent race
+                            state.in_recovery = false;
+                            states.remove(&normalized_mint); // Clean up
+                            (proofs, true)
+                        } else {
+                            (proofs, false)
+                        }
                     };
 
-                    if queued_proofs.is_empty() {
+                    if should_exit {
                         break;
                     }
 
@@ -960,18 +970,6 @@ where
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
                         if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
                             log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
-                        }
-                    }
-                }
-
-                // Release recovery lock
-                {
-                    let mut states = MINT_RECOVERY_STATE.lock().unwrap();
-                    if let Some(state) = states.get_mut(&normalized_mint) {
-                        state.in_recovery = false;
-                        // Clean up empty entries to prevent unbounded growth
-                        if state.pending_proofs.is_empty() {
-                            states.remove(&normalized_mint);
                         }
                     }
                 }
@@ -1098,14 +1096,24 @@ pub(crate) async fn try_swap_or_recover(
                 }
 
                 // Drain and process any queued proofs for this mint
+                // TOCTOU fix: Atomic check+clear in single lock (nostr-sdk pattern)
                 loop {
-                    let queued_proofs = {
+                    let (queued_proofs, should_exit) = {
                         let mut states = MINT_RECOVERY_STATE.lock().unwrap();
                         let state = states.entry(normalized_mint.clone()).or_default();
-                        std::mem::take(&mut state.pending_proofs)
+                        let proofs = std::mem::take(&mut state.pending_proofs);
+
+                        if proofs.is_empty() {
+                            // Atomically check empty AND clear in_recovery to prevent race
+                            state.in_recovery = false;
+                            states.remove(&normalized_mint); // Clean up
+                            (proofs, true)
+                        } else {
+                            (proofs, false)
+                        }
                     };
 
-                    if queued_proofs.is_empty() {
+                    if should_exit {
                         break;
                     }
 
@@ -1114,18 +1122,6 @@ pub(crate) async fn try_swap_or_recover(
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
                         if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
                             log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
-                        }
-                    }
-                }
-
-                // Release recovery lock
-                {
-                    let mut states = MINT_RECOVERY_STATE.lock().unwrap();
-                    if let Some(state) = states.get_mut(&normalized_mint) {
-                        state.in_recovery = false;
-                        // Clean up empty entries to prevent unbounded growth
-                        if state.pending_proofs.is_empty() {
-                            states.remove(&normalized_mint);
                         }
                     }
                 }

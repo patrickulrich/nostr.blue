@@ -174,13 +174,15 @@ pub(crate) fn detect_mime_type(url: &str) -> Option<String> {
         "avif" => Some("image/avif".to_string()),
         "heic" | "heif" => Some("image/heic".to_string()),
 
-        // Audio types
+        // Audio types (audio-only extensions)
         "mp3" => Some("audio/mpeg".to_string()),
-        "m4a" | "mp4" | "aac" => Some("audio/mp4".to_string()),
+        "m4a" | "aac" => Some("audio/mp4".to_string()),
         "ogg" | "opus" => Some("audio/ogg".to_string()),
         "wav" => Some("audio/wav".to_string()),
-        "webm" | "weba" => Some("audio/webm".to_string()),
+        "weba" => Some("audio/webm".to_string()),
         "flac" => Some("audio/flac".to_string()),
+        // Note: mp4/webm are video-capable but listed under images for backwards compat
+        // Use detect_video_mime_type for explicit video detection
 
         _ => None,
     }

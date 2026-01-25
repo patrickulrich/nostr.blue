@@ -417,23 +417,20 @@ pub async fn execute_swap_with_nip60(
                 .map_err(|e| format!("Failed to get swapped proofs: {}", e))?;
 
             // Filter to only NEW proofs (those with Y values not in input_ys)
-            all_unspent
-                .into_iter()
-                .filter(|p| {
-                    match p.y() {
-                        Ok(y) => !input_ys.contains(&y.to_string()),
-                        Err(e) => {
-                            // Escalate to error level for visibility - this should never happen
-                            // and indicates a potential fund loss scenario
-                            log::error!(
-                                "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - PROOF SKIPPED",
-                                u64::from(p.amount), e
-                            );
-                            false
-                        }
-                    }
-                })
-                .collect()
+            // Fail-fast on y() error to avoid silent fund loss (nostr-sdk pattern)
+            let mut new_proofs = Vec::new();
+            for p in all_unspent {
+                let y = p.y().map_err(|e| {
+                    format!(
+                        "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - aborting to prevent fund loss",
+                        u64::from(p.amount), e
+                    )
+                })?;
+                if !input_ys.contains(&y.to_string()) {
+                    new_proofs.push(p);
+                }
+            }
+            new_proofs
         }
     };
 

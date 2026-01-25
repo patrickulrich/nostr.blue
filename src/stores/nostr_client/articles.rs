@@ -48,6 +48,8 @@ pub async fn fetch_articles(
         Ok(events) => {
             let mut sorted: Vec<_> = events.into_iter().collect();
             sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            // Enforce limit after sorting (API contract)
+            sorted.truncate(limit);
             log::info!("Fetched {} articles", sorted.len());
             Ok(sorted)
         }

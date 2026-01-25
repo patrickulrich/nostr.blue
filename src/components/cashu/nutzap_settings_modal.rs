@@ -64,9 +64,12 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             return;
         }
 
+        // Filter selected mints against current wallet mints to avoid stale entries
+        let current_wallet_mints = cashu::get_mints();
         let mints: Vec<cashu::NutzapMint> = selected_mints
             .read()
             .iter()
+            .filter(|url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, url)))
             .map(|url| cashu::NutzapMint {
                 url: url.clone(),
                 unit: "sat".to_string(),
@@ -211,6 +214,8 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                                         let mint_url_clone = mint_url.clone();
                                         rsx! {
                                             button {
+                                                // Use stable key from mint URL (Dioxus pattern)
+                                                key: "mint-{mint_url}",
                                                 class: if is_selected {
                                                     "w-full px-4 py-3 text-left rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 transition"
                                                 } else {

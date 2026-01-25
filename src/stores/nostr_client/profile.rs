@@ -6,7 +6,7 @@ use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use nostr::Url;
 
-use super::signals::{NOSTR_CLIENT, HAS_SIGNER};
+use super::{get_client, HAS_SIGNER};
 use super::types::PublishResult;
 
 // =============================================================================
@@ -17,8 +17,8 @@ use super::types::PublishResult;
 ///
 /// Updates the user's Nostr profile with the provided metadata
 pub async fn publish_metadata_tracked(metadata: Metadata) -> std::result::Result<PublishResult, String> {
-    let client = NOSTR_CLIENT.read();
-    let client = client.as_ref().ok_or("Client not initialized")?;
+    // Use get_client() helper to avoid holding RwLock across await
+    let client = get_client().ok_or("Client not initialized")?;
 
     // Verify signer is available
     if !*HAS_SIGNER.read() {
@@ -65,12 +65,12 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
 /// Update just the profile picture
 #[allow(dead_code)]
 pub async fn update_profile_picture(url: String) -> std::result::Result<(), String> {
-    // Fetch current metadata
+    // Fetch current metadata - require existing profile to avoid clobbering data
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
-        .unwrap_or_default();
+        .ok_or("Profile not loaded; fetch metadata first")?;
 
     // Validate URL by parsing it, then convert back to String
     let _validated_url = Url::parse(&url)
@@ -89,12 +89,12 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
 /// Update just the profile banner
 #[allow(dead_code)]
 pub async fn update_profile_banner(url: String) -> std::result::Result<(), String> {
-    // Fetch current metadata
+    // Fetch current metadata - require existing profile to avoid clobbering data
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
-        .unwrap_or_default();
+        .ok_or("Profile not loaded; fetch metadata first")?;
 
     // Validate URL by parsing it, then convert back to String
     let _validated_url = Url::parse(&url)

@@ -193,13 +193,10 @@ pub async fn publish_poll_tracked(
     };
 
     // Build event using EventBuilder::poll
-    let mut builder = nostr::EventBuilder::poll(poll);
-
-    // Add hashtags
+    // Batch hashtag tags for efficiency (nostr-sdk pattern)
     use nostr::Tag;
-    for hashtag in hashtags {
-        builder = builder.tags([Tag::hashtag(hashtag)]);
-    }
+    let hashtag_tags: Vec<Tag> = hashtags.into_iter().map(Tag::hashtag).collect();
+    let builder = nostr::EventBuilder::poll(poll).tags(hashtag_tags);
 
     // Publish
     let output = client.send_event_builder(builder).await
