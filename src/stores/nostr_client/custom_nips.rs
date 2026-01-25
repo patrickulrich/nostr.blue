@@ -15,6 +15,40 @@ use super::types::PublishResult;
 // =============================================================================
 
 /// Kind 30817 - Custom NIP (addressable event)
+///
+/// A community-driven event type for proposing and discussing custom NIPs.
+/// Uses the addressable event pattern (30000-39999 range) for deduplication.
+///
+/// # Event Schema
+/// - **Kind**: 30817 (addressable, parameterized replaceable)
+/// - **Content**: Markdown body of the NIP proposal
+///
+/// # Required Tags
+/// - `d`: Unique identifier for this NIP (e.g., "my-custom-nip" or UUID)
+/// - `title`: Human-readable title of the proposal
+///
+/// # Optional Tags
+/// - `k`: Related event kinds this NIP affects (can appear multiple times)
+/// - `alt`: NIP-31 fallback description for clients that don't support this kind
+///
+/// # Example
+/// ```json
+/// {
+///   "kind": 30817,
+///   "content": "# My Custom NIP\n\nThis NIP defines...",
+///   "tags": [
+///     ["d", "my-custom-nip"],
+///     ["title", "My Custom NIP"],
+///     ["k", "1"],
+///     ["k", "6"],
+///     ["alt", "Custom NIP proposal: My Custom NIP"]
+///   ]
+/// }
+/// ```
+///
+/// # References
+/// - NIP-33: Parameterized Replaceable Events
+/// - NIP-31: Alt tag for unknown event kinds
 pub const KIND_CUSTOM_NIP: u16 = 30817;
 
 // =============================================================================
