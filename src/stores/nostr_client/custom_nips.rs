@@ -101,7 +101,8 @@ pub async fn fetch_custom_nip_by_naddr(
             let filter = Filter::new()
                 .kind(coord.kind)
                 .author(coord.public_key)
-                .identifier(coord.identifier);
+                .identifier(coord.identifier)
+                .limit(10);
 
             // nostr-sdk pattern: For addressable events, always get max created_at
             let events = fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
@@ -128,13 +129,23 @@ pub async fn publish_custom_nip_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
+    // Validate required fields (NIP-33: d-tag cannot be empty for addressable events)
+    let identifier = identifier.trim();
+    let title = title.trim();
+    if identifier.is_empty() {
+        return Err("Identifier (d-tag) cannot be empty".to_string());
+    }
+    if title.is_empty() {
+        return Err("Title cannot be empty".to_string());
+    }
+
     use nostr::{EventBuilder, Kind, Tag, TagKind, SingleLetterTag, Alphabet};
 
     // Build event with required d-tag and optional tags
     // nostr-sdk NIP-31 pattern: Add alt tag for clients that don't understand custom kinds
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CUSTOM_NIP), &content)
-        .tag(Tag::identifier(&identifier))
-        .tag(Tag::title(&title))
+        .tag(Tag::identifier(identifier))
+        .tag(Tag::title(title))
         .tag(Tag::alt(format!("Custom NIP proposal: {}", title)));
 
     // Add k tags for related event kinds

@@ -20,7 +20,10 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
-    let pubkey = nostr::PublicKey::from_hex(&current_pubkey)
+    // Normalize to hex (handles both hex and bech32 npub formats from NIP-46 signers)
+    let pubkey_hex = crate::utils::nip19::normalize_pubkey(&current_pubkey)?;
+
+    let pubkey = nostr::PublicKey::from_hex(&pubkey_hex)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Note: No .limit(1) - let aggregation collect all versions from multiple relays.
