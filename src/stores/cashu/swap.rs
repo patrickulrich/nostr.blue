@@ -361,13 +361,17 @@ pub async fn execute_swap_with_nip60(
 
     // Snapshot pre-swap unspent Y values (CDK saga pattern - defensive filter data)
     // Ensures only THIS swap's proofs are returned, not pre-existing ones
-    let pre_swap_ys: HashSet<String> = wallet
+    // Dioxus fail-fast pattern: use collect::<Result<_, _>>() instead of filter_map
+    let pre_swap_proofs = wallet
         .get_unspent_proofs()
         .await
-        .map_err(|e| format!("Failed to get pre-swap proofs: {}", e))?
+        .map_err(|e| format!("Failed to get pre-swap proofs: {}", e))?;
+
+    let pre_swap_ys: HashSet<String> = pre_swap_proofs
         .iter()
-        .filter_map(|p| p.y().ok().map(|y| y.to_string()))
-        .collect();
+        .map(|p| p.y().map(|y| y.to_string()))
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|e| format!("Failed to compute Y for pre-swap proof: {}", e))?;
 
     log::debug!("Pre-swap snapshot: {} existing unspent proofs", pre_swap_ys.len());
 

@@ -38,6 +38,8 @@ pub(crate) struct CachedContacts {
     pub pubkey: String,
     pub contacts: Vec<String>,
     pub cached_at: instant::Instant,
+    /// nostr-sdk pattern: Track last refresh spawn to prevent spam
+    pub last_refresh_spawned: Option<instant::Instant>,
 }
 
 static CONTACTS_CACHE: OnceLock<Mutex<Option<CachedContacts>>> = OnceLock::new();
