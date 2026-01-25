@@ -1,0 +1,530 @@
+//! Picture/video/voice
+//!
+//! Functions for publishing media content (NIP-68, NIP-71, NIP-A0).
+
+use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
+
+use super::fetching::get_client;
+use super::signals::HAS_SIGNER;
+use super::types::{PublishResult, detect_mime_type};
+
+// =============================================================================
+// Picture Publishing (Kind 20 - NIP-68)
+// =============================================================================
+
+/// Publish a picture post (Kind 20) with relay feedback
+/// NIP-68: https://github.com/nostr-protocol/nips/blob/master/68.md
+pub async fn publish_picture_tracked(
+    title: String,
+    caption: String,
+    image_urls: Vec<String>,
+    hashtags: Vec<String>,
+    location: String,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    if image_urls.is_empty() {
+        return Err("At least one image is required".to_string());
+    }
+
+    log::info!("Publishing picture post: {}", title);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = vec![
+        Tag::title(title.clone()),
+    ];
+
+    // Add imeta tags for each image
+    // Detect MIME type from extension or omit if unknown
+    for url in &image_urls {
+        let mut imeta_fields = vec![format!("url {}", url)];
+
+        // Add MIME type if we can detect it from the extension
+        if let Some(mime_type) = detect_mime_type(url) {
+            imeta_fields.push(format!("m {}", mime_type));
+        }
+
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("imeta".into()),
+            imeta_fields
+        ));
+    }
+
+    // Add location if provided
+    if !location.is_empty() {
+        tags.push(Tag::custom(
+            nostr::TagKind::Custom("location".into()),
+            vec![location]
+        ));
+    }
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Build the event (Kind 20 - Picture)
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption)
+        .tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish picture: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Picture '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a picture post (Kind 20)
+/// For relay feedback, use publish_picture_tracked instead
+pub async fn publish_picture(
+    title: String,
+    caption: String,
+    image_urls: Vec<String>,
+    hashtags: Vec<String>,
+    location: String,
+) -> std::result::Result<String, String> {
+    publish_picture_tracked(title, caption, image_urls, hashtags, location)
+        .await
+        .map(|result| result.event_id)
+}
+
+// =============================================================================
+// Video Publishing (Kind 21/22 - NIP-71)
+// =============================================================================
+
+/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait) with relay feedback
+/// NIP-71: https://github.com/nostr-protocol/nips/blob/master/71.md
+pub async fn publish_video_tracked(
+    title: String,
+    description: String,
+    video_url: String,
+    thumbnail_url: String,
+    hashtags: Vec<String>,
+    is_portrait: bool,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate required fields
+    if video_url.trim().is_empty() {
+        return Err("Video URL is required".to_string());
+    }
+
+    if title.trim().is_empty() {
+        return Err("Title is required".to_string());
+    }
+
+    let kind = if is_portrait { 22 } else { 21 };
+    log::info!("Publishing video (kind {}): {}", kind, title);
+
+    // Build tags per NIP-71
+    use nostr::Tag;
+    let mut tags = vec![
+        Tag::title(title.clone()),
+    ];
+
+    // Build imeta tag with video metadata (NIP-71 + NIP-92)
+    let mut imeta_fields = vec![
+        format!("url {}", video_url),
+    ];
+
+    // Detect video mime type from extension (video-specific, not using detect_mime_type)
+    let video_mime = {
+        let url_lower = video_url.to_lowercase();
+        let path = url_lower.split('?').next().unwrap_or(&url_lower);
+        let ext = path.split('.').next_back().unwrap_or("");
+        match ext {
+            "mp4" | "m4v" => "video/mp4",
+            "webm" => "video/webm",
+            "mov" => "video/quicktime",
+            "avi" => "video/x-msvideo",
+            "mkv" => "video/x-matroska",
+            "m3u8" => "application/x-mpegURL",
+            "ts" => "video/MP2T",
+            _ => "video/mp4", // Default to mp4
+        }
+    };
+    imeta_fields.push(format!("m {}", video_mime));
+
+    // Add thumbnail as image in imeta if provided
+    if !thumbnail_url.is_empty() {
+        imeta_fields.push(format!("image {}", thumbnail_url));
+    }
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Content is just the description per NIP-71
+    let content = description;
+
+    // Build the event
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content)
+        .tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish video: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Video '{}' published: {} ({}/{} relays succeeded)",
+        title,
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait)
+/// For relay feedback, use publish_video_tracked instead
+pub async fn publish_video(
+    title: String,
+    description: String,
+    video_url: String,
+    thumbnail_url: String,
+    hashtags: Vec<String>,
+    is_portrait: bool,
+) -> std::result::Result<String, String> {
+    publish_video_tracked(title, description, video_url, thumbnail_url, hashtags, is_portrait)
+        .await
+        .map(|result| result.event_id)
+}
+
+// =============================================================================
+// Voice Message Publishing (Kind 1222/1244 - NIP-A0)
+// =============================================================================
+
+/// Publish a voice message (Kind 1222) with relay feedback
+/// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
+pub async fn publish_voice_message_tracked(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    hashtags: Vec<String>,
+    mime_type: Option<String>,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    log::info!("Publishing voice message: {}", audio_url);
+
+    // Parse URL
+    let url = nostr::Url::parse(&audio_url)
+        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+
+    // Build event using EventBuilder::voice_message
+    let mut builder = nostr::EventBuilder::voice_message(url);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = Vec::new();
+
+    // Add imeta tag with duration and waveform (NIP-92)
+    let waveform_str = waveform.iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut imeta_fields = vec![
+        format!("url {}", audio_url),
+        format!("duration {}", duration.round() as u64),
+        format!("waveform {}", waveform_str),
+    ];
+
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
+
+    // Add hashtags
+    for hashtag in hashtags {
+        tags.push(Tag::hashtag(hashtag));
+    }
+
+    // Add tags to builder
+    builder = builder.tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish voice message: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Voice message published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a voice message (Kind 1222)
+/// For relay feedback, use publish_voice_message_tracked instead
+pub async fn publish_voice_message(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    hashtags: Vec<String>,
+    mime_type: Option<String>,
+) -> std::result::Result<String, String> {
+    publish_voice_message_tracked(audio_url, duration, waveform, hashtags, mime_type)
+        .await
+        .map(|result| result.event_id)
+}
+
+/// Publish a voice message reply (Kind 1244) with relay feedback
+/// NIP-A0: https://github.com/nostr-protocol/nips/blob/master/A0.md
+/// NIP-22: https://github.com/nostr-protocol/nips/blob/master/22.md
+pub async fn publish_voice_message_reply_tracked(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    reply_to: nostr::Event,
+    mime_type: Option<String>,
+) -> std::result::Result<PublishResult, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    log::info!("Publishing voice message reply to: {}", reply_to.id.to_hex());
+
+    // Parse URL
+    let url = nostr::Url::parse(&audio_url)
+        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+
+    // Determine root and parent for NIP-22 structure
+    // Check if reply_to has a root tag marker (NIP-10/NIP-22)
+    // Extract root event ID, author pubkey, and relay URL
+    let (root_event_id, root_pubkey, root_relay_url): (Option<String>, Option<PublicKey>, Option<RelayUrl>) = {
+        // First, try to find modern NIP-10/NIP-22 lowercase 'e' tag with marker="root"
+        let modern_root = reply_to.tags.iter().find_map(|tag| {
+            if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+                // Check for lowercase 'e' tag with marker="root" (NIP-10/NIP-22)
+                if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
+                    return Some((
+                        Some(event_id.to_hex()),
+                        *public_key,  // Public key from the tag
+                        relay_url.clone(),  // Relay URL from the tag
+                    ));
+                }
+            }
+            None
+        });
+
+        if let Some(result) = modern_root {
+            result
+        } else {
+            // Fallback: Legacy uppercase 'E'/'P' tag support
+            // NIP-10 deprecated positional convention: first 'E' tag = root, first 'P' tag = root author
+            let uppercase_e_tags: Vec<_> = reply_to.tags.iter()
+                .filter_map(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    if tag_vec.len() >= 2 && tag_vec[0] == "E" {
+                        Some((
+                            tag_vec[1].clone(),
+                            if tag_vec.len() >= 3 && !tag_vec[2].is_empty() {
+                                RelayUrl::parse(&tag_vec[2]).ok()
+                            } else {
+                                None
+                            }
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if let Some((root_event_id, relay)) = uppercase_e_tags.first() {
+                // Per deprecated NIP-10 positional convention, the first 'P' tag corresponds to the root author
+                // Note: This is a heuristic and may not be accurate if the event has multiple 'P' tags
+                // for different purposes (e.g., mentions). Modern events should use marker-based tags.
+                let root_pubkey = reply_to.tags.iter().find_map(|p_tag| {
+                    let p_vec = p_tag.clone().to_vec();
+                    if p_vec.len() >= 2 && p_vec[0] == "P" {
+                        PublicKey::from_hex(&p_vec[1]).ok()
+                    } else {
+                        None
+                    }
+                });
+
+                (Some(root_event_id.clone()), root_pubkey, relay.clone())
+            } else {
+                (None, None, None)
+            }
+        }
+    };
+
+    let parent_id = reply_to.id.to_hex();
+    let parent_pubkey = reply_to.pubkey;
+    let parent_kind = reply_to.kind;
+
+    // Create CommentTarget for parent
+    use nostr::prelude::*;
+    let parent_target = if parent_kind.as_u16() == 1222 || parent_kind.as_u16() == 1244 {
+        // Voice message or voice reply
+        let event_id = EventId::parse(&parent_id)
+            .map_err(|e| format!("Failed to parse parent event ID: {}", e))?;
+        CommentTarget::event(event_id, parent_kind, Some(parent_pubkey), None)
+    } else {
+        return Err("Can only reply to voice messages (Kind 1222 or 1244)".to_string());
+    };
+
+    // Create root target if different from parent
+    let root_target = if let Some(root_id) = root_event_id {
+        if root_id != parent_id {
+            let event_id = EventId::parse(&root_id)
+                .map_err(|e| format!("Failed to parse root event ID: {}", e))?;
+            // Include root author and relay URL for proper NIP-22/NIP-10 compliance
+            use std::borrow::Cow;
+            Some(CommentTarget::event(
+                event_id,
+                nostr::Kind::VoiceMessage,
+                root_pubkey,  // Root author's public key
+                root_relay_url.as_ref().map(Cow::Borrowed)  // Relay hint/URL as Cow
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build event using EventBuilder::voice_message_reply
+    let mut builder = nostr::EventBuilder::voice_message_reply(url, root_target, parent_target);
+
+    // Build tags
+    use nostr::Tag;
+    let mut tags = Vec::new();
+
+    // Add imeta tag with duration and waveform (NIP-92)
+    let waveform_str = waveform.iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut imeta_fields = vec![
+        format!("url {}", audio_url),
+        format!("duration {}", duration.round() as u64),
+        format!("waveform {}", waveform_str),
+    ];
+
+    // Add MIME type - use provided mime_type, fallback to detection, or default
+    let final_mime_type = mime_type
+        .or_else(|| detect_mime_type(&audio_url))
+        .unwrap_or_else(|| "audio/webm".to_string());
+    imeta_fields.push(format!("m {}", final_mime_type));
+
+    tags.push(Tag::custom(
+        nostr::TagKind::Custom("imeta".into()),
+        imeta_fields
+    ));
+
+    // Add p tag for parent author
+    tags.push(Tag::public_key(parent_pubkey));
+
+    // Add p tags for anyone else mentioned in the parent (using SDK's public_keys())
+    for public_key in reply_to.tags.public_keys() {
+        // Don't duplicate the parent author
+        if public_key != &parent_pubkey {
+            tags.push(Tag::public_key(*public_key));
+        }
+    }
+
+    // Add tags to builder
+    builder = builder.tags(tags);
+
+    // Publish
+    let output = client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
+
+    let result = PublishResult::from_output(output);
+
+    log::info!(
+        "Voice message reply published: {} ({}/{} relays succeeded)",
+        result.event_id,
+        result.success_count(),
+        result.total_attempted()
+    );
+
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Publish a voice message reply (Kind 1244) following NIP-22
+/// For relay feedback, use publish_voice_message_reply_tracked instead
+pub async fn publish_voice_message_reply(
+    audio_url: String,
+    duration: f64,
+    waveform: Vec<u8>,
+    reply_to: nostr::Event,
+    mime_type: Option<String>,
+) -> std::result::Result<String, String> {
+    publish_voice_message_reply_tracked(audio_url, duration, waveform, reply_to, mime_type)
+        .await
+        .map(|result| result.event_id)
+}
