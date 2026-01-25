@@ -155,6 +155,10 @@ pub fn generate_custom_nip_naddr(
 }
 
 /// Search custom NIPs using NIP-50 full-text search
+///
+/// **Note**: Requires NIP-50-capable relays (e.g., relay.nostr.band,
+/// cache1.primal.net) for server-side full-text search. Returns empty
+/// results on relays without NIP-50 support.
 pub async fn search_custom_nips(
     query: &str,
     limit: usize,

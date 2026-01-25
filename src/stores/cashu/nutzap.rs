@@ -329,7 +329,7 @@ pub async fn validate_nutzap_recipient(pubkey: &str) -> Result<NutzapMint, Strin
 /// Validate nutzap recipient using pre-fetched info (avoids duplicate network fetch)
 ///
 /// CDK pattern: Always filter by unit when checking proof availability
-fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
+pub fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
     // Get our mints
     let our_mints = super::get_mints();
 

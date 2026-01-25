@@ -5,7 +5,7 @@
 use std::fmt;
 
 /// Errors that can occur during client operations
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     /// Client not initialized
     NotInitialized,

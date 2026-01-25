@@ -252,14 +252,15 @@ where
     mutate_fn(&mut tokens_write)?;
 
     // Compute balance from mutated tokens (CDK pattern)
+    // Use normal addition - wallet balances can't realistically overflow u64
     let (available, pending) = tokens_write
         .iter()
         .flat_map(|t| &t.proofs)
         .fold((0u64, 0u64), |(avail, pend), proof| {
             if proof.state.is_spendable() {
-                (avail.saturating_add(proof.amount), pend)
+                (avail + proof.amount, pend)
             } else if proof.state.is_pending() {
-                (avail, pend.saturating_add(proof.amount))
+                (avail, pend + proof.amount)
             } else {
                 (avail, pend)
             }
@@ -268,7 +269,7 @@ where
     // Update single balance signal
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
         crate::stores::cashu_cdk_bridge::WalletBalances {
-            total: available.saturating_add(pending),
+            total: available + pending,
             available,
             pending,
         };
@@ -307,20 +308,21 @@ pub fn update_wallet_balances() {
     let data = store.data();
     let tokens = data.read();
 
+    // Use normal addition - wallet balances can't realistically overflow u64
     let (available, pending) = tokens
         .iter()
         .flat_map(|t| &t.proofs)
         .fold((0u64, 0u64), |(avail, pend), proof| {
             if proof.state.is_spendable() {
-                (avail.saturating_add(proof.amount), pend)
+                (avail + proof.amount, pend)
             } else if proof.state.is_pending() {
-                (avail, pend.saturating_add(proof.amount))
+                (avail, pend + proof.amount)
             } else {
                 (avail, pend)
             }
         });
 
-    let total = available.saturating_add(pending);
+    let total = available + pending;
 
     // Single signal for all balance data
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =

@@ -294,12 +294,15 @@ pub async fn reset_mempool_endpoint() {
 
 /// Update Cashu wallet auto-load setting and save to Nostr
 pub async fn update_cashu_wallet_auto_load(enabled: bool) {
-    // Clone settings out before async work (Dioxus best practice)
-    let mut settings = SETTINGS.read().clone();
-    settings.cashu_wallet_auto_load = enabled;
+    // Update in-memory state immediately so UI reflects change (Dioxus pattern)
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.cashu_wallet_auto_load = enabled;
+        w.clone() // Clone for async save
+    }; // Lock released here
 
-    // Async save - doesn't hold signal borrow
+    // Async persist (may fail if unauthenticated, but UI state persists)
     if let Err(e) = save_settings(&settings).await {
-        log::error!("Failed to save Cashu wallet auto-load setting: {}", e);
+        log::warn!("Failed to persist Cashu wallet auto-load setting (may be unauthenticated): {}", e);
     }
 }

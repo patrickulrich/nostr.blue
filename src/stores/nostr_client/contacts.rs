@@ -63,7 +63,8 @@ async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Ve
     // This routes the query to the author's preferred write relays
     match fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            if let Some(event) = events.into_iter().next() {
+            // Select latest event by timestamp (nostr-database pattern)
+            if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
                 // Use SDK's public_keys() method to extract p-tags
                 let contacts: Vec<String> = event.tags.public_keys()
                     .map(|pk| pk.to_string())

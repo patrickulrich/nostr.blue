@@ -370,10 +370,18 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
 }
 
 /// Small badge component for showing nutzap count in wallet UI
+///
+/// Accepts optional pre-fetched count/value to avoid redundant signal reads.
 #[component]
-pub fn NutzapBadge() -> Element {
-    let count = cashu::pending_nutzap_count();
-    let value = cashu::pending_nutzap_value();
+pub fn NutzapBadge(
+    /// Pre-fetched nutzap count (if None, fetches from signal)
+    count: Option<usize>,
+    /// Pre-fetched nutzap value (if None, fetches from signal)
+    value: Option<u64>,
+) -> Element {
+    // Use passed values or fetch from signals
+    let count = count.unwrap_or_else(cashu::pending_nutzap_count);
+    let value = value.unwrap_or_else(cashu::pending_nutzap_value);
 
     if count == 0 {
         return rsx! {};

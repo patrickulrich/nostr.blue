@@ -99,9 +99,6 @@ pub fn pending_nutzap_count() -> usize {
 /// Get total value of pending nutzaps
 #[allow(dead_code)]
 pub fn pending_nutzap_value() -> u64 {
-    PENDING_NUTZAPS
-        .read()
-        .iter()
-        .map(|n| n.amount)
-        .fold(0u64, |acc, amt| acc.saturating_add(amt))
+    // Use sum() for clarity - nutzap amounts can't realistically overflow u64
+    PENDING_NUTZAPS.read().iter().map(|n| n.amount).sum()
 }

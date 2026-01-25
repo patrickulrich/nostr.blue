@@ -84,6 +84,11 @@ fn App() -> Element {
                             // Clone settings out before async work (Dioxus best practice)
                             let settings = settings_store::SETTINGS.read().clone();
                             if settings.cashu_wallet_auto_load {
+                                // Early return if not authenticated (nostr-sdk pattern)
+                                if auth_store::get_pubkey().is_none() {
+                                    log::debug!("Skipping Cashu auto-load: not authenticated");
+                                    return;
+                                }
                                 // Only auto-load if terms were previously accepted
                                 match cashu::check_terms_accepted().await {
                                     Ok(true) => {

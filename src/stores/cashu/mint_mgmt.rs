@@ -68,7 +68,11 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
                 async move {
                     match wallet.get_mint_keysets().await {
                         Ok(keysets) => Some((mint_url, keysets)),
-                        Err(_) => None,
+                        Err(e) => {
+                            // Log failure with context (nostr-sdk error pattern)
+                            log::warn!("Failed to get keysets for {}: {}", mint_url, e);
+                            None
+                        }
                     }
                 }
             })

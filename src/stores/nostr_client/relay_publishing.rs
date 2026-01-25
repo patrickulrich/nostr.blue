@@ -46,10 +46,19 @@ pub async fn publish_note_to_relays(
     let builder = nostr::EventBuilder::text_note(&content)
         .tags(nostr_tags);
 
-    // Parse relay URLs
-    let urls: Vec<nostr::RelayUrl> = relay_urls
+    // Parse relay URLs with validation logging
+    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
         .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
+        .partition(|(_, result)| result.is_ok());
+
+    for (url, _) in &invalid_urls {
+        log::warn!("Invalid relay URL skipped: {}", url);
+    }
+
+    let urls: Vec<nostr::RelayUrl> = valid_urls
+        .into_iter()
+        .filter_map(|(_, r)| r.ok())
         .collect();
 
     if urls.is_empty() {
@@ -136,6 +145,13 @@ pub async fn publish_reaction_to_relays(
         result.total_attempted()
     );
 
+    // Log per-relay failures for debugging (matching publish_note_to_relays pattern)
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
+
     Ok(result)
 }
 
@@ -153,9 +169,19 @@ pub async fn send_presigned_event_to_relays(
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
-    let urls: Vec<nostr::RelayUrl> = relay_urls
+    // Parse relay URLs with validation logging
+    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
         .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
+        .partition(|(_, result)| result.is_ok());
+
+    for (url, _) in &invalid_urls {
+        log::warn!("Invalid relay URL skipped: {}", url);
+    }
+
+    let urls: Vec<nostr::RelayUrl> = valid_urls
+        .into_iter()
+        .filter_map(|(_, r)| r.ok())
         .collect();
 
     if urls.is_empty() {

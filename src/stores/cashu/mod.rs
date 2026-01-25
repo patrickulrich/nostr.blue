@@ -258,7 +258,7 @@ pub use nutzap::{
     NutzapInfo, NutzapMint, PendingNutzap, NutzapStatus,
     NutzapSendResult, NutzapRedeemResult,
     get_nutzap_p2pk_pubkey, publish_nutzap_info, fetch_nutzap_info,
-    send_nutzap, validate_nutzap_recipient,
+    send_nutzap, validate_nutzap_recipient, validate_nutzap_recipient_with_info,
     start_nutzap_subscription, process_nutzap_event,
     redeem_nutzap, fetch_pending_nutzaps,
 };

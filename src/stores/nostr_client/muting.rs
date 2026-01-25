@@ -32,7 +32,8 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
 
     // Fetch from database/relays
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => Ok(events.into_iter().next()),
+        // Select latest event by timestamp (nostr-database pattern)
+        Ok(events) => Ok(events.into_iter().max_by_key(|e| e.created_at)),
         Err(e) => {
             log::error!("Failed to fetch mute list: {}", e);
             Ok(None)

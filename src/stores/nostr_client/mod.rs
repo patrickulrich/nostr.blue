@@ -400,6 +400,10 @@ pub async fn set_signer(signer: SignerType) -> std::result::Result<(), String> {
     // 1. Load user's relay metadata for Settings UI display
     // 2. Apply local relays (browser-only storage)
     // 3. Load NIP-51 lists (search/blocked - not handled by gossip)
+    //
+    // NOTE: Dioxus spawns are scoped to the component that calls set_signer.
+    // These init tasks should complete before the component unmounts.
+    // If this becomes an issue, consider moving to App-level use_effect.
     let client_clone = client.clone();
     spawn(async move {
         // Apply local relays FIRST (browser-only storage) - this is instant
