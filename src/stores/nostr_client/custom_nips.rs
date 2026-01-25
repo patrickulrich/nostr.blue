@@ -191,6 +191,13 @@ pub async fn search_custom_nips(
     query: &str,
     limit: usize,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
+    // Early return for empty query (Dioxus pattern: trim then is_empty check)
+    // Avoids relay-dependent .search("") behavior
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let timeout = Duration::from_secs(10);
 
     // Try NIP-50 server-side search first

@@ -55,6 +55,37 @@ use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 
 // =============================================================================
+// RAII Guard for In-Flight Tracking
+// =============================================================================
+
+/// RAII guard for in-flight send/swap tracking cleanup
+/// Follows MintOperationGuard pattern from signals.rs
+struct InFlightGuard {
+    tx_id: Option<String>,
+}
+
+impl InFlightGuard {
+    fn new(tx_id: String) -> Self {
+        Self { tx_id: Some(tx_id) }
+    }
+
+    /// Dismiss the guard - prevents automatic cleanup on drop
+    /// Call this when you want to handle cleanup manually
+    fn dismiss(&mut self) {
+        self.tx_id = None;
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(ref tx_id) = self.tx_id {
+            super::signals::remove_in_flight_send_request(tx_id);
+            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
+        }
+    }
+}
+
+// =============================================================================
 // Swap Options
 // =============================================================================
 
@@ -322,10 +353,24 @@ pub async fn execute_swap_with_nip60(
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
+    let mut in_flight_guard = InFlightGuard::new(tx_id.clone());
 
     // 4. Get wallet and execute swap
     // NOTE: CDK's swap() has built-in try_proof_operation_or_reclaim - don't wrap again
     let wallet = get_or_create_wallet(&mint_url).await?;
+
+    // Snapshot pre-swap unspent Y values (CDK saga pattern - defensive filter data)
+    // Ensures only THIS swap's proofs are returned, not pre-existing ones
+    let pre_swap_ys: HashSet<String> = wallet
+        .get_unspent_proofs()
+        .await
+        .map_err(|e| format!("Failed to get pre-swap proofs: {}", e))?
+        .iter()
+        .filter_map(|p| p.y().ok().map(|y| y.to_string()))
+        .collect();
+
+    log::debug!("Pre-swap snapshot: {} existing unspent proofs", pre_swap_ys.len());
+
     let amount = options.amount.map(cdk::Amount::from);
     let split_target = options.denomination.to_split_target();
 
@@ -339,7 +384,8 @@ pub async fn execute_swap_with_nip60(
         )
         .await;
 
-    // SAFETY: Remove in-flight tracking regardless of success/failure
+    // Dismiss guard and handle cleanup manually now that swap completed
+    in_flight_guard.dismiss();
     super::signals::remove_in_flight_send_request(&tx_id);
 
     let swap_result = swap_result.map_err(|e| format!("Swap failed: {}", e))?;
@@ -387,8 +433,8 @@ pub async fn execute_swap_with_nip60(
                 .collect::<Result<Vec<_>, String>>()? // Fail-fast on first Y() error
                 .into_iter()
                 .filter(|(_, y_str)| {
-                    // Skip if it's an input proof or already seen
-                    if input_ys.contains(y_str) || seen_ys.contains(y_str) {
+                    // Skip if it's an input proof, pre-existing proof, or already seen
+                    if input_ys.contains(y_str) || pre_swap_ys.contains(y_str) || seen_ys.contains(y_str) {
                         false
                     } else {
                         seen_ys.insert(y_str.clone());
@@ -426,7 +472,7 @@ pub async fn execute_swap_with_nip60(
                         u64::from(p.amount), e
                     )
                 })?;
-                if !input_ys.contains(&y.to_string()) {
+                if !input_ys.contains(&y.to_string()) && !pre_swap_ys.contains(&y.to_string()) {
                     new_proofs.push(p);
                 }
             }
