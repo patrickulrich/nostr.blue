@@ -183,6 +183,9 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
 
         // Publish updated contact list
         publish_contacts(contacts).await?;
+
+        // Invalidate cache after successful publish (nostr-sdk pattern)
+        invalidate_contacts_cache();
     } else {
         log::info!("Already following: {}", normalized_pubkey);
     }
@@ -210,6 +213,9 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
 
         // Publish updated contact list
         publish_contacts(contacts).await?;
+
+        // Invalidate cache after successful publish (nostr-sdk pattern)
+        invalidate_contacts_cache();
     } else {
         log::info!("Not following: {}", normalized_pubkey);
     }

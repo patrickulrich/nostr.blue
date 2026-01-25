@@ -3,9 +3,11 @@
 //! Functions for community NIP proposals - addressable events for custom NIPs.
 
 use std::time::Duration;
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
 use super::fetching::{get_client, fetch_events_aggregated};
+use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 
 // =============================================================================
@@ -53,6 +55,15 @@ pub async fn fetch_custom_nip_by_naddr(
         Nip19::Coordinate(nip19_coord) => {
             let coord = nip19_coord.coordinate;
 
+            // Validate kind matches KIND_CUSTOM_NIP (30817) - nostr-sdk pattern
+            if coord.kind != Kind::Custom(KIND_CUSTOM_NIP) {
+                return Err(format!(
+                    "Invalid kind for custom NIP: expected {}, got {}",
+                    KIND_CUSTOM_NIP,
+                    coord.kind.as_u16()
+                ));
+            }
+
             let filter = Filter::new()
                 .kind(coord.kind)
                 .author(coord.public_key)
@@ -77,6 +88,10 @@ pub async fn publish_custom_nip_tracked(
     related_kinds: Vec<u32>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
+
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
 
     use nostr::{EventBuilder, Kind, Tag, SingleLetterTag, Alphabet};
 
@@ -185,7 +200,17 @@ pub async fn search_custom_nips(
         let query_lower = query.to_lowercase();
 
         return Ok(all_events.into_iter()
-            .filter(|e| e.content.to_lowercase().contains(&query_lower))
+            .filter(|e| {
+                let content_matches = e.content.to_lowercase().contains(&query_lower);
+                let title_matches = e.tags.iter().any(|tag| {
+                    if let Some(nostr::TagStandard::Title(title)) = tag.as_standardized() {
+                        title.to_lowercase().contains(&query_lower)
+                    } else {
+                        false
+                    }
+                });
+                content_matches || title_matches
+            })
             .take(limit)
             .collect());
     }

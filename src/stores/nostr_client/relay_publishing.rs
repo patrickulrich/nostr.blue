@@ -30,16 +30,28 @@ pub async fn publish_note_to_relays(
         return Err("No signer attached".to_string());
     }
 
-    // Convert raw tags to nostr::Tag format
+    // Convert raw tags to nostr::Tag format using standard constructors (nostr-sdk pattern)
+    use nostr::{EventId, PublicKey};
     let nostr_tags: Vec<nostr::Tag> = tags.iter()
         .filter_map(|tag| {
             if tag.is_empty() {
                 return None;
             }
-            Some(nostr::Tag::custom(
-                nostr::TagKind::Custom(std::borrow::Cow::Owned(tag[0].clone())),
-                tag[1..].to_vec(),
-            ))
+            match tag[0].as_str() {
+                "e" if tag.len() >= 2 => {
+                    EventId::from_hex(&tag[1]).ok().map(nostr::Tag::event)
+                }
+                "p" if tag.len() >= 2 => {
+                    PublicKey::from_hex(&tag[1]).ok().map(nostr::Tag::public_key)
+                }
+                "t" if tag.len() >= 2 => {
+                    Some(nostr::Tag::hashtag(&tag[1]))
+                }
+                _ => Some(nostr::Tag::custom(
+                    nostr::TagKind::Custom(std::borrow::Cow::Owned(tag[0].clone())),
+                    tag[1..].to_vec(),
+                ))
+            }
         })
         .collect();
 

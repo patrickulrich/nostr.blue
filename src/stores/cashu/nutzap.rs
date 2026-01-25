@@ -911,7 +911,7 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
 
     // CurrencyUnit::from_str never fails - unknown units become Custom(String)
     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&pending.unit)
-        .expect("CurrencyUnit::from_str never fails");
+        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(pending.unit.clone()));
 
     let token = Token::new(
         mint_url_parsed,

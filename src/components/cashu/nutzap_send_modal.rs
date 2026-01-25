@@ -243,7 +243,7 @@ pub fn NutzapSendModal(
                                 r#type: "number",
                                 placeholder: "0",
                                 min: "1",
-                                value: amount.read().clone(),
+                                value: "{amount}",
                                 oninput: move |evt| amount.set(evt.value()),
                                 disabled: compatible_mint.read().is_none()
                             }

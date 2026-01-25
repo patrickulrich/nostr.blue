@@ -111,6 +111,13 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                     // Update auto-redeem setting
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
 
+                    // Persist to localStorage (Dioxus pattern for persistence)
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use gloo_storage::{LocalStorage, Storage};
+                        let _ = LocalStorage::set("nostr_nutzap_auto_redeem", auto_redeem_setting);
+                    }
+
                     success_message.set(Some(format!(
                         "Nutzap info published! Event: {}...",
                         &event_id[..12.min(event_id.len())]

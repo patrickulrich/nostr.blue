@@ -56,8 +56,12 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     // Get existing keyset IDs from all current mints
     let mut existing_keyset_to_mint: HashMap<String, String> = HashMap::new();
 
+    // Clone the Option<Arc<MultiMintWallet>> out of the read guard immediately (CDK pattern)
+    // This releases the lock before any await points
+    let multi_wallet_opt = cashu_cdk_bridge::MULTI_WALLET.read().clone();
+
     // Collect keysets from all existing mints in parallel (read-only, safe)
-    if let Some(ref multi_wallet) = *cashu_cdk_bridge::MULTI_WALLET.read() {
+    if let Some(ref multi_wallet) = multi_wallet_opt {
         let wallets = multi_wallet.get_wallets().await;
 
         let futures: Vec<_> = wallets

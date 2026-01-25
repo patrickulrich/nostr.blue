@@ -7,7 +7,7 @@ use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
 use crate::stores::relay;
-use super::fetching::{get_client, ensure_relays_ready, fetch_events_aggregated};
+use super::fetching::{get_client, fetch_events_aggregated};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 use crate::stores::signer::SignerType;
@@ -27,8 +27,6 @@ pub async fn fetch_articles(
     limit: usize,
     until: Option<u64>,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
-    let client = get_client().ok_or("Client not initialized")?;
-
     log::info!("Fetching articles with limit: {}", limit);
 
     use nostr::{Filter, Kind, Timestamp};
@@ -41,10 +39,8 @@ pub async fn fetch_articles(
         filter = filter.until(Timestamp::from(until_timestamp));
     }
 
-    // Ensure relays are ready before fetching
-    ensure_relays_ready(&client).await;
-
-    match client.fetch_events(filter, std::time::Duration::from_secs(10)).await {
+    // Use aggregated fetch pattern (DB cache first, background relay sync)
+    match fetch_events_aggregated(filter, std::time::Duration::from_secs(10)).await {
         Ok(events) => {
             let mut sorted: Vec<_> = events.into_iter().collect();
             sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -176,8 +172,15 @@ pub async fn publish_article_tracked(
         vec![timestamp]
     ));
 
-    // Add hashtags
-    for hashtag in hashtags {
+    // Add hashtags - sanitize: trim, filter empty, dedupe (Tag::hashtag already lowercases)
+    use std::collections::HashSet;
+    let sanitized: HashSet<String> = hashtags
+        .into_iter()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .collect();
+
+    for hashtag in sanitized {
         tags.push(Tag::hashtag(hashtag));
     }
 

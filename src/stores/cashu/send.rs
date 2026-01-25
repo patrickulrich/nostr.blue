@@ -178,7 +178,20 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         &pending_event_id,
     ).await {
         Ok(Some(event_id)) => Some(event_id),
-        Ok(None) => None,
+        Ok(None) => {
+            // Invariant: when publish returns None, keep_proofs should be empty
+            if !keep_proofs.is_empty() {
+                log::error!(
+                    "publish_send_events returned None but keep_proofs has {} entries",
+                    keep_proofs.len()
+                );
+            }
+            debug_assert!(
+                keep_proofs.is_empty(),
+                "publish_send_events returned None but keep_proofs is non-empty"
+            );
+            None
+        }
         Err(e) => {
             log::warn!("Nostr publish failed: {}", e);
             Some(pending_event_id.clone())
