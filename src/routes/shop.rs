@@ -342,7 +342,7 @@ pub fn ShopHome() -> Element {
                                                 // Fetch contacts when enabling WoT filter
                                                 wot_loading.set(true);
                                                 spawn(async move {
-                                                    if let Ok(pubkey) = get_user_pubkey().await {
+                                                    if let Ok(pubkey) = get_user_pubkey() {
                                                         match fetch_contacts(pubkey.to_hex()).await {
                                                             Ok(contacts) => {
                                                                 log::info!("WoT filter: loaded {} contacts", contacts.len());

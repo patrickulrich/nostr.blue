@@ -123,9 +123,19 @@ pub async fn publish_reaction_to_relays(
 
     let builder = EventBuilder::reaction(target, reaction);
 
-    let urls: Vec<nostr::RelayUrl> = relay_urls
+    // Parse relay URLs with validation logging (matching publish_note_to_relays pattern)
+    let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
         .iter()
-        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
+        .partition(|(_, result)| result.is_ok());
+
+    for (url, _) in &invalid_urls {
+        log::warn!("Invalid relay URL skipped in reaction publish: {}", url);
+    }
+
+    let urls: Vec<nostr::RelayUrl> = valid_urls
+        .into_iter()
+        .filter_map(|(_, r)| r.ok())
         .collect();
 
     if urls.is_empty() {

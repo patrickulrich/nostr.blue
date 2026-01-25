@@ -301,8 +301,12 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
         w.clone() // Clone for async save
     }; // Lock released here
 
-    // Async persist (may fail if unauthenticated, but UI state persists)
+    // Cache locally first (sync, never fails user-visible)
+    // This ensures setting persists even if Nostr save fails
+    cache_settings(&settings);
+
+    // Async persist to Nostr (may fail if unauthenticated)
     if let Err(e) = save_settings(&settings).await {
-        log::warn!("Failed to persist Cashu wallet auto-load setting (may be unauthenticated): {}", e);
+        log::warn!("Failed to persist Cashu wallet auto-load setting to Nostr: {}", e);
     }
 }

@@ -1061,7 +1061,15 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 mint_url.clone(),
             ).await;
 
-            pending_id
+            // CRITICAL: Return early WITHOUT deleting old proofs from local state.
+            // If the queued token never publishes, we'd lose proofs permanently.
+            // The proofs are already persisted to CDK database (line 945), so they're safe.
+            // sync_orphaned_cdk_proofs_to_nostr() handles deduplication on restart.
+            return Ok(ConsolidationResult {
+                proofs_before,
+                proofs_after,
+                fee_paid: 0,
+            });
         }
         None => {
             // Non-retryable error - return error, don't queue

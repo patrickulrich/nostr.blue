@@ -180,7 +180,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             };
 
             // Create zap request builder
-            let msg_opt = if message.is_empty() { None } else { Some(message) };
+            // Clone message for later use in nutzap fallback
+            let msg_opt = if message.is_empty() { None } else { Some(message.clone()) };
             let builder = lnurl::create_zap_request_unsigned(
                 recipient_pubkey,
                 relays,
@@ -287,9 +288,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap
                             let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
-                            // Get comment from zap_message signal (message was moved earlier)
-                            let nutzap_comment = zap_message.read().clone();
-                            let nutzap_comment_opt = if nutzap_comment.is_empty() { None } else { Some(nutzap_comment) };
+                            // Use already-captured message (avoid redundant signal read)
+                            let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
                             match cashu::send_nutzap(
                                 &recipient_pubkey_str,
                                 amount,

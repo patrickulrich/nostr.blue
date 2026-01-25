@@ -156,17 +156,39 @@ pub fn generate_custom_nip_naddr(
 
 /// Search custom NIPs using NIP-50 full-text search
 ///
-/// **Note**: Requires NIP-50-capable relays (e.g., relay.nostr.band,
-/// cache1.primal.net) for server-side full-text search. Returns empty
-/// results on relays without NIP-50 support.
+/// Falls back to client-side filtering if NIP-50 returns empty.
+/// Primary search uses NIP-50-capable relays (e.g., relay.nostr.band,
+/// cache1.primal.net) for server-side full-text search.
 pub async fn search_custom_nips(
     query: &str,
     limit: usize,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
+    let timeout = Duration::from_secs(10);
+
+    // Try NIP-50 server-side search first
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_CUSTOM_NIP))
         .search(query)
         .limit(limit);
 
-    fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let results = fetch_events_aggregated(filter, timeout).await?;
+
+    // Fallback: client-side filter if NIP-50 returned empty
+    if results.is_empty() && !query.is_empty() {
+        log::info!("NIP-50 search returned empty, trying client-side filter");
+
+        let fallback_filter = Filter::new()
+            .kind(Kind::Custom(KIND_CUSTOM_NIP))
+            .limit(500);
+
+        let all_events = fetch_events_aggregated(fallback_filter, timeout).await?;
+        let query_lower = query.to_lowercase();
+
+        return Ok(all_events.into_iter()
+            .filter(|e| e.content.to_lowercase().contains(&query_lower))
+            .take(limit)
+            .collect());
+    }
+
+    Ok(results)
 }
