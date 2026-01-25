@@ -817,7 +817,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
     }
 
     // Get current user pubkey to separate buyer/seller orders
-    let user_pubkey = nostr_client::get_user_pubkey()
+    let user_pubkey = nostr_client::get_cached_pubkey()
         .map(|pk| pk.to_hex())
         .unwrap_or_default();
 
@@ -1260,7 +1260,7 @@ pub async fn create_shop_order(
     // total_sats already calculated above
 
     // Get user pubkey
-    let buyer_pubkey = nostr_client::get_user_pubkey()
+    let buyer_pubkey = nostr_client::get_cached_pubkey()
         .map(|pk| pk.to_hex())
         .unwrap_or_default();
 
@@ -1596,7 +1596,7 @@ pub struct CollectionFormData {
 
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
-    let pubkey = nostr_client::get_user_pubkey()
+    let pubkey = nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Not authenticated: {}", e))?
         .to_hex();
 
@@ -1824,7 +1824,7 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
                             .unwrap_or(0);
 
                         // Get current user as merchant
-                        let merchant_pubkey = nostr_client::get_user_pubkey()
+                        let merchant_pubkey = nostr_client::get_cached_pubkey()
                             .map(|pk| pk.to_hex())
                             .unwrap_or_default();
 

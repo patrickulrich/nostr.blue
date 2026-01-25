@@ -84,7 +84,16 @@ pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result
 
                 Ok(contacts)
             } else {
-                log::info!("No contact list found");
+                log::info!("No contact list found for {}", pubkey_str);
+                // nostr-sdk cache pattern: Cache empty result to avoid repeated relay queries
+                {
+                    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *cache = Some(CachedContacts {
+                        pubkey: pubkey_str,
+                        contacts: Vec::new(),
+                        cached_at: instant::Instant::now(),
+                    });
+                }
                 Ok(Vec::new())
             }
         }

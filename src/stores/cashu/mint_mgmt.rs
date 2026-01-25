@@ -910,15 +910,20 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     };
     super::signals::add_in_flight_send_request(in_flight);
 
+    // Pre-compute values needed for per-batch persistence (CDK saga pattern)
+    let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
+        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+
     // Batch proofs to avoid exceeding mint limits (CDK pattern)
+    let total_batches = all_proofs.chunks(BATCH_PROOF_SIZE).count();
     let mut new_proofs: Vec<cdk::nuts::Proof> = Vec::new();
     for (batch_idx, proof_batch) in all_proofs.chunks(BATCH_PROOF_SIZE).enumerate() {
         let batch_amount: u64 = proof_batch.iter()
             .map(|p| u64::from(p.amount))
             .fold(0u64, |acc, amt| acc.saturating_add(amt));
 
-        log::debug!("Swapping batch {} with {} proofs ({} sats)",
-            batch_idx + 1, proof_batch.len(), batch_amount);
+        log::debug!("Swapping batch {}/{} with {} proofs ({} sats)",
+            batch_idx + 1, total_batches, proof_batch.len(), batch_amount);
 
         let batch_result = match wallet.swap(
             Some(Amount::from(batch_amount)),
@@ -931,7 +936,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             Err(e) => {
                 // If swap fails, sync proof states with mint (CDK try_proof_operation_or_reclaim pattern)
                 // Mint is source of truth - proofs may have been consumed even if we got network error
-                log::warn!("Swap failed on batch {}, syncing proof states with mint: {}", batch_idx + 1, e);
+                log::warn!("Swap failed on batch {}/{}, syncing proof states with mint: {}", batch_idx + 1, total_batches, e);
 
                 // Check spent status with mint (NUT-07)
                 match wallet.check_proofs_spent(proof_batch.to_vec()).await {
@@ -950,11 +955,39 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 // Remove in-flight tracking before returning error
                 super::signals::remove_in_flight_send_request(&tx_id);
 
-                return Err(format!("Swap failed on batch {}: {}", batch_idx + 1, e));
+                return Err(format!("Swap failed on batch {}/{}: {}", batch_idx + 1, total_batches, e));
             }
         };
 
         if let Some(proofs) = batch_result {
+            // CDK saga pattern: Persist THIS batch's proofs immediately before continuing
+            // This ensures partial success survives later batch failures
+            {
+                use cdk_common::database::WalletDatabase;
+
+                let localstore = SHARED_LOCALSTORE.read()
+                    .as_ref()
+                    .ok_or("Localstore not initialized")?
+                    .clone();
+
+                let proof_infos: Vec<cdk::types::ProofInfo> = proofs.iter()
+                    .filter_map(|p| {
+                        cdk::types::ProofInfo::new(
+                            p.clone(),
+                            mint_url_parsed.clone(),
+                            cdk::nuts::State::Unspent,
+                            cdk::nuts::CurrencyUnit::Sat,
+                        ).ok()
+                    })
+                    .collect();
+
+                if !proof_infos.is_empty() {
+                    localstore.update_proofs(proof_infos, vec![]).await
+                        .map_err(|e| format!("Failed to persist batch {} proofs: {}", batch_idx + 1, e))?;
+                    log::info!("Batch {}/{} persisted {} proofs", batch_idx + 1, total_batches, proofs.len());
+                }
+            }
+
             new_proofs.extend(proofs);
         }
     }
@@ -967,39 +1000,9 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     }
 
     let proofs_after = new_proofs.len();
-    log::info!("Consolidated to {} proofs", proofs_after);
+    log::info!("Consolidated to {} proofs (all batches persisted)", proofs_after);
 
-    // Persist new proofs to CDK database BEFORE publishing (CDK saga pattern)
-    // This ensures proofs survive if publish fails - can be recovered on next startup
-    {
-        use cdk_common::database::WalletDatabase;
-
-        let localstore = SHARED_LOCALSTORE.read()
-            .as_ref()
-            .ok_or("Localstore not initialized")?
-            .clone();
-
-        let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
-            .map_err(|e| format!("Invalid mint URL: {}", e))?;
-
-        // Create ProofInfo entries for each proof
-        let proof_infos: Vec<cdk::types::ProofInfo> = new_proofs.iter()
-            .filter_map(|p| {
-                cdk::types::ProofInfo::new(
-                    p.clone(),
-                    mint_url_parsed.clone(),
-                    cdk::nuts::State::Unspent,
-                    cdk::nuts::CurrencyUnit::Sat,
-                ).ok()
-            })
-            .collect();
-
-        if !proof_infos.is_empty() {
-            localstore.update_proofs(proof_infos, vec![]).await
-                .map_err(|e| format!("Failed to persist proofs to CDK database: {}", e))?;
-            log::debug!("Persisted {} proofs to CDK database before publish", proofs_after);
-        }
-    }
+    // Note: Proofs already persisted per-batch above (CDK saga pattern)
 
     // Prepare event data
     let signer = crate::stores::signer::get_signer()
@@ -1039,9 +1042,15 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Attempt publish with immediate retries
-    // Proofs are already safely persisted in CDK IndexedDB at line 950
-    let mut new_event_id: Option<String> = None;
+    // CDK pattern: Sign ONCE before retry loop (idempotent retries with consistent event ID)
+    let mut unsigned = builder.clone().build(pubkey);
+    let pre_signed_event_id = unsigned.id().to_hex();
+    let signed_event = unsigned.sign(&signer).await
+        .map_err(|e| format!("Failed to sign token event: {}", e))?;
+
+    // Attempt publish with immediate retries using SAME signed event
+    // Proofs are already safely persisted in CDK IndexedDB per-batch above
+    let mut publish_succeeded = false;
     let mut last_error = String::new();
     let mut retryable = true;
 
@@ -1064,18 +1073,18 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
 
-        match client.send_event_builder(builder.clone()).await {
+        // Use pre-signed event for consistent event ID across retries
+        match client.send_event(&signed_event).await {
             Ok(output) => {
                 // Check for partial success (at least 1 relay succeeded)
                 if !output.success.is_empty() {
-                    let id = output.id().to_hex();
                     log::info!(
                         "Published token event {} to {}/{} relays",
-                        id,
+                        pre_signed_event_id,
                         output.success.len(),
                         output.success.len() + output.failed.len()
                     );
-                    new_event_id = Some(id);
+                    publish_succeeded = true;
                     break;
                 } else {
                     // All relays failed - treat as error
@@ -1099,28 +1108,26 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     }
 
     // Handle final result
-    let new_event_id = match new_event_id {
-        Some(id) => id,
-        None if retryable => {
-            // All retries failed - use pending_id for background retry
-            log::error!("All publish attempts failed, using pending ID for background retry: {}", last_error);
+    let new_event_id = if publish_succeeded {
+        pre_signed_event_id
+    } else if retryable {
+        // All retries failed - use pending_id for background retry
+        log::error!("All publish attempts failed, using pending ID for background retry: {}", last_error);
 
-            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
 
-            // Queue with token tracking info
-            super::events::queue_token_event_for_retry(
-                builder,
-                pending_id.clone(),
-                mint_url.clone(),
-            ).await;
+        // Queue with token tracking info (builder for re-signing in background retry)
+        super::events::queue_token_event_for_retry(
+            builder,
+            pending_id.clone(),
+            mint_url.clone(),
+        ).await;
 
-            // Use pending_id as event_id - continues to update local state below
-            pending_id
-        }
-        None => {
-            // Non-retryable error - return error, don't queue
-            return Err(format!("Non-retryable publish error: {}", last_error));
-        }
+        // Use pending_id as event_id - continues to update local state below
+        pending_id
+    } else {
+        // Non-retryable error - return error, don't queue
+        return Err(format!("Non-retryable publish error: {}", last_error));
     };
 
     // CRITICAL: Update local state IMMEDIATELY (even with pending_id)
