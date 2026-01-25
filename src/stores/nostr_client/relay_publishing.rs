@@ -30,7 +30,8 @@ pub async fn publish_note_to_relays(
         return Err("No signer attached".to_string());
     }
 
-    // Convert raw tags to nostr::Tag format using standard constructors (nostr-sdk pattern)
+    // Convert raw tags to nostr::Tag format preserving relay hints and markers
+    // (follows nostr-sdk parse_e_tag pattern from standard.rs)
     use nostr::{EventId, PublicKey};
     let nostr_tags: Vec<nostr::Tag> = tags.iter()
         .filter_map(|tag| {
@@ -39,10 +40,36 @@ pub async fn publish_note_to_relays(
             }
             match tag[0].as_str() {
                 "e" if tag.len() >= 2 => {
-                    EventId::from_hex(&tag[1]).ok().map(nostr::Tag::event)
+                    EventId::from_hex(&tag[1]).ok().map(|id| {
+                        // Get optional relay hint (index 2) and marker (index 3)
+                        let relay_hint = tag.get(2).filter(|s| !s.is_empty()).cloned();
+                        let marker = tag.get(3).filter(|s| !s.is_empty()).cloned();
+
+                        if relay_hint.is_some() || marker.is_some() {
+                            // Build full tag with all fields preserved
+                            let mut fields = vec![id.to_hex()];
+                            fields.push(relay_hint.unwrap_or_default());
+                            if let Some(m) = marker {
+                                fields.push(m);
+                            }
+                            nostr::Tag::custom(nostr::TagKind::e(), fields)
+                        } else {
+                            nostr::Tag::event(id)
+                        }
+                    })
                 }
                 "p" if tag.len() >= 2 => {
-                    PublicKey::from_hex(&tag[1]).ok().map(nostr::Tag::public_key)
+                    PublicKey::from_hex(&tag[1]).ok().map(|pk| {
+                        // Get optional relay hint (index 2)
+                        let relay_hint = tag.get(2).filter(|s| !s.is_empty()).cloned();
+
+                        if relay_hint.is_some() {
+                            // Preserve relay hint using custom tag
+                            nostr::Tag::custom(nostr::TagKind::p(), tag[1..].to_vec())
+                        } else {
+                            nostr::Tag::public_key(pk)
+                        }
+                    })
                 }
                 "t" if tag.len() >= 2 => {
                     Some(nostr::Tag::hashtag(&tag[1]))

@@ -590,11 +590,18 @@ async fn publish_swap_events(
         .collect();
 
     // Build ExtendedTokenEvent with del tags for consumed events
+    // Filter out pending_* IDs - they're not valid hex event IDs for relay transmission
+    let valid_del_ids: Vec<String> = event_ids_to_delete
+        .iter()
+        .filter(|id| !id.starts_with("pending_"))
+        .cloned()
+        .collect();
+
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.to_string(),
         unit: "sat".to_string(),
         proofs: extended_proofs,
-        del: event_ids_to_delete.to_vec(),
+        del: valid_del_ids,
     };
 
     let json_content = serde_json::to_string(&token_event_data)

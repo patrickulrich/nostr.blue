@@ -117,10 +117,14 @@ pub async fn publish_contacts_tracked(contacts: Vec<String>) -> std::result::Res
         .into_iter()
         .filter_map(|contact_str| {
             // Try to parse as hex or NIP-19
-            PublicKey::from_hex(&contact_str)
-                .or_else(|_| PublicKey::parse(&contact_str))
-                .ok()
-                .map(Contact::new)
+            match PublicKey::from_hex(&contact_str)
+                .or_else(|_| PublicKey::parse(&contact_str)) {
+                Ok(pk) => Some(Contact::new(pk)),
+                Err(_) => {
+                    log::debug!("Skipping invalid contact pubkey: {}", contact_str);
+                    None
+                }
+            }
         })
         .collect();
 

@@ -17,8 +17,6 @@ use super::types::{MuteListTags, extract_mute_list_tags, rebuild_mute_list_tags}
 /// Fetch the mute list (kind 10000) from relays
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
 async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> {
-    let _client = get_client().ok_or("Client not initialized")?;
-
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
@@ -60,10 +58,23 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     }
 }
 
+/// Normalize event ID to hex format (handles both hex and bech32 note1... inputs)
+fn normalize_event_id(event_id: &str) -> Result<String, String> {
+    // Try hex first
+    if let Ok(id) = nostr::EventId::from_hex(event_id) {
+        return Ok(id.to_hex());
+    }
+    // Try bech32 (note1...)
+    nostr::EventId::parse(event_id)
+        .map(|id| id.to_hex())
+        .map_err(|e| format!("Invalid event ID: {}", e))
+}
+
 /// Check if a post is muted
 pub async fn is_post_muted(event_id: String) -> std::result::Result<bool, String> {
+    let normalized = normalize_event_id(&event_id)?;
     let muted_posts = get_muted_posts().await?;
-    Ok(muted_posts.contains(&event_id))
+    Ok(muted_posts.contains(&normalized))
 }
 
 /// Mute a post (add to mute list kind 10000)
@@ -77,7 +88,8 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
 
     log::info!("Muting post: {}", event_id);
 
-    let target_event_id = nostr::EventId::from_hex(&event_id)
+    // Use parse() to support both hex and bech32 (note1...) formats
+    let target_event_id = nostr::EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch current mute list and extract tags
@@ -115,7 +127,8 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
 
     log::info!("Unmuting post: {}", event_id);
 
-    let target_event_id = nostr::EventId::from_hex(&event_id)
+    // Use parse() to support both hex and bech32 (note1...) formats
+    let target_event_id = nostr::EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch current mute list and extract tags
@@ -256,8 +269,9 @@ pub async fn report_post(
     log::info!("Reporting post: {} for: {}", event_id, report_type);
 
     // Parse event ID and pubkey
+    // Use parse() to support both hex and bech32 (note1...) formats
     use nostr::{EventId, PublicKey, Tag};
-    let target_event_id = EventId::from_hex(&event_id)
+    let target_event_id = EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
     // Use parse() to support both hex and bech32 formats (nostr-sdk pattern)
     let target_pubkey = PublicKey::parse(&author_pubkey)

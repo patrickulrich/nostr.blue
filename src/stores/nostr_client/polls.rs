@@ -189,12 +189,12 @@ pub async fn publish_poll_tracked(
         .filter_map(|r| nostr::RelayUrl::parse(&r).ok())
         .collect();
 
-    // Build poll struct
+    // Build poll struct (clone relay_urls since we need it for publishing too)
     let poll = nostr::nips::nip88::Poll {
         title: title.clone(),
         r#type: poll_type,
         options,
-        relays: relay_urls,
+        relays: relay_urls.clone(),
         ends_at,
     };
 
@@ -204,9 +204,47 @@ pub async fn publish_poll_tracked(
     let hashtag_tags: Vec<Tag> = hashtags.into_iter().map(Tag::hashtag).collect();
     let builder = nostr::EventBuilder::poll(poll).tags(hashtag_tags);
 
-    // Publish
-    let output = client.send_event_builder(builder).await
-        .map_err(|e| format!("Failed to publish poll: {}", e))?;
+    // NIP-88: Polls specify relays where votes should be published
+    // We should also publish the poll to those relays for discoverability
+    let output = if !relay_urls.is_empty() {
+        // Add poll relays temporarily (mirrors publish_poll_vote_tracked pattern)
+        let added_relays = relay::add_relays(&client, &relay_urls).await;
+
+        // Use non-blocking relay ready check
+        ensure_relays_ready(&client).await;
+
+        // Check which poll relays are connected
+        let connected_poll_relays = relay::get_connected(&client, &relay_urls).await;
+
+        if connected_poll_relays.is_empty() {
+            log::warn!("None of the {} poll relays are connected, falling back to default relays", relay_urls.len());
+        } else {
+            log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), relay_urls.len());
+        }
+
+        // Publish to connected poll relays if available
+        let result = if !connected_poll_relays.is_empty() {
+            let urls: Vec<nostr::Url> = connected_poll_relays.iter()
+                .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
+                .collect();
+            log::info!("Publishing poll to {} connected poll relays", urls.len());
+            client.send_event_builder_to(urls, builder).await
+                .map_err(|e| format!("Failed to publish poll to specified relays: {}", e))
+        } else {
+            // No connected poll relays - use default relays
+            client.send_event_builder(builder).await
+                .map_err(|e| format!("Failed to publish poll: {}", e))
+        };
+
+        // Cleanup: remove only the relays we added
+        relay::remove_relays(&client, &added_relays).await;
+
+        result?
+    } else {
+        // No poll relays specified, use default relays
+        client.send_event_builder(builder).await
+            .map_err(|e| format!("Failed to publish poll: {}", e))?
+    };
 
     let result = PublishResult::from_output(output);
 
