@@ -10,6 +10,9 @@ use super::fetching::{get_client, fetch_events_aggregated_outbox};
 use super::signals::{HAS_SIGNER, get_contacts_cache, CachedContacts, invalidate_contacts_cache};
 use super::types::PublishResult;
 
+/// nostr-sdk pattern: Minimum interval between background refresh spawns (60 seconds)
+const BACKGROUND_REFRESH_COOLDOWN_SECS: u64 = 60;
+
 // =============================================================================
 // Contact Fetching
 // =============================================================================
@@ -18,40 +21,56 @@ use super::types::PublishResult;
 /// NIP-02: https://github.com/nostr-protocol/nips/blob/master/02.md
 /// Uses a 5-minute cache to speed up repeated calls
 pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
+    // nostr-sdk pattern: Normalize pubkey to canonical hex for consistent cache keys
+    let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
+
     // Check cache first (5-minute TTL)
     {
-        let cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(ref cached) = *cache {
-            if cached.pubkey == pubkey_str
+        let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(ref mut cached) = *cache {
+            if cached.pubkey == normalized_pubkey
                && cached.cached_at.elapsed() < Duration::from_secs(300) {
                 log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
                 let contacts = cached.contacts.clone();
-                drop(cache); // Release lock before spawning
 
-                // Background refresh (don't await)
-                let pk = pubkey_str.clone();
-                dioxus::prelude::spawn(async move {
-                    let _ = fetch_contacts_from_relay(pk).await;
-                });
+                // nostr-sdk pattern: Check cooldown before spawning background refresh
+                let should_refresh = cached.last_refresh_spawned
+                    .map(|t| t.elapsed() >= Duration::from_secs(BACKGROUND_REFRESH_COOLDOWN_SECS))
+                    .unwrap_or(true);
+
+                if should_refresh {
+                    cached.last_refresh_spawned = Some(instant::Instant::now());
+                    drop(cache); // Release lock before spawning
+
+                    // Background refresh (don't await) - use normalized key
+                    let pk = normalized_pubkey.clone();
+                    dioxus::prelude::spawn(async move {
+                        let _ = fetch_contacts_from_relay(pk).await;
+                    });
+                } else {
+                    log::debug!("Skipping background refresh - cooldown not elapsed");
+                }
 
                 return Ok(contacts);
             }
         }
     }
 
-    // Cache miss - fetch from relay
-    fetch_contacts_from_relay(pubkey_str).await
+    // Cache miss - fetch from relay (pass normalized key)
+    fetch_contacts_from_relay(normalized_pubkey).await
 }
 
 /// Fetch contacts directly from relay, bypassing cache
 /// Use this when you need guaranteed fresh data (e.g., after modifications)
 pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
-    log::info!("Fetching contacts from relay for: {}", pubkey_str);
+    // nostr-sdk pattern: Defensive normalization (may already be normalized by caller)
+    let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
 
-    // Parse pubkey
+    log::info!("Fetching contacts from relay for: {}", normalized_pubkey);
+
+    // Parse pubkey (now guaranteed to be hex)
     use nostr::{PublicKey, Filter, Kind};
-    let pubkey = PublicKey::from_hex(&pubkey_str)
-        .or_else(|_| PublicKey::parse(&pubkey_str))
+    let pubkey = PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Create filter for kind 3 (contact list)
@@ -72,26 +91,28 @@ pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result
                     .collect();
                 log::info!("Found {} contacts from relay", contacts.len());
 
-                // Update cache
+                // Update cache with normalized key
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     *cache = Some(CachedContacts {
-                        pubkey: pubkey_str,
+                        pubkey: normalized_pubkey,
                         contacts: contacts.clone(),
                         cached_at: instant::Instant::now(),
+                        last_refresh_spawned: None,
                     });
                 }
 
                 Ok(contacts)
             } else {
-                log::info!("No contact list found for {}", pubkey_str);
+                log::info!("No contact list found for {}", normalized_pubkey);
                 // nostr-sdk cache pattern: Cache empty result to avoid repeated relay queries
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     *cache = Some(CachedContacts {
-                        pubkey: pubkey_str,
+                        pubkey: normalized_pubkey,
                         contacts: Vec::new(),
                         cached_at: instant::Instant::now(),
+                        last_refresh_spawned: None,
                     });
                 }
                 Ok(Vec::new())

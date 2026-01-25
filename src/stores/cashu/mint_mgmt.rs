@@ -31,6 +31,37 @@ use crate::stores::{auth_store, nostr_client};
 const BATCH_PROOF_SIZE: usize = 100;
 
 // =============================================================================
+// RAII Guard for In-Flight Tracking (CDK Transaction Guard Pattern)
+// =============================================================================
+
+/// RAII guard for in-flight send/swap tracking cleanup
+/// Follows CDK's ConnectionWithTransaction pattern: auto-cleanup on drop unless dismissed
+struct InFlightGuard {
+    tx_id: Option<String>,
+}
+
+impl InFlightGuard {
+    fn new(tx_id: String) -> Self {
+        Self { tx_id: Some(tx_id) }
+    }
+
+    /// Dismiss the guard - prevents automatic cleanup on drop
+    /// Call this on success path when you want cleanup handled normally
+    fn dismiss(&mut self) {
+        self.tx_id = None;
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(ref tx_id) = self.tx_id {
+            super::signals::remove_in_flight_send_request(tx_id);
+            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
+        }
+    }
+}
+
+// =============================================================================
 // Keyset Collision Detection
 // =============================================================================
 
@@ -910,6 +941,9 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     };
     super::signals::add_in_flight_send_request(in_flight);
 
+    // CDK Transaction Guard pattern: auto-cleanup on drop unless dismissed
+    let mut in_flight_guard = InFlightGuard::new(tx_id.clone());
+
     // Pre-compute values needed for per-batch persistence (CDK saga pattern)
     let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
@@ -952,9 +986,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     }
                 }
 
-                // Remove in-flight tracking before returning error
-                super::signals::remove_in_flight_send_request(&tx_id);
-
+                // InFlightGuard will auto-cleanup on return (CDK pattern)
                 return Err(format!("Swap failed on batch {}/{}: {}", batch_idx + 1, total_batches, e));
             }
         };
@@ -992,8 +1024,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         }
     }
 
-    // Remove in-flight tracking after all swaps complete successfully
-    super::signals::remove_in_flight_send_request(&tx_id);
+    // Dismiss guard on success path - cleanup already complete
+    in_flight_guard.dismiss();
 
     if new_proofs.is_empty() {
         return Err("Swap returned no proofs".to_string());
