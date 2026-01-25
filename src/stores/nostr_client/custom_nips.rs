@@ -135,10 +135,7 @@ pub async fn publish_custom_nip_tracked(
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CUSTOM_NIP), &content)
         .tag(Tag::identifier(&identifier))
         .tag(Tag::title(&title))
-        .tag(Tag::custom(
-            TagKind::Custom("alt".into()),
-            vec![format!("Custom NIP proposal: {}", title)],
-        ));
+        .tag(Tag::alt(format!("Custom NIP proposal: {}", title)));
 
     // Add k tags for related event kinds
     for kind in related_kinds {

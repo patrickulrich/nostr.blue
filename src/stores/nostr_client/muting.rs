@@ -35,7 +35,7 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
         Ok(events) => Ok(events.into_iter().max_by_key(|e| e.created_at)),
         Err(e) => {
             log::error!("Failed to fetch mute list: {}", e);
-            Ok(None)
+            Err(format!("Failed to fetch mute list: {}", e))
         }
     }
 }
@@ -252,6 +252,12 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
 // Reporting
 // =============================================================================
 
+/// NIP-56 report types
+/// See: https://github.com/nostr-protocol/nips/blob/master/56.md
+const NIP56_REPORT_TYPES: &[&str] = &[
+    "nudity", "malware", "profanity", "illegal", "spam", "impersonation", "other"
+];
+
 /// Report a post (publish kind 1984 event)
 /// NIP-56: https://github.com/nostr-protocol/nips/blob/master/56.md
 pub async fn report_post(
@@ -264,6 +270,18 @@ pub async fn report_post(
 
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
+    }
+
+    // Validate and normalize report_type (NIP-56 compliance)
+    let report_type = report_type.trim().to_lowercase();
+    if report_type.is_empty() {
+        return Err("Report type cannot be empty (NIP-56)".to_string());
+    }
+    if !NIP56_REPORT_TYPES.contains(&report_type.as_str()) {
+        log::warn!(
+            "Unknown NIP-56 report type '{}', proceeding (may be a future type)",
+            report_type
+        );
     }
 
     log::info!("Reporting post: {} for: {}", event_id, report_type);
