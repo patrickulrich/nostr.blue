@@ -88,17 +88,22 @@ pub async fn publish_poll_vote_tracked(
             log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), poll_relays.len());
         }
 
-        // Publish to poll-specified relays
-        let relay_urls: Vec<nostr::Url> = poll_relays.iter()
-            .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
-            .collect();
+        // Build from connected relays, not all poll relays (use only those actually connected)
+        let relay_urls: Vec<nostr::Url> = if !connected_poll_relays.is_empty() {
+            connected_poll_relays.iter()
+                .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
+                .collect()
+        } else {
+            // Fallback already logged above
+            vec![]
+        };
 
         let result = if !relay_urls.is_empty() {
-            log::info!("Publishing vote to {} poll-specified relays", relay_urls.len());
+            log::info!("Publishing vote to {} connected poll relays", relay_urls.len());
             client.send_event_builder_to(relay_urls, builder).await
                 .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
         } else {
-            // Fallback if URL parsing failed
+            // No connected poll relays - use default relays
             client.send_event_builder(builder).await
                 .map_err(|e| format!("Failed to publish poll vote: {}", e))
         };

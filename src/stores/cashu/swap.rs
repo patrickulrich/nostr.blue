@@ -722,9 +722,10 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         return;
     }
 
-    let valid_event_ids: Vec<_> = event_ids_to_delete
+    // Parse once, store Vec<EventId> (avoid double parsing)
+    let valid_event_ids: Vec<EventId> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter_map(|id| EventId::from_hex(id).ok())
         .collect();
 
     if valid_event_ids.is_empty() {
@@ -732,10 +733,8 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
     }
 
     let mut tags = Vec::new();
-    for event_id in &valid_event_ids {
-        if let Ok(eid) = EventId::from_hex(event_id) {
-            tags.push(nostr_sdk::Tag::event(eid));
-        }
+    for eid in &valid_event_ids {
+        tags.push(nostr_sdk::Tag::event(*eid));
     }
     tags.push(nostr_sdk::Tag::custom(
         nostr_sdk::TagKind::custom("k"),

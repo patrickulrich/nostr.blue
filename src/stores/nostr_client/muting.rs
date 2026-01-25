@@ -259,7 +259,8 @@ pub async fn report_post(
     use nostr::{EventId, PublicKey, Tag};
     let target_event_id = EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let target_pubkey = PublicKey::from_hex(&author_pubkey)
+    // Use parse() to support both hex and bech32 formats (nostr-sdk pattern)
+    let target_pubkey = PublicKey::parse(&author_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Build report event (kind 1984)

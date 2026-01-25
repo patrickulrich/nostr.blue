@@ -23,8 +23,21 @@ pub static NUTZAP_INFO_CACHE: GlobalSignal<HashMap<String, NutzapInfo>> =
 /// Pending nutzaps awaiting redemption
 pub static PENDING_NUTZAPS: GlobalSignal<Vec<PendingNutzap>> = Signal::global(Vec::new);
 
+/// Load nutzap auto-redeem setting from localStorage (Dioxus pattern - closure runs once on first access)
+fn load_nutzap_auto_redeem() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_storage::{LocalStorage, Storage};
+        LocalStorage::get("nostr_nutzap_auto_redeem").unwrap_or(true)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        true
+    }
+}
+
 /// Whether to automatically redeem incoming nutzaps
-pub static NUTZAP_AUTO_REDEEM: GlobalSignal<bool> = Signal::global(|| true);
+pub static NUTZAP_AUTO_REDEEM: GlobalSignal<bool> = Signal::global(load_nutzap_auto_redeem);
 
 /// Whether nutzap subscription is currently active
 pub static NUTZAP_SUBSCRIPTION_ACTIVE: GlobalSignal<bool> = Signal::global(|| false);
