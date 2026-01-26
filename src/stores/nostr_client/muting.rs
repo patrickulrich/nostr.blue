@@ -67,6 +67,42 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     }
 }
 
+// =============================================================================
+// Combined Fetch (N+1 Optimization)
+// =============================================================================
+
+/// Combined mute list data for single-fetch optimization
+/// Instead of calling get_muted_posts() and get_blocked_users() separately
+/// (which each call fetch_mute_list()), use this to fetch once.
+#[derive(Clone, Debug, Default)]
+pub struct MuteListData {
+    pub muted_posts: HashSet<String>,
+    pub blocked_users: HashSet<String>,
+}
+
+/// Get muted posts AND blocked users in a single fetch
+/// This avoids the double fetch_mute_list() call that happens when
+/// get_muted_posts() and get_blocked_users() are called separately.
+pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
+    match fetch_mute_list().await {
+        Ok(Some(event)) => {
+            let muted_posts: HashSet<String> = event.tags.event_ids()
+                .map(|id| id.to_hex())
+                .collect();
+            let blocked_users: HashSet<String> = event.tags.public_keys()
+                .map(|pk| pk.to_hex())
+                .collect();
+            Ok(MuteListData { muted_posts, blocked_users })
+        }
+        Ok(None) => Ok(MuteListData::default()),
+        Err(e) => {
+            log::warn!("Failed to fetch mute list: {}", e);
+            // Fail open with empty sets - don't block feed rendering
+            Ok(MuteListData::default())
+        }
+    }
+}
+
 /// Normalize event ID to hex format (handles hex, bech32 note1..., and NIP-21 URIs)
 fn normalize_event_id(event_id: &str) -> Result<String, String> {
     nostr::EventId::parse(event_id)

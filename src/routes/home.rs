@@ -113,6 +113,7 @@ pub fn Home(list: String) -> Element {
     });
 
     // Fetch mute/block lists once when authenticated (N+1 optimization)
+    // Single fetch for both muted posts and blocked users
     use_effect(move || {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -127,14 +128,10 @@ pub fn Home(list: String) -> Element {
         }
 
         spawn(async move {
-            // Fetch muted posts
-            if let Ok(muted) = nostr_client::get_muted_posts().await {
-                cached_muted_posts.set(Some(muted.into_iter().collect()));
-            }
-            // Fetch blocked users
-            if let Ok(blocked) = nostr_client::get_blocked_users().await {
-                cached_blocked_users.set(Some(blocked.into_iter().collect()));
-            }
+            // Single fetch for both - avoids double fetch_mute_list() call
+            let data = nostr_client::get_mute_list_data().await.unwrap_or_default();
+            cached_muted_posts.set(Some(data.muted_posts));
+            cached_blocked_users.set(Some(data.blocked_users));
         });
     });
 

@@ -120,7 +120,7 @@ pub use contacts::{
     follow_user, unfollow_user, is_following,
 };
 pub use muting::{
-    get_muted_posts, get_blocked_users,
+    get_muted_posts, get_blocked_users, get_mute_list_data, MuteListData,
     is_post_muted, is_post_muted_cached,
     is_user_blocked, is_user_blocked_cached,
     mute_post, unmute_post, block_user, unblock_user, report_post,
@@ -171,6 +171,15 @@ pub use crate::stores::relay::display::RelayDisplayInfo;
 // =============================================================================
 // Initialization
 // =============================================================================
+
+/// Discovery relays for gossip model fallback
+/// These are used by the SDK to find users' relay lists (NIP-65/NIP-17)
+/// when gossip data is outdated or missing
+const DISCOVERY_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://purplepag.es",
+    "wss://nos.lol",
+];
 
 /// Initialize the Nostr client and connect to relays
 pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
@@ -267,7 +276,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     // These are used by the SDK to find users' relay lists (NIP-65/NIP-17)
     // when gossip data is outdated or missing
     log::info!("Adding discovery relays for gossip...");
-    for discovery_url in &["wss://relay.damus.io", "wss://purplepag.es", "wss://nos.lol"] {
+    for discovery_url in DISCOVERY_RELAYS {
         if let Err(e) = client.add_discovery_relay(*discovery_url).await {
             log::warn!("Failed to add discovery relay {}: {}", discovery_url, e);
         }
