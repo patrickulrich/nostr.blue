@@ -66,13 +66,8 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     }
 }
 
-/// Normalize event ID to hex format (handles both hex and bech32 note1... inputs)
+/// Normalize event ID to hex format (handles hex, bech32 note1..., and NIP-21 URIs)
 fn normalize_event_id(event_id: &str) -> Result<String, String> {
-    // Try hex first
-    if let Ok(id) = nostr::EventId::from_hex(event_id) {
-        return Ok(id.to_hex());
-    }
-    // Try bech32 (note1...)
     nostr::EventId::parse(event_id)
         .map(|id| id.to_hex())
         .map_err(|e| format!("Invalid event ID: {}", e))
