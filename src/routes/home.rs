@@ -9,8 +9,8 @@ use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::get_all_list_members;
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]
 enum FeedType {
@@ -51,6 +51,10 @@ pub fn Home(list: String) -> Element {
     // First load: full fetch (no local data to reconcile)
     // Subsequent refreshes: use negentropy sync for incremental updates
     let mut interactions_loaded = use_signal(|| false);
+
+    // Cached mute/block lists for N+1 optimization (fetch once, pass to all NoteCards)
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
@@ -106,6 +110,32 @@ pub fn Home(list: String) -> Element {
                 log::warn!("Deep link: List with identifier '{}' not found", list_param);
             }
         }
+    });
+
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !is_authenticated || !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            // Fetch muted posts
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            // Fetch blocked users
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
+            }
+        });
     });
 
     // Load feed on mount and when refresh is triggered or feed type changes
@@ -1255,7 +1285,9 @@ pub fn Home(list: String) -> Element {
                                             event: event.clone(),
                                             repost_info: repost_info,
                                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                            collapsible: true
+                                            collapsible: true,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone()
                                         }
                                     }
                                 }

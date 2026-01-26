@@ -120,7 +120,9 @@ pub use contacts::{
     follow_user, unfollow_user, is_following,
 };
 pub use muting::{
-    get_muted_posts, get_blocked_users, is_post_muted, is_user_blocked,
+    get_muted_posts, get_blocked_users,
+    is_post_muted, is_post_muted_cached,
+    is_user_blocked, is_user_blocked_cached,
     mute_post, unmute_post, block_user, unblock_user, report_post,
 };
 pub use reposts::{publish_repost_tracked, publish_repost, delete_repost};
