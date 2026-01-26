@@ -94,11 +94,10 @@ pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
                 .collect();
             Ok(MuteListData { muted_posts, blocked_users })
         }
-        Ok(None) => Ok(MuteListData::default()),
+        Ok(None) => Ok(MuteListData::default()), // No mute list event = valid empty state
         Err(e) => {
             log::warn!("Failed to fetch mute list: {}", e);
-            // Fail open with empty sets - don't block feed rendering
-            Ok(MuteListData::default())
+            Err(e) // Propagate error so callers don't cache empty sets
         }
     }
 }
