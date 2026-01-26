@@ -393,43 +393,46 @@ pub fn NoteCard(
     }));
 
     // Check if post is muted or author is blocked
+    // Using use_reactive! to re-run when cached data changes (fixes reactivity bug)
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
 
-    use_effect(move || {
-        let event_id = event_id_mute_check.clone();
-        let author_pubkey = author_pubkey_block_check.clone();
+    use_effect(use_reactive!(
+        |(cached_muted_posts, cached_blocked_users, event_id_mute_check, author_pubkey_block_check)| {
+            let event_id = event_id_mute_check.clone();
+            let author_pubkey = author_pubkey_block_check.clone();
 
-        // Use cached data if available (synchronous O(1) check)
-        if let Some(ref muted_set) = cached_muted_posts {
-            if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
-                is_muted.set(muted);
+            // Use cached data if available (synchronous O(1) check)
+            if let Some(ref muted_set) = cached_muted_posts {
+                if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
+                    is_muted.set(muted);
+                }
+            }
+            if let Some(ref blocked_set) = cached_blocked_users {
+                if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                    is_author_blocked.set(blocked);
+                }
+            }
+
+            // Fall back to async fetch only if no cached data provided
+            if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
+                let need_muted = cached_muted_posts.is_none();
+                let need_blocked = cached_blocked_users.is_none();
+                spawn(async move {
+                    if need_muted {
+                        if let Ok(muted) = nostr_client::is_post_muted(event_id.clone()).await {
+                            is_muted.set(muted);
+                        }
+                    }
+                    if need_blocked {
+                        if let Ok(blocked) = nostr_client::is_user_blocked(author_pubkey).await {
+                            is_author_blocked.set(blocked);
+                        }
+                    }
+                });
             }
         }
-        if let Some(ref blocked_set) = cached_blocked_users {
-            if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
-                is_author_blocked.set(blocked);
-            }
-        }
-
-        // Fall back to async fetch only if no cached data provided
-        if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
-            let need_muted = cached_muted_posts.is_none();
-            let need_blocked = cached_blocked_users.is_none();
-            spawn(async move {
-                if need_muted {
-                    if let Ok(muted) = nostr_client::is_post_muted(event_id.clone()).await {
-                        is_muted.set(muted);
-                    }
-                }
-                if need_blocked {
-                    if let Ok(blocked) = nostr_client::is_user_blocked(author_pubkey).await {
-                        is_author_blocked.set(blocked);
-                    }
-                }
-            });
-        }
-    });
+    ));
 
     // Format timestamp using shared utility
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
