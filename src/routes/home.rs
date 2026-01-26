@@ -10,6 +10,7 @@ use crate::utils::list_encryption::get_all_list_members;
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -53,8 +54,8 @@ pub fn Home(list: String) -> Element {
     let mut interactions_loaded = use_signal(|| false);
 
     // Cached mute/block lists for N+1 optimization (fetch once, pass to all NoteCards)
-    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
-    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
@@ -134,12 +135,18 @@ pub fn Home(list: String) -> Element {
             return;
         }
 
+        // Capture auth state before spawn to guard against logout during fetch
+        let auth_snapshot = auth_store::AUTH_STATE.peek().is_authenticated;
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             // Only set caches on success; leave as None on error so we can retry
             if let Ok(data) = nostr_client::get_mute_list_data().await {
-                cached_muted_posts.set(Some(data.muted_posts));
-                cached_blocked_users.set(Some(data.blocked_users));
+                // Guard against logout/account switch during fetch
+                // Re-check auth state matches snapshot before writing
+                if auth_store::AUTH_STATE.peek().is_authenticated == auth_snapshot && auth_snapshot {
+                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                }
             }
         });
     });
