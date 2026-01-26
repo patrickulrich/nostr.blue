@@ -3,14 +3,16 @@
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
 
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+
 use crate::stores::{nostr_client, dvm_store};
 use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
 use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
-use nostr_sdk::PublicKey;
-use std::collections::HashMap;
-use std::time::Duration;
 
 /// Main Explore page component - DVM-powered content discovery
 #[component]
@@ -21,6 +23,10 @@ pub fn Explore() -> Element {
     // Interaction counts cache (event_id -> counts) for batch optimization
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
+
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -79,6 +85,29 @@ pub fn Explore() -> Element {
                 Err(e) => {
                     log::error!("Failed to fetch interaction counts: {}", e);
                 }
+            }
+        });
+    });
+
+    // Fetch mute/block lists once when client is initialized
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
             }
         });
     });
@@ -219,7 +248,9 @@ pub fn Explore() -> Element {
                             key: "{event.id.to_hex()}",
                             event: event.clone(),
                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                            collapsible: true
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone()
                         }
                     }
                 }

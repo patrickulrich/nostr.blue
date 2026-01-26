@@ -1,12 +1,15 @@
+use std::collections::HashSet;
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
+use nostr_sdk::Event as NostrEvent;
+
 use crate::stores::nostr_client;
 use crate::routes::Route;
 use crate::components::{NoteCard, ThreadedComment, ClientInitializing, VoiceMessageCard};
 use crate::utils::{build_thread_tree, merge_pending_into_tree, event::is_voice_message};
 use crate::stores::pending_comments::get_pending_comments;
-use nostr_sdk::prelude::*;
-use nostr_sdk::Event as NostrEvent;
-use std::time::Duration;
 
 // Helper functions for parallel loading
 
@@ -119,6 +122,33 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut loading_parents = use_signal(|| false);
     let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+
+    // Fetch mute/block lists once when client is initialized
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
+            }
+        });
+    });
 
     // PARALLEL LOADING - Fetch all data at once (10s instead of 30s)
     use_effect(use_reactive!(|note_id| {
@@ -289,7 +319,9 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                                     NoteCard {
                                         key: "{parent.id}",
                                         event: parent.clone(),
-                                        collapsible: true
+                                        collapsible: true,
+                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                        cached_blocked_users: cached_blocked_users.read().clone()
                                     }
                                 }
                                 // Thread line indicator
@@ -312,7 +344,9 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     NoteCard {
                         key: "{event.id}",
                         event: event.clone(),
-                        collapsible: false
+                        collapsible: false,
+                        cached_muted_posts: cached_muted_posts.read().clone(),
+                        cached_blocked_users: cached_blocked_users.read().clone()
                     }
                 }
 

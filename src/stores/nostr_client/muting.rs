@@ -2,6 +2,7 @@
 //!
 //! Functions for muting posts, blocking users, and reporting content (NIP-51, NIP-56).
 
+use std::collections::HashSet;
 use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
@@ -73,7 +74,13 @@ fn normalize_event_id(event_id: &str) -> Result<String, String> {
         .map_err(|e| format!("Invalid event ID: {}", e))
 }
 
-/// Check if a post is muted
+/// Check if a post is muted using cached data (synchronous, O(1))
+pub fn is_post_muted_cached(event_id: &str, muted_posts: &HashSet<String>) -> Result<bool, String> {
+    let normalized = normalize_event_id(event_id)?;
+    Ok(muted_posts.contains(&normalized))
+}
+
+/// Check if a post is muted (async fallback, fetches from relays)
 pub async fn is_post_muted(event_id: String) -> std::result::Result<bool, String> {
     let normalized = normalize_event_id(&event_id)?;
     let muted_posts = get_muted_posts().await?;
@@ -182,7 +189,13 @@ pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
     }
 }
 
-/// Check if a user is blocked
+/// Check if a user is blocked using cached data (synchronous, O(1))
+pub fn is_user_blocked_cached(pubkey: &str, blocked_users: &HashSet<String>) -> Result<bool, String> {
+    let normalized_pubkey = crate::utils::nip19::normalize_pubkey(pubkey)?;
+    Ok(blocked_users.contains(&normalized_pubkey))
+}
+
+/// Check if a user is blocked (async fallback, fetches from relays)
 pub async fn is_user_blocked(pubkey: String) -> std::result::Result<bool, String> {
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
     let blocked_users = get_blocked_users().await?;

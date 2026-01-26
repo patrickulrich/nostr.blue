@@ -10,8 +10,8 @@ use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -146,6 +146,10 @@ pub fn Profile(pubkey: String) -> Element {
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
 
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+
     // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
@@ -211,6 +215,27 @@ pub fn Profile(pubkey: String) -> Element {
                 }
             }
             pinned_loading.set(false);
+        });
+    }));
+
+    // Fetch mute/block lists once when client is initialized
+    use_effect(use_reactive(&*nostr_client::CLIENT_INITIALIZED.read(), move |client_initialized| {
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
+            }
         });
     }));
 
@@ -1223,7 +1248,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }
@@ -1240,7 +1267,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                                 key: "{event.id}",
                                                                 event: original_event,
                                                                 repost_info: repost_info,
-                                                                collapsible: true
+                                                                collapsible: true,
+                                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                                cached_blocked_users: cached_blocked_users.read().clone()
                                                             }
                                                         }
                                                     }
@@ -1254,7 +1283,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }

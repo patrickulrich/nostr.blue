@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::components::{NoteCard, NoteCardSkeleton};
@@ -13,6 +15,33 @@ pub fn Trending() -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
+
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+
+    // Fetch mute/block lists once when client is initialized
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
+            }
+        });
+    });
 
     // Load trending feed - wait for client initialization
     use_effect(move || {
@@ -119,7 +148,9 @@ pub fn Trending() -> Element {
                         NoteCard {
                             key: "{event.id}",
                             event: event.clone(),
-                            collapsible: true
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone()
                         }
                     }
                 }

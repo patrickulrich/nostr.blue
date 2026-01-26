@@ -1,8 +1,11 @@
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
+use nostr_sdk::Event as NostrEvent;
+
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll::use_infinite_scroll;
-use nostr_sdk::Event as NostrEvent;
 
 #[component]
 pub fn Bookmarks() -> Element {
@@ -15,6 +18,33 @@ pub fn Bookmarks() -> Element {
     let mut has_more = use_signal(|| true);
     let mut loaded_count = use_signal(|| 0usize);
     const BATCH_SIZE: usize = 50;
+
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+
+    // Fetch mute/block lists once when client is initialized
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Ok(muted) = nostr_client::get_muted_posts().await {
+                cached_muted_posts.set(Some(muted.into_iter().collect()));
+            }
+            if let Ok(blocked) = nostr_client::get_blocked_users().await {
+                cached_blocked_users.set(Some(blocked.into_iter().collect()));
+            }
+        });
+    });
 
     // Load initial batch of bookmarks on mount
     use_effect(move || {
@@ -207,7 +237,9 @@ pub fn Bookmarks() -> Element {
                             NoteCard {
                                 key: "{event.id}",
                                 event: event.clone(),
-                                collapsible: true
+                                collapsible: true,
+                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                cached_blocked_users: cached_blocked_users.read().clone()
                             }
                         }
 
