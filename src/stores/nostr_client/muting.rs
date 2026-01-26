@@ -34,8 +34,13 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
 
     // Fetch from database/relays
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        // Select latest event by timestamp (nostr-database pattern)
-        Ok(events) => Ok(events.into_iter().max_by_key(|e| e.created_at)),
+        // NIP-01 tie-breaking: higher created_at wins, then lower event ID wins
+        Ok(events) => Ok(events.into_iter().max_by(|a, b| {
+            match a.created_at.cmp(&b.created_at) {
+                std::cmp::Ordering::Equal => b.id.cmp(&a.id), // Lower ID = Greater
+                other => other,
+            }
+        })),
         Err(e) => {
             log::error!("Failed to fetch mute list: {}", e);
             Err(format!("Failed to fetch mute list: {}", e))
@@ -105,10 +110,12 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
         None => (MuteListTags::default(), String::new())
     };
 
-    // Add new muted post if not already present
-    if !tags.event_ids.contains(&target_event_id) {
-        tags.event_ids.push(target_event_id);
+    // Skip if already muted (idempotent)
+    if tags.event_ids.contains(&target_event_id) {
+        log::debug!("Post already muted, skipping publish");
+        return Ok(());
     }
+    tags.event_ids.push(target_event_id);
 
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
@@ -145,7 +152,11 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     let existing_content = mute_event.content.clone();
     let mut tags = extract_mute_list_tags(&mute_event);
 
-    // Remove the target post
+    // Skip if not in list (idempotent)
+    if !tags.event_ids.contains(&target_event_id) {
+        log::debug!("Post not in mute list, nothing to unmute");
+        return Ok(());
+    }
     tags.event_ids.retain(|eid| *eid != target_event_id);
 
     let all_tags = rebuild_mute_list_tags(&tags);
@@ -208,10 +219,12 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
         None => (MuteListTags::default(), String::new())
     };
 
-    // Add new blocked user if not already present
-    if !tags.pubkeys.contains(&target_pubkey) {
-        tags.pubkeys.push(target_pubkey);
+    // Skip if already blocked (idempotent)
+    if tags.pubkeys.contains(&target_pubkey) {
+        log::debug!("User already blocked, skipping publish");
+        return Ok(());
     }
+    tags.pubkeys.push(target_pubkey);
 
     let all_tags = rebuild_mute_list_tags(&tags);
     let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
@@ -248,7 +261,11 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     let existing_content = mute_event.content.clone();
     let mut tags = extract_mute_list_tags(&mute_event);
 
-    // Remove the target user
+    // Skip if not in list (idempotent)
+    if !tags.pubkeys.contains(&target_pubkey) {
+        log::debug!("User not in block list, nothing to unblock");
+        return Ok(());
+    }
     tags.pubkeys.retain(|pk| *pk != target_pubkey);
 
     let all_tags = rebuild_mute_list_tags(&tags);
