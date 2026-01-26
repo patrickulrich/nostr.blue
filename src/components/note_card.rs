@@ -408,11 +408,18 @@ pub fn NoteCard(
                 if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
                     is_muted.set(muted);
                 }
+            } else {
+                // Reset when cache is None (e.g., logout or not yet loaded)
+                is_muted.set(false);
             }
+
             if let Some(ref blocked_set) = cached_blocked_users {
                 if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
                     is_author_blocked.set(blocked);
                 }
+            } else {
+                // Reset when cache is None
+                is_author_blocked.set(false);
             }
 
             // Fall back to async fetch only if no cached data provided
@@ -421,13 +428,15 @@ pub fn NoteCard(
                 let need_blocked = cached_blocked_users.is_none();
                 spawn(async move {
                     if need_muted {
-                        if let Ok(muted) = nostr_client::is_post_muted(event_id.clone()).await {
-                            is_muted.set(muted);
+                        match nostr_client::is_post_muted(event_id.clone()).await {
+                            Ok(muted) => is_muted.set(muted),
+                            Err(_) => is_muted.set(false), // Reset on error
                         }
                     }
                     if need_blocked {
-                        if let Ok(blocked) = nostr_client::is_user_blocked(author_pubkey).await {
-                            is_author_blocked.set(blocked);
+                        match nostr_client::is_user_blocked(author_pubkey).await {
+                            Ok(blocked) => is_author_blocked.set(blocked),
+                            Err(_) => is_author_blocked.set(false), // Reset on error
                         }
                     }
                 });
