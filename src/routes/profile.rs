@@ -10,8 +10,9 @@ use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
-use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -146,6 +147,10 @@ pub fn Profile(pubkey: String) -> Element {
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
 
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+
     // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
     let pubkey_for_display = pubkey.clone();
@@ -213,6 +218,44 @@ pub fn Profile(pubkey: String) -> Element {
             pinned_loading.set(false);
         });
     }));
+
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
+    // Single fetch for both muted posts and blocked users
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Clear caches on logout to prevent stale data
+        if !is_authenticated {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            return;
+        }
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        // Capture pubkey before spawn to guard against account switch during fetch
+        let auth_pubkey_snapshot = auth_store::AUTH_STATE.peek().pubkey.clone();
+        spawn(async move {
+            // Single fetch for both - avoids double fetch_mute_list() call
+            // Only set caches on success; leave as None on error so we can retry
+            if let Ok(data) = nostr_client::get_mute_list_data().await {
+                // Guard: only write if same user still logged in
+                let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+                if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                }
+            }
+        });
+    });
 
     // Fetch profile metadata
     use_effect(use_reactive((&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
@@ -1223,7 +1266,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }
@@ -1240,7 +1285,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                                 key: "{event.id}",
                                                                 event: original_event,
                                                                 repost_info: repost_info,
-                                                                collapsible: true
+                                                                collapsible: true,
+                                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                                cached_blocked_users: cached_blocked_users.read().clone()
                                                             }
                                                         }
                                                     }
@@ -1254,7 +1301,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }

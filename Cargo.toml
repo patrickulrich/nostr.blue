@@ -112,16 +112,13 @@ web-sys = { version = "0.3", features = [
 gloo-storage = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 
-# Logging and tracing
+# Logging
 log = "0.4"
 wasm-logger = "0.2"
 console_error_panic_hook = "0.1"
-tracing = "0.1"
-tracing-wasm = "0.2"
 
 # Utilities
 chrono = { version = "0.4", features = ["wasmbind"] }
-anyhow = "1.0"
 regex = "1.10"
 urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "js"] }
@@ -131,7 +128,6 @@ gloo-net = "0.5"
 bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
-ciborium = "0.2"
 hex = "0.4"
 lru = "0.16"
 instant = { version = "0.1", features = ["wasm-bindgen"] }

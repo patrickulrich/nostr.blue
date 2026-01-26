@@ -816,10 +816,14 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
         return Ok(());
     }
 
-    // Get current user pubkey to separate buyer/seller orders
-    let user_pubkey = nostr_client::get_user_pubkey().await
-        .map(|pk| pk.to_hex())
-        .unwrap_or_default();
+    // Dioxus pattern: Explicit validation before state mutation
+    let user_pubkey = match nostr_client::get_cached_pubkey() {
+        Ok(pk) => pk.to_hex(),
+        Err(_) => {
+            log::warn!("Cannot load orders - not authenticated");
+            return Ok(());  // Early return, don't proceed with empty pubkey
+        }
+    };
 
     let mut buyer_orders = Vec::new();
     let mut seller_orders = Vec::new();
@@ -1259,10 +1263,10 @@ pub async fn create_shop_order(
 
     // total_sats already calculated above
 
-    // Get user pubkey
-    let buyer_pubkey = nostr_client::get_user_pubkey().await
+    // Dioxus pattern: Propagate auth errors, don't mask with defaults
+    let buyer_pubkey = nostr_client::get_cached_pubkey()
         .map(|pk| pk.to_hex())
-        .unwrap_or_default();
+        .map_err(|_| "Cannot checkout - not authenticated".to_string())?;
 
     let now = now_secs();
 
@@ -1596,8 +1600,7 @@ pub struct CollectionFormData {
 
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
-    let pubkey = nostr_client::get_user_pubkey()
-        .await
+    let pubkey = nostr_client::get_cached_pubkey()
         .map_err(|e| format!("Not authenticated: {}", e))?
         .to_hex();
 
@@ -1824,10 +1827,14 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
 
-                        // Get current user as merchant
-                        let merchant_pubkey = nostr_client::get_user_pubkey().await
-                            .map(|pk| pk.to_hex())
-                            .unwrap_or_default();
+                        // Dioxus pattern: Guard clause with explicit skip
+                        let merchant_pubkey = match nostr_client::get_cached_pubkey() {
+                            Ok(pk) => pk.to_hex(),
+                            Err(_) => {
+                                log::warn!("Skipping order message - not authenticated");
+                                return Ok(());  // Skip processing, don't use empty pubkey
+                            }
+                        };
 
                         let order = ShopOrder {
                             order_id: order_id.clone(),

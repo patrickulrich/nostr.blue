@@ -13,9 +13,9 @@ use cdk::wallet::multi_mint_wallet::MultiMintWallet;
 use cdk::nuts::CurrencyUnit;
 
 use super::cashu::{
-    WALLET_BALANCE, WALLET_TOKENS, WALLET_STATUS, WalletStatus,
+    WALLET_TOKENS, WALLET_STATUS, WalletStatus,
     TokenData, ProofData, ProofState, WalletTokensStoreStoreExt,
-    DleqData, PENDING_BY_MINT_SECRETS, WALLET_STATE,
+    DleqData, WALLET_STATE,
 };
 
 /// Global MultiMintWallet instance
@@ -154,7 +154,7 @@ pub async fn get_total_balance() -> Result<u64, String> {
 /// Sync CDK state to Dioxus signals
 ///
 /// This should be called after any CDK operation that changes wallet state.
-/// It updates WALLET_BALANCE, WALLET_TOKENS, and WALLET_BALANCES.
+/// It updates WALLET_TOKENS and WALLET_BALANCES.
 pub async fn sync_wallet_state() -> Result<(), String> {
     let multi_wallet = match MULTI_WALLET.read().as_ref() {
         Some(w) => w.clone(),
@@ -163,18 +163,6 @@ pub async fn sync_wallet_state() -> Result<(), String> {
             return Ok(());
         }
     };
-
-    // Get balances per mint
-    let balances = multi_wallet.get_balances().await
-        .map_err(|e| format!("Failed to get balances: {}", e))?;
-
-    // Calculate total balance with checked arithmetic
-    let total: u64 = balances.values()
-        .try_fold(0u64, |acc, amount| acc.checked_add(u64::from(*amount)))
-        .ok_or("Balance overflow")?;
-
-    // Update WALLET_BALANCE
-    *WALLET_BALANCE.write() = total;
 
     // Get proofs per mint for token list
     let proofs_by_mint = multi_wallet.list_proofs().await
@@ -235,50 +223,29 @@ pub async fn sync_wallet_state() -> Result<(), String> {
 
     *WALLET_TOKENS.read().data().write() = tokens;
 
-    // Calculate pending balance from proof state flags and mint-reported pending
-    let pending: u64 = {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-
-        // Get proofs that are pending at mint level
-        let pending_at_mint = PENDING_BY_MINT_SECRETS.read();
-
-        tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .filter(|p| {
-                // Proof is pending if:
-                // 1. Local state is pending (user initiated operation)
-                // 2. Mint reports it as pending (lightning payment in-flight)
-                p.state.is_pending() || pending_at_mint.contains_key(&p.secret)
-            })
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-            .unwrap_or(0)
-    };
-
-    // Update balance breakdown
-    let available = total.saturating_sub(pending);
-    *WALLET_BALANCES.write() = WalletBalances {
-        total,
-        available,
-        pending,
-    };
+    // Update balance from proof state (CDK pattern)
+    super::cashu::signals::update_wallet_balances();
 
     // Update status to Ready
     *WALLET_STATUS.write() = WalletStatus::Ready;
 
-    log::debug!("Synced wallet state: {} sats total", total);
+    let balance = WALLET_BALANCES.read().available;
+    log::debug!("Synced wallet state: {} sats available", balance);
 
     Ok(())
 }
 
-/// Sync balance only (lighter weight than full sync)
+/// Recompute wallet balances from cached WALLET_TOKENS
+///
+/// **IMPORTANT**: This function does NOT query CDK or mint state.
+/// It only recomputes balances from the in-memory WALLET_TOKENS cache.
+/// Call `sync_wallet_state()` first to ensure WALLET_TOKENS is fresh.
+///
+/// This is a lightweight, no-network operation suitable for frequent calls.
 #[allow(dead_code)]
 pub async fn sync_balance_only() -> Result<u64, String> {
-    let total = get_total_balance().await?;
-    *WALLET_BALANCE.write() = total;
-    Ok(total)
+    super::cashu::signals::update_wallet_balances();
+    Ok(WALLET_BALANCES.read().available)
 }
 
 /// Clear the MultiMintWallet and all related UI signals (for logout)
@@ -287,9 +254,8 @@ pub fn clear_multi_wallet() {
     // Clear CDK wallet (triggers Drop which zeroizes the seed)
     *MULTI_WALLET.write() = None;
 
-    // Clear balance signals
+    // Clear balance signal
     *WALLET_BALANCES.write() = WalletBalances::default();
-    *WALLET_BALANCE.write() = 0;
 
     // Clear token data
     *WALLET_TOKENS.read().data().write() = Vec::new();
