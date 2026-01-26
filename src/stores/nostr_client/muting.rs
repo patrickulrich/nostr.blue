@@ -53,7 +53,7 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
         Some(event) => {
             // Use SDK's event_ids() method to extract e-tags
             let muted_posts: Vec<String> = event.tags.event_ids()
-                .map(|id| id.to_string())
+                .map(|id| id.to_hex())
                 .collect();
             Ok(muted_posts)
         }
@@ -135,8 +135,13 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch current mute list and extract tags
-    let mute_event = fetch_mute_list().await?
-        .ok_or("No mute list found")?;
+    let mute_event = match fetch_mute_list().await? {
+        Some(event) => event,
+        None => {
+            log::debug!("No mute list found, nothing to unmute");
+            return Ok(());
+        }
+    };
     let existing_content = mute_event.content.clone();
     let mut tags = extract_mute_list_tags(&mute_event);
 
@@ -233,8 +238,13 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch current mute list and extract tags
-    let mute_event = fetch_mute_list().await?
-        .ok_or("No mute list found")?;
+    let mute_event = match fetch_mute_list().await? {
+        Some(event) => event,
+        None => {
+            log::debug!("No mute list found, nothing to unblock");
+            return Ok(());
+        }
+    };
     let existing_content = mute_event.content.clone();
     let mut tags = extract_mute_list_tags(&mute_event);
 

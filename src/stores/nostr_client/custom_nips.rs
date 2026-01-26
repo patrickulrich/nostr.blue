@@ -257,7 +257,7 @@ pub async fn search_custom_nips(
     let results = fetch_events_aggregated(filter, timeout).await?;
 
     // Fallback: client-side filter if NIP-50 returned empty
-    if results.is_empty() && !query.is_empty() {
+    if results.is_empty() {
         log::info!("NIP-50 search returned empty, trying client-side filter");
 
         let fallback_filter = Filter::new()
