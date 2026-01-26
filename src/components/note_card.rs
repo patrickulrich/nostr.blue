@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::time::Duration;
 
 use dioxus::prelude::*;
@@ -22,8 +23,8 @@ pub fn NoteCard(
     #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
     #[props(default = true)] collapsible: bool,
-    #[props(default = None)] cached_muted_posts: Option<HashSet<String>>,
-    #[props(default = None)] cached_blocked_users: Option<HashSet<String>>,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();

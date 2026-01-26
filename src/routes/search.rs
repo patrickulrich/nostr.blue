@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
@@ -59,8 +60,8 @@ pub fn Search(q: String) -> Element {
     let mut show_sort_dropdown = use_signal(|| false);
 
     // Cached mute/block lists for N+1 optimization
-    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
-    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
 
     // Fetch mute/block lists once when authenticated (N+1 optimization)
     // Single fetch for both muted posts and blocked users
@@ -84,12 +85,18 @@ pub fn Search(q: String) -> Element {
             return;
         }
 
+        // Capture auth state before spawn to guard against logout during fetch
+        let auth_snapshot = crate::stores::auth_store::AUTH_STATE.peek().is_authenticated;
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             // Only set caches on success; leave as None on error so we can retry
             if let Ok(data) = nostr_client::get_mute_list_data().await {
-                cached_muted_posts.set(Some(data.muted_posts));
-                cached_blocked_users.set(Some(data.blocked_users));
+                // Guard against logout/account switch during fetch
+                // Re-check auth state matches snapshot before writing
+                if crate::stores::auth_store::AUTH_STATE.peek().is_authenticated == auth_snapshot && auth_snapshot {
+                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                }
             }
         });
     });

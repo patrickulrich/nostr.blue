@@ -11,6 +11,7 @@ use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
@@ -147,8 +148,8 @@ pub fn Profile(pubkey: String) -> Element {
     let mut pinned_loading = use_signal(|| true);
 
     // Cached mute/block lists for N+1 optimization
-    let mut cached_muted_posts: Signal<Option<HashSet<String>>> = use_signal(|| None);
-    let mut cached_blocked_users: Signal<Option<HashSet<String>>> = use_signal(|| None);
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
 
     // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
@@ -240,12 +241,18 @@ pub fn Profile(pubkey: String) -> Element {
             return;
         }
 
+        // Capture auth state before spawn to guard against logout during fetch
+        let auth_snapshot = auth_store::AUTH_STATE.peek().is_authenticated;
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             // Only set caches on success; leave as None on error so we can retry
             if let Ok(data) = nostr_client::get_mute_list_data().await {
-                cached_muted_posts.set(Some(data.muted_posts));
-                cached_blocked_users.set(Some(data.blocked_users));
+                // Guard against logout/account switch during fetch
+                // Re-check auth state matches snapshot before writing
+                if auth_store::AUTH_STATE.peek().is_authenticated == auth_snapshot && auth_snapshot {
+                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                }
             }
         });
     });
