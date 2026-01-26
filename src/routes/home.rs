@@ -118,7 +118,14 @@ pub fn Home(list: String) -> Element {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        if !is_authenticated || !client_initialized {
+        // Clear caches on logout to prevent stale data on re-login
+        if !is_authenticated {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            return;
+        }
+
+        if !client_initialized {
             return;
         }
 
@@ -129,9 +136,11 @@ pub fn Home(list: String) -> Element {
 
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
-            let data = nostr_client::get_mute_list_data().await.unwrap_or_default();
-            cached_muted_posts.set(Some(data.muted_posts));
-            cached_blocked_users.set(Some(data.blocked_users));
+            // Only set caches on success; leave as None on error so we can retry
+            if let Ok(data) = nostr_client::get_mute_list_data().await {
+                cached_muted_posts.set(Some(data.muted_posts));
+                cached_blocked_users.set(Some(data.blocked_users));
+            }
         });
     });
 

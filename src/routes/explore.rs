@@ -89,10 +89,18 @@ pub fn Explore() -> Element {
         });
     });
 
-    // Fetch mute/block lists once when client is initialized (N+1 optimization)
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
     // Single fetch for both muted posts and blocked users
     use_effect(move || {
+        let is_authenticated = crate::stores::auth_store::is_authenticated();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Clear caches on logout to prevent stale data
+        if !is_authenticated {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            return;
+        }
 
         if !client_initialized {
             return;
@@ -105,9 +113,11 @@ pub fn Explore() -> Element {
 
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
-            let data = nostr_client::get_mute_list_data().await.unwrap_or_default();
-            cached_muted_posts.set(Some(data.muted_posts));
-            cached_blocked_users.set(Some(data.blocked_users));
+            // Only set caches on success; leave as None on error so we can retry
+            if let Ok(data) = nostr_client::get_mute_list_data().await {
+                cached_muted_posts.set(Some(data.muted_posts));
+                cached_blocked_users.set(Some(data.blocked_users));
+            }
         });
     });
 
