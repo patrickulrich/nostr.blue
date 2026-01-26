@@ -46,15 +46,15 @@ pub fn Bookmarks() -> Element {
             return;
         }
 
-        // Capture auth state before spawn to guard against logout during fetch
-        let auth_snapshot = auth_store::AUTH_STATE.peek().is_authenticated;
+        // Capture pubkey before spawn to guard against account switch during fetch
+        let auth_pubkey_snapshot = auth_store::AUTH_STATE.peek().pubkey.clone();
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             // Only set caches on success; leave as None on error so we can retry
             if let Ok(data) = nostr_client::get_mute_list_data().await {
-                // Guard against logout/account switch during fetch
-                // Re-check auth state matches snapshot before writing
-                if auth_store::AUTH_STATE.peek().is_authenticated == auth_snapshot && auth_snapshot {
+                // Guard: only write if same user still logged in
+                let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+                if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
                     cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
                     cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
                 }
