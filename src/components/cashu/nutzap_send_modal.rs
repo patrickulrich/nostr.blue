@@ -32,11 +32,19 @@ pub fn NutzapSendModal(
     let mut is_loading_info = use_signal(|| true);
     let mut load_error = use_signal(|| Option::<String>::None);
 
+    // Track request version to prevent stale fetches from overwriting newer state
+    let mut request_version: Signal<u64> = use_signal(|| 0);
+
     // Fetch recipient nutzap info when recipient changes
     // Use use_reactive! to track non-signal prop and re-run when recipient_pubkey changes
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
     use_effect(use_reactive!(|(recipient_pubkey_for_effect,)| {
         let recipient = recipient_pubkey_for_effect.clone();
+
+        // Increment version for this request (Dioxus effect dedup pattern)
+        let version = *request_version.peek() + 1;
+        request_version.set(version);
+
         spawn(async move {
             is_loading_info.set(true);
             load_error.set(None);
@@ -46,6 +54,12 @@ pub fn NutzapSendModal(
 
             match cashu::fetch_nutzap_info(&recipient).await {
                 Ok(info) => {
+                    // Guard: only update if this is still the latest request
+                    if *request_version.peek() != version {
+                        log::debug!("Stale nutzap fetch discarded (v{} != current)", version);
+                        return;
+                    }
+
                     // Check for compatible mint using already-fetched info (avoids double-fetch)
                     match cashu::validate_nutzap_recipient_with_info(&info) {
                         Ok(mint) => {
@@ -59,10 +73,16 @@ pub fn NutzapSendModal(
                     recipient_info.set(Some(info));
                 }
                 Err(e) => {
+                    if *request_version.peek() != version {
+                        return;
+                    }
                     load_error.set(Some(e));
                 }
             }
-            is_loading_info.set(false);
+
+            if *request_version.peek() == version {
+                is_loading_info.set(false);
+            }
         });
     }));
 

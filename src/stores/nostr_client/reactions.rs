@@ -59,7 +59,14 @@ pub async fn publish_reaction_tracked(
             };
             (kind, coordinate)
         }
-        _ => (None, None), // If we can't fetch it, continue without kind/coordinate
+        Ok(None) => {
+            log::debug!("Event {} not found in DB for NIP-25 tags", event_id);
+            (None, None)
+        }
+        Err(e) => {
+            log::debug!("Failed to fetch event {} for NIP-25 tags: {}", event_id, e);
+            (None, None)
+        }
     };
 
     // Use EventBuilder::reaction() with ReactionTarget for proper NIP-25 compliance

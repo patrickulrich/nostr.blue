@@ -38,6 +38,7 @@ where
     use futures::StreamExt;
 
     let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
 
     let mut stream = client.stream_events(filter, timeout)
         .await

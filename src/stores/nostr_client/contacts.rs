@@ -206,7 +206,7 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
-    // Invalidate cache and fetch directly from relay to avoid race with background refresher
+    // Pre-publish invalidation: forces fresh relay fetch to avoid races with background refresher
     invalidate_contacts_cache();
     let mut contacts = fetch_contacts_from_relay(current_pubkey.clone()).await?;
 
@@ -218,7 +218,7 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
         // Publish updated contact list
         publish_contacts(contacts).await?;
 
-        // Invalidate cache after successful publish (nostr-sdk pattern)
+        // Post-publish invalidation: clears stale cache so subsequent reads see updated list
         invalidate_contacts_cache();
     } else {
         log::info!("Already following: {}", normalized_pubkey);

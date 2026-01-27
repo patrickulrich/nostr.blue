@@ -31,7 +31,7 @@ pub fn ShopOrders() -> Element {
             loading.set(true);
             error.set(None);
 
-            // CDK pattern: retry auth-dependent operations when auth becomes available
+            // Shop pattern: retry auth-dependent operations when auth becomes available
             if let Err(e) = ensure_orders_loaded().await {
                 log::warn!("Failed to ensure orders loaded: {}", e);
             }

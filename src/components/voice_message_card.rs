@@ -309,17 +309,15 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
 
     // Clone values for interaction handlers
     let event_id_for_repost = event_id_str.clone();
-    let author_for_repost = author_pubkey.clone();
 
     // Note: Like handler is provided by use_reaction hook
 
     // Repost handler
     let handle_repost = move |_| {
         let event_id_copy = event_id_for_repost.clone();
-        let event_author_copy = author_for_repost.clone();
         is_reposting.set(true);
         spawn(async move {
-            match nostr_client::publish_repost(event_id_copy, event_author_copy, None).await {
+            match nostr_client::publish_repost(event_id_copy, None).await {
                 Ok(_) => {
                     log::info!("Repost published successfully");
                     is_reposted.set(true);

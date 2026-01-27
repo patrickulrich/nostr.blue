@@ -1,12 +1,9 @@
-use std::collections::HashSet;
-use std::rc::Rc;
-
 use dioxus::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use crate::components::{NoteCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll::use_infinite_scroll, use_mute_block_cache};
 
 #[component]
 pub fn Bookmarks() -> Element {
@@ -20,47 +17,8 @@ pub fn Bookmarks() -> Element {
     let mut loaded_count = use_signal(|| 0usize);
     const BATCH_SIZE: usize = 50;
 
-    // Cached mute/block lists for N+1 optimization
-    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
-    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
-
-    // Fetch mute/block lists once when authenticated (N+1 optimization)
-    // Single fetch for both muted posts and blocked users
-    use_effect(move || {
-        let is_authenticated = auth_store::is_authenticated();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
-        // Clear caches on logout to prevent stale data
-        if !is_authenticated {
-            cached_muted_posts.set(None);
-            cached_blocked_users.set(None);
-            return;
-        }
-
-        if !client_initialized {
-            return;
-        }
-
-        // Only fetch if not already loaded
-        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
-            return;
-        }
-
-        // Capture pubkey before spawn to guard against account switch during fetch
-        let auth_pubkey_snapshot = auth_store::AUTH_STATE.peek().pubkey.clone();
-        spawn(async move {
-            // Single fetch for both - avoids double fetch_mute_list() call
-            // Only set caches on success; leave as None on error so we can retry
-            if let Ok(data) = nostr_client::get_mute_list_data().await {
-                // Guard: only write if same user still logged in
-                let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
-                if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
-                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
-                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
-                }
-            }
-        });
-    });
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Load initial batch of bookmarks on mount
     use_effect(move || {

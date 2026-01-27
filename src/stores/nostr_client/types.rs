@@ -221,7 +221,8 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
 // MIME Type Detection
 // =============================================================================
 
-/// Detect MIME type from URL file extension
+/// Detect MIME type from URL file extension (images and audio)
+/// For video types, use detect_video_mime_type()
 pub(crate) fn detect_mime_type(url: &str) -> Option<String> {
     let url_lower = url.to_lowercase();
 
@@ -251,9 +252,31 @@ pub(crate) fn detect_mime_type(url: &str) -> Option<String> {
         "wav" => Some("audio/wav".to_string()),
         "weba" => Some("audio/webm".to_string()),
         "flac" => Some("audio/flac".to_string()),
-        // Note: mp4/webm are video-capable but listed under images for backwards compat
-        // Use detect_video_mime_type for explicit video detection
 
+        _ => None,
+    }
+}
+
+/// Detect video MIME type from URL file extension
+#[allow(dead_code)]
+pub(crate) fn detect_video_mime_type(url: &str) -> Option<String> {
+    let url_lower = url.to_lowercase();
+
+    // Extract extension from URL (handles query params and fragments)
+    let path = url_lower
+        .split('?').next()?  // Remove query string
+        .split('#').next()?; // Remove fragment
+    let extension = path.split('.').next_back()?;
+
+    match extension {
+        "mp4" | "m4v" => Some("video/mp4".to_string()),
+        "webm" => Some("video/webm".to_string()),
+        "mov" => Some("video/quicktime".to_string()),
+        "avi" => Some("video/x-msvideo".to_string()),
+        "mkv" => Some("video/x-matroska".to_string()),
+        "ogv" => Some("video/ogg".to_string()),
+        "3gp" => Some("video/3gpp".to_string()),
+        "flv" => Some("video/x-flv".to_string()),
         _ => None,
     }
 }

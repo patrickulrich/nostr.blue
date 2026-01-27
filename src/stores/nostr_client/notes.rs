@@ -16,12 +16,15 @@ use crate::utils::mention_extractor::{extract_mentioned_pubkeys, create_mention_
 
 /// Extract quote tags from content containing nostr: URIs (NIP-18 compliance)
 /// Returns q tags for note1/nevent1/naddr1 references
+/// Deduplicates tags to avoid duplicate q tags for the same reference
 fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
     use nostr::nips::nip19::Nip19;
     use nostr::event::tag::TagStandard;
     use nostr_sdk::nips::nip01::Coordinate;
+    use std::collections::HashSet;
 
     let mut tags = Vec::new();
+    let mut seen_identifiers = HashSet::new();
 
     // Match nostr:note1..., nostr:nevent1..., nostr:naddr1...
     let re = match regex::Regex::new(r"nostr:(note1[a-z0-9]+|nevent1[a-z0-9]+|naddr1[a-z0-9]+)") {
@@ -35,6 +38,10 @@ fn extract_quote_tags(content: &str) -> Vec<nostr::Tag> {
     for cap in re.captures_iter(content) {
         if let Some(bech32_match) = cap.get(1) {
             let bech32 = bech32_match.as_str();
+            // Skip if we've already processed this bech32 identifier
+            if !seen_identifiers.insert(bech32.to_string()) {
+                continue;
+            }
             match Nip19::from_bech32(bech32) {
                 Ok(nip19) => {
                     let tag = match nip19 {

@@ -50,14 +50,16 @@ pub static NUTZAP_ENABLED: GlobalSignal<bool> = Signal::global(|| false);
 // =============================================================================
 
 /// Clear all nutzap state (for logout/reset)
+/// Note: NUTZAP_AUTO_REDEEM is not reset here - it's persisted to localStorage
+/// and should retain user preference across sessions
 pub fn clear_nutzap_state() {
     *MY_NUTZAP_INFO.write() = None;
     NUTZAP_INFO_CACHE.write().clear();
     PENDING_NUTZAPS.write().clear();
-    *NUTZAP_AUTO_REDEEM.write() = true;
+    // Don't reset NUTZAP_AUTO_REDEEM - it's a persisted user preference
     *NUTZAP_SUBSCRIPTION_ACTIVE.write() = false;
     *NUTZAP_ENABLED.write() = false;
-    log::info!("Cleared all nutzap state");
+    log::info!("Cleared nutzap state (auto-redeem preference preserved)");
 }
 
 /// Add a nutzap info to the cache

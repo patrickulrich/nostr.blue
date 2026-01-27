@@ -470,10 +470,17 @@ pub async fn receive_tokens_with_options(
             Err(e) => {
                 last_error = e.to_string();
                 // Check for permanent errors that shouldn't be retried
+                // CDK pattern: classify errors - 4xx = permanent, 5xx = retryable
                 let err_str = last_error.to_lowercase();
                 if err_str.contains("banned") || err_str.contains("invalid") {
                     log::error!("Permanent error, stopping retries: {}", last_error);
                     retryable = false; // Mark as non-retryable
+                    break;
+                }
+                // "duplicate" means event already published - this is success, not error
+                if err_str.contains("duplicate") || err_str.contains("already exists") {
+                    log::info!("Event already exists on relay, treating as success");
+                    retryable = false; // Don't queue for retry - event is already there
                     break;
                 }
             }
