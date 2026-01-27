@@ -698,6 +698,16 @@ async fn publish_swap_events(
     Ok(event_id_hex)
 }
 
+/// Build deletion event tags for token events
+///
+/// CDK pattern: centralize tag building to avoid duplication between
+/// queue_deletion_event_retry and publish_deletion_events
+fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
+    let mut tags: Vec<_> = event_ids.iter().map(|eid| nostr_sdk::Tag::event(*eid)).collect();
+    tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
+    tags
+}
+
 /// Queue deletion event for retry (extracted helper to reduce duplication)
 ///
 /// CDK pattern: centralize deletion event queueing logic
@@ -715,15 +725,7 @@ async fn queue_deletion_event_retry(event_ids_to_delete: &[String]) {
         return;
     }
 
-    let mut tags = Vec::new();
-    for eid in &valid_event_ids {
-        tags.push(nostr_sdk::Tag::event(*eid));
-    }
-    tags.push(nostr_sdk::Tag::custom(
-        nostr_sdk::TagKind::custom("k"),
-        ["7375"],
-    ));
-
+    let tags = build_deletion_tags(&valid_event_ids);
     let deletion_builder =
         nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
 
@@ -752,15 +754,7 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         return;
     }
 
-    let mut tags = Vec::new();
-    for eid in &valid_event_ids {
-        tags.push(nostr_sdk::Tag::event(*eid));
-    }
-    tags.push(nostr_sdk::Tag::custom(
-        nostr_sdk::TagKind::custom("k"),
-        ["7375"],
-    ));
-
+    let tags = build_deletion_tags(&valid_event_ids);
     let deletion_builder =
         nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
 

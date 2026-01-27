@@ -619,10 +619,15 @@ fn is_transient_error(err: &str) -> bool {
 ///
 /// Subscribes to kind:9321 events tagged with our pubkey and accepted mints.
 pub async fn start_nutzap_subscription() -> Result<(), String> {
-    if *NUTZAP_SUBSCRIPTION_ACTIVE.read() {
-        log::debug!("Nutzap subscription already active");
-        return Ok(());
-    }
+    // Hold write lock during check-and-set to prevent race condition
+    {
+        let mut active = NUTZAP_SUBSCRIPTION_ACTIVE.write();
+        if *active {
+            log::debug!("Nutzap subscription already active");
+            return Ok(());
+        }
+        *active = true;
+    } // Drop lock before spawn
 
     let _my_info = MY_NUTZAP_INFO
         .read()
@@ -641,9 +646,7 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 
     log::info!("Starting nutzap subscription with filter: {:?}", filter);
 
-    *NUTZAP_SUBSCRIPTION_ACTIVE.write() = true;
-
-    // Spawn subscription handler
+    // Spawn subscription handler (flag already set above)
     spawn(async move {
         // RAII guard ensures flag is cleared on any exit path
         let _guard = SubscriptionGuard::new();
@@ -859,12 +862,33 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
             return Err("Proof is not P2PK locked".to_string());
         }
 
+        // Validate nonce exists and is non-empty
+        let nonce = secret
+            .get(1)
+            .and_then(|obj| obj.get("nonce"))
+            .and_then(|n| n.as_str())
+            .ok_or("P2PK secret missing nonce")?;
+        if nonce.is_empty() {
+            return Err("P2PK nonce is empty".to_string());
+        }
+
         // Get the locked pubkey
         let locked_pubkey = secret
             .get(1)
             .and_then(|obj| obj.get("data"))
             .and_then(|d| d.as_str())
             .ok_or("P2PK secret missing pubkey data")?;
+
+        // Validate pubkey format: 33-byte compressed = 66 hex chars, starts with 02 or 03
+        if locked_pubkey.len() != 66 {
+            return Err(format!("Invalid pubkey length: {} (expected 66)", locked_pubkey.len()));
+        }
+        if !locked_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("Invalid pubkey hex".to_string());
+        }
+        if !locked_pubkey.starts_with("02") && !locked_pubkey.starts_with("03") {
+            return Err(format!("Invalid pubkey prefix: {} (expected 02 or 03)", &locked_pubkey[0..2]));
+        }
 
         // Verify it matches our P2PK pubkey
         if locked_pubkey != our_p2pk {

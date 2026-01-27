@@ -66,11 +66,14 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
 
         // Filter selected mints against current wallet mints to avoid stale entries
         // Normalize URLs first to handle trailing slashes/scheme differences (CDK MintUrl pattern)
+        // Deduplication: track seen URLs to avoid duplicates after normalization
         let current_wallet_mints = cashu::get_mints();
+        let mut seen_mints = std::collections::HashSet::new();
         let mints: Vec<cashu::NutzapMint> = selected_mints
             .read()
             .iter()
             .map(|url| cashu::normalize_mint_url(url))  // Normalize first
+            .filter(|normalized_url| seen_mints.insert(normalized_url.clone()))  // Deduplicate
             .filter(|normalized_url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, normalized_url)))
             .map(|normalized_url| cashu::NutzapMint {
                 url: normalized_url,  // Store normalized URL
@@ -96,6 +99,13 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         if !rejected.is_empty() {
             log::warn!("Rejected relay URLs (invalid scheme): {:?}", rejected);
         }
+
+        // Deduplicate relays after validation
+        let relays: Vec<String> = relays
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
 
         if relays.is_empty() {
             error_message.set(Some("Please enter at least one valid relay URL (wss:// or ws://)".to_string()));
@@ -293,6 +303,9 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                         button {
+                            role: "switch",
+                            aria_checked: if *auto_redeem_enabled.read() { "true" } else { "false" },
+                            aria_label: "Toggle automatic nutzap redemption",
                             class: if *auto_redeem_enabled.read() {
                                 "w-12 h-6 rounded-full bg-blue-500 relative transition-colors"
                             } else {

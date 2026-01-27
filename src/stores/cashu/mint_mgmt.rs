@@ -198,7 +198,8 @@ pub fn get_mints() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Get balance for a specific mint
+/// Get balance for a specific mint (includes all proofs regardless of state)
+/// For spendable balance, use get_mint_spendable_balance instead
 pub fn get_mint_balance(mint_url: &str) -> u64 {
     let store = WALLET_TOKENS.read();
     let data = store.data();
@@ -207,6 +208,23 @@ pub fn get_mint_balance(mint_url: &str) -> u64 {
     tokens.iter()
         .filter(|t| mint_matches(&t.mint, mint_url))
         .flat_map(|t| t.proofs.iter())
+        .map(|p| p.amount)
+        .fold(0u64, |acc, amt| acc.saturating_add(amt))
+}
+
+/// Get spendable balance for a specific mint (only Unspent proofs)
+/// CDK pattern: filter by state to exclude pending/reserved/spent proofs
+pub fn get_mint_spendable_balance(mint_url: &str) -> u64 {
+    use super::types::ProofState;
+
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    tokens.iter()
+        .filter(|t| mint_matches(&t.mint, mint_url))
+        .flat_map(|t| t.proofs.iter())
+        .filter(|p| p.state == ProofState::Unspent)
         .map(|p| p.amount)
         .fold(0u64, |acc, amt| acc.saturating_add(amt))
 }

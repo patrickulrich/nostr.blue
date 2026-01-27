@@ -241,9 +241,9 @@ pub async fn sync_wallet_state() -> Result<(), String> {
 /// It only recomputes balances from the in-memory WALLET_TOKENS cache.
 /// Call `sync_wallet_state()` first to ensure WALLET_TOKENS is fresh.
 ///
-/// This is a lightweight, no-network operation suitable for frequent calls.
+/// This is a lightweight, synchronous, no-network operation suitable for frequent calls.
 #[allow(dead_code)]
-pub async fn sync_balance_only() -> Result<u64, String> {
+pub fn sync_balance_only() -> Result<u64, String> {
     super::cashu::signals::update_wallet_balances();
     Ok(WALLET_BALANCES.read().available)
 }

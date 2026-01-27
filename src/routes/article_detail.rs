@@ -51,8 +51,9 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     // Clear only this author's profile from cache to prevent stale metadata
                     crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
 
-                    // Fetch the article
-                    match crate::stores::nostr_client::fetch_article_by_coordinate(
+                    // Fetch the article (Kind 30023 = LongFormTextNote)
+                    match crate::stores::nostr_client::fetch_event_by_coordinate(
+                        30023,
                         pubkey.clone(),
                         identifier
                     ).await {

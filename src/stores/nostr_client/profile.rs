@@ -72,9 +72,16 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .ok_or("Profile not loaded; fetch metadata first")?;
 
-    // Validate URL by parsing it, then convert back to String
-    let _validated_url = Url::parse(&url)
+    // Validate URL by parsing it and check scheme
+    let validated_url = Url::parse(&url)
         .map_err(|e| format!("Invalid picture URL: {}", e))?;
+    match validated_url.scheme() {
+        "http" | "https" => {}
+        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
+    }
+    if validated_url.host().is_none() {
+        return Err("Invalid URL: missing host".to_string());
+    }
 
     // Update picture field
     let updated_metadata = Metadata {
@@ -96,9 +103,16 @@ pub async fn update_profile_banner(url: String) -> std::result::Result<(), Strin
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .ok_or("Profile not loaded; fetch metadata first")?;
 
-    // Validate URL by parsing it, then convert back to String
-    let _validated_url = Url::parse(&url)
+    // Validate URL by parsing it and check scheme
+    let validated_url = Url::parse(&url)
         .map_err(|e| format!("Invalid banner URL: {}", e))?;
+    match validated_url.scheme() {
+        "http" | "https" => {}
+        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
+    }
+    if validated_url.host().is_none() {
+        return Err("Invalid URL: missing host".to_string());
+    }
 
     // Update banner field
     let updated_metadata = Metadata {

@@ -278,12 +278,13 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         Either::Right(_) => {} // Check completed
                     }
 
-                    // Check if nutzap is possible using per-mint balance
+                    // Check if nutzap is possible using per-mint spendable balance
                     if let Some(mint) = nutzap_mint.read().as_ref() {
                         // Normalize mint URL for consistent balance lookups
                         let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
-                        // Use per-mint balance instead of aggregate to ensure this mint has funds
-                        let balance = cashu::get_mint_balance(&normalized_mint_url);
+                        // CDK pattern: use spendable balance (only Unspent proofs) to exclude
+                        // pending/reserved/spent proofs that cannot be used for payment
+                        let balance = cashu::get_mint_spendable_balance(&normalized_mint_url);
                         if balance >= amount {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap
@@ -621,9 +622,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             } else if let Some(mint) = nutzap_mint.read().as_ref() {
                                 {
-                                    // Show per-mint balance (normalize URL for consistent lookup)
+                                    // Show per-mint spendable balance (normalize URL for consistent lookup)
                                     let normalized_url = cashu::normalize_mint_url(&mint.url);
-                                    let balance = cashu::get_mint_balance(&normalized_url);
+                                    let balance = cashu::get_mint_spendable_balance(&normalized_url);
                                     rsx! {
                                         div {
                                             class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",

@@ -257,12 +257,13 @@ pub async fn search_custom_nips(
     let results = fetch_events_aggregated(filter, timeout).await?;
 
     // Fallback: client-side filter if NIP-50 returned empty
+    // Use conservative limit to avoid overwhelming clients/relays
     if results.is_empty() {
         log::info!("NIP-50 search returned empty, trying client-side filter");
 
         let fallback_filter = Filter::new()
             .kind(Kind::Custom(KIND_CUSTOM_NIP))
-            .limit(500);
+            .limit(200);
 
         let all_events = fetch_events_aggregated(fallback_filter, timeout).await?;
         let query_lower = query.to_lowercase();

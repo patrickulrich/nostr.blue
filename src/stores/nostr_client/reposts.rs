@@ -17,7 +17,6 @@ use super::types::PublishResult;
 /// NIP-18: https://github.com/nostr-protocol/nips/blob/master/18.md
 pub async fn publish_repost_tracked(
     event_id: String,
-    _event_author: String,
     relay_url: Option<String>,
 ) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -88,10 +87,9 @@ pub async fn publish_repost_tracked(
 /// For relay feedback, use publish_repost_tracked instead
 pub async fn publish_repost(
     event_id: String,
-    event_author: String,
     relay_url: Option<String>,
 ) -> std::result::Result<String, String> {
-    publish_repost_tracked(event_id, event_author, relay_url)
+    publish_repost_tracked(event_id, relay_url)
         .await
         .map(|result| result.event_id)
 }

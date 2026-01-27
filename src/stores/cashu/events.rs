@@ -1104,7 +1104,8 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Uses AtomicBool guard to ensure only one processor runs at a time.
 /// Calling this function multiple times is safe - subsequent calls are no-ops.
 ///
-/// Uses adaptive interval: 30s when there are pending events, 5 minutes when idle.
+/// Uses adaptive interval: 30s when there are pending events, 60s when idle.
+/// Maintenance tasks (recovery, cleanup) run every 6th idle iteration (~6 min cadence).
 /// Also runs periodic proof recovery and pending secrets cleanup.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
@@ -1123,7 +1124,7 @@ pub fn start_pending_events_processor() {
     }
 
     spawn(async {
-        // Counter for periodic recovery (every 6th iteration when idle = ~30 min)
+        // Counter for periodic recovery (every 6th iteration when idle = ~6 min)
         let mut recovery_counter = 0u32;
 
         loop {
@@ -1142,7 +1143,7 @@ pub fn start_pending_events_processor() {
                 log::error!("Error processing pending events: {}", e);
             }
 
-            // Every 6th iteration when idle (roughly every 30 min), run maintenance tasks
+            // Every 6th iteration when idle (roughly every 6 min), run maintenance tasks
             recovery_counter += 1;
             if recovery_counter >= 6 && pending_count == 0 {
                 recovery_counter = 0;

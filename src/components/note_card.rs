@@ -28,7 +28,6 @@ pub fn NoteCard(
 ) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();
-    let author_pubkey_repost = author_pubkey.clone();
     let author_pubkey_like = author_pubkey.clone();
     let author_pubkey_for_fetch = author_pubkey.clone();
     let content = event.content.clone();
@@ -758,12 +757,11 @@ pub fn NoteCard(
                                             } else {
                                                 // Create new repost
                                                 let event_id_clone = event_id_repost.clone();
-                                                let author_pubkey_clone = author_pubkey_repost.clone();
 
                                                 is_reposting.set(true);
 
                                                 spawn(async move {
-                                                    match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                                    match publish_repost(event_id_clone, None).await {
                                                         Ok(repost_id) => {
                                                             log::info!("Reposted event, repost ID: {}", repost_id);
                                                             is_reposted.set(true);

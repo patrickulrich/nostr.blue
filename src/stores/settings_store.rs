@@ -84,9 +84,14 @@ fn cache_settings(settings: &AppSettings) {
 /// Initialize settings from localStorage cache (synchronous, for instant UI)
 /// Call this during app init BEFORE async client initialization
 pub fn init_settings_from_cache() {
-    if let Some(cached) = load_cached_settings() {
-        log::info!("Initialized settings from localStorage cache");
-        *SETTINGS.write() = cached;
+    match load_cached_settings() {
+        Some(cached) => {
+            log::info!("Initialized settings from localStorage cache");
+            *SETTINGS.write() = cached;
+        }
+        None => {
+            log::debug!("No settings cache found or failed to parse");
+        }
     }
 }
 

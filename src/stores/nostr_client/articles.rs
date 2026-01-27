@@ -52,6 +52,8 @@ pub async fn fetch_articles(
 
 /// Fetch a specific article by coordinate (kind:pubkey:identifier)
 /// Legacy function - use fetch_event_by_coordinate for new code
+#[deprecated(since = "0.7.7", note = "Use fetch_event_by_coordinate instead")]
+#[allow(dead_code)]
 pub async fn fetch_article_by_coordinate(
     pubkey: String,
     identifier: String,

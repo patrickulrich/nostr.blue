@@ -131,9 +131,10 @@ pub use profile::{
     update_profile_picture, update_profile_banner,
 };
 pub use articles::{
-    fetch_articles, fetch_article_by_coordinate, fetch_event_by_coordinate,
+    fetch_articles, fetch_event_by_coordinate,
     fetch_event_by_coordinate_with_relays, publish_article_tracked, publish_article,
 };
+// Deprecated: fetch_article_by_coordinate - use fetch_event_by_coordinate(30023, pubkey, id) instead
 pub use media::{
     publish_picture_tracked, publish_picture,
     publish_video_tracked, publish_video,
