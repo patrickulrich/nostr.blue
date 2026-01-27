@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
-use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates};
+use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates, ensure_orders_loaded};
 use crate::components::shop::{OrderStatusBadge, ReviewForm};
 
 /// Buyer orders page
@@ -15,10 +15,26 @@ pub fn ShopOrders() -> Element {
     let mut selected_order = use_signal(|| None::<ShopOrder>);
 
     // Fetch orders and listen for updates on mount
+    // Dioxus pattern: reading is_authenticated() auto-subscribes to auth changes
+    // Effect will rerun when user logs in
     use_effect(move || {
+        let is_authenticated = crate::stores::auth_store::is_authenticated();
+
+        // Skip if not authenticated - orders page requires login
+        if !is_authenticated {
+            orders.set(Vec::new());
+            loading.set(false);
+            return;
+        }
+
         spawn(async move {
             loading.set(true);
             error.set(None);
+
+            // CDK pattern: retry auth-dependent operations when auth becomes available
+            if let Err(e) = ensure_orders_loaded().await {
+                log::warn!("Failed to ensure orders loaded: {}", e);
+            }
 
             // First, listen for any new order updates via NIP-17
             if let Err(e) = listen_for_order_updates().await {

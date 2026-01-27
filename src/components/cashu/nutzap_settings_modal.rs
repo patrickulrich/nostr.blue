@@ -65,13 +65,15 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         }
 
         // Filter selected mints against current wallet mints to avoid stale entries
+        // Normalize URLs first to handle trailing slashes/scheme differences (CDK MintUrl pattern)
         let current_wallet_mints = cashu::get_mints();
         let mints: Vec<cashu::NutzapMint> = selected_mints
             .read()
             .iter()
-            .filter(|url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, url)))
-            .map(|url| cashu::NutzapMint {
-                url: url.clone(),
+            .map(|url| cashu::normalize_mint_url(url))  // Normalize first
+            .filter(|normalized_url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, normalized_url)))
+            .map(|normalized_url| cashu::NutzapMint {
+                url: normalized_url,  // Store normalized URL
                 unit: "sat".to_string(),
             })
             .collect();
