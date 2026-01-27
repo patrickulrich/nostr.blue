@@ -148,6 +148,76 @@ pub(crate) fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::Tag> {
 }
 
 // =============================================================================
+// Tag Conversion
+// =============================================================================
+
+/// Convert raw string tags to nostr::Tag with NIP-10 marker support
+/// Follows nostr-sdk pattern: handles flexible field detection for backward compat
+pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
+    use nostr_sdk::nips::nip10::Marker;
+
+    tags.into_iter()
+        .filter_map(|tag_vec| {
+            if tag_vec.is_empty() {
+                return None;
+            }
+            match tag_vec[0].as_str() {
+                "e" if tag_vec.len() >= 4 && !tag_vec[3].is_empty() => {
+                    // E-tag with marker (NIP-10)
+                    let event_id = nostr::EventId::from_hex(&tag_vec[1]).ok()?;
+                    let marker = match tag_vec[3].as_str() {
+                        "root" => Some(Marker::Root),
+                        "reply" => Some(Marker::Reply),
+                        _ => None,
+                    };
+                    if let Some(m) = marker {
+                        let relay_url = if !tag_vec[2].is_empty() {
+                            nostr_sdk::RelayUrl::parse(&tag_vec[2]).ok()
+                        } else {
+                            None
+                        };
+                        Some(nostr::Tag::from(nostr::TagStandard::Event {
+                            event_id,
+                            relay_url,
+                            marker: Some(m),
+                            public_key: None,
+                            uppercase: false,
+                        }))
+                    } else {
+                        Some(nostr::Tag::event(event_id))
+                    }
+                }
+                "e" if tag_vec.len() >= 2 => {
+                    // Simple e-tag - preserve trailing fields if present
+                    if tag_vec.len() > 2 {
+                        Some(nostr::Tag::custom(nostr::TagKind::e(), tag_vec[1..].to_vec()))
+                    } else {
+                        nostr::EventId::from_hex(&tag_vec[1]).ok()
+                            .map(nostr::Tag::event)
+                    }
+                }
+                "p" if tag_vec.len() >= 2 => {
+                    // P-tag - preserve trailing fields if present
+                    if tag_vec.len() > 2 {
+                        Some(nostr::Tag::custom(nostr::TagKind::p(), tag_vec[1..].to_vec()))
+                    } else {
+                        nostr::PublicKey::from_hex(&tag_vec[1]).ok()
+                            .map(nostr::Tag::public_key)
+                    }
+                }
+                "t" if tag_vec.len() >= 2 => {
+                    Some(nostr::Tag::hashtag(&tag_vec[1]))
+                }
+                _ => Some(nostr::Tag::custom(
+                    nostr::TagKind::Custom(std::borrow::Cow::Owned(tag_vec[0].clone())),
+                    tag_vec[1..].to_vec(),
+                ))
+            }
+        })
+        .collect()
+}
+
+// =============================================================================
 // MIME Type Detection
 // =============================================================================
 

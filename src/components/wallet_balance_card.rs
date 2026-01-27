@@ -165,7 +165,7 @@ pub fn WalletBalanceCard(
                                 rsx! {
                                     div {
                                         class: "absolute -top-1 -right-1",
-                                        NutzapBadge { count: pending_count, value: pending_value }
+                                        NutzapBadge { count: Some(pending_count), value: Some(pending_value) }
                                     }
                                 }
                             } else {

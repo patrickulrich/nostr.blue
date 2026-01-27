@@ -34,32 +34,7 @@ const BATCH_PROOF_SIZE: usize = 100;
 // RAII Guard for In-Flight Tracking (CDK Transaction Guard Pattern)
 // =============================================================================
 
-/// RAII guard for in-flight send/swap tracking cleanup
-/// Follows CDK's ConnectionWithTransaction pattern: auto-cleanup on drop unless dismissed
-struct InFlightGuard {
-    tx_id: Option<String>,
-}
-
-impl InFlightGuard {
-    fn new(tx_id: String) -> Self {
-        Self { tx_id: Some(tx_id) }
-    }
-
-    /// Dismiss the guard - prevents automatic cleanup on drop
-    /// Call this on success path when you want cleanup handled normally
-    fn dismiss(&mut self) {
-        self.tx_id = None;
-    }
-}
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        if let Some(ref tx_id) = self.tx_id {
-            super::signals::remove_in_flight_send_request(tx_id);
-            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
-        }
-    }
-}
+use super::signals::InFlightGuard;
 
 // =============================================================================
 // Keyset Collision Detection
@@ -1003,15 +978,19 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     .clone();
 
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs.iter()
-                    .filter_map(|p| {
+                    .enumerate()
+                    .map(|(i, p)| {
                         cdk::types::ProofInfo::new(
                             p.clone(),
                             mint_url_parsed.clone(),
                             cdk::nuts::State::Unspent,
                             cdk::nuts::CurrencyUnit::Sat,
-                        ).ok()
+                        ).map_err(|e| format!(
+                            "ProofInfo conversion failed in batch {}, proof {}: {}",
+                            batch_idx + 1, i, e
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, String>>()?;
 
                 if !proof_infos.is_empty() {
                     localstore.update_proofs(proof_infos, vec![]).await

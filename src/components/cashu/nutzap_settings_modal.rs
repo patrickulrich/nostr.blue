@@ -81,13 +81,14 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             return;
         }
 
-        // Accept both wss:// and ws:// (ws:// useful for local dev)
+        // Validate relay URLs using RelayUrl::parse (nostr-sdk pattern)
+        // This performs multi-step validation: scheme check, URL structure, ws/wss only
         let (relays, rejected): (Vec<String>, Vec<String>) = relay_input
             .read()
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
-            .partition(|l| l.starts_with("wss://") || l.starts_with("ws://"));
+            .partition(|l| nostr_sdk::RelayUrl::parse(l).is_ok());
 
         // Log warning for rejected entries
         if !rejected.is_empty() {

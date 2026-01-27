@@ -38,7 +38,7 @@ pub async fn publish_reaction_tracked(
 
     let target_event_id = EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let target_pubkey = PublicKey::from_hex(&event_author)
+    let target_pubkey = PublicKey::parse(&event_author)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Try to fetch the original event to get its kind and coordinate

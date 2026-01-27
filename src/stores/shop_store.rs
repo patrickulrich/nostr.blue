@@ -1158,6 +1158,11 @@ pub async fn create_shop_order(
     payment_method: &str,
     payment_proof: &str,
 ) -> Result<String> {
+    // Auth check FIRST, before any side effects
+    let buyer_pubkey = nostr_client::get_cached_pubkey()
+        .map(|pk| pk.to_hex())
+        .map_err(|_| "Cannot checkout - not authenticated".to_string())?;
+
     if items.is_empty() {
         return Err("Cannot create order with no items".to_string());
     }
@@ -1262,11 +1267,7 @@ pub async fn create_shop_order(
     }
 
     // total_sats already calculated above
-
-    // Dioxus pattern: Propagate auth errors, don't mask with defaults
-    let buyer_pubkey = nostr_client::get_cached_pubkey()
-        .map(|pk| pk.to_hex())
-        .map_err(|_| "Cannot checkout - not authenticated".to_string())?;
+    // buyer_pubkey already validated at function entry
 
     let now = now_secs();
 

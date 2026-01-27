@@ -552,6 +552,32 @@ pub const MAX_RECEIVE_BATCH_SIZE: usize = 100;
 // Helper Functions
 // =============================================================================
 
+/// RAII guard for in-flight send/swap tracking cleanup
+/// Follows CDK pattern: decrement on all exit paths (success, error, panic)
+pub struct InFlightGuard {
+    tx_id: Option<String>,
+}
+
+impl InFlightGuard {
+    pub fn new(tx_id: String) -> Self {
+        Self { tx_id: Some(tx_id) }
+    }
+
+    /// Dismiss guard - call on success when manual cleanup is done
+    pub fn dismiss(&mut self) {
+        self.tx_id = None;
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(ref tx_id) = self.tx_id {
+            remove_in_flight_send_request(tx_id);
+            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
+        }
+    }
+}
+
 /// Guard that releases the mint lock when dropped (RAII pattern)
 pub struct MintOperationGuard {
     mint_url: String,

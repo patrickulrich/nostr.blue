@@ -98,75 +98,8 @@ pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> st
 
     // Note: tagged pubkeys can be derived from mentioned_pubkeys for future outbox routing
 
-    // Convert tags to nostr Tag format
-    use nostr::Tag;
-    use nostr_sdk::nips::nip10::Marker;
-    let nostr_tags: Vec<Tag> = tags
-        .into_iter()
-        .filter_map(|tag_vec| {
-            if tag_vec.is_empty() {
-                return None;
-            }
-            // Convert string vector to Tag
-            match tag_vec[0].as_str() {
-                "e" if tag_vec.len() >= 4 && !tag_vec[3].is_empty() => {
-                    // E-tag with marker (for threading)
-                    let event_id = nostr::EventId::from_hex(&tag_vec[1]).ok()?;
-
-                    // Parse marker from 4th element (NIP-10: only "root" and "reply")
-                    let marker = match tag_vec[3].as_str() {
-                        "root" => Some(Marker::Root),
-                        "reply" => Some(Marker::Reply),
-                        _ => None,
-                    };
-
-                    if let Some(m) = marker {
-                        // Parse optional relay URL (3rd element)
-                        let relay_url = if !tag_vec[2].is_empty() {
-                            nostr_sdk::RelayUrl::parse(&tag_vec[2]).ok()
-                        } else {
-                            None
-                        };
-
-                        // Construct event tag with marker
-                        let tag_standard = nostr::TagStandard::Event {
-                            event_id,
-                            relay_url,
-                            marker: Some(m),
-                            public_key: None,
-                            uppercase: false,
-                        };
-
-                        Some(Tag::from(tag_standard))
-                    } else {
-                        // Invalid marker, fallback to simple event tag
-                        Some(Tag::event(event_id))
-                    }
-                },
-                "e" if tag_vec.len() >= 2 => {
-                    // Simple e-tag without marker
-                    Some(Tag::event(
-                        nostr::EventId::from_hex(&tag_vec[1]).ok()?
-                    ))
-                },
-                "p" if tag_vec.len() >= 2 => {
-                    // Extract pubkey for Outbox routing
-                    if let Ok(pubkey) = nostr::PublicKey::from_hex(&tag_vec[1]) {
-                        Some(Tag::public_key(pubkey))
-                    } else {
-                        None
-                    }
-                },
-                _ => {
-                    // Generic tag
-                    Some(Tag::custom(
-                        nostr::TagKind::Custom(tag_vec[0].clone().into()),
-                        tag_vec[1..].to_vec()
-                    ))
-                }
-            }
-        })
-        .collect();
+    // Convert tags to nostr Tag format using shared helper
+    let nostr_tags = super::types::convert_raw_tags(tags);
 
     // Combine mention tags with other tags
     mention_tags.extend(nostr_tags);

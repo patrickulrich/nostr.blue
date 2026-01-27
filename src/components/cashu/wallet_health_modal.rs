@@ -167,8 +167,8 @@ fn TransactionGroup(transaction_id: Option<u64>, proofs: Vec<StuckProofInfo>) ->
             div { class: "space-y-1 text-sm text-muted-foreground",
                 for proof in proofs.iter() {
                     div {
-                        // Use proof secret as stable key (Dioxus pattern)
-                        key: "{proof.secret}",
+                        // Use hashed proof ID as stable key (Dioxus pattern)
+                        key: "{proof.hashed_id}",
                         class: "flex justify-between pl-4",
                         span { "{format_sats_with_separator(proof.amount)} - {proof.state:?}" }
                         span { "{format_duration(proof.stuck_duration_secs)}" }
@@ -281,11 +281,19 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                             h3 { class: "font-semibold", "Stuck Proofs" }
 
                             for (idx, group) in grouped.iter().enumerate() {
-                                TransactionGroup {
-                                    // Use composite key with index fallback for None transaction_id
-                                    key: "{group.mint_url}_{group.transaction_id.unwrap_or(idx as u64)}",
-                                    transaction_id: group.transaction_id,
-                                    proofs: group.proofs.clone(),
+                                // Compute key before component to satisfy Dioxus formatting requirements
+                                {
+                                    let group_key = match group.transaction_id {
+                                        Some(tx_id) => format!("{}_tx_{}", group.mint_url, tx_id),
+                                        None => format!("{}_idx_{}", group.mint_url, idx),
+                                    };
+                                    rsx! {
+                                        TransactionGroup {
+                                            key: "{group_key}",
+                                            transaction_id: group.transaction_id,
+                                            proofs: group.proofs.clone(),
+                                        }
+                                    }
                                 }
                             }
                         }

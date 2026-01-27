@@ -99,8 +99,12 @@ pub fn DVM() -> Element {
     // Fetch mute/block lists once when authenticated (N+1 optimization)
     // Single fetch for both muted posts and blocked users
     use_effect(move || {
+        // Subscribe to refresh_trigger to allow manual refresh (Dioxus pattern)
+        let _ = refresh_trigger.read();
         let is_authenticated = crate::stores::auth_store::is_authenticated();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        // Reading AUTH_STATE auto-subscribes to pubkey changes (Dioxus pattern)
+        let current_pubkey = crate::stores::auth_store::AUTH_STATE.read().pubkey.clone();
 
         // Clear caches on logout to prevent stale data
         if !is_authenticated {
@@ -113,22 +117,33 @@ pub fn DVM() -> Element {
             return;
         }
 
+        // Pubkey change detection: the effect auto-reruns when current_pubkey changes
+        // due to reading AUTH_STATE above (Dioxus signal subscription).
+        // On rerun, we fetch fresh data; the pubkey guard in spawn() prevents
+        // race conditions where stale data could be written after account switch.
+
         // Only fetch if not already loaded
         if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
             return;
         }
 
         // Capture pubkey before spawn to guard against account switch during fetch
-        let auth_pubkey_snapshot = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
+        let auth_pubkey_snapshot = current_pubkey.clone();
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             // Only set caches on success; leave as None on error so we can retry
-            if let Ok(data) = nostr_client::get_mute_list_data().await {
-                // Guard: only write if same user still logged in
-                let current_pubkey = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
-                if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
-                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
-                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+            match nostr_client::get_mute_list_data().await {
+                Ok(data) => {
+                    // Guard: only write if same user still logged in
+                    let current_pubkey = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
+                    if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                        cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                        cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch mute/block data: {}", e);
+                    // Leave as None to enable retry on next effect run
                 }
             }
         });
