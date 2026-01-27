@@ -1003,7 +1003,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         }
     }
 
-    // Dismiss guard on success path - cleanup already complete
+    // Remove in-flight tracking on success (CDK inc/dec pattern - must be before dismiss)
+    super::signals::remove_in_flight_send_request(&tx_id);
+
+    // Dismiss guard - cleanup already done above, prevent Drop from double-cleaning
     in_flight_guard.dismiss();
 
     if new_proofs.is_empty() {

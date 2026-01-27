@@ -72,7 +72,7 @@ pub async fn publish_note_to_relays(
 
     let urls = parse_relay_urls(&relay_urls)?;
 
-    let output = client.send_event_builder_to(urls.clone(), builder)
+    let output = client.send_event_builder_to(urls, builder)
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
@@ -183,6 +183,13 @@ pub async fn send_presigned_event_to_relays(
         result.success_count(),
         result.total_attempted()
     );
+
+    // Log per-relay failures for debugging (matching publish_note_to_relays pattern)
+    if result.has_failures() {
+        for (relay, error) in &result.failed_relays {
+            log::warn!("Relay {} failed: {}", relay, error);
+        }
+    }
 
     Ok(result)
 }

@@ -120,14 +120,29 @@ where
     // Wait for at least one relay to be ready
     ensure_relays_ready(&client).await;
 
+    // Capture authors for client-side filtering (defense-in-depth)
+    // Must be before stream_events consumes the filter
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+        .map(|authors| authors.iter().collect());
+
     let mut stream = client.stream_events(filter, timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 
     let mut total_count = 0;
+    let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
 
     while let Some(event) = stream.next().await {
+        // Client-side author filtering (defense-in-depth against misbehaving relays)
+        if let Some(ref authors) = author_set {
+            if !authors.contains(&event.pubkey) {
+                filtered_count += 1;
+                continue;  // Skip events from non-matching authors
+            }
+        }
+
         batch.push(event);
         total_count += 1;
 
@@ -144,7 +159,11 @@ where
         on_batch(batch);
     }
 
-    log::info!("Stream completed: received {} events in batches", total_count);
+    if filtered_count > 0 {
+        log::info!("Stream completed: {} events ({} filtered out from non-matching authors)", total_count, filtered_count);
+    } else {
+        log::info!("Stream completed: received {} events in batches", total_count);
+    }
     Ok(total_count)
 }
 

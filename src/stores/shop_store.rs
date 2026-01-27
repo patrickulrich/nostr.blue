@@ -773,6 +773,21 @@ pub fn get_shop_stats() -> ShopStats {
 // Shop Store Initialization & Order Persistence
 // =============================================================================
 
+/// Ensure orders are loaded from DB (call when auth becomes available)
+/// CDK pattern: idempotent, returns Ok(()) if already loaded or no DB
+pub async fn ensure_orders_loaded() -> Result<()> {
+    let db = match SHOP_DB.read().as_ref() {
+        Some(db) => db.clone(),
+        None => return Ok(()),  // No DB yet, nothing to do
+    };
+
+    // Only reload if orders are empty (might have loaded already)
+    if BUYER_ORDERS.read().is_empty() && SELLER_ORDERS.read().is_empty() {
+        restore_orders_from_db(&db).await?;
+    }
+    Ok(())
+}
+
 /// Initialize the shop store and restore persisted orders from IndexedDB
 pub async fn init_shop_store() -> Result<()> {
     if *SHOP_INITIALIZED.read() {
