@@ -33,7 +33,7 @@ pub async fn stream_events_with_callback<F>(
     mut on_event: F,
 ) -> std::result::Result<usize, String>
 where
-    F: FnMut(nostr::Event) + Send,
+    F: FnMut(nostr::Event),
 {
     use futures::StreamExt;
 
